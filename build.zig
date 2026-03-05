@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             // List of modules available for import in source files part of the
             // root module.
-            .imports = &.{ },
+            .imports = &.{},
         }),
     });
 
@@ -81,6 +81,49 @@ pub fn build(b: *std.Build) void {
     // By making the run step depend on the default step, it will be run from the
     // installation directory rather than directly from within the cache directory.
     run_cmd.step.dependOn(b.getInstallStep());
+
+    const mm0_test_lib = b.createModule(.{
+        .root_source_file = b.path("src/lib.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const unit_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/unit_tests.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "mm0", .module = mm0_test_lib },
+            },
+        }),
+    });
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+
+    const integration_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/integration_examples.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "mm0", .module = mm0_test_lib },
+            },
+        }),
+    });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+
+    const unit_step = b.step("test-unit", "Run unit tests");
+    unit_step.dependOn(&run_unit_tests.step);
+
+    const integration_step = b.step(
+        "test-integration",
+        "Run integration tests against mm0 examples",
+    );
+    integration_step.dependOn(&run_integration_tests.step);
+
+    const test_step = b.step("test", "Run all tests");
+    test_step.dependOn(&run_unit_tests.step);
+    test_step.dependOn(&run_integration_tests.step);
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
