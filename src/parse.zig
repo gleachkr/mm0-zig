@@ -116,7 +116,6 @@ pub const MM0Parser = struct {
         }
     }
 
-
     fn parseBinders(
         self: *MM0Parser,
         args: *std.ArrayListUnmanaged(ArgInfo),
@@ -126,7 +125,7 @@ pub const MM0Parser = struct {
             const is_bound = self.src[self.pos] == '{';
             self.pos += 1;
             self.skipWhitespaceAndComments();
-    
+
             // Collect ident names until ':'
             var names: std.ArrayListUnmanaged([]const u8) = .{};
             var is_dummy_buf: std.ArrayListUnmanaged(bool) = .{};
@@ -142,7 +141,7 @@ pub const MM0Parser = struct {
             self.pos += 1; // consume ':'
             self.skipWhitespaceAndComments();
             const sort_name = self.consumeIdent() orelse return error.ExpectedIdent;
-    
+
             if (is_bound) {
                 // Bound vars have no dep annotations - they depend only on themselves
                 // Register each name and assign the next bv index
@@ -191,6 +190,55 @@ pub const MM0Parser = struct {
         }
     }
 
+    fn parseSortExpr(
+        self: *MM0Parser,
+        bv_names: []const []const u8,
+    ) !ArgInfo {
+        self.skipWhitespaceAndComments();
+        const sort_name = self.consumeIdent() orelse return error.ExpectedIdent;
+
+        var deps: u55 = 0;
+        while (true) {
+            self.skipWhitespaceAndComments();
+            const ch = self.peek();
+            if (ch == '>' or ch == ';' or ch == '=' or ch == ')' or ch == 0)
+                break;
+
+            const dep_name = self.consumeIdent() orelse return error.ExpectedIdent;
+            for (bv_names, 0..) |bv_name, idx| {
+                if (std.mem.eql(u8, dep_name, bv_name)) {
+                    deps |= @as(u55, 1) << @intCast(idx);
+                    break;
+                }
+            }
+        }
+
+        return .{
+            .sort_name = sort_name,
+            .bound = false,
+            .deps = deps,
+        };
+    }
+
+    fn parseTermType(
+        self: *MM0Parser,
+        args: *std.ArrayListUnmanaged(ArgInfo),
+        bv_names: []const []const u8,
+    ) ![]const u8 {
+        var current = try self.parseSortExpr(bv_names);
+
+        while (true) {
+            self.skipWhitespaceAndComments();
+            if (self.peek() != '>') break;
+
+            try args.append(self.allocator, current);
+            self.pos += 1;
+            current = try self.parseSortExpr(bv_names);
+        }
+
+        return current.sort_name;
+    }
+
     fn parseTermStmt(self: *MM0Parser, is_def: bool) !TermStmt {
         _ = self.consumeIdent(); // consume 'term' or 'def'
         self.skipWhitespaceAndComments();
@@ -203,10 +251,9 @@ pub const MM0Parser = struct {
         self.skipWhitespaceAndComments();
         try self.parseBinders(&args, &bv_names);
 
-        // Parse ':' return type
+        // Parse ':' and then either `ret` or `a > b > ret`
         try self.expect(':');
-        self.skipWhitespaceAndComments();
-        const ret_sort_name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const ret_sort_name = try self.parseTermType(&args, bv_names.items);
 
         // Skip rest to semicolon (math string for def, nothing for term)
         try self.skipToSemicolon();
@@ -272,8 +319,7 @@ pub const MM0Parser = struct {
             const ch = self.src[self.pos];
             if (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r') {
                 self.pos += 1;
-            } else if (ch == '-' and self.pos + 1 < self.src.len
-                       and self.src[self.pos + 1] == '-') {
+            } else if (ch == '-' and self.pos + 1 < self.src.len and self.src[self.pos + 1] == '-') {
                 // Line comment
                 while (self.pos < self.src.len and self.src[self.pos] != '\n') {
                     self.pos += 1;
