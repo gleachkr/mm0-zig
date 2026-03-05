@@ -19,7 +19,6 @@ const Arg = @import("./args.zig").Arg;
 const HEAP_SIZE = @import("./constants.zig").HEAP_SIZE;
 const ARENA_SIZE = @import("./constants.zig").ARENA_SIZE;
 
-
 pub const Verifier = struct {
     // Per-theorem working state - reset between theorems
     stack: Stack,
@@ -29,7 +28,7 @@ pub const Verifier = struct {
     hyps: HypList,
     next_bv: u32,
     sorry_used: bool,
-    
+
     // Arena for expression nodes - reset between theorems
     arena: std.heap.FixedBufferAllocator,
     arena_buf: [ARENA_SIZE]u8,
@@ -40,13 +39,7 @@ pub const Verifier = struct {
     term_table: []const Term,
     thm_table: []const Theorem,
 
-    pub fn init(
-        allocator: std.mem.Allocator,
-        file_bytes: []const u8, 
-        sort_table: []const Sort, 
-        term_table: []const Term, 
-        thm_table: []const Theorem
-        ) !*Verifier{
+    pub fn init(allocator: std.mem.Allocator, file_bytes: []const u8, sort_table: []const Sort, term_table: []const Term, thm_table: []const Theorem) !*Verifier {
         const v = try allocator.create(Verifier);
         v.file_bytes = file_bytes;
         v.sort_table = sort_table;
@@ -71,7 +64,7 @@ pub const Verifier = struct {
         self.arena = std.heap.FixedBufferAllocator.init(&self.arena_buf);
     }
 
-    fn verifyThm(self: *Verifier, thm: Theorem, proof_pos : u32) !void {
+    fn verifyThm(self: *Verifier, thm: Theorem, proof_pos: u32) !void {
         defer self.reset();
         try self.initHeapFromThmArgs(thm);
         try self.runProofStream(proof_pos);
@@ -79,8 +72,8 @@ pub const Verifier = struct {
         if (top != .proof) return error.ExpectedProof;
         if (self.stack.top != 0) return error.StackNotEmpty;
     }
-    
-    fn verifyDef(self: *Verifier, term: Term, proof_pos : u32) !void {
+
+    fn verifyDef(self: *Verifier, term: Term, proof_pos: u32) !void {
         defer self.reset();
         try self.initHeapFromTermArgs(term);
         try self.runProofStream(proof_pos);
@@ -88,8 +81,8 @@ pub const Verifier = struct {
         if (top != .expr) return error.ExpectedExpr;
         if (self.stack.top != 0) return error.StackNotEmpty;
     }
-    
-    fn verifyAxiom(self: *Verifier, thm: Theorem, proof_pos : u32) !void {
+
+    fn verifyAxiom(self: *Verifier, thm: Theorem, proof_pos: u32) !void {
         defer self.reset();
         try self.initHeapFromThmArgs(thm);
         try self.runProofStream(proof_pos);
@@ -104,24 +97,24 @@ pub const Verifier = struct {
             const cmd = Cmd.read(self.file_bytes, pos);
             pos += @intCast(cmd.size);
             switch (@as(ProofCmd, @enumFromInt(cmd.op))) {
-                .End      => break,
-                .Term     => try self.opTerm(cmd.data, false),
+                .End => break,
+                .Term => try self.opTerm(cmd.data, false),
                 .TermSave => try self.opTerm(cmd.data, true),
-                .Ref      => try self.opRef(cmd.data),
-                .Dummy    => try self.opDummy(cmd.data),
-                .Thm      => try self.opThm(cmd.data, false),
-                .ThmSave  => try self.opThm(cmd.data, true),
-                .Hyp      => try self.opHyp(),
-                .Conv     => try self.opConv(),
-                .Refl     => try self.opRefl(),
-                .Symm     => try self.opSymm(),
-                .Cong     => try self.opCong(),
-                .Unfold   => try self.opUnfold(),
-                .ConvCut  => try self.opConvCut(),
+                .Ref => try self.opRef(cmd.data),
+                .Dummy => try self.opDummy(cmd.data),
+                .Thm => try self.opThm(cmd.data, false),
+                .ThmSave => try self.opThm(cmd.data, true),
+                .Hyp => try self.opHyp(),
+                .Conv => try self.opConv(),
+                .Refl => try self.opRefl(),
+                .Symm => try self.opSymm(),
+                .Cong => try self.opCong(),
+                .Unfold => try self.opUnfold(),
+                .ConvCut => try self.opConvCut(),
                 .ConvSave => try self.opConvSave(),
-                .Save     => try self.opSave(),
-                .Sorry    => try self.opSorry(),
-                _         => return error.UnknownProofCmd,
+                .Save => try self.opSave(),
+                .Sorry => try self.opSorry(),
+                _ => return error.UnknownProofCmd,
             }
         }
     }
@@ -129,7 +122,7 @@ pub const Verifier = struct {
     fn initHeapFromThmArgs(self: *Verifier, thm: Theorem) !void {
         try self.initHeapFromArgs(thm.getArgs(self.file_bytes));
     }
-    
+
     fn initHeapFromTermArgs(self: *Verifier, term: Term) !void {
         try self.initHeapFromArgs(term.getArgs(self.file_bytes));
     }
@@ -143,7 +136,7 @@ pub const Verifier = struct {
                     .sort = arg.sort,
                     .bound = true,
                     .deps = @as(u55, 1) << bv_idx,
-                }};
+                } };
                 bv_idx += 1;
                 self.next_bv += 1;
             } else {
@@ -151,13 +144,13 @@ pub const Verifier = struct {
                     .sort = arg.sort,
                     .bound = false,
                     .deps = arg.deps,
-                }};
+                } };
             }
             try self.heap.push(.{ .expr = expr });
         }
     }
 
-    pub fn verifyProofStream(self: *Verifier, proof_start : u32, checker : *CrossChecker) !void {
+    pub fn verifyProofStream(self: *Verifier, proof_start: u32, checker: *CrossChecker) !void {
         var pos: u32 = proof_start;
         var sort_count: u32 = 0;
         var term_count: u32 = 0;
@@ -166,7 +159,7 @@ pub const Verifier = struct {
         while (true) {
             const stmt_start = pos;
             const cmd = Cmd.read(self.file_bytes, pos);
-            pos += @intCast(cmd.size);  // now pos points to first proof command
+            pos += @intCast(cmd.size); // now pos points to first proof command
 
             switch (@as(StmtCmd, @enumFromInt(cmd.op))) {
                 .End => break,
@@ -243,7 +236,7 @@ pub const Verifier = struct {
             .deps = deps,
             .id = term_id,
             .args = popped,
-        }};
+        } };
 
         try self.stack.push(.{ .expr = node });
         if (save) try self.heap.push(.{ .expr = node });
@@ -261,7 +254,7 @@ pub const Verifier = struct {
             .expr => |e| e,
             else => return error.ExpectedExpr,
         };
-    
+
         // Pop n args in reverse order, filling uheap in forward order
         self.uheap.len = n;
         var i: usize = n;
@@ -274,34 +267,40 @@ pub const Verifier = struct {
             };
             if (expr.sort() != args[i].sort) return error.SortMismatch;
             if (args[i].bound and !expr.bound()) return error.ExpectedBoundVar;
-            self.uheap.entries[i] = expr;
+            self.uheap.entries[i] = .{ .expr = expr, .saved = false };
         }
-    
+
         // Dep checks in forward order
         var deps_buf: [56]u55 = std.mem.zeroes([56]u55);
         var deps_len: usize = 0;
         for (0..n) |j| {
-            const expr = self.uheap.entries[j];
+            const expr = self.uheap.entries[j].expr;
             if (args[j].bound) {
                 // Bound var must not overlap with any previously seen bound var
                 for (0..j) |k| {
-                    if (self.uheap.entries[k].deps() & expr.deps() != 0) 
+                    const prev = self.uheap.entries[k].expr;
+                    if (prev.deps() & expr.deps() != 0) {
                         return error.DepViolation;
+                    }
                 }
                 deps_buf[deps_len] = expr.deps();
                 deps_len += 1;
             } else {
-                // Regular arg must not contain bound vars it's not allowed to depend on
+                // Regular arg must not contain bound vars it's not allowed to
+                // depend on
                 for (0..deps_len) |k| {
-                    if ((@as(u64, args[j].deps) >> @intCast(k)) & 1 != 0) continue;
-                    if (deps_buf[k] & expr.deps() != 0) return error.DepViolation;
+                    if ((@as(u64, args[j].deps) >> @intCast(k)) & 1 != 0)
+                        continue;
+                    if (deps_buf[k] & expr.deps() != 0) {
+                        return error.DepViolation;
+                    }
                 }
             }
         }
-    
+
         // Run unification against the conclusion
         try self.runUnifyStream(thm.getUnifyPtr(self.file_bytes), concl);
-    
+
         // Push |- concl
         try self.stack.push(.{ .proof = concl });
         if (save) try self.heap.push(.{ .proof = concl });
@@ -313,7 +312,7 @@ pub const Verifier = struct {
         // Pointer equality per spec
         if (expr != expected) return error.UnifyMismatch;
     }
-    
+
     fn uopTerm(self: *Verifier, term_id: u32, save: bool) !void {
         const expr = try self.ustack.pop();
         // Must be a term application with matching constructor
@@ -323,7 +322,7 @@ pub const Verifier = struct {
         };
         if (t.id != term_id) return error.TermMismatch;
         // Save before pushing children per spec
-        if (save) try self.uheap.push(expr);
+        if (save) try self.uheap.pushSaved(expr);
         // Push children in reverse order so they're popped in forward order
         var i: usize = t.args.len;
         while (i > 0) {
@@ -331,7 +330,7 @@ pub const Verifier = struct {
             try self.ustack.push(t.args[i]);
         }
     }
-    
+
     fn uopDummy(self: *Verifier, sort_id: u32) !void {
         const expr = try self.ustack.pop();
         // Must be a bound variable of the right sort
@@ -341,13 +340,16 @@ pub const Verifier = struct {
         };
         if (!v.bound) return error.ExpectedBoundVar;
         if (v.sort != @as(u7, @intCast(sort_id))) return error.SortMismatch;
-        // Must not overlap with any expr already in uheap
+        // Must not overlap with any non-saved expr already in uheap
         for (self.uheap.entries[0..self.uheap.len]) |prev| {
-            if (prev.deps() & expr.deps() != 0) return error.DepViolation;
+            if (prev.saved) continue;
+            if (prev.expr.deps() & expr.deps() != 0) {
+                return error.DepViolation;
+            }
         }
         try self.uheap.push(expr);
     }
-    
+
     fn uopHyp(self: *Verifier) !void {
         // Pop |- e from main stack, push e onto unify stack
         const entry = try self.stack.pop();
@@ -360,7 +362,7 @@ pub const Verifier = struct {
 
     fn opRef(self: *Verifier, heap_id: u32) !void {
         const entry = try self.heap.get(heap_id);
-        // Special case: if top of stack is conv_obligation, 
+        // Special case: if top of stack is conv_obligation,
         // and heap[i] is a conv proof, discharge it
         if (self.stack.top > 0) {
             const top = try self.stack.peek();
@@ -376,7 +378,7 @@ pub const Verifier = struct {
         }
         try self.stack.push(entry);
     }
-    
+
     fn opDummy(self: *Verifier, sort_id: u32) !void {
         // Check sort exists and is not strict
         if (sort_id >= self.sort_table.len) return error.InvalidSort;
@@ -387,12 +389,12 @@ pub const Verifier = struct {
             .sort = @intCast(sort_id),
             .bound = true,
             .deps = @as(u55, 1) << @intCast(self.next_bv),
-        }};
+        } };
         self.next_bv += 1;
         try self.stack.push(.{ .expr = expr });
         try self.heap.push(.{ .expr = expr });
     }
-    
+
     fn opHyp(self: *Verifier) !void {
         const entry = try self.stack.pop();
         const expr = switch (entry) {
@@ -403,7 +405,7 @@ pub const Verifier = struct {
         try self.hyps.append(expr);
         try self.heap.push(.{ .proof = expr });
     }
-    
+
     fn opSave(self: *Verifier) !void {
         const entry = try self.stack.peek();
         switch (entry) {
@@ -411,7 +413,7 @@ pub const Verifier = struct {
             else => try self.heap.push(entry),
         }
     }
-    
+
     fn opRefl(self: *Verifier) !void {
         const entry = try self.stack.pop();
         const obl = switch (entry) {
@@ -420,7 +422,7 @@ pub const Verifier = struct {
         };
         if (obl.left != obl.right) return error.ReflMismatch;
     }
-    
+
     fn opSymm(self: *Verifier) !void {
         const entry = try self.stack.pop();
         const obl = switch (entry) {
@@ -430,9 +432,9 @@ pub const Verifier = struct {
         try self.stack.push(.{ .conv_obligation = .{
             .left = obl.right,
             .right = obl.left,
-        }});
+        } });
     }
-    
+
     fn opConv(self: *Verifier) !void {
         const proof_entry = try self.stack.pop();
         const e2 = switch (proof_entry) {
@@ -448,9 +450,9 @@ pub const Verifier = struct {
         try self.stack.push(.{ .conv_obligation = .{
             .left = e1,
             .right = e2,
-        }});
+        } });
     }
-    
+
     fn opConvCut(self: *Verifier) !void {
         const entry = try self.stack.pop();
         const obl = switch (entry) {
@@ -461,10 +463,10 @@ pub const Verifier = struct {
         try self.stack.push(.{ .conv = .{
             .left = obl.left,
             .right = obl.right,
-        }});
+        } });
         try self.stack.push(.{ .conv_obligation = obl });
     }
-    
+
     fn opConvSave(self: *Verifier) !void {
         const entry = try self.stack.pop();
         const conv = switch (entry) {
@@ -473,7 +475,7 @@ pub const Verifier = struct {
         };
         try self.heap.push(.{ .conv = conv });
     }
-    
+
     fn opSorry(self: *Verifier) !void {
         // Sorry is not a valid proof command but we handle it gracefully
         // Check what's on top and either push a proof or discharge an obligation
@@ -517,10 +519,10 @@ pub const Verifier = struct {
             try self.stack.push(.{ .conv_obligation = .{
                 .left = left.args[i],
                 .right = right.args[i],
-            }});
+            } });
         }
     }
-    
+
     fn opUnfold(self: *Verifier) !void {
         // Stack: (t e1...en) =?= e', e
         // Pop e
@@ -545,7 +547,7 @@ pub const Verifier = struct {
         // with def's args as initial uheap
         self.uheap.len = t.args.len;
         for (t.args, 0..) |arg, i| {
-            self.uheap.entries[i] = arg;
+            self.uheap.entries[i] = .{ .expr = arg, .saved = false };
         }
         // Run the def's unify stream with e on the unify stack
         const unify_ptr = self.term_table[t.id].getUnifyPtr(self.file_bytes).?;
@@ -556,7 +558,7 @@ pub const Verifier = struct {
         try self.stack.push(.{ .conv_obligation = .{
             .left = e,
             .right = obl.right,
-        }});
+        } });
     }
 
     fn runUnifyStreamRaw(self: *Verifier, start_pos: u32) !void {
@@ -576,11 +578,10 @@ pub const Verifier = struct {
         }
         if (self.ustack.top != 0) return error.UnifyStackNotEmpty;
     }
-    
+
     fn runUnifyStream(self: *Verifier, start_pos: u32, concl: *const Expr) !void {
         self.ustack.reset();
         try self.ustack.push(concl);
         try self.runUnifyStreamRaw(start_pos);
     }
-
 };
