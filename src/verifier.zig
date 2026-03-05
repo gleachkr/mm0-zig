@@ -208,6 +208,7 @@ pub const Verifier = struct {
 
         // Pop n args in reverse order
         const popped = try self.arena.allocator().alloc(*const Expr, n);
+        var deps: u55 = 0;
         var i: usize = n;
         while (i > 0) {
             i -= 1;
@@ -221,12 +222,7 @@ pub const Verifier = struct {
             // If arg is bound, expr must be a bound variable
             if (args[i].bound and !expr.bound()) return error.ExpectedBoundVar;
             popped[i] = expr;
-        }
-
-        // Compute deps as union of children's deps
-        var deps: u55 = 0;
-        for (popped) |arg| {
-            deps |= arg.deps();
+            deps |= expr.deps();
         }
 
         // Allocate new node
@@ -271,7 +267,7 @@ pub const Verifier = struct {
         }
 
         // Dep checks in forward order
-        var deps_buf: [56]u55 = std.mem.zeroes([56]u55);
+        var deps_buf: [56]u55 = undefined;
         var deps_len: usize = 0;
         for (0..n) |j| {
             const expr = self.uheap.entries[j].expr;
@@ -308,7 +304,8 @@ pub const Verifier = struct {
 
     fn uopRef(self: *Verifier, heap_id: u32) !void {
         const expr = try self.ustack.pop();
-        const expected = try self.uheap.get(heap_id);
+        if (heap_id >= self.uheap.len) return error.UHeapOutOfBounds;
+        const expected = self.uheap.entries[heap_id].expr;
         // Pointer equality per spec
         if (expr != expected) return error.UnifyMismatch;
     }
@@ -361,21 +358,22 @@ pub const Verifier = struct {
     }
 
     fn opRef(self: *Verifier, heap_id: u32) !void {
-        const entry = try self.heap.get(heap_id);
-        // Special case: if top of stack is conv_obligation,
-        // and heap[i] is a conv proof, discharge it
-        if (self.stack.top > 0) {
-            const top = try self.stack.peek();
+        if (heap_id >= self.heap.len) return error.HeapOutOfBounds;
+        const entry = self.heap.entries[heap_id];
+
+        // Fast path: most refs just push the heap entry.
+        if (entry == .conv and self.stack.top > 0) {
+            const top = self.stack.entries[self.stack.top - 1];
             if (top == .conv_obligation) {
-                if (entry == .conv) {
-                    const obl = (try self.stack.pop()).conv_obligation;
-                    const conv = entry.conv;
-                    if (obl.left != conv.left or obl.right != conv.right)
-                        return error.ConvMismatch;
-                    return;
-                }
+                self.stack.top -= 1;
+                const obl = self.stack.entries[self.stack.top].conv_obligation;
+                const conv = entry.conv;
+                if (obl.left != conv.left or obl.right != conv.right)
+                    return error.ConvMismatch;
+                return;
             }
         }
+
         try self.stack.push(entry);
     }
 
