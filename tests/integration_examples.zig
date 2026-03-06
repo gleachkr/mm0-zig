@@ -21,8 +21,7 @@ const expected_pairs = [_]ExpectedPair{
     .{
         .name = "hello_assembler",
         .outcome = .{ .verify_error = error.MM0Mismatch },
-        .reason =
-            "mm1 declares theorem hello_terminates without a proof; mm0 does " ++
+        .reason = "mm1 declares theorem hello_terminates without a proof; mm0 does " ++
             "not declare it, so declaration streams diverge.",
     },
     .{ .name = "hello_mmc", .outcome = .pass },
@@ -34,8 +33,7 @@ const expected_pairs = [_]ExpectedPair{
     .{
         .name = "verifier",
         .outcome = .compile_fail,
-        .reason =
-            "upstream example is intentionally incomplete and mm0-rs compile " ++
+        .reason = "upstream example is intentionally incomplete and mm0-rs compile " ++
             "fails (missing theorem bodies/placeholders).",
     },
     .{ .name = "x86", .outcome = .pass },

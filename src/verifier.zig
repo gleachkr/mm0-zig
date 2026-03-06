@@ -8,6 +8,7 @@ const Sort = @import("./sorts.zig").Sort;
 const Term = @import("./terms.zig").Term;
 const Theorem = @import("./theorems.zig").Theorem;
 const CrossChecker = @import("./check.zig").CrossChecker;
+const Index = @import("./mmb.zig").Index;
 
 const ProofCmd = @import("./proof.zig").ProofCmd;
 const StmtCmd = @import("./proof.zig").StmtCmd;
@@ -19,6 +20,24 @@ const Arg = @import("./args.zig").Arg;
 const HEAP_SIZE = @import("./constants.zig").HEAP_SIZE;
 const ARENA_SIZE = @import("./constants.zig").ARENA_SIZE;
 
+const ProofContext = enum {
+    defn,
+    axiom,
+    theorem,
+};
+
+const UnifyContext = enum {
+    defn,
+    theorem,
+};
+
+const StatementRef = union(enum) {
+    none,
+    sort: usize,
+    term: usize,
+    theorem: usize,
+};
+
 pub const Verifier = struct {
     // Per-theorem working state - reset between theorems
     stack: Stack,
@@ -28,6 +47,13 @@ pub const Verifier = struct {
     hyps: HypList,
     next_bv: u32,
     sorry_used: bool,
+    available_sorts: usize,
+    available_terms: usize,
+    available_thms: usize,
+    proof_context: ?ProofContext,
+    unify_context: ?UnifyContext,
+    current_statement: StatementRef,
+    index: ?*const Index,
 
     // Arena for expression nodes - reset between theorems
     arena: std.heap.FixedBufferAllocator,
@@ -39,12 +65,21 @@ pub const Verifier = struct {
     term_table: []const Term,
     thm_table: []const Theorem,
 
-    pub fn init(allocator: std.mem.Allocator, file_bytes: []const u8, sort_table: []const Sort, term_table: []const Term, thm_table: []const Theorem) !*Verifier {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        file_bytes: []const u8,
+        sort_table: []const Sort,
+        term_table: []const Term,
+        thm_table: []const Theorem,
+        index: ?*const Index,
+    ) !*Verifier {
         const v = try allocator.create(Verifier);
         v.file_bytes = file_bytes;
         v.sort_table = sort_table;
         v.term_table = term_table;
         v.thm_table = thm_table;
+        v.index = index;
+        v.current_statement = .none;
         v.reset(); // XXX is this actually needed?
         return v;
     }
@@ -61,43 +96,91 @@ pub const Verifier = struct {
         self.hyps.len = 0;
         self.next_bv = 0;
         self.sorry_used = false;
+        self.available_sorts = 0;
+        self.available_terms = 0;
+        self.available_thms = 0;
+        self.proof_context = null;
+        self.unify_context = null;
         self.arena = std.heap.FixedBufferAllocator.init(&self.arena_buf);
     }
 
-    fn verifyThm(self: *Verifier, thm: Theorem, proof_pos: u32) !void {
+    fn verifyThm(
+        self: *Verifier,
+        thm: Theorem,
+        proof_pos: u32,
+        proof_end: u32,
+        available_sorts: usize,
+        available_terms: usize,
+        available_thms: usize,
+    ) !void {
         defer self.reset();
+        self.proof_context = .theorem;
+        self.available_sorts = available_sorts;
+        self.available_terms = available_terms;
+        self.available_thms = available_thms;
         try self.initHeapFromThmArgs(thm);
-        try self.runProofStream(proof_pos);
+        try self.runProofStream(proof_pos, proof_end);
         const top = try self.stack.pop();
         if (top != .proof) return error.ExpectedProof;
         if (self.stack.top != 0) return error.StackNotEmpty;
+        if (self.sorry_used) return error.SorryUsed;
     }
 
-    fn verifyDef(self: *Verifier, term: Term, proof_pos: u32) !void {
+    fn verifyDef(
+        self: *Verifier,
+        term: Term,
+        proof_pos: u32,
+        proof_end: u32,
+        available_sorts: usize,
+        available_terms: usize,
+        available_thms: usize,
+    ) !void {
         defer self.reset();
+        self.proof_context = .defn;
+        self.available_sorts = available_sorts;
+        self.available_terms = available_terms;
+        self.available_thms = available_thms;
         try self.initHeapFromTermArgs(term);
-        try self.runProofStream(proof_pos);
+        try self.runProofStream(proof_pos, proof_end);
         const top = try self.stack.pop();
         if (top != .expr) return error.ExpectedExpr;
         if (self.stack.top != 0) return error.StackNotEmpty;
+        if (self.sorry_used) return error.SorryUsed;
     }
 
-    fn verifyAxiom(self: *Verifier, thm: Theorem, proof_pos: u32) !void {
+    fn verifyAxiom(
+        self: *Verifier,
+        thm: Theorem,
+        proof_pos: u32,
+        proof_end: u32,
+        available_sorts: usize,
+        available_terms: usize,
+        available_thms: usize,
+    ) !void {
         defer self.reset();
+        self.proof_context = .axiom;
+        self.available_sorts = available_sorts;
+        self.available_terms = available_terms;
+        self.available_thms = available_thms;
         try self.initHeapFromThmArgs(thm);
-        try self.runProofStream(proof_pos);
+        try self.runProofStream(proof_pos, proof_end);
         const top = try self.stack.pop();
         if (top != .expr) return error.ExpectedExpr;
         if (self.stack.top != 0) return error.StackNotEmpty;
+        if (self.sorry_used) return error.SorryUsed;
     }
 
-    fn runProofStream(self: *Verifier, start_pos: u32) !void {
-        var pos = start_pos;
+    fn runProofStream(self: *Verifier, start_pos: u32, end_pos: u32) !void {
+        var pos: usize = start_pos;
+        const limit: usize = end_pos;
         while (true) {
-            const cmd = Cmd.read(self.file_bytes, pos);
-            pos += @intCast(cmd.size);
+            const cmd = try Cmd.read(self.file_bytes, pos, limit);
+            pos += cmd.size;
             switch (@as(ProofCmd, @enumFromInt(cmd.op))) {
-                .End => break,
+                .End => {
+                    if (pos != limit) return error.BadStatementLength;
+                    break;
+                },
                 .Term => try self.opTerm(cmd.data, false),
                 .TermSave => try self.opTerm(cmd.data, true),
                 .Ref => try self.opRef(cmd.data),
@@ -151,57 +234,218 @@ pub const Verifier = struct {
     }
 
     pub fn verifyProofStream(self: *Verifier, proof_start: u32, checker: *CrossChecker) !void {
-        var pos: u32 = proof_start;
-        var sort_count: u32 = 0;
-        var term_count: u32 = 0;
-        var thm_count: u32 = 0;
+        var pos: usize = proof_start;
+        var sort_count: usize = 0;
+        var term_count: usize = 0;
+        var thm_count: usize = 0;
 
         while (true) {
             const stmt_start = pos;
-            const cmd = Cmd.read(self.file_bytes, pos);
-            pos += @intCast(cmd.size); // now pos points to first proof command
+            const cmd = try Cmd.read(self.file_bytes, pos, self.file_bytes.len);
+            pos += cmd.size;
 
             switch (@as(StmtCmd, @enumFromInt(cmd.op))) {
                 .End => break,
                 .Sort => {
-                    try checker.checkSort(@intCast(sort_count), self.sort_table[sort_count]);
+                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
+                    if (sort_count >= self.sort_table.len) {
+                        return error.SortCountMismatch;
+                    }
+                    self.current_statement = .{ .sort = sort_count };
+                    if (self.index) |index| {
+                        try index.validateSortProof(sort_count, stmt_start);
+                    }
+                    try checker.checkSort(
+                        @intCast(sort_count),
+                        self.sort_table[sort_count],
+                    );
+                    if (stmt_end != pos) return error.NonEmptySortStatement;
                     sort_count += 1;
+                    pos = stmt_end;
                 },
                 .TermDef => {
+                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
+                    if (term_count >= self.term_table.len) {
+                        return error.TermCountMismatch;
+                    }
+                    self.current_statement = .{ .term = term_count };
+                    if (self.index) |index| {
+                        try index.validateTermProof(term_count, stmt_start);
+                    }
                     const term = self.term_table[term_count];
-                    try checker.checkTerm(term, self.file_bytes);
+                    try checker.checkTerm(
+                        @intCast(term_count),
+                        term,
+                        self.file_bytes,
+                    );
                     if (term.ret_sort.is_def) {
-                        try self.verifyDef(term, pos);
+                        try self.verifyDef(
+                            term,
+                            @intCast(pos),
+                            @intCast(stmt_end),
+                            sort_count,
+                            term_count + 1,
+                            thm_count,
+                        );
+                    } else if (stmt_end != pos) {
+                        return error.NonDefTermHasProof;
                     }
                     term_count += 1;
+                    pos = stmt_end;
                 },
                 .Axiom => {
-                    try checker.checkAssertion(self.thm_table[thm_count], self.file_bytes);
-                    try self.verifyAxiom(self.thm_table[thm_count], pos);
+                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
+                    if (thm_count >= self.thm_table.len) {
+                        return error.TheoremCountMismatch;
+                    }
+                    self.current_statement = .{ .theorem = thm_count };
+                    if (self.index) |index| {
+                        try index.validateTheoremProof(thm_count, stmt_start);
+                    }
+                    const theorem = self.thm_table[thm_count];
+                    try checker.checkAssertion(theorem, self.file_bytes);
+                    try self.verifyAxiom(
+                        theorem,
+                        @intCast(pos),
+                        @intCast(stmt_end),
+                        sort_count,
+                        term_count,
+                        thm_count + 1,
+                    );
                     thm_count += 1;
+                    pos = stmt_end;
                 },
                 .Thm => {
-                    try checker.checkAssertion(self.thm_table[thm_count], self.file_bytes);
-                    try self.verifyThm(self.thm_table[thm_count], pos);
+                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
+                    if (thm_count >= self.thm_table.len) {
+                        return error.TheoremCountMismatch;
+                    }
+                    self.current_statement = .{ .theorem = thm_count };
+                    if (self.index) |index| {
+                        try index.validateTheoremProof(thm_count, stmt_start);
+                    }
+                    const theorem = self.thm_table[thm_count];
+                    try checker.checkAssertion(theorem, self.file_bytes);
+                    try self.verifyThm(
+                        theorem,
+                        @intCast(pos),
+                        @intCast(stmt_end),
+                        sort_count,
+                        term_count,
+                        thm_count + 1,
+                    );
                     thm_count += 1;
+                    pos = stmt_end;
                 },
                 .LocalDef => {
-                    try self.verifyDef(self.term_table[term_count], pos);
+                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
+                    if (term_count >= self.term_table.len) {
+                        return error.TermCountMismatch;
+                    }
+                    self.current_statement = .{ .term = term_count };
+                    if (self.index) |index| {
+                        try index.validateTermProof(term_count, stmt_start);
+                    }
+                    try self.verifyDef(
+                        self.term_table[term_count],
+                        @intCast(pos),
+                        @intCast(stmt_end),
+                        sort_count,
+                        term_count + 1,
+                        thm_count,
+                    );
                     term_count += 1;
+                    pos = stmt_end;
                 },
                 .LocalThm => {
-                    try self.verifyThm(self.thm_table[thm_count], pos);
+                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
+                    if (thm_count >= self.thm_table.len) {
+                        return error.TheoremCountMismatch;
+                    }
+                    self.current_statement = .{ .theorem = thm_count };
+                    if (self.index) |index| {
+                        try index.validateTheoremProof(thm_count, stmt_start);
+                    }
+                    try self.verifyThm(
+                        self.thm_table[thm_count],
+                        @intCast(pos),
+                        @intCast(stmt_end),
+                        sort_count,
+                        term_count,
+                        thm_count + 1,
+                    );
                     thm_count += 1;
+                    pos = stmt_end;
                 },
                 else => return error.UnknownStatement,
             }
+        }
 
-            // Use data field to jump to next statement
-            pos = stmt_start + cmd.data;
+        if (sort_count != self.sort_table.len) return error.SortCountMismatch;
+        if (term_count != self.term_table.len) return error.TermCountMismatch;
+        if (thm_count != self.thm_table.len) return error.TheoremCountMismatch;
+    }
+
+    pub fn reportError(self: *const Verifier, err: anyerror) void {
+        var name_buf: [32]u8 = undefined;
+        switch (self.current_statement) {
+            .none => std.debug.print("Verification failed: {s}\n", .{
+                @errorName(err),
+            }),
+            .sort => |id| std.debug.print(
+                "Verification failed in sort {s}: {s}\n",
+                .{ self.sortName(id, &name_buf), @errorName(err) },
+            ),
+            .term => |id| std.debug.print(
+                "Verification failed in term {s}: {s}\n",
+                .{ self.termName(id, &name_buf), @errorName(err) },
+            ),
+            .theorem => |id| std.debug.print(
+                "Verification failed in theorem {s}: {s}\n",
+                .{ self.theoremName(id, &name_buf), @errorName(err) },
+            ),
         }
     }
 
+    fn sortName(self: *const Verifier, id: usize, buf: *[32]u8) []const u8 {
+        if (self.index) |index| {
+            if (index.sortName(self.file_bytes, id) catch null) |name| return name;
+        }
+        return std.fmt.bufPrint(buf, "s{}", .{id}) catch "<sort>";
+    }
+
+    fn termName(self: *const Verifier, id: usize, buf: *[32]u8) []const u8 {
+        if (self.index) |index| {
+            if (index.termName(self.file_bytes, id) catch null) |name| return name;
+        }
+        return std.fmt.bufPrint(buf, "t{}", .{id}) catch "<term>";
+    }
+
+    fn theoremName(self: *const Verifier, id: usize, buf: *[32]u8) []const u8 {
+        if (self.index) |index| {
+            if (index.theoremName(self.file_bytes, id) catch null) |name| {
+                return name;
+            }
+        }
+        return std.fmt.bufPrint(buf, "T{}", .{id}) catch "<theorem>";
+    }
+
+    fn statementEnd(
+        self: *Verifier,
+        stmt_start: usize,
+        body_start: usize,
+        encoded_len: u32,
+    ) !usize {
+        const stmt_len = std.math.cast(usize, encoded_len) orelse return error.IntegerOverflow;
+        const stmt_end = try std.math.add(usize, stmt_start, stmt_len);
+        if (stmt_end < body_start) return error.BadStatementLength;
+        if (stmt_end > self.file_bytes.len) return error.BadStatementLength;
+        return stmt_end;
+    }
+
     fn opTerm(self: *Verifier, term_id: u32, save: bool) !void {
+        if (term_id >= self.available_terms) return error.ForwardTermRef;
+
         const term = self.term_table[term_id];
         const args = term.getArgs(self.file_bytes);
         const n = term.num_args;
@@ -239,6 +483,12 @@ pub const Verifier = struct {
     }
 
     fn opThm(self: *Verifier, thm_id: u32, save: bool) !void {
+        switch (self.proof_context orelse return error.InvalidProofContext) {
+            .axiom, .theorem => {},
+            .defn => return error.ThmNotAllowed,
+        }
+        if (thm_id >= self.available_thms) return error.ForwardTheoremRef;
+
         self.uheap.len = 0;
         const thm = self.thm_table[thm_id];
         const args = thm.getArgs(self.file_bytes);
@@ -295,7 +545,11 @@ pub const Verifier = struct {
         }
 
         // Run unification against the conclusion
-        try self.runUnifyStream(thm.getUnifyPtr(self.file_bytes), concl);
+        try self.runUnifyStream(
+            thm.getUnifyPtr(self.file_bytes),
+            concl,
+            .theorem,
+        );
 
         // Push |- concl
         try self.stack.push(.{ .proof = concl });
@@ -311,6 +565,8 @@ pub const Verifier = struct {
     }
 
     fn uopTerm(self: *Verifier, term_id: u32, save: bool) !void {
+        if (term_id >= self.available_terms) return error.ForwardTermRef;
+
         const expr = try self.ustack.pop();
         // Must be a term application with matching constructor
         const t = switch (expr.*) {
@@ -329,6 +585,12 @@ pub const Verifier = struct {
     }
 
     fn uopDummy(self: *Verifier, sort_id: u32) !void {
+        switch (self.unify_context orelse return error.InvalidUnifyContext) {
+            .defn => {},
+            .theorem => return error.UDummyNotAllowed,
+        }
+        if (sort_id >= self.available_sorts) return error.InvalidSort;
+
         const expr = try self.ustack.pop();
         // Must be a bound variable of the right sort
         const v = switch (expr.*) {
@@ -348,6 +610,11 @@ pub const Verifier = struct {
     }
 
     fn uopHyp(self: *Verifier) !void {
+        switch (self.unify_context orelse return error.InvalidUnifyContext) {
+            .theorem => {},
+            .defn => return error.UHypNotAllowed,
+        }
+
         // Pop |- e from main stack, push e onto unify stack
         const entry = try self.stack.pop();
         const expr = switch (entry) {
@@ -378,9 +645,10 @@ pub const Verifier = struct {
     }
 
     fn opDummy(self: *Verifier, sort_id: u32) !void {
-        // Check sort exists and is not strict
-        if (sort_id >= self.sort_table.len) return error.InvalidSort;
+        // Check sort exists and is not strict or free
+        if (sort_id >= self.available_sorts) return error.InvalidSort;
         if (self.sort_table[sort_id].strict) return error.StrictSort;
+        if (self.sort_table[sort_id].free) return error.FreeSort;
         // Allocate fresh bound variable
         const expr = try self.arena.allocator().create(Expr);
         expr.* = .{ .variable = .{
@@ -394,6 +662,11 @@ pub const Verifier = struct {
     }
 
     fn opHyp(self: *Verifier) !void {
+        switch (self.proof_context orelse return error.InvalidProofContext) {
+            .axiom, .theorem => {},
+            .defn => return error.HypNotAllowed,
+        }
+
         const entry = try self.stack.pop();
         const expr = switch (entry) {
             .expr => |e| e,
@@ -540,6 +813,7 @@ pub const Verifier = struct {
             .term => |t| t,
             else => return error.ExpectedTermApp,
         };
+        if (t.id >= self.available_terms) return error.ForwardTermRef;
         if (!self.term_table[t.id].ret_sort.is_def) return error.ExpectedDef;
         // Run unification of def's unify stream against e,
         // with def's args as initial uheap
@@ -551,7 +825,7 @@ pub const Verifier = struct {
         const unify_ptr = self.term_table[t.id].getUnifyPtr(self.file_bytes).?;
         self.ustack.reset();
         try self.ustack.push(e);
-        try self.runUnifyStreamRaw(unify_ptr);
+        try self.runUnifyStreamRaw(unify_ptr, .defn);
         // Push e =?= e'
         try self.stack.push(.{ .conv_obligation = .{
             .left = e,
@@ -559,11 +833,19 @@ pub const Verifier = struct {
         } });
     }
 
-    fn runUnifyStreamRaw(self: *Verifier, start_pos: u32) !void {
-        var pos = start_pos;
+    fn runUnifyStreamRaw(
+        self: *Verifier,
+        start_pos: u32,
+        context: UnifyContext,
+    ) !void {
+        const prev_context = self.unify_context;
+        self.unify_context = context;
+        defer self.unify_context = prev_context;
+
+        var pos: usize = start_pos;
         while (true) {
-            const cmd = Cmd.read(self.file_bytes, pos);
-            pos += @intCast(cmd.size);
+            const cmd = try Cmd.read(self.file_bytes, pos, self.file_bytes.len);
+            pos += cmd.size;
             switch (@as(UnifyCmd, @enumFromInt(cmd.op))) {
                 .End => break,
                 .UTerm => try self.uopTerm(cmd.data, false),
@@ -577,9 +859,14 @@ pub const Verifier = struct {
         if (self.ustack.top != 0) return error.UnifyStackNotEmpty;
     }
 
-    fn runUnifyStream(self: *Verifier, start_pos: u32, concl: *const Expr) !void {
+    fn runUnifyStream(
+        self: *Verifier,
+        start_pos: u32,
+        concl: *const Expr,
+        context: UnifyContext,
+    ) !void {
         self.ustack.reset();
         try self.ustack.push(concl);
-        try self.runUnifyStreamRaw(start_pos);
+        try self.runUnifyStreamRaw(start_pos, context);
     }
 };

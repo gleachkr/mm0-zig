@@ -1,8 +1,5 @@
 const std = @import("std");
-const Header = @import("./headers.zig").Header;
-const Sort = @import("./sorts.zig").Sort;
-const Term = @import("./terms.zig").Term;
-const Theorem = @import("./theorems.zig").Theorem;
+const Mmb = @import("./mmb.zig").Mmb;
 const Verifier = @import("./verifier.zig").Verifier;
 const CrossChecker = @import("./check.zig").CrossChecker;
 
@@ -15,7 +12,6 @@ pub fn usage() !void {
 }
 
 pub fn main() !void {
-    
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -35,29 +31,33 @@ pub fn main() !void {
     const mm0 = try std.fs.File.readToEndAlloc(std.fs.File.stdin(), allocator, std.math.maxInt(usize));
     defer allocator.free(mm0);
 
-    const header = try Header.fromBytes(mmb[0..@sizeOf(Header)]);
-
-    const sort_bytes = mmb[@sizeOf(Header)..][0..header.num_sorts];
-    const sort_table = @as([*]const Sort, @ptrCast(sort_bytes))[0..header.num_sorts];
-
-    const term_bytes = mmb[header.p_terms..header.p_terms + header.num_terms * @sizeOf(Term)];
-    if (header.p_terms % @alignOf(Term) != 0) return error.MisalignedTermTable;
-    const term_table = @as([*]const Term, @ptrCast(@alignCast(term_bytes)))[0..header.num_terms];
-
-    const theorem_bytes = mmb[header.p_thms..header.p_thms + header.num_thms * @sizeOf(Theorem)];
-    if (header.p_thms % @alignOf(Theorem) != 0) return error.MisalignedTheoremTable;
-    const theorem_table = @as([*]const Theorem, @ptrCast(@alignCast(theorem_bytes)))[0..header.num_thms];
+    const parsed = Mmb.parse(allocator, mmb) catch |err| {
+        std.debug.print("Failed to parse {s}: {s}\n", .{
+            args[1],
+            @errorName(err),
+        });
+        std.process.exit(1);
+    };
 
     // Create verifier
-    const verifier = try Verifier.init(allocator, mmb, sort_table, term_table, theorem_table);
+    const verifier = try Verifier.init(
+        allocator,
+        mmb,
+        parsed.sort_table,
+        parsed.term_table,
+        parsed.theorem_table,
+        &parsed.index,
+    );
     defer verifier.deinit(allocator);
 
     // Create crosschecker
     const checker = try CrossChecker.init(mm0, allocator);
     defer checker.deinit(allocator);
 
-    try verifier.verifyProofStream(header.p_proof, checker);
+    verifier.verifyProofStream(parsed.header.p_proof, checker) catch |err| {
+        verifier.reportError(err);
+        std.process.exit(1);
+    };
 
     std.debug.print("Verification successful!\n", .{});
 }
-

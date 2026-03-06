@@ -7,11 +7,14 @@ const Header = mm0.Header;
 const MAGIC = mm0.MAGIC;
 const Heap = mm0.Heap;
 const MM0Parser = mm0.MM0Parser;
+const Mmb = mm0.Mmb;
+const CrossChecker = mm0.CrossChecker;
 const Proof = mm0.Proof;
 const Sort = mm0.Sort;
 const Stack = mm0.Stack;
 const Term = mm0.Term;
 const Theorem = mm0.Theorem;
+const Verifier = mm0.Verifier;
 
 fn fillHeaderBytes(
     out: *align(@alignOf(Header)) [@sizeOf(Header)]u8,
@@ -22,6 +25,153 @@ fn fillHeaderBytes(
 
 fn writeArg(buf: []u8, offset: usize, arg: Arg) void {
     @memcpy(buf[offset..][0..@sizeOf(Arg)], std.mem.asBytes(&arg));
+}
+
+fn writeValue(buf: []u8, offset: usize, value: anytype) void {
+    const bytes = std.mem.asBytes(&value);
+    @memcpy(buf[offset..][0..bytes.len], bytes);
+}
+
+const IndexEntryWire = extern struct {
+    id: [4]u8,
+    data: u32,
+    ptr: u64,
+};
+
+const NameEntryWire = extern struct {
+    proof: u64,
+    name: u64,
+};
+
+fn buildIndexedMmb() [256]u8 {
+    var bytes: [256]u8 align(8) = std.mem.zeroes([256]u8);
+
+    const header = Header{
+        .magic = MAGIC,
+        .version = 1,
+        .num_sorts = 1,
+        .reserved0 = 0,
+        .num_terms = 1,
+        .num_thms = 1,
+        .p_terms = 48,
+        .p_thms = 56,
+        .p_proof = 80,
+        .reserved1 = 0,
+        .p_index = 88,
+    };
+    writeValue(bytes[0..], 0, header);
+
+    const sort = Sort{};
+    writeValue(bytes[0..], 40, sort);
+
+    const term = Term{
+        .num_args = 0,
+        .ret_sort = .{ .sort = 0, .is_def = false },
+        .reserved = 0,
+        .p_data = 64,
+    };
+    writeValue(bytes[0..], 48, term);
+
+    const theorem = Theorem{
+        .num_args = 0,
+        .reserved = 0,
+        .p_data = 72,
+    };
+    writeValue(bytes[0..], 56, theorem);
+
+    writeArg(
+        bytes[0..],
+        64,
+        .{ .deps = 0, .reserved = 0, .sort = 0, .bound = false },
+    );
+
+    bytes[80] = 0x44;
+    bytes[81] = 0x02;
+    bytes[82] = 0x45;
+    bytes[83] = 0x02;
+    bytes[84] = 0x42;
+    bytes[85] = 0x03;
+    bytes[86] = 0x00;
+    bytes[87] = 0x00;
+
+    writeValue(bytes[0..], 88, @as(u64, 3));
+    writeValue(
+        bytes[0..],
+        96,
+        IndexEntryWire{ .id = .{ 'N', 'a', 'm', 'e' }, .data = 0, .ptr = 144 },
+    );
+    writeValue(
+        bytes[0..],
+        112,
+        IndexEntryWire{ .id = .{ 'V', 'a', 'r', 'N' }, .data = 0, .ptr = 192 },
+    );
+    writeValue(
+        bytes[0..],
+        128,
+        IndexEntryWire{ .id = .{ 'H', 'y', 'p', 'N' }, .data = 0, .ptr = 208 },
+    );
+
+    writeValue(bytes[0..], 144, NameEntryWire{ .proof = 80, .name = 224 });
+    writeValue(bytes[0..], 160, NameEntryWire{ .proof = 82, .name = 228 });
+    writeValue(bytes[0..], 176, NameEntryWire{ .proof = 84, .name = 232 });
+
+    writeValue(bytes[0..], 192, @as(u64, 216));
+    writeValue(bytes[0..], 200, @as(u64, 216));
+    writeValue(bytes[0..], 208, @as(u64, 216));
+    writeValue(bytes[0..], 216, @as(u64, 0));
+
+    @memcpy(bytes[224..228], "wff\x00");
+    @memcpy(bytes[228..232], "app\x00");
+    @memcpy(bytes[232..235], "ax\x00");
+
+    return bytes;
+}
+
+fn buildRemapCrossCheckBytes() [128]u8 {
+    var bytes: [128]u8 align(@alignOf(Arg)) = std.mem.zeroes([128]u8);
+
+    const term_p_data: usize = 16;
+    writeArg(
+        bytes[0..],
+        term_p_data,
+        .{ .deps = 0, .reserved = 0, .sort = 1, .bound = false },
+    );
+    writeArg(
+        bytes[0..],
+        term_p_data + @sizeOf(Arg),
+        .{ .deps = 0, .reserved = 0, .sort = 1, .bound = false },
+    );
+
+    const thm_p_data: usize = 48;
+    writeArg(
+        bytes[0..],
+        thm_p_data,
+        .{ .deps = 0, .reserved = 0, .sort = 1, .bound = false },
+    );
+
+    const unify = thm_p_data + @sizeOf(Arg);
+    bytes[unify + 0] = 0x70;
+    bytes[unify + 1] = 0x01;
+    bytes[unify + 2] = 0x72;
+    bytes[unify + 3] = 0x00;
+    bytes[unify + 4] = 0x72;
+    bytes[unify + 5] = 0x00;
+    bytes[unify + 6] = 0x00;
+
+    return bytes;
+}
+
+fn buildLocalDefDummyProof() [16]u8 {
+    var bytes: [16]u8 = std.mem.zeroes([16]u8);
+    bytes[0] = 0x44;
+    bytes[1] = 0x02;
+    bytes[2] = 0x4D;
+    bytes[3] = 0x05;
+    bytes[4] = 0x53;
+    bytes[5] = 0x00;
+    bytes[6] = 0x00;
+    bytes[7] = 0x00;
+    return bytes;
 }
 
 test "header parsing accepts valid header" {
@@ -41,7 +191,7 @@ test "header parsing accepts valid header" {
 
     var bytes: [@sizeOf(Header)]u8 align(@alignOf(Header)) = undefined;
     fillHeaderBytes(&bytes, header);
-    const parsed = try Header.fromBytes(&bytes);
+    const parsed = try Header.fromBytes(bytes[0..]);
     try std.testing.expectEqual(header.magic, parsed.magic);
     try std.testing.expectEqual(header.num_terms, parsed.num_terms);
     try std.testing.expectEqual(header.p_index, parsed.p_index);
@@ -76,7 +226,7 @@ test "header parsing rejects invalid fields" {
         .reserved1 = base.reserved1,
         .p_index = base.p_index,
     });
-    try std.testing.expectError(error.BadMagic, Header.fromBytes(&bad_magic));
+    try std.testing.expectError(error.BadMagic, Header.fromBytes(bad_magic[0..]));
 
     var bad_version: [@sizeOf(Header)]u8 align(@alignOf(Header)) = undefined;
     fillHeaderBytes(&bad_version, Header{
@@ -92,7 +242,7 @@ test "header parsing rejects invalid fields" {
         .reserved1 = base.reserved1,
         .p_index = base.p_index,
     });
-    try std.testing.expectError(error.BadVersion, Header.fromBytes(&bad_version));
+    try std.testing.expectError(error.BadVersion, Header.fromBytes(bad_version[0..]));
 
     var bad_reserved: [@sizeOf(Header)]u8 align(@alignOf(Header)) = undefined;
     fillHeaderBytes(&bad_reserved, Header{
@@ -108,7 +258,7 @@ test "header parsing rejects invalid fields" {
         .reserved1 = base.reserved1,
         .p_index = base.p_index,
     });
-    try std.testing.expectError(error.BadReserved, Header.fromBytes(&bad_reserved));
+    try std.testing.expectError(error.BadReserved, Header.fromBytes(bad_reserved[0..]));
 }
 
 test "Arg dependency helpers" {
@@ -127,22 +277,26 @@ test "Arg dependency helpers" {
 }
 
 test "proof command decoding handles all payload sizes" {
-    const cmd1 = Proof.Cmd.read(&[_]u8{0x1A}, 0);
+    const cmd1 = try Proof.Cmd.read(&[_]u8{0x1A}, 0, 1);
     try std.testing.expectEqual(@as(u6, 0x1A), cmd1.op);
     try std.testing.expectEqual(@as(u32, 0), cmd1.data);
     try std.testing.expectEqual(@as(usize, 1), cmd1.size);
 
-    const cmd2 = Proof.Cmd.read(&[_]u8{ 0x45, 0x7F }, 0);
+    const cmd2 = try Proof.Cmd.read(&[_]u8{ 0x45, 0x7F }, 0, 2);
     try std.testing.expectEqual(@as(u6, 0x05), cmd2.op);
     try std.testing.expectEqual(@as(u32, 0x7F), cmd2.data);
     try std.testing.expectEqual(@as(usize, 2), cmd2.size);
 
-    const cmd3 = Proof.Cmd.read(&[_]u8{ 0x91, 0xCD, 0xAB }, 0);
+    const cmd3 = try Proof.Cmd.read(&[_]u8{ 0x91, 0xCD, 0xAB }, 0, 3);
     try std.testing.expectEqual(@as(u6, 0x11), cmd3.op);
     try std.testing.expectEqual(@as(u32, 0xABCD), cmd3.data);
     try std.testing.expectEqual(@as(usize, 3), cmd3.size);
 
-    const cmd4 = Proof.Cmd.read(&[_]u8{ 0xE2, 0x44, 0x33, 0x22, 0x11 }, 0);
+    const cmd4 = try Proof.Cmd.read(
+        &[_]u8{ 0xE2, 0x44, 0x33, 0x22, 0x11 },
+        0,
+        5,
+    );
     try std.testing.expectEqual(@as(u6, 0x22), cmd4.op);
     try std.testing.expectEqual(@as(u32, 0x11223344), cmd4.data);
     try std.testing.expectEqual(@as(usize, 5), cmd4.size);
@@ -176,6 +330,7 @@ test "MM0 parser parses sort modifiers" {
 
 test "MM0 parser handles binders and dependencies" {
     const src =
+        \\sort wff;
         \\term app {x: wff} (h: wff x) (.d: wff x) : wff;
     ;
 
@@ -183,6 +338,7 @@ test "MM0 parser handles binders and dependencies" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
     const stmt = (try parser.next()).?;
 
     switch (stmt) {
@@ -207,6 +363,8 @@ test "MM0 parser handles binders and dependencies" {
 
 test "MM0 parser handles arrow-style term signatures" {
     const src =
+        \\sort hex;
+        \\sort char;
         \\term ch: hex > hex > char;
     ;
 
@@ -214,6 +372,8 @@ test "MM0 parser handles arrow-style term signatures" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
     const stmt = (try parser.next()).?;
 
     switch (stmt) {
@@ -234,6 +394,8 @@ test "MM0 parser handles arrow-style term signatures" {
 
 test "MM0 parser handles dependent args in arrow signatures" {
     const src =
+        \\sort term;
+        \\sort type;
         \\term lam {x: term}: type > term x > term;
     ;
 
@@ -241,6 +403,8 @@ test "MM0 parser handles dependent args in arrow signatures" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
     const stmt = (try parser.next()).?;
 
     switch (stmt) {
@@ -267,6 +431,7 @@ test "MM0 parser handles dependent args in arrow signatures" {
 
 test "MM0 parser skips local theorems and unknown declarations" {
     const src =
+        \\provable sort wff;
         \\notation "|-";
         \\theorem visible0 {x: wff}: $ |- x $;
         \\local theorem hidden {x: wff}: $ |- x $;
@@ -277,6 +442,7 @@ test "MM0 parser skips local theorems and unknown declarations" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
     const stmt0 = (try parser.next()).?;
     switch (stmt0) {
         .assertion => |assert_stmt| {
@@ -298,6 +464,391 @@ test "MM0 parser skips local theorems and unknown declarations" {
     }
 
     try std.testing.expect((try parser.next()) == null);
+}
+
+test "MM0 parser rejects unknown sorts in term signatures" {
+    {
+        const src =
+            \\sort nat;
+            \\term bad: foo > nat;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        try std.testing.expectError(error.UnknownSort, parser.next());
+    }
+
+    {
+        const src =
+            \\sort nat;
+            \\term bad: nat > foo;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        try std.testing.expectError(error.UnknownSort, parser.next());
+    }
+}
+
+test "MM0 parser rejects unknown sorts in theorem binders" {
+    const src =
+        \\provable sort wff;
+        \\theorem bad (x: foo): $ x $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.UnknownSort, parser.next());
+}
+
+test "MM0 parser rejects unknown sorts in defs and coercions" {
+    {
+        const src =
+            \\sort nat;
+            \\term z: nat;
+            \\def bad: foo = $ z $;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        try std.testing.expectError(error.UnknownSort, parser.next());
+    }
+
+    {
+        const src =
+            \\sort a;
+            \\term aa: a > a;
+            \\coercion aa: a > b;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        try std.testing.expectError(error.UnknownSort, parser.next());
+    }
+}
+
+test "MM0 parser rejects notation tokens using parentheses" {
+    {
+        const src =
+            \\sort wff;
+            \\term p: wff > wff;
+            \\prefix p: $($ prec 5;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        try std.testing.expectError(error.InvalidNotationToken, parser.next());
+    }
+
+    {
+        const src =
+            \\sort wff;
+            \\term p: wff > wff;
+            \\notation p (x: wff): wff = ($)$: 5) x;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        try std.testing.expectError(error.InvalidNotationToken, parser.next());
+    }
+}
+
+test "MM0 parser rejects infix precedence max" {
+    const src =
+        \\sort wff;
+        \\term imp: wff > wff > wff;
+        \\infixr imp: $->$ prec max;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.InfixPrecOutOfRange, parser.next());
+}
+
+test "MM0 parser rejects notation precedence conflicts" {
+    {
+        const src =
+            \\sort wff;
+            \\term p: wff > wff;
+            \\prefix p: $~$ prec 5;
+            \\prefix p: $~$ prec 6;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        try std.testing.expectError(error.PrecedenceMismatch, parser.next());
+    }
+
+    {
+        const src =
+            \\sort wff;
+            \\term l: wff > wff > wff;
+            \\term r: wff > wff > wff;
+            \\infixl l: $*$ prec 7;
+            \\infixr r: $+$ prec 7;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        try std.testing.expectError(error.PrecedenceAssocMismatch, parser.next());
+    }
+}
+
+test "MM0 parser rejects notation first-token conflicts" {
+    const src =
+        \\sort wff;
+        \\term p: wff > wff;
+        \\term q: wff > wff;
+        \\prefix p: $~$ prec 5;
+        \\notation q (x: wff): wff = ($~$: 5) x;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(
+        error.NotationFirstTokenConflict,
+        parser.next(),
+    );
+}
+
+test "MM0 parser rejects notation first-token vs infixy conflicts" {
+    {
+        const src =
+            \\sort wff;
+            \\term mix: wff > wff > wff;
+            \\term p: wff > wff;
+            \\notation mix (x y: wff): wff = ($[$: 20) x ($->$: 5) y;
+            \\prefix p: $->$ prec 5;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        try std.testing.expectError(
+            error.NotationFirstTokenConflict,
+            parser.next(),
+        );
+    }
+
+    {
+        const src =
+            \\sort wff;
+            \\term mix: wff > wff > wff;
+            \\term p: wff > wff;
+            \\prefix p: $->$ prec 5;
+            \\notation mix (x y: wff): wff = ($[$: 20) x ($->$: 5) y;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        _ = (try parser.next()).?;
+        try std.testing.expectError(
+            error.NotationFirstTokenConflict,
+            parser.next(),
+        );
+    }
+}
+
+test "MM0 parser rejects coercion cycles" {
+    const src =
+        \\sort a;
+        \\sort b;
+        \\term ab: a > b;
+        \\term ba: b > a;
+        \\coercion ab: a > b;
+        \\coercion ba: b > a;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.CoercionCycle, parser.next());
+}
+
+test "MM0 parser rejects coercion diamonds" {
+    const src =
+        \\sort a;
+        \\sort b;
+        \\sort c;
+        \\term ab: a > b;
+        \\term bc: b > c;
+        \\term ac: a > c;
+        \\coercion ab: a > b;
+        \\coercion bc: b > c;
+        \\coercion ac: a > c;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.CoercionDiamond, parser.next());
+}
+
+test "MM0 parser rejects coercion diamonds to provable" {
+    const src =
+        \\sort a;
+        \\provable sort b;
+        \\provable sort c;
+        \\term ab: a > b;
+        \\term ac: a > c;
+        \\coercion ab: a > b;
+        \\coercion ac: a > c;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.CoercionDiamondToProvable, parser.next());
+}
+
+test "MM0 parser coerces formulas to provable sorts" {
+    const src =
+        \\sort nat;
+        \\provable sort wff;
+        \\term box: nat > wff;
+        \\coercion box: nat > wff;
+        \\theorem t (x: nat): $ x $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+
+    const stmt = (try parser.next()).?;
+    switch (stmt) {
+        .assertion => |assert_stmt| switch (assert_stmt.concl.*) {
+            .term => |term_app| {
+                try std.testing.expectEqual(@as(u32, 0), term_app.id);
+                try std.testing.expectEqual(@as(usize, 1), term_app.args.len);
+                try std.testing.expect(term_app.args[0] == assert_stmt.arg_exprs[0]);
+            },
+            else => return error.ExpectedTermApp,
+        },
+        else => return error.UnexpectedStatementKind,
+    }
+}
+
+test "MM0 parser handles nullary terms in applications" {
+    const src =
+        \\provable sort wff;
+        \\sort nat;
+        \\term z: nat;
+        \\term p: nat > nat > wff;
+        \\theorem t: $ p z z $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+
+    const stmt = (try parser.next()).?;
+    switch (stmt) {
+        .assertion => |assert_stmt| {
+            try std.testing.expectEqualStrings("t", assert_stmt.name);
+            try std.testing.expectEqual(@as(usize, 0), assert_stmt.args.len);
+            try std.testing.expectEqual(@as(usize, 0), assert_stmt.hyps.len);
+            switch (assert_stmt.concl.*) {
+                .term => |concl| {
+                    try std.testing.expectEqual(@as(u32, 1), concl.id);
+                    try std.testing.expectEqual(@as(usize, 2), concl.args.len);
+                    switch (concl.args[0].*) {
+                        .term => |arg0| {
+                            try std.testing.expectEqual(@as(u32, 0), arg0.id);
+                            try std.testing.expectEqual(@as(usize, 0), arg0.args.len);
+                        },
+                        else => return error.ExpectedTermApp,
+                    }
+                    switch (concl.args[1].*) {
+                        .term => |arg1| {
+                            try std.testing.expectEqual(@as(u32, 0), arg1.id);
+                            try std.testing.expectEqual(@as(usize, 0), arg1.args.len);
+                        },
+                        else => return error.ExpectedTermApp,
+                    }
+                },
+                else => return error.ExpectedTermApp,
+            }
+        },
+        else => return error.UnexpectedStatementKind,
+    }
 }
 
 test "stack and heap basic behavior" {
@@ -402,4 +953,119 @@ test "sort packed fields round-trip" {
     try std.testing.expect(!parsed.strict);
     try std.testing.expect(parsed.provable);
     try std.testing.expect(!parsed.free);
+}
+
+test "CrossChecker remaps parser term ids to MMB ids" {
+    const mm0_src =
+        \\provable sort wff;
+        \\sort nat;
+        \\term eq: nat > nat > wff;
+        \\axiom refl (a: nat): $ eq a a $;
+    ;
+
+    var bytes = buildRemapCrossCheckBytes();
+    const file_bytes = bytes[0..];
+
+    const checker = try CrossChecker.init(mm0_src, std.testing.allocator);
+    defer checker.deinit(std.testing.allocator);
+
+    try checker.checkSort(0, .{ .provable = true });
+    try checker.checkSort(1, .{});
+
+    const eq_term = Term{
+        .num_args = 2,
+        .ret_sort = .{ .sort = 0, .is_def = false },
+        .reserved = 0,
+        .p_data = 16,
+    };
+    try checker.checkTerm(1, eq_term, file_bytes);
+
+    const refl = Theorem{
+        .num_args = 1,
+        .reserved = 0,
+        .p_data = 48,
+    };
+    try checker.checkAssertion(refl, file_bytes);
+}
+
+test "Verifier rejects dummy variables in free sorts" {
+    const mm0_src =
+        \\provable free sort foo;
+    ;
+
+    var checker = try CrossChecker.init(mm0_src, std.testing.allocator);
+    defer checker.deinit(std.testing.allocator);
+
+    const sorts = [_]Sort{.{ .provable = true, .free = true }};
+    const terms = [_]Term{.{
+        .num_args = 0,
+        .ret_sort = .{ .sort = 0, .is_def = true },
+        .reserved = 0,
+        .p_data = 0,
+    }};
+    const theorems = [_]Theorem{};
+    var proof = buildLocalDefDummyProof();
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.FreeSort,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
+test "proof command decoding detects truncation" {
+    try std.testing.expectError(
+        error.TruncatedCommand,
+        Proof.Cmd.read(&[_]u8{0x45}, 0, 1),
+    );
+}
+
+test "MMB parser reads index names and string lists" {
+    var bytes: [256]u8 align(8) = buildIndexedMmb();
+    const mmb = try Mmb.parse(std.testing.allocator, bytes[0..235]);
+
+    try std.testing.expectEqualStrings("wff", (try mmb.sortName(0)).?);
+    try std.testing.expectEqualStrings("app", (try mmb.termName(0)).?);
+    try std.testing.expectEqualStrings("ax", (try mmb.theoremName(0)).?);
+
+    const term_vars = (try mmb.termVarNames(0)).?;
+    const thm_vars = (try mmb.theoremVarNames(0)).?;
+    const thm_hyps = (try mmb.theoremHypNames(0)).?;
+    try std.testing.expectEqual(@as(usize, 0), term_vars.len());
+    try std.testing.expectEqual(@as(usize, 0), thm_vars.len());
+    try std.testing.expectEqual(@as(usize, 0), thm_hyps.len());
+}
+
+test "MMB parser rejects duplicate index tables" {
+    var bytes: [256]u8 align(8) = buildIndexedMmb();
+    writeValue(
+        bytes[0..],
+        112,
+        IndexEntryWire{ .id = .{ 'N', 'a', 'm', 'e' }, .data = 0, .ptr = 192 },
+    );
+
+    try std.testing.expectError(
+        error.DuplicateIndexTable,
+        Mmb.parse(std.testing.allocator, bytes[0..235]),
+    );
+}
+
+test "MMB index validates proof pointer in name table" {
+    var bytes: [256]u8 align(8) = buildIndexedMmb();
+    writeValue(bytes[0..], 144, NameEntryWire{ .proof = 81, .name = 224 });
+
+    const mmb = try Mmb.parse(std.testing.allocator, bytes[0..235]);
+    try std.testing.expectError(
+        error.BadIndexLookup,
+        mmb.index.validateSortProof(0, 80),
+    );
 }
