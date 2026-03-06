@@ -17,6 +17,7 @@
           mm0-rs
           mm0-c
           hyperfine
+          perf
         ];
       };
     }
