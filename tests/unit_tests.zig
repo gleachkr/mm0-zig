@@ -2,6 +2,9 @@ const std = @import("std");
 const mm0 = @import("mm0");
 
 const Arg = mm0.Arg;
+const Compiler = mm0.Compiler;
+const CompilerEnv = mm0.CompilerEnv;
+const CompilerExpr = mm0.CompilerExpr;
 const Expr = mm0.Expr;
 const Header = mm0.Header;
 const MAGIC = mm0.MAGIC;
@@ -10,6 +13,7 @@ const MM0Parser = mm0.MM0Parser;
 const Mmb = mm0.Mmb;
 const CrossChecker = mm0.CrossChecker;
 const Proof = mm0.Proof;
+const ProofScript = mm0.ProofScript;
 const Sort = mm0.Sort;
 const Stack = mm0.Stack;
 const Term = mm0.Term;
@@ -1068,4 +1072,471 @@ test "MMB index validates proof pointer in name table" {
         error.BadIndexLookup,
         mmb.index.validateSortProof(0, 80),
     );
+}
+
+test "MM0 parser preserves binder names and assertion kind" {
+    const src =
+        \\provable sort wff;
+        \\term pair (left _: wff) {x: wff}: wff;
+        \\theorem thm (a _: wff) {x: wff}: $ a $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+
+    const term_stmt = (try parser.next()).?;
+    switch (term_stmt) {
+        .term => |term| {
+            try std.testing.expectEqual(@as(usize, 3), term.arg_names.len);
+            try std.testing.expectEqualStrings("left", term.arg_names[0].?);
+            try std.testing.expect(term.arg_names[1] == null);
+            try std.testing.expectEqualStrings("x", term.arg_names[2].?);
+        },
+        else => return error.UnexpectedStatementKind,
+    }
+
+    const assertion_stmt = (try parser.next()).?;
+    switch (assertion_stmt) {
+        .assertion => |assertion| {
+            try std.testing.expectEqual(@as(usize, 3), assertion.arg_names.len);
+            try std.testing.expectEqualStrings("a", assertion.arg_names[0].?);
+            try std.testing.expect(assertion.arg_names[1] == null);
+            try std.testing.expectEqualStrings("x", assertion.arg_names[2].?);
+            try std.testing.expect(assertion.kind == .theorem);
+        },
+        else => return error.UnexpectedStatementKind,
+    }
+}
+
+test "proof script parser reads theorem blocks and proof lines" {
+    const src =
+        \\id
+        \\--
+        \\l1: $ a -> a $ by ax_1 (a := $ a $, b := $ a $) []
+        \\l2: $ a $ by ax_mp (a := $ a $, b := $ a $) [#1, l1]
+        \\
+        \\other
+        \\l1: $ b $ by ax_b () []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const first = (try parser.nextBlock()).?;
+    try std.testing.expectEqualStrings("id", first.name);
+    try std.testing.expect(first.underline_span != null);
+    try std.testing.expectEqual(@as(usize, 2), first.lines.len);
+    try std.testing.expectEqualStrings("l1", first.lines[0].label);
+    try std.testing.expectEqualStrings(" a -> a ", first.lines[0].assertion.text);
+    try std.testing.expectEqualStrings("ax_mp", first.lines[1].rule_name);
+    try std.testing.expectEqual(@as(usize, 2), first.lines[1].arg_bindings.len);
+    try std.testing.expectEqualStrings(
+        "a",
+        first.lines[1].arg_bindings[0].name,
+    );
+    try std.testing.expectEqual(@as(usize, 2), first.lines[1].refs.len);
+    switch (first.lines[1].refs[0]) {
+        .hyp => |hyp| try std.testing.expectEqual(@as(usize, 1), hyp.index),
+        else => return error.UnexpectedRefKind,
+    }
+    switch (first.lines[1].refs[1]) {
+        .line => |line| try std.testing.expectEqualStrings("l1", line.label),
+        else => return error.UnexpectedRefKind,
+    }
+
+    const second = (try parser.nextBlock()).?;
+    try std.testing.expectEqualStrings("other", second.name);
+    try std.testing.expect(second.underline_span == null);
+    try std.testing.expectEqual(@as(usize, 1), second.lines.len);
+    try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "compiler env converts rules into binder-indexed templates" {
+    const src =
+        \\provable sort wff;
+        \\term imp (a b: wff): wff;
+        \\axiom ax_mp (a b: wff): $ imp a b $ > $ a $ > $ b $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), env.rules.items.len);
+    const rule = env.rules.items[0];
+    try std.testing.expect(rule.kind == .axiom);
+    try std.testing.expectEqual(@as(usize, 2), rule.arg_names.len);
+    try std.testing.expectEqualStrings("a", rule.arg_names[0].?);
+    try std.testing.expectEqualStrings("b", rule.arg_names[1].?);
+    try std.testing.expectEqual(@as(usize, 2), rule.hyps.len);
+    switch (rule.hyps[0]) {
+        .app => |app| {
+            try std.testing.expectEqual(@as(u32, 0), app.term_id);
+            try std.testing.expectEqual(@as(usize, 2), app.args.len);
+            switch (app.args[0]) {
+                .binder => |idx| try std.testing.expectEqual(@as(usize, 0), idx),
+                else => return error.UnexpectedTemplateExpr,
+            }
+            switch (app.args[1]) {
+                .binder => |idx| try std.testing.expectEqual(@as(usize, 1), idx),
+                else => return error.UnexpectedTemplateExpr,
+            }
+        },
+        else => return error.UnexpectedTemplateExpr,
+    }
+    switch (rule.hyps[1]) {
+        .binder => |idx| try std.testing.expectEqual(@as(usize, 0), idx),
+        else => return error.UnexpectedTemplateExpr,
+    }
+    switch (rule.concl) {
+        .binder => |idx| try std.testing.expectEqual(@as(usize, 1), idx),
+        else => return error.UnexpectedTemplateExpr,
+    }
+}
+
+test "compiler checks proof blocks in theorem order" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem first: $ top $;
+        \\theorem second: $ top $;
+    ;
+    const proof_src =
+        \\first
+        \\-----
+        \\l1: $ top $ by top_i () []
+        \\
+        \\second
+        \\------
+        \\l1: $ top $ by top_i () []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.check();
+}
+
+test "compiler rejects out-of-order and extra proof blocks" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem first: $ top $;
+    ;
+
+    var mismatch = Compiler.initWithProof(std.testing.allocator, mm0_src,
+        \\second
+        \\------
+    );
+    try std.testing.expectError(error.TheoremNameMismatch, mismatch.check());
+
+    var extra = Compiler.initWithProof(std.testing.allocator, mm0_src,
+        \\first
+        \\-----
+        \\l1: $ top $ by top_i () []
+        \\
+        \\second
+        \\------
+    );
+    try std.testing.expectError(error.ExtraProofBlock, extra.check());
+}
+
+test "compiler records proof diagnostics for failing proof lines" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\axiom ax_keep (a b: wff): $ a $ > $ a -> b -> a $;
+        \\theorem keep_label (a b: wff): $ a $ > $ a -> b -> a $;
+    ;
+    const proof_src =
+        \\keep_label
+        \\----------
+        \\l1: $ a -> b -> a $ by ax_keep (a := $ a $, b := $ b $) [missing]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.UnknownLabel, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnknownLabel, diag.err);
+    try std.testing.expectEqualStrings("keep_label", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("missing", diag.name.?);
+    try std.testing.expect(diag.span != null);
+}
+
+test "theorem context preserves theorem var identity" {
+    const src =
+        \\provable sort wff;
+        \\theorem thm (a b: wff): $ a $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    const stmt = (try parser.next()).?;
+    const assertion = switch (stmt) {
+        .assertion => |value| value,
+        else => return error.UnexpectedStatementKind,
+    };
+
+    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    try ctx.seedAssertion(assertion);
+    try std.testing.expectEqual(@as(usize, 2), ctx.theorem_vars.items.len);
+
+    const first = ctx.theorem_vars.items[0];
+    const second = ctx.theorem_vars.items[1];
+    try std.testing.expect(first != second);
+
+    const first_node = ctx.interner.node(first);
+    const first_value = first_node.*;
+    switch (first_value) {
+        .variable => |var_id| switch (var_id) {
+            .theorem_var => |idx| {
+                try std.testing.expectEqual(@as(u32, 0), idx);
+            },
+            else => return error.UnexpectedVariableKind,
+        },
+        else => return error.UnexpectedExprNode,
+    }
+
+    const second_node = ctx.interner.node(second);
+    const second_value = second_node.*;
+    switch (second_value) {
+        .variable => |var_id| switch (var_id) {
+            .theorem_var => |idx| {
+                try std.testing.expectEqual(@as(u32, 1), idx);
+            },
+            else => return error.UnexpectedVariableKind,
+        },
+        else => return error.UnexpectedExprNode,
+    }
+}
+
+test "theorem context interns parsed expressions with sharing" {
+    const src =
+        \\provable sort wff;
+        \\term imp (a b: wff): wff;
+        \\theorem thm (a b: wff): $ imp a b $ > $ imp a b $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    const stmt = (try parser.next()).?;
+    const assertion = switch (stmt) {
+        .assertion => |value| value,
+        else => return error.UnexpectedStatementKind,
+    };
+
+    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    try ctx.seedAssertion(assertion);
+    const concl_id = try ctx.internParsedExpr(assertion.concl);
+
+    try std.testing.expectEqual(@as(usize, 1), ctx.theorem_hyps.items.len);
+    try std.testing.expectEqual(ctx.theorem_hyps.items[0], concl_id);
+    try std.testing.expectEqual(@as(usize, 3), ctx.interner.count());
+}
+
+test "template instantiation shares repeated substitutions" {
+    const src =
+        \\provable sort wff;
+        \\term imp (a b: wff): wff;
+        \\axiom dup (a: wff): $ imp a a $;
+        \\theorem host (p q: wff): $ imp p q $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+
+    const sort_stmt = (try parser.next()).?;
+    try env.addStmt(sort_stmt);
+    const term_stmt = (try parser.next()).?;
+    try env.addStmt(term_stmt);
+    const axiom_stmt = (try parser.next()).?;
+    try env.addStmt(axiom_stmt);
+    const host_stmt = (try parser.next()).?;
+    try env.addStmt(host_stmt);
+
+    const host = switch (host_stmt) {
+        .assertion => |value| value,
+        else => return error.UnexpectedStatementKind,
+    };
+    const rule = env.rules.items[0];
+
+    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    try ctx.seedAssertion(host);
+    const subst = try ctx.internParsedExpr(host.concl);
+    const inst = try ctx.instantiateTemplate(rule.concl, &.{subst});
+
+    const inst_node = ctx.interner.node(inst);
+    const inst_value = inst_node.*;
+    switch (inst_value) {
+        .app => |app| {
+            try std.testing.expectEqual(@as(u32, 0), app.term_id);
+            try std.testing.expectEqual(@as(usize, 2), app.args.len);
+            try std.testing.expectEqual(subst, app.args[0]);
+            try std.testing.expectEqual(subst, app.args[1]);
+        },
+        else => return error.UnexpectedExprNode,
+    }
+}
+
+const ProofCaseOutcome = union(enum) {
+    pass,
+    fail: anyerror,
+};
+
+const ProofCase = struct {
+    stem: []const u8,
+    outcome: ProofCaseOutcome,
+};
+
+const proof_cases = [_]ProofCase{
+    .{ .stem = "pass_keep", .outcome = .pass },
+    .{ .stem = "pass_label", .outcome = .pass },
+    .{ .stem = "pass_gen", .outcome = .pass },
+    .{ .stem = "pass_dup", .outcome = .pass },
+    .{ .stem = "pass_def", .outcome = .pass },
+    .{ .stem = "hilbert", .outcome = .pass },
+    .{
+        .stem = "fail_missing_binding",
+        .outcome = .{ .fail = error.MissingBinderAssignment },
+    },
+    .{
+        .stem = "fail_hyp_mismatch",
+        .outcome = .{ .fail = error.HypothesisMismatch },
+    },
+    .{
+        .stem = "fail_duplicate_label",
+        .outcome = .{ .fail = error.DuplicateLabel },
+    },
+    .{
+        .stem = "fail_boundness",
+        .outcome = .{ .fail = error.BoundnessMismatch },
+    },
+    .{
+        .stem = "fail_unknown_label",
+        .outcome = .{ .fail = error.UnknownLabel },
+    },
+};
+
+fn readProofCaseFile(
+    allocator: std.mem.Allocator,
+    stem: []const u8,
+    ext: []const u8,
+) ![]u8 {
+    const path = try std.fmt.allocPrint(
+        allocator,
+        "tests/proof_cases/{s}.{s}",
+        .{ stem, ext },
+    );
+    defer allocator.free(path);
+    return try std.fs.cwd().readFileAlloc(
+        allocator,
+        path,
+        std.math.maxInt(usize),
+    );
+}
+
+test "compiler proof cases from files" {
+    const allocator = std.testing.allocator;
+
+    for (proof_cases) |case| {
+        const mm0_src = try readProofCaseFile(allocator, case.stem, "mm0");
+        defer allocator.free(mm0_src);
+
+        const proof_src = try readProofCaseFile(allocator, case.stem, "proof");
+        defer allocator.free(proof_src);
+
+        var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+        switch (case.outcome) {
+            .pass => {
+                const mmb = try compiler.compileMmb(allocator);
+                defer allocator.free(mmb);
+                try mm0.verifyPair(allocator, mm0_src, mmb);
+            },
+            .fail => |err| {
+                try std.testing.expectError(err, compiler.compileMmb(allocator));
+            },
+        }
+    }
+}
+
+test "compiler emits name, var, and hyp index tables" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(allocator, "hilbert", "mm0");
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(allocator, "hilbert", "proof");
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb_bytes = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb_bytes);
+
+    const mmb = try Mmb.parse(allocator, mmb_bytes);
+    try std.testing.expect(mmb.header.p_index != 0);
+    try std.testing.expectEqualStrings("wff", (try mmb.sortName(0)).?);
+    try std.testing.expectEqualStrings("imp", (try mmb.termName(0)).?);
+    try std.testing.expectEqualStrings("not", (try mmb.termName(1)).?);
+    try std.testing.expectEqualStrings("h1", (try mmb.theoremName(0)).?);
+    try std.testing.expectEqualStrings("mp", (try mmb.theoremName(3)).?);
+    try std.testing.expectEqualStrings("imp_refl", (try mmb.theoremName(4)).?);
+    try std.testing.expectEqualStrings("hs", (try mmb.theoremName(5)).?);
+
+    const imp_vars = (try mmb.termVarNames(0)).?;
+    try std.testing.expectEqual(@as(usize, 2), imp_vars.len());
+    try std.testing.expectEqualStrings("a", (try imp_vars.get(0)).?);
+    try std.testing.expectEqualStrings("b", (try imp_vars.get(1)).?);
+
+    const mp_vars = (try mmb.theoremVarNames(3)).?;
+    try std.testing.expectEqual(@as(usize, 2), mp_vars.len());
+    try std.testing.expectEqualStrings("a", (try mp_vars.get(0)).?);
+    try std.testing.expectEqualStrings("b", (try mp_vars.get(1)).?);
+
+    const mp_hyps = (try mmb.theoremHypNames(3)).?;
+    try std.testing.expectEqual(@as(usize, 2), mp_hyps.len());
+    try std.testing.expectEqualStrings("#1", (try mp_hyps.get(0)).?);
+    try std.testing.expectEqualStrings("#2", (try mp_hyps.get(1)).?);
+
+    const refl_hyps = (try mmb.theoremHypNames(4)).?;
+    try std.testing.expectEqual(@as(usize, 0), refl_hyps.len());
+
+    const hs_hyps = (try mmb.theoremHypNames(5)).?;
+    try std.testing.expectEqual(@as(usize, 2), hs_hyps.len());
+    try std.testing.expectEqualStrings("#1", (try hs_hyps.get(0)).?);
+    try std.testing.expectEqualStrings("#2", (try hs_hyps.get(1)).?);
 }

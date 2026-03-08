@@ -1,0 +1,3 @@
+gen_bad
+-------
+l1: $ A. x p $ by ax_gen (x := $ n $, p := $ p $) [#1]

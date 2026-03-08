@@ -1,0 +1,107 @@
+const std = @import("std");
+const ArgInfo = @import("./parse.zig").ArgInfo;
+const AssertionKind = @import("./parse.zig").AssertionKind;
+const AssertionStmt = @import("./parse.zig").AssertionStmt;
+const MM0Stmt = @import("./parse.zig").MM0Stmt;
+const TermStmt = @import("./parse.zig").TermStmt;
+const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
+
+pub const TermDecl = struct {
+    name: []const u8,
+    args: []const ArgInfo,
+    arg_names: []const ?[]const u8,
+    ret_sort_name: []const u8,
+    is_def: bool,
+    body: ?TemplateExpr,
+};
+
+pub const RuleDecl = struct {
+    name: []const u8,
+    args: []const ArgInfo,
+    arg_names: []const ?[]const u8,
+    hyps: []const TemplateExpr,
+    concl: TemplateExpr,
+    kind: AssertionKind,
+    is_local: bool,
+};
+
+pub const GlobalEnv = struct {
+    allocator: std.mem.Allocator,
+    term_names: std.StringHashMap(u32),
+    rule_names: std.StringHashMap(u32),
+    terms: std.ArrayListUnmanaged(TermDecl) = .{},
+    rules: std.ArrayListUnmanaged(RuleDecl) = .{},
+
+    pub fn init(allocator: std.mem.Allocator) GlobalEnv {
+        return .{
+            .allocator = allocator,
+            .term_names = std.StringHashMap(u32).init(allocator),
+            .rule_names = std.StringHashMap(u32).init(allocator),
+        };
+    }
+
+    pub fn addStmt(self: *GlobalEnv, stmt: MM0Stmt) !void {
+        switch (stmt) {
+            .sort => {},
+            .term => |term| try self.addTerm(term),
+            .assertion => |rule| try self.addRule(rule),
+        }
+    }
+
+    pub fn addTerm(self: *GlobalEnv, stmt: TermStmt) !void {
+        const term_id = std.math.cast(u32, self.terms.items.len) orelse {
+            return error.TooManyCompilerTerms;
+        };
+        const body = if (stmt.body) |expr|
+            try TemplateExpr.fromExpr(self.allocator, expr, stmt.arg_exprs)
+        else
+            null;
+        try self.terms.append(self.allocator, .{
+            .name = stmt.name,
+            .args = stmt.args,
+            .arg_names = stmt.arg_names,
+            .ret_sort_name = stmt.ret_sort_name,
+            .is_def = stmt.is_def,
+            .body = body,
+        });
+        try self.term_names.put(stmt.name, term_id);
+    }
+
+    pub fn addRule(self: *GlobalEnv, stmt: AssertionStmt) !void {
+        const rule_id = std.math.cast(u32, self.rules.items.len) orelse {
+            return error.TooManyCompilerRules;
+        };
+        const hyps = try self.allocator.alloc(TemplateExpr, stmt.hyps.len);
+        for (stmt.hyps, 0..) |hyp, idx| {
+            hyps[idx] = try TemplateExpr.fromExpr(
+                self.allocator,
+                hyp,
+                stmt.arg_exprs,
+            );
+        }
+        const concl = try TemplateExpr.fromExpr(
+            self.allocator,
+            stmt.concl,
+            stmt.arg_exprs,
+        );
+        try self.rules.append(self.allocator, .{
+            .name = stmt.name,
+            .args = stmt.args,
+            .arg_names = stmt.arg_names,
+            .hyps = hyps,
+            .concl = concl,
+            .kind = stmt.kind,
+            .is_local = stmt.is_local,
+        });
+        try self.rule_names.put(stmt.name, rule_id);
+    }
+
+    pub fn getRuleId(self: *const GlobalEnv, name: []const u8) ?u32 {
+        return self.rule_names.get(name);
+    }
+
+    pub fn getRule(self: *const GlobalEnv, name: []const u8) ?*const RuleDecl {
+        const rule_id = self.getRuleId(name) orelse return null;
+        return &self.rules.items[rule_id];
+    }
+};

@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const verifier_module = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
+        .root_source_file = b.path("src/bin/verifier/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(verifier_exe);
 
     const compiler_module = b.createModule(.{
-        .root_source_file = b.path("src/compiler_main.zig"),
+        .root_source_file = b.path("src/bin/compiler/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -43,7 +43,7 @@ pub fn build(b: *std.Build) void {
 
     const run_compiler_step = b.step(
         "run-compiler",
-        "Run the mm0-zig compiler skeleton",
+        "Run the mm0-zig compiler",
     );
     const run_compiler_cmd = b.addRunArtifact(compiler_exe);
     run_compiler_step.dependOn(&run_compiler_cmd.step);

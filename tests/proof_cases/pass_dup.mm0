@@ -1,0 +1,5 @@
+delimiter $ ( ) $;
+provable sort wff;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+axiom ax_dup (a: wff): $ a $ > $ a -> a $;
+theorem dup (a: wff): $ a $ > $ a -> a $;

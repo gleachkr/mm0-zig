@@ -19,9 +19,15 @@ pub const SortStmt = struct {
     modifiers: Sort,
 };
 
+pub const AssertionKind = enum {
+    axiom,
+    theorem,
+};
+
 pub const TermStmt = struct {
     name: []const u8,
     args: []const ArgInfo,
+    arg_names: []const ?[]const u8,
     arg_exprs: []const *const Expr,
     ret_sort_name: []const u8,
     is_def: bool,
@@ -31,9 +37,11 @@ pub const TermStmt = struct {
 pub const AssertionStmt = struct {
     name: []const u8,
     args: []const ArgInfo,
+    arg_names: []const ?[]const u8,
     arg_exprs: []const *const Expr,
     hyps: []const *const Expr,
     concl: *const Expr,
+    kind: AssertionKind,
     is_local: bool,
 };
 
@@ -87,6 +95,7 @@ const BinderKind = enum { term, assertion };
 const BinderContext = struct {
     vars: std.StringHashMap(*const Expr),
     arg_infos: std.ArrayListUnmanaged(ArgInfo) = .{},
+    arg_names: std.ArrayListUnmanaged(?[]const u8) = .{},
     arg_exprs: std.ArrayListUnmanaged(*const Expr) = .{},
     bound_names: std.ArrayListUnmanaged([]const u8) = .{},
 
@@ -224,11 +233,11 @@ pub const MM0Parser = struct {
                 return MM0Stmt{ .term = stmt };
             }
             if (std.mem.eql(u8, word, "axiom")) {
-                const stmt = try self.parseAssertionStmt(false);
+                const stmt = try self.parseAssertionStmt(.axiom, false);
                 return MM0Stmt{ .assertion = stmt };
             }
             if (std.mem.eql(u8, word, "theorem")) {
-                const stmt = try self.parseAssertionStmt(false);
+                const stmt = try self.parseAssertionStmt(.theorem, false);
                 return MM0Stmt{ .assertion = stmt };
             }
             if (std.mem.eql(u8, word, "pub")) {
@@ -240,7 +249,7 @@ pub const MM0Parser = struct {
                     return MM0Stmt{ .term = stmt };
                 }
                 if (std.mem.eql(u8, next_word, "theorem")) {
-                    const stmt = try self.parseAssertionStmt(false);
+                    const stmt = try self.parseAssertionStmt(.theorem, false);
                     return MM0Stmt{ .assertion = stmt };
                 }
                 return error.UnexpectedKeyword;
@@ -342,6 +351,7 @@ pub const MM0Parser = struct {
         try self.expect(';');
 
         const arg_slice = try ctx.arg_infos.toOwnedSlice(self.allocator);
+        const arg_names = try ctx.arg_names.toOwnedSlice(self.allocator);
         const arg_exprs = try ctx.arg_exprs.toOwnedSlice(self.allocator);
         const term_id = try self.nextTermId();
         const term_args = try self.buildTermArgs(arg_slice);
@@ -354,6 +364,7 @@ pub const MM0Parser = struct {
         return .{
             .name = name,
             .args = arg_slice,
+            .arg_names = arg_names,
             .arg_exprs = arg_exprs,
             .ret_sort_name = ret_sort_name,
             .is_def = is_def,
@@ -361,7 +372,11 @@ pub const MM0Parser = struct {
         };
     }
 
-    fn parseAssertionStmt(self: *MM0Parser, is_local: bool) !AssertionStmt {
+    fn parseAssertionStmt(
+        self: *MM0Parser,
+        kind: AssertionKind,
+        is_local: bool,
+    ) !AssertionStmt {
         _ = self.consumeIdent();
         self.skipWhitespaceAndComments();
         const name = self.consumeIdent() orelse return error.ExpectedIdent;
@@ -384,9 +399,11 @@ pub const MM0Parser = struct {
         return .{
             .name = name,
             .args = try ctx.arg_infos.toOwnedSlice(self.allocator),
+            .arg_names = try ctx.arg_names.toOwnedSlice(self.allocator),
             .arg_exprs = try ctx.arg_exprs.toOwnedSlice(self.allocator),
             .hyps = try hyps_rev.toOwnedSlice(self.allocator),
             .concl = concl,
+            .kind = kind,
             .is_local = is_local,
         };
     }
@@ -403,7 +420,7 @@ pub const MM0Parser = struct {
                 self.skipWhitespaceAndComments();
                 if (self.peek() == '>') {
                     self.pos += 1;
-                    try hyps_rev.insert(self.allocator, 0, formula);
+                    try hyps_rev.append(self.allocator, formula);
                     continue;
                 }
                 return formula;
@@ -412,6 +429,7 @@ pub const MM0Parser = struct {
             const arg = try self.parseSortExpr(ctx.bound_names.items);
             const expr = try self.makeVariable(arg.sort_name, arg.bound, arg.deps);
             try ctx.arg_infos.append(self.allocator, arg);
+            try ctx.arg_names.append(self.allocator, null);
             try ctx.arg_exprs.append(self.allocator, expr);
             self.skipWhitespaceAndComments();
             if (self.peek() != '>') return error.ExpectedFormula;
@@ -461,7 +479,7 @@ pub const MM0Parser = struct {
                 try self.expect(close);
                 for (names.items, is_dummy_buf.items) |_, is_dummy| {
                     if (is_dummy) return error.DummyHypothesisBinder;
-                    try hyps_rev.insert(self.allocator, 0, hyp);
+                    try hyps_rev.append(self.allocator, hyp);
                 }
                 self.skipWhitespaceAndComments();
                 continue;
@@ -493,6 +511,11 @@ pub const MM0Parser = struct {
                 }
                 if (!is_dummy) {
                     try ctx.arg_infos.append(self.allocator, actual_arg);
+                    const arg_name = if (std.mem.eql(u8, name, "_"))
+                        null
+                    else
+                        name;
+                    try ctx.arg_names.append(self.allocator, arg_name);
                     try ctx.arg_exprs.append(self.allocator, expr);
                 }
             }
@@ -556,6 +579,7 @@ pub const MM0Parser = struct {
             self.pos += 1;
             const expr = try self.makeVariable(current.sort_name, current.bound, current.deps);
             try ctx.arg_infos.append(self.allocator, current);
+            try ctx.arg_names.append(self.allocator, null);
             try ctx.arg_exprs.append(self.allocator, expr);
             current = try self.parseSortExpr(ctx.bound_names.items);
         }
@@ -759,13 +783,45 @@ pub const MM0Parser = struct {
         try self.registerCoercion(src, dst, term_id);
     }
 
+    pub fn parseFormulaText(
+        self: *MM0Parser,
+        math: []const u8,
+        vars: *const std.StringHashMap(*const Expr),
+    ) anyerror!*const Expr {
+        const expr = try self.parseMathText(math, vars);
+        return try self.coerceExprToProvable(expr);
+    }
+
+    pub fn parseArgText(
+        self: *MM0Parser,
+        math: []const u8,
+        vars: *const std.StringHashMap(*const Expr),
+        arg: ArgInfo,
+    ) anyerror!*const Expr {
+        const expr = try self.parseMathText(math, vars);
+        const sort = try self.lookupSortId(arg.sort_name);
+        const coerced = try self.coerceExpr(expr, sort);
+        if (coerced.bound() != arg.bound) return error.BoundnessMismatch;
+        if ((coerced.deps() & ~arg.deps) != 0) {
+            return error.DependencyMismatch;
+        }
+        return coerced;
+    }
+
     fn parseFormulaMathString(
         self: *MM0Parser,
         vars: *const std.StringHashMap(*const Expr),
     ) anyerror!*const Expr {
         const math = try self.readMathString();
-        const expr = try self.parseMathString(math, vars);
-        return try self.coerceExprToProvable(expr);
+        return try self.parseFormulaText(math, vars);
+    }
+
+    pub fn parseMathText(
+        self: *MM0Parser,
+        math: []const u8,
+        vars: *const std.StringHashMap(*const Expr),
+    ) anyerror!*const Expr {
+        return try self.parseMathString(math, vars);
     }
 
     fn parseMathString(

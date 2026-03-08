@@ -1,0 +1,6 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort nat;
+term all {x: nat} (p: wff x): wff; prefix all: $A.$ prec 41;
+axiom ax_gen {x: nat} (p: wff x): $ p $ > $ A. x p $;
+theorem gen_bad (n: nat) {x: nat} (p: wff x): $ p $ > $ A. x p $;

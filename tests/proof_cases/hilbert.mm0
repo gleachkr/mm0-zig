@@ -1,0 +1,11 @@
+delimiter $ ( ) $;
+provable sort wff;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+term not (a: wff): wff; prefix not: $not$ prec 35;
+axiom h1 (a b: wff): $ a -> (b -> a) $;
+axiom h2 (a b c: wff):
+  $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $;
+axiom h3 (a b: wff): $ (not a -> not b) -> (b -> a) $;
+axiom mp (a b: wff): $ a $ > $ a -> b $ > $ b $;
+theorem imp_refl (a: wff): $ a -> a $;
+theorem hs (a b c: wff): $ a -> b $ > $ b -> c $ > $ a -> c $;

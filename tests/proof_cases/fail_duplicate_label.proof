@@ -1,0 +1,4 @@
+keep_label
+----------
+l1: $ a -> b -> a $ by ax_keep (a := $ a $, b := $ b $) [#1]
+l1: $ a -> b -> a $ by ax_echo (a := $ a $, b := $ b $) [l1]

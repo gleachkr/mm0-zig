@@ -1,0 +1,5 @@
+delimiter $ ( ) $;
+provable sort wff;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+axiom ax_keep (a b: wff): $ a $ > $ a -> b -> a $;
+theorem keep (a b: wff): $ a $ > $ a -> b -> a $;

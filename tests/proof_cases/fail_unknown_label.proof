@@ -1,0 +1,3 @@
+keep_label
+----------
+l1: $ a -> b -> a $ by ax_echo (a := $ a $, b := $ b $) [l0]
