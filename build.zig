@@ -10,6 +10,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+    const mm0_wasm_lib = b.createModule(.{
+        .root_source_file = b.path("src/lib.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+
     const verifier_module = b.createModule(.{
         .root_source_file = b.path("src/bin/verifier/main.zig"),
         .target = target,
@@ -35,6 +45,70 @@ pub fn build(b: *std.Build) void {
         .root_module = compiler_module,
     });
     b.installArtifact(compiler_exe);
+
+    const compiler_wasm_module = b.createModule(.{
+        .root_source_file = b.path("src/bin/compiler/wasm.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+    compiler_wasm_module.addImport("mm0", mm0_wasm_lib);
+
+    const compiler_wasm = b.addExecutable(.{
+        .name = "mm0-zigc-web",
+        .root_module = compiler_wasm_module,
+    });
+    compiler_wasm.entry = .disabled;
+    compiler_wasm.rdynamic = true;
+    compiler_wasm.export_memory = true;
+
+    const verifier_wasm_module = b.createModule(.{
+        .root_source_file = b.path("src/bin/verifier/wasm.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+    verifier_wasm_module.addImport("mm0", mm0_wasm_lib);
+
+    const verifier_wasm = b.addExecutable(.{
+        .name = "mm0-zig-web",
+        .root_module = verifier_wasm_module,
+    });
+    verifier_wasm.entry = .disabled;
+    verifier_wasm.rdynamic = true;
+    verifier_wasm.export_memory = true;
+
+    const web_demo_step = b.step("web-demo", "Build the browser demo");
+    const install_compiler_wasm = b.addInstallArtifact(compiler_wasm, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = "web-demo/compiler.wasm",
+    });
+    const install_verifier_wasm = b.addInstallArtifact(verifier_wasm, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = "web-demo/verifier.wasm",
+    });
+    const install_web_assets = b.addInstallDirectory(.{
+        .source_dir = b.path("web"),
+        .install_dir = .prefix,
+        .install_subdir = "web-demo",
+    });
+    const install_web_fonts = b.addInstallDirectory(.{
+        .source_dir = b.path("web/fonts"),
+        .install_dir = .prefix,
+        .install_subdir = "web-demo/fonts",
+    });
+    const install_hilbert_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/hilbert.mm0"),
+        "web-demo/fixtures/hilbert.mm0",
+    );
+    const install_hilbert_proof = b.addInstallFile(
+        b.path("tests/proof_cases/hilbert.proof"),
+        "web-demo/fixtures/hilbert.proof",
+    );
+    web_demo_step.dependOn(&install_compiler_wasm.step);
+    web_demo_step.dependOn(&install_verifier_wasm.step);
+    web_demo_step.dependOn(&install_web_assets.step);
+    web_demo_step.dependOn(&install_web_fonts.step);
+    web_demo_step.dependOn(&install_hilbert_mm0.step);
+    web_demo_step.dependOn(&install_hilbert_proof.step);
 
     const run_step = b.step("run", "Run the mm0-zig verifier");
     const run_cmd = b.addRunArtifact(verifier_exe);

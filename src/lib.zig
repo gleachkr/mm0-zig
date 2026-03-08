@@ -2,6 +2,9 @@ const std = @import("std");
 
 pub const Arg = @import("./args.zig").Arg;
 pub const Compiler = @import("./compiler.zig").Compiler;
+pub const CompilerDiagnostic = @import("./compiler.zig").Diagnostic;
+pub const compilerDiagnosticSummary =
+    @import("./compiler.zig").diagnosticSummary;
 pub const CompilerEnv = @import("./compiler_env.zig");
 pub const CompilerExpr = @import("./compiler_expr.zig");
 pub const CompilerRules = @import("./compiler_rules.zig");

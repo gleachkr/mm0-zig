@@ -427,7 +427,7 @@ pub const Compiler = struct {
     }
 };
 
-fn diagnosticSummary(diag: Diagnostic) []const u8 {
+pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
     return switch (diag.kind) {
         .generic => @errorName(diag.err),
         .missing_proof_block => "missing proof block for theorem",
