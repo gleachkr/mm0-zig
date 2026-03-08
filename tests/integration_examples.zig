@@ -1,6 +1,5 @@
 const std = @import("std");
-const verifyMmbAgainstMm0 =
-    @import("./support/verify_pair.zig").verifyMmbAgainstMm0;
+const mm0_lib = @import("mm0");
 
 const EXAMPLES_DIR = "third_party/mm0/examples";
 
@@ -259,7 +258,7 @@ test "integration: all example mm1/mm0 pairs" {
 
         switch (expected.outcome) {
             .pass => {
-                verifyMmbAgainstMm0(allocator, mm0, mmb) catch |err| {
+                mm0_lib.verifyPair(allocator, mm0, mmb) catch |err| {
                     std.debug.print(
                         "verify failed for {s}: {s}\n",
                         .{ mm1_rel, @errorName(err) },
@@ -270,7 +269,7 @@ test "integration: all example mm1/mm0 pairs" {
             .verify_error => |err| {
                 std.testing.expectError(
                     err,
-                    verifyMmbAgainstMm0(allocator, mm0, mmb),
+                    mm0_lib.verifyPair(allocator, mm0, mmb),
                 ) catch |got| {
                     std.debug.print(
                         "expected verify error {s} for {s}, got {s}\n",
