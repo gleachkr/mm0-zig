@@ -179,7 +179,7 @@ pub const CrossChecker = struct {
         self.ustack_top = 1;
         self.ustack[0] = target;
 
-        var hyp_idx: usize = 0;
+        var hyp_idx: usize = hyps.len;
         var pos: usize = start_pos;
         while (true) {
             const cmd = try Proof.Cmd.read(file_bytes, pos, file_bytes.len);
@@ -195,9 +195,9 @@ pub const CrossChecker = struct {
                 },
                 .UHyp => switch (mode) {
                     .theorem => {
-                        if (hyp_idx >= hyps.len) return error.HypCountMismatch;
+                        if (hyp_idx == 0) return error.HypCountMismatch;
+                        hyp_idx -= 1;
                         try self.pushUStack(hyps[hyp_idx]);
-                        hyp_idx += 1;
                     },
                     .definition => return error.UHypNotAllowed,
                 },
@@ -206,7 +206,7 @@ pub const CrossChecker = struct {
         }
 
         if (self.ustack_top != 0) return error.UnifyStackNotEmpty;
-        if (mode == .theorem and hyp_idx != hyps.len) return error.HypCountMismatch;
+        if (mode == .theorem and hyp_idx != 0) return error.HypCountMismatch;
     }
 
     fn matchURef(self: *CrossChecker, heap_id: u32) !void {

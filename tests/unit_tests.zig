@@ -165,6 +165,51 @@ fn buildRemapCrossCheckBytes() [128]u8 {
     return bytes;
 }
 
+fn buildTheoremHypOrderCrossCheckBytes() [128]u8 {
+    var bytes: [128]u8 align(@alignOf(Arg)) = std.mem.zeroes([128]u8);
+
+    const term_p_data: usize = 16;
+    writeArg(
+        bytes[0..],
+        term_p_data,
+        .{ .deps = 0, .reserved = 0, .sort = 0, .bound = false },
+    );
+    writeArg(
+        bytes[0..],
+        term_p_data + @sizeOf(Arg),
+        .{ .deps = 0, .reserved = 0, .sort = 0, .bound = false },
+    );
+
+    const thm_p_data: usize = 48;
+    writeArg(
+        bytes[0..],
+        thm_p_data,
+        .{ .deps = 0, .reserved = 0, .sort = 0, .bound = false },
+    );
+    writeArg(
+        bytes[0..],
+        thm_p_data + @sizeOf(Arg),
+        .{ .deps = 0, .reserved = 0, .sort = 0, .bound = false },
+    );
+
+    const unify = thm_p_data + 2 * @sizeOf(Arg);
+    bytes[unify + 0] = 0x72;
+    bytes[unify + 1] = 0x01;
+    bytes[unify + 2] = 0x36;
+    bytes[unify + 3] = 0x72;
+    bytes[unify + 4] = 0x00;
+    bytes[unify + 5] = 0x36;
+    bytes[unify + 6] = 0x70;
+    bytes[unify + 7] = 0x00;
+    bytes[unify + 8] = 0x72;
+    bytes[unify + 9] = 0x00;
+    bytes[unify + 10] = 0x72;
+    bytes[unify + 11] = 0x01;
+    bytes[unify + 12] = 0x00;
+
+    return bytes;
+}
+
 fn buildLocalDefDummyProof() [16]u8 {
     var bytes: [16]u8 = std.mem.zeroes([16]u8);
     bytes[0] = 0x44;
@@ -990,6 +1035,37 @@ test "CrossChecker remaps parser term ids to MMB ids" {
         .p_data = 48,
     };
     try checker.checkAssertion(refl, file_bytes);
+}
+
+test "CrossChecker consumes theorem hypotheses in unify order" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term imp (a b: wff): wff;
+        \\axiom ax_mp (a b: wff): $ imp a b $ > $ a $ > $ b $;
+    ;
+
+    var bytes = buildTheoremHypOrderCrossCheckBytes();
+    const file_bytes = bytes[0..];
+
+    var checker = try CrossChecker.init(mm0_src, std.testing.allocator);
+    defer checker.deinit(std.testing.allocator);
+
+    try checker.checkSort(0, .{ .provable = true });
+
+    const imp_term = Term{
+        .num_args = 2,
+        .ret_sort = .{ .sort = 0, .is_def = false },
+        .reserved = 0,
+        .p_data = 16,
+    };
+    try checker.checkTerm(0, imp_term, file_bytes);
+
+    const ax_mp = Theorem{
+        .num_args = 2,
+        .reserved = 0,
+        .p_data = 48,
+    };
+    try checker.checkAssertion(ax_mp, file_bytes);
 }
 
 test "Verifier rejects dummy variables in free sorts" {

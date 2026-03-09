@@ -572,9 +572,11 @@ fn buildAssertionUnifyStream(
     var emitter = UnifyEmitter.init(allocator, theorem);
     defer emitter.deinit();
     try emitter.emitExpr(concl);
-    for (theorem.theorem_hyps.items) |hyp| {
+    var hyp_idx = theorem.theorem_hyps.items.len;
+    while (hyp_idx > 0) {
+        hyp_idx -= 1;
         try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.UHyp, 0);
-        try emitter.emitExpr(hyp);
+        try emitter.emitExpr(theorem.theorem_hyps.items[hyp_idx]);
     }
     try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.End, 0);
     return try emitter.bytes.toOwnedSlice(allocator);
@@ -762,10 +764,8 @@ const TheoremProofEmitter = struct {
         }
 
         const line = self.lines[line_idx];
-        var ref_idx = line.refs.len;
-        while (ref_idx > 0) {
-            ref_idx -= 1;
-            switch (line.refs[ref_idx]) {
+        for (line.refs) |ref| {
+            switch (ref) {
                 .hyp => |idx| try MmbWriter.appendCmd(
                     &self.bytes,
                     self.allocator,
