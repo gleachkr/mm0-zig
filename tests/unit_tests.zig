@@ -1012,7 +1012,8 @@ test "CrossChecker remaps parser term ids to MMB ids" {
         \\axiom refl (a: nat): $ eq a a $;
     ;
 
-    var bytes = buildRemapCrossCheckBytes();
+    var bytes: [128]u8 align(@alignOf(Arg)) =
+        buildRemapCrossCheckBytes();
     const file_bytes = bytes[0..];
 
     const checker = try CrossChecker.init(mm0_src, std.testing.allocator);
@@ -1044,7 +1045,8 @@ test "CrossChecker consumes theorem hypotheses in unify order" {
         \\axiom ax_mp (a b: wff): $ imp a b $ > $ a $ > $ b $;
     ;
 
-    var bytes = buildTheoremHypOrderCrossCheckBytes();
+    var bytes: [128]u8 align(@alignOf(Arg)) =
+        buildTheoremHypOrderCrossCheckBytes();
     const file_bytes = bytes[0..];
 
     var checker = try CrossChecker.init(mm0_src, std.testing.allocator);
@@ -1123,6 +1125,17 @@ test "MMB parser reads index names and string lists" {
     try std.testing.expectEqual(@as(usize, 0), term_vars.len());
     try std.testing.expectEqual(@as(usize, 0), thm_vars.len());
     try std.testing.expectEqual(@as(usize, 0), thm_hyps.len());
+}
+
+test "MMB parser rejects misaligned backing bytes" {
+    const bytes = buildIndexedMmb();
+    var backing: [257]u8 align(8) = std.mem.zeroes([257]u8);
+    @memcpy(backing[1..236], bytes[0..235]);
+
+    try std.testing.expectError(
+        error.MisalignedTermTable,
+        Mmb.parse(std.testing.allocator, backing[1..236]),
+    );
 }
 
 test "MMB parser rejects duplicate index tables" {

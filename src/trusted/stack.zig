@@ -22,5 +22,3 @@ pub const Stack = struct {
         return self.entries[self.top - 1];
     }
 };
-
-

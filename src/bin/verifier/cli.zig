@@ -20,10 +20,13 @@ pub fn run(
     const mmb_path = argv[0];
     const cwd = std.fs.cwd();
 
-    const mmb_bytes = try cwd.readFileAlloc(
+    const mmb_bytes = try cwd.readFileAllocOptions(
         allocator,
         mmb_path,
         std.math.maxInt(usize),
+        null,
+        std.mem.Alignment.of(mm0.Arg),
+        null,
     );
     defer allocator.free(mmb_bytes);
 

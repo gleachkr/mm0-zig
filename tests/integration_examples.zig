@@ -249,10 +249,13 @@ test "integration: all example mm1/mm0 pairs" {
         );
         defer allocator.free(mm0);
 
-        const mmb = try std.fs.cwd().readFileAlloc(
+        const mmb = try std.fs.cwd().readFileAllocOptions(
             allocator,
             out_mmb_path,
             std.math.maxInt(usize),
+            null,
+            std.mem.Alignment.of(mm0_lib.Arg),
+            null,
         );
         defer allocator.free(mmb);
 

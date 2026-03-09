@@ -1,7 +1,7 @@
 const std = @import("std");
-const Arg = @import("./args.zig").Arg;
-const Expr = @import("./expressions.zig").Expr;
-const Sort = @import("./sorts.zig").Sort;
+const Arg = @import("../trusted/args.zig").Arg;
+const Expr = @import("../trusted/expressions.zig").Expr;
+const Sort = @import("../trusted/sorts.zig").Sort;
 
 const MAX_PRECEDENCE = std.math.maxInt(u16);
 const APP_PRECEDENCE: u16 = 1024;

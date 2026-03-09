@@ -1,5 +1,5 @@
 const std = @import("std");
-const Expr = @import("./expressions.zig").Expr;
+const Expr = @import("../trusted/expressions.zig").Expr;
 
 pub const TemplateExpr = union(enum) {
     binder: usize,

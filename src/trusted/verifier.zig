@@ -7,7 +7,6 @@ const HypList = @import("./hypothesis.zig").HypList;
 const Sort = @import("./sorts.zig").Sort;
 const Term = @import("./terms.zig").Term;
 const Theorem = @import("./theorems.zig").Theorem;
-const CrossChecker = @import("./check.zig").CrossChecker;
 const Index = @import("./mmb.zig").Index;
 
 const ProofCmd = @import("./proof.zig").ProofCmd;
@@ -53,7 +52,7 @@ pub const Verifier = struct {
     proof_context: ?ProofContext,
     unify_context: ?UnifyContext,
     current_statement: StatementRef,
-    index: ?*const Index,
+    index: ?Index,
 
     // Arena for expression nodes - reset between theorems
     arena: std.heap.FixedBufferAllocator,
@@ -71,7 +70,7 @@ pub const Verifier = struct {
         sort_table: []const Sort,
         term_table: []const Term,
         thm_table: []const Theorem,
-        index: ?*const Index,
+        index: ?Index,
     ) !*Verifier {
         const v = try allocator.create(Verifier);
         v.file_bytes = file_bytes;
@@ -233,7 +232,11 @@ pub const Verifier = struct {
         }
     }
 
-    pub fn verifyProofStream(self: *Verifier, proof_start: u32, checker: *CrossChecker) !void {
+    pub fn verifyProofStream(
+        self: *Verifier,
+        proof_start: u32,
+        checker: anytype,
+    ) !void {
         var pos: usize = proof_start;
         var sort_count: usize = 0;
         var term_count: usize = 0;

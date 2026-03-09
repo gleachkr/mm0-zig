@@ -1,9 +1,9 @@
 const std = @import("std");
-const ArgInfo = @import("./parse.zig").ArgInfo;
-const AssertionKind = @import("./parse.zig").AssertionKind;
-const AssertionStmt = @import("./parse.zig").AssertionStmt;
-const MM0Stmt = @import("./parse.zig").MM0Stmt;
-const TermStmt = @import("./parse.zig").TermStmt;
+const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
+const AssertionKind = @import("../trusted/parse.zig").AssertionKind;
+const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
+const MM0Stmt = @import("../trusted/parse.zig").MM0Stmt;
+const TermStmt = @import("../trusted/parse.zig").TermStmt;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 
 pub const TermDecl = struct {

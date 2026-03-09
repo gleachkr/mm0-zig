@@ -6,19 +6,30 @@ pub const Theorem = extern struct {
     reserved: u16,
     p_data: u32,
 
-    pub fn getArgs(self: Theorem, file_bytes: []const u8) []const Arg {
+    pub fn getArgs(
+        self: Theorem,
+        file_bytes: []const u8,
+    ) []const Arg {
         return self.getArgsChecked(file_bytes) catch unreachable;
     }
 
-    pub fn getArgsChecked(self: Theorem, file_bytes: []const u8) ![]const Arg {
+    pub fn getArgsChecked(
+        self: Theorem,
+        file_bytes: []const u8,
+    ) ![]const Arg {
         const start: usize = self.p_data;
         const byte_len = try std.math.mul(usize, self.num_args, @sizeOf(Arg));
         const end = try std.math.add(usize, start, byte_len);
         if (end > file_bytes.len) return error.ShortTheoremData;
+        if (self.num_args == 0) return &.{};
         if (start % @alignOf(Arg) != 0) return error.MisalignedArgTable;
+        if (@intFromPtr(file_bytes.ptr) % @alignOf(Arg) != 0) {
+            return error.MisalignedArgTable;
+        }
 
         const data = file_bytes[start..end];
-        return @as([*]const Arg, @ptrCast(@alignCast(data.ptr)))[0..self.num_args];
+        const args_ptr: [*]const Arg = @ptrCast(@alignCast(data.ptr));
+        return args_ptr[0..self.num_args];
     }
 
     pub fn getUnifyPtr(self: Theorem, file_bytes: []const u8) u32 {

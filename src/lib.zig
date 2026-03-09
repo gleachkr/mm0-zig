@@ -1,30 +1,30 @@
 const std = @import("std");
 
-pub const Arg = @import("./args.zig").Arg;
-pub const Compiler = @import("./compiler.zig").Compiler;
-pub const CompilerDiagnostic = @import("./compiler.zig").Diagnostic;
+pub const Arg = @import("./trusted/args.zig").Arg;
+pub const Compiler = @import("./frontend/compiler.zig").Compiler;
+pub const CompilerDiagnostic = @import("./frontend/compiler.zig").Diagnostic;
 pub const compilerDiagnosticSummary =
-    @import("./compiler.zig").diagnosticSummary;
-pub const CompilerEnv = @import("./compiler_env.zig");
-pub const CompilerExpr = @import("./compiler_expr.zig");
-pub const CompilerRules = @import("./compiler_rules.zig");
-pub const MmbWriter = @import("./mmb_writer.zig");
-pub const CrossChecker = @import("./check.zig").CrossChecker;
-pub const Expr = @import("./expressions.zig").Expr;
-pub const Header = @import("./headers.zig").Header;
-pub const MAGIC = @import("./headers.zig").MAGIC;
-pub const Heap = @import("./heap.zig").Heap;
-pub const MM0Parser = @import("./parse.zig").MM0Parser;
-pub const Mmb = @import("./mmb.zig").Mmb;
-pub const Index = @import("./mmb.zig").Index;
-pub const StringList = @import("./mmb.zig").StringList;
-pub const Proof = @import("./proof.zig");
-pub const ProofScript = @import("./proof_script.zig");
-pub const Sort = @import("./sorts.zig").Sort;
-pub const Stack = @import("./stack.zig").Stack;
-pub const Term = @import("./terms.zig").Term;
-pub const Theorem = @import("./theorems.zig").Theorem;
-pub const Verifier = @import("./verifier.zig").Verifier;
+    @import("./frontend/compiler.zig").diagnosticSummary;
+pub const CompilerEnv = @import("./frontend/compiler_env.zig");
+pub const CompilerExpr = @import("./frontend/compiler_expr.zig");
+pub const CompilerRules = @import("./frontend/compiler_rules.zig");
+pub const MmbWriter = @import("./frontend/mmb_writer.zig");
+pub const CrossChecker = @import("./trusted/check.zig").CrossChecker;
+pub const Expr = @import("./trusted/expressions.zig").Expr;
+pub const Header = @import("./trusted/headers.zig").Header;
+pub const MAGIC = @import("./trusted/headers.zig").MAGIC;
+pub const Heap = @import("./trusted/heap.zig").Heap;
+pub const MM0Parser = @import("./trusted/parse.zig").MM0Parser;
+pub const Mmb = @import("./trusted/mmb.zig").Mmb;
+pub const Index = @import("./trusted/mmb.zig").Index;
+pub const StringList = @import("./trusted/mmb.zig").StringList;
+pub const Proof = @import("./trusted/proof.zig");
+pub const ProofScript = @import("./frontend/proof_script.zig");
+pub const Sort = @import("./trusted/sorts.zig").Sort;
+pub const Stack = @import("./trusted/stack.zig").Stack;
+pub const Term = @import("./trusted/terms.zig").Term;
+pub const Theorem = @import("./trusted/theorems.zig").Theorem;
+pub const Verifier = @import("./trusted/verifier.zig").Verifier;
 
 pub const VerificationSession = struct {
     allocator: std.mem.Allocator,
@@ -59,7 +59,7 @@ pub const VerificationSession = struct {
             session.parsed.sort_table,
             session.parsed.term_table,
             session.parsed.theorem_table,
-            &session.parsed.index,
+            session.parsed.index,
         );
         errdefer session.verifier.deinit(allocator);
 

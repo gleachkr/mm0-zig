@@ -1,8 +1,8 @@
 const std = @import("std");
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
-const Expr = @import("./expressions.zig").Expr;
-const AssertionStmt = @import("./parse.zig").AssertionStmt;
-const TermStmt = @import("./parse.zig").TermStmt;
+const Expr = @import("../trusted/expressions.zig").Expr;
+const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
+const TermStmt = @import("../trusted/parse.zig").TermStmt;
 
 pub const ExprId = u32;
 pub const TheoremVarId = u32;

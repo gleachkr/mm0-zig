@@ -9,6 +9,8 @@ const NAME_ID = [4]u8{ 'N', 'a', 'm', 'e' };
 const VAR_ID = [4]u8{ 'V', 'a', 'r', 'N' };
 const HYP_ID = [4]u8{ 'H', 'y', 'p', 'N' };
 
+pub const FILE_ALIGNMENT = @alignOf(Arg);
+
 pub const IndexEntry = extern struct {
     id: [4]u8,
     data: u32,
@@ -515,6 +517,9 @@ fn readTableSlice(
     if (len == 0) return &.{};
     if (misaligned_err) |err| {
         if (offset % @alignOf(T) != 0) return err;
+        if (@intFromPtr(file_bytes.ptr) % @alignOf(T) != 0) {
+            return err;
+        }
     }
 
     const bytes = file_bytes[offset..end];

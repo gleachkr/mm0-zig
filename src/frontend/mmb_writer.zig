@@ -1,13 +1,13 @@
 const std = @import("std");
-const Arg = @import("./args.zig").Arg;
-const Header = @import("./headers.zig").Header;
-const MAGIC = @import("./headers.zig").MAGIC;
-const IndexEntry = @import("./mmb.zig").IndexEntry;
-const NameEntry = @import("./mmb.zig").NameEntry;
-const Sort = @import("./sorts.zig").Sort;
-const Term = @import("./terms.zig").Term;
-const Theorem = @import("./theorems.zig").Theorem;
-const StmtCmd = @import("./proof.zig").StmtCmd;
+const Arg = @import("../trusted/args.zig").Arg;
+const Header = @import("../trusted/headers.zig").Header;
+const MAGIC = @import("../trusted/headers.zig").MAGIC;
+const IndexEntry = @import("../trusted/mmb.zig").IndexEntry;
+const NameEntry = @import("../trusted/mmb.zig").NameEntry;
+const Sort = @import("../trusted/sorts.zig").Sort;
+const Term = @import("../trusted/terms.zig").Term;
+const Theorem = @import("../trusted/theorems.zig").Theorem;
+const StmtCmd = @import("../trusted/proof.zig").StmtCmd;
 
 const NAME_ID = [4]u8{ 'N', 'a', 'm', 'e' };
 const VAR_ID = [4]u8{ 'V', 'a', 'r', 'N' };
