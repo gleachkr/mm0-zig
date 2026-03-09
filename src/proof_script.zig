@@ -107,9 +107,12 @@ pub const Parser = struct {
         try self.expectKeyword("by");
         const rule_name = try self.parseIdentifier();
         self.skipHorizontalSpace();
-        try self.expect('(');
-        const arg_bindings = try self.parseArgBindings();
-        try self.expect(')');
+        const arg_bindings: []const ArgBinding = if (self.peek() == '(') blk: {
+            try self.expect('(');
+            const bindings = try self.parseArgBindings();
+            try self.expect(')');
+            break :blk bindings;
+        } else &.{};
         self.skipHorizontalSpace();
         try self.expect('[');
         const refs = try self.parseRefs();

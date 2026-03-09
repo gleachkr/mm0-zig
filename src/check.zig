@@ -1,6 +1,6 @@
 const std = @import("std");
 const Expr = @import("./expressions.zig").Expr;
-const Proof = @import("./proof.zig");
+const UnifyReplay = @import("./unify_replay.zig");
 const Sort = @import("./sorts.zig").Sort;
 const Term = @import("./terms.zig").Term;
 const Theorem = @import("./theorems.zig").Theorem;
@@ -35,6 +35,10 @@ pub const CrossChecker = struct {
     ustack_top: usize = 0,
     eq_stack: [USTACK_SIZE]EqPair = undefined,
     eq_stack_top: usize = 0,
+    unify_mode: UnifyMode = .definition,
+    unify_args: []const *const Expr = &.{},
+    unify_hyps: []const *const Expr = &.{},
+    unify_hyp_idx: usize = 0,
 
     pub fn init(mm0_src: []const u8, backing: std.mem.Allocator) !*CrossChecker {
         const self = try backing.create(CrossChecker);
@@ -179,43 +183,29 @@ pub const CrossChecker = struct {
         self.ustack_top = 1;
         self.ustack[0] = target;
 
-        var hyp_idx: usize = hyps.len;
-        var pos: usize = start_pos;
-        while (true) {
-            const cmd = try Proof.Cmd.read(file_bytes, pos, file_bytes.len);
-            pos += cmd.size;
-            switch (@as(Proof.UnifyCmd, @enumFromInt(cmd.op))) {
-                .End => break,
-                .URef => try self.matchURef(cmd.data),
-                .UTerm => try self.matchUTerm(cmd.data, false),
-                .UTermSave => try self.matchUTerm(cmd.data, true),
-                .UDummy => switch (mode) {
-                    .definition => try self.matchUDummy(cmd.data, args),
-                    .theorem => return error.UDummyNotAllowed,
-                },
-                .UHyp => switch (mode) {
-                    .theorem => {
-                        if (hyp_idx == 0) return error.HypCountMismatch;
-                        hyp_idx -= 1;
-                        try self.pushUStack(hyps[hyp_idx]);
-                    },
-                    .definition => return error.UHypNotAllowed,
-                },
-                _ => return error.UnknownUnifyCmd,
-            }
-        }
+        self.unify_mode = mode;
+        self.unify_args = args;
+        self.unify_hyps = hyps;
+        // `UHyp` appears between encoded hypotheses, but operationally it
+        // pushes the *next* target expression onto the stack. Since theorem
+        // unify streams are emitted as `concl, UHyp, hyp_n, ..., UHyp, hyp_1`,
+        // we consume the hypothesis list from the end here.
+        self.unify_hyp_idx = hyps.len;
+        try UnifyReplay.run(file_bytes, start_pos, self);
 
         if (self.ustack_top != 0) return error.UnifyStackNotEmpty;
-        if (mode == .theorem and hyp_idx != 0) return error.HypCountMismatch;
+        if (mode == .theorem and self.unify_hyp_idx != 0) {
+            return error.HypCountMismatch;
+        }
     }
 
-    fn matchURef(self: *CrossChecker, heap_id: u32) !void {
+    pub fn uopRef(self: *CrossChecker, heap_id: u32) !void {
         const expr = try self.popUStack();
         if (heap_id >= self.uheap_len) return error.UHeapOutOfBounds;
         if (!self.deepEq(expr, self.uheap[heap_id])) return error.UnifyMismatch;
     }
 
-    fn matchUTerm(self: *CrossChecker, term_id: u32, save: bool) !void {
+    pub fn uopTerm(self: *CrossChecker, term_id: u32, save: bool) !void {
         const expr = try self.popUStack();
         const term = switch (expr.*) {
             .term => |t| t,
@@ -254,6 +244,24 @@ pub const CrossChecker = struct {
         if (self.uheap_len >= UHEAP_SIZE) return error.UHeapOverflow;
         self.uheap[self.uheap_len] = expr;
         self.uheap_len += 1;
+    }
+
+    pub fn uopDummy(self: *CrossChecker, sort_id: u32) !void {
+        return switch (self.unify_mode) {
+            .definition => self.matchUDummy(sort_id, self.unify_args),
+            .theorem => error.UDummyNotAllowed,
+        };
+    }
+
+    pub fn uopHyp(self: *CrossChecker) !void {
+        return switch (self.unify_mode) {
+            .theorem => {
+                if (self.unify_hyp_idx == 0) return error.HypCountMismatch;
+                self.unify_hyp_idx -= 1;
+                try self.pushUStack(self.unify_hyps[self.unify_hyp_idx]);
+            },
+            .definition => error.UHypNotAllowed,
+        };
     }
 
     fn deepEq(self: *CrossChecker, lhs: *const Expr, rhs: *const Expr) bool {

@@ -2,7 +2,6 @@ const std = @import("std");
 const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
 const RuleDecl = @import("./compiler_env.zig").RuleDecl;
 const ExprId = @import("./compiler_expr.zig").ExprId;
-const ExprNode = @import("./compiler_expr.zig").ExprNode;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const Expr = @import("./expressions.zig").Expr;
 const MmbWriter = @import("./mmb_writer.zig");
@@ -14,8 +13,8 @@ const AssertionStmt = @import("./parse.zig").AssertionStmt;
 const MM0Parser = @import("./parse.zig").MM0Parser;
 const TermStmt = @import("./parse.zig").TermStmt;
 const ProofCmd = @import("./proof.zig").ProofCmd;
-const StmtCmd = @import("./proof.zig").StmtCmd;
 const UnifyCmd = @import("./proof.zig").UnifyCmd;
+const UnifyReplay = @import("./unify_replay.zig");
 const ProofLine = @import("./proof_script.zig").ProofLine;
 const Span = @import("./proof_script.zig").Span;
 const TheoremBlock = @import("./proof_script.zig").TheoremBlock;
@@ -38,6 +37,12 @@ const CheckedLine = struct {
     refs: []const CheckedRef,
 };
 
+const ExprInfo = struct {
+    sort_name: []const u8,
+    bound: bool,
+    deps: u55,
+};
+
 const DiagnosticKind = enum {
     generic,
     missing_proof_block,
@@ -45,6 +50,7 @@ const DiagnosticKind = enum {
     theorem_name_mismatch,
     parse_assertion,
     parse_binding,
+    inference_failed,
     unknown_rule,
     unknown_binder_name,
     duplicate_binder_assignment,
@@ -435,6 +441,7 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
         .theorem_name_mismatch => "proof block name does not match the theorem",
         .parse_assertion => "could not parse proof line assertion",
         .parse_binding => "could not parse binder assignment",
+        .inference_failed => "could not infer omitted rule arguments",
         .unknown_rule => "unknown rule in proof line",
         .unknown_binder_name => "unknown binder name in rule application",
         .duplicate_binder_assignment => "duplicate binder assignment in rule application",
@@ -572,12 +579,46 @@ fn buildAssertionUnifyStream(
     var emitter = UnifyEmitter.init(allocator, theorem);
     defer emitter.deinit();
     try emitter.emitExpr(concl);
+    // `UHyp` pushes the next hypothesis target onto the unify stack before
+    // replay continues. To make hypotheses replay in source order, the stream
+    // therefore stores them in reverse.
     var hyp_idx = theorem.theorem_hyps.items.len;
     while (hyp_idx > 0) {
         hyp_idx -= 1;
         try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.UHyp, 0);
         try emitter.emitExpr(theorem.theorem_hyps.items[hyp_idx]);
     }
+    try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.End, 0);
+    return try emitter.bytes.toOwnedSlice(allocator);
+}
+
+fn buildRuleUnifyStream(
+    allocator: std.mem.Allocator,
+    rule: *const RuleDecl,
+) ![]const u8 {
+    // For inference we rebuild the cited rule's unify stream from the same
+    // binder-indexed templates that drive explicit instantiation. This keeps
+    // one source of truth for theorem shape instead of maintaining a second,
+    // compiler-only matcher by hand.
+    var theorem = TheoremContext.init(allocator);
+    defer theorem.deinit();
+    try theorem.seedBinderCount(rule.args.len);
+
+    var emitter = UnifyEmitter.init(allocator, &theorem);
+    defer emitter.deinit();
+
+    const binders = theorem.theorem_vars.items;
+    const concl = try theorem.instantiateTemplate(rule.concl, binders);
+    try emitter.emitExpr(concl);
+
+    var hyp_idx = rule.hyps.len;
+    while (hyp_idx > 0) {
+        hyp_idx -= 1;
+        try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.UHyp, 0);
+        const hyp = try theorem.instantiateTemplate(rule.hyps[hyp_idx], binders);
+        try emitter.emitExpr(hyp);
+    }
+
     try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.End, 0);
     return try emitter.bytes.toOwnedSlice(allocator);
 }
@@ -700,6 +741,88 @@ const UnifyEmitter = struct {
                 }
             },
         }
+    }
+};
+
+const InferenceContext = struct {
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    // Heap prefix `0..rule.args.len` stores inferred theorem arguments.
+    // These slots start as either an explicit binding or `null` if omitted.
+    // Any entries appended later by `UTermSave` are concrete by construction.
+    uheap: std.ArrayListUnmanaged(?ExprId) = .{},
+    ustack: std.ArrayListUnmanaged(ExprId) = .{},
+    hyps: []const ExprId,
+    next_hyp: usize,
+
+    fn init(
+        allocator: std.mem.Allocator,
+        theorem: *const TheoremContext,
+        partial_bindings: []const ?ExprId,
+        hyps: []const ExprId,
+        line_expr: ExprId,
+    ) !InferenceContext {
+        var ctx = InferenceContext{
+            .allocator = allocator,
+            .theorem = theorem,
+            .hyps = hyps,
+            .next_hyp = hyps.len,
+        };
+        try ctx.uheap.appendSlice(allocator, partial_bindings);
+        try ctx.ustack.append(allocator, line_expr);
+        return ctx;
+    }
+
+    fn deinit(self: *InferenceContext) void {
+        self.uheap.deinit(self.allocator);
+        self.ustack.deinit(self.allocator);
+    }
+
+    pub fn uopRef(self: *InferenceContext, heap_id: u32) !void {
+        if (self.ustack.items.len == 0) return error.UStackUnderflow;
+        const expr_id = self.ustack.pop().?;
+        if (heap_id >= self.uheap.items.len) return error.UHeapOutOfBounds;
+        if (self.uheap.items[heap_id]) |expected| {
+            if (expr_id != expected) return error.UnifyMismatch;
+        } else {
+            // This is the one semantic difference from verifier-style unify:
+            // the first encounter with an omitted binder solves it.
+            self.uheap.items[heap_id] = expr_id;
+        }
+    }
+
+    pub fn uopTerm(
+        self: *InferenceContext,
+        term_id: u32,
+        save: bool,
+    ) !void {
+        if (self.ustack.items.len == 0) return error.UStackUnderflow;
+        const expr_id = self.ustack.pop().?;
+        const node = self.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |app| app,
+            .variable => return error.ExpectedTermApp,
+        };
+        if (app.term_id != term_id) return error.TermMismatch;
+        if (save) try self.uheap.append(self.allocator, expr_id);
+        var i = app.args.len;
+        while (i > 0) {
+            i -= 1;
+            try self.ustack.append(self.allocator, app.args[i]);
+        }
+    }
+
+    pub fn uopDummy(self: *InferenceContext, _: u32) !void {
+        _ = self;
+        return error.UDummyNotAllowed;
+    }
+
+    pub fn uopHyp(self: *InferenceContext) !void {
+        if (self.next_hyp == 0) return error.HypCountMismatch;
+        // See `buildRuleUnifyStream`: hypotheses are replayed from the end so
+        // that they are matched in source order overall.
+        self.next_hyp -= 1;
+        try self.ustack.append(self.allocator, self.hyps[self.next_hyp]);
     }
 };
 
@@ -867,7 +990,7 @@ fn checkTheoremBlock(
             return error.UnknownRule;
         };
         const rule = &env.rules.items[rule_id];
-        const bindings = try parseBindings(
+        const partial_bindings = try parseBindings(
             self,
             allocator,
             parser,
@@ -890,8 +1013,9 @@ fn checkTheoremBlock(
         }
 
         const refs = try allocator.alloc(CheckedRef, line.refs.len);
+        const ref_exprs = try allocator.alloc(ExprId, line.refs.len);
         for (line.refs, 0..) |ref, idx| {
-            const actual = switch (ref) {
+            ref_exprs[idx] = switch (ref) {
                 .hyp => |hyp| blk: {
                     if (hyp.index == 0 or
                         hyp.index > theorem.theorem_hyps.items.len)
@@ -926,6 +1050,28 @@ fn checkTheoremBlock(
                     break :blk checked.items[line_idx].expr;
                 },
             };
+        }
+
+        const bindings = if (hasOmittedBindings(partial_bindings))
+            try inferBindings(
+                self,
+                allocator,
+                env,
+                theorem,
+                assertion,
+                rule,
+                line,
+                partial_bindings,
+                ref_exprs,
+                line_expr,
+            )
+        else
+            try requireConcreteBindings(
+                allocator,
+                partial_bindings,
+            );
+
+        for (ref_exprs, line.refs, 0..) |actual, ref, idx| {
             const expected = try theorem.instantiateTemplate(
                 rule.hyps[idx],
                 bindings,
@@ -1047,7 +1193,7 @@ fn parseBindings(
     theorem_name: []const u8,
     rule: *const RuleDecl,
     line: ProofLine,
-) ![]const ExprId {
+) ![]const ?ExprId {
     for (rule.arg_names) |arg_name| {
         if (arg_name == null) {
             self.setDiagnostic(.{
@@ -1062,10 +1208,8 @@ fn parseBindings(
         }
     }
 
-    const bindings = try allocator.alloc(ExprId, rule.args.len);
-    const seen = try allocator.alloc(bool, rule.args.len);
-    defer allocator.free(seen);
-    @memset(seen, false);
+    const bindings = try allocator.alloc(?ExprId, rule.args.len);
+    @memset(bindings, null);
 
     for (line.arg_bindings) |binding| {
         const arg_index = findRuleArgIndex(rule, binding.name) orelse {
@@ -1080,7 +1224,7 @@ fn parseBindings(
             });
             return error.UnknownBinderName;
         };
-        if (seen[arg_index]) {
+        if (bindings[arg_index] != null) {
             self.setDiagnostic(.{
                 .kind = .duplicate_binder_assignment,
                 .err = error.DuplicateBinderAssignment,
@@ -1110,24 +1254,187 @@ fn parseBindings(
             return err;
         };
         bindings[arg_index] = try theorem.internParsedExpr(expr);
-        seen[arg_index] = true;
     }
 
-    for (seen, 0..) |was_seen, idx| {
-        if (!was_seen) {
+    return bindings;
+}
+
+fn hasOmittedBindings(bindings: []const ?ExprId) bool {
+    for (bindings) |binding| {
+        if (binding == null) return true;
+    }
+    return false;
+}
+
+fn requireConcreteBindings(
+    allocator: std.mem.Allocator,
+    partial_bindings: []const ?ExprId,
+) ![]const ExprId {
+    const bindings = try allocator.alloc(ExprId, partial_bindings.len);
+    for (partial_bindings, 0..) |binding, idx| {
+        bindings[idx] = binding orelse return error.MissingBinderAssignment;
+    }
+    return bindings;
+}
+
+fn inferBindings(
+    self: *Compiler,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ![]const ExprId {
+    // Replay the cited rule's unify stream against the asserted conclusion and
+    // referenced hypotheses. Explicit named bindings act as pre-filled slots,
+    // while omitted bindings are solved on first `URef`.
+    const unify = buildRuleUnifyStream(allocator, rule) catch |err| {
+        self.setDiagnostic(.{
+            .kind = .inference_failed,
+            .err = err,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.span,
+        });
+        return err;
+    };
+
+    var inference = try InferenceContext.init(
+        allocator,
+        theorem,
+        partial_bindings,
+        ref_exprs,
+        line_expr,
+    );
+    defer inference.deinit();
+
+    UnifyReplay.run(unify, 0, &inference) catch |err| {
+        self.setDiagnostic(.{
+            .kind = .inference_failed,
+            .err = err,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.span,
+        });
+        return err;
+    };
+    if (inference.ustack.items.len != 0) {
+        self.setDiagnostic(.{
+            .kind = .inference_failed,
+            .err = error.UnifyStackNotEmpty,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.span,
+        });
+        return error.UnifyStackNotEmpty;
+    }
+    if (inference.next_hyp != 0) {
+        self.setDiagnostic(.{
+            .kind = .inference_failed,
+            .err = error.HypCountMismatch,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.span,
+        });
+        return error.HypCountMismatch;
+    }
+
+    const bindings = try allocator.alloc(ExprId, rule.args.len);
+    for (0..rule.args.len) |idx| {
+        // Emission still needs a concrete argument for every theorem binder,
+        // so a slot that remained null after replay is still an error.
+        const binding = inference.uheap.items[idx] orelse {
             self.setDiagnostic(.{
                 .kind = .missing_binder_assignment,
                 .err = error.MissingBinderAssignment,
-                .theorem_name = theorem_name,
+                .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .name = rule.arg_names[idx].?,
                 .span = line.span,
             });
             return error.MissingBinderAssignment;
-        }
+        };
+        validateBindingExpr(
+            env,
+            theorem,
+            assertion.args,
+            rule.args[idx],
+            binding,
+        ) catch |err| {
+            self.setDiagnostic(.{
+                .kind = .inference_failed,
+                .err = err,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = rule.arg_names[idx].?,
+                .span = line.span,
+            });
+            return err;
+        };
+        bindings[idx] = binding;
     }
     return bindings;
+}
+
+// Inference only solves equalities. We still need the same sort, boundness,
+// and dependency checks that explicit parser-side argument parsing performs.
+fn validateBindingExpr(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    theorem_args: []const ArgInfo,
+    expected: ArgInfo,
+    expr_id: ExprId,
+) !void {
+    const info = try exprInfo(env, theorem, theorem_args, expr_id);
+    if (!std.mem.eql(u8, info.sort_name, expected.sort_name)) {
+        return error.SortMismatch;
+    }
+    if (info.bound != expected.bound) return error.BoundnessMismatch;
+    if ((info.deps & ~expected.deps) != 0) return error.DependencyMismatch;
+}
+
+fn exprInfo(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    theorem_args: []const ArgInfo,
+    expr_id: ExprId,
+) !ExprInfo {
+    return switch (theorem.interner.node(expr_id).*) {
+        .variable => |var_id| switch (var_id) {
+            .theorem_var => |idx| blk: {
+                if (idx >= theorem_args.len) return error.UnknownTheoremVariable;
+                const arg = theorem_args[idx];
+                break :blk .{
+                    .sort_name = arg.sort_name,
+                    .bound = arg.bound,
+                    .deps = arg.deps,
+                };
+            },
+            .dummy_var => return error.UnexpectedDummyVar,
+        },
+        .app => |app| blk: {
+            if (app.term_id >= env.terms.items.len) return error.UnknownTerm;
+            var deps: u55 = 0;
+            for (app.args) |arg_id| {
+                deps |= (try exprInfo(env, theorem, theorem_args, arg_id)).deps;
+            }
+            break :blk .{
+                .sort_name = env.terms.items[app.term_id].ret_sort_name,
+                .bound = false,
+                .deps = deps,
+            };
+        },
+    };
 }
 
 fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {

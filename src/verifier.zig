@@ -12,8 +12,8 @@ const Index = @import("./mmb.zig").Index;
 
 const ProofCmd = @import("./proof.zig").ProofCmd;
 const StmtCmd = @import("./proof.zig").StmtCmd;
-const UnifyCmd = @import("./proof.zig").UnifyCmd;
 const Cmd = @import("./proof.zig").Cmd;
+const UnifyReplay = @import("./unify_replay.zig");
 
 const Expr = @import("./expressions.zig").Expr;
 const Arg = @import("./args.zig").Arg;
@@ -556,7 +556,7 @@ pub const Verifier = struct {
         if (save) try self.heap.push(.{ .proof = concl });
     }
 
-    fn uopRef(self: *Verifier, heap_id: u32) !void {
+    pub fn uopRef(self: *Verifier, heap_id: u32) !void {
         const expr = try self.ustack.pop();
         if (heap_id >= self.uheap.len) return error.UHeapOutOfBounds;
         const expected = self.uheap.entries[heap_id].expr;
@@ -564,7 +564,7 @@ pub const Verifier = struct {
         if (expr != expected) return error.UnifyMismatch;
     }
 
-    fn uopTerm(self: *Verifier, term_id: u32, save: bool) !void {
+    pub fn uopTerm(self: *Verifier, term_id: u32, save: bool) !void {
         if (term_id >= self.available_terms) return error.ForwardTermRef;
 
         const expr = try self.ustack.pop();
@@ -584,7 +584,7 @@ pub const Verifier = struct {
         }
     }
 
-    fn uopDummy(self: *Verifier, sort_id: u32) !void {
+    pub fn uopDummy(self: *Verifier, sort_id: u32) !void {
         switch (self.unify_context orelse return error.InvalidUnifyContext) {
             .defn => {},
             .theorem => return error.UDummyNotAllowed,
@@ -609,7 +609,7 @@ pub const Verifier = struct {
         try self.uheap.push(expr);
     }
 
-    fn uopHyp(self: *Verifier) !void {
+    pub fn uopHyp(self: *Verifier) !void {
         switch (self.unify_context orelse return error.InvalidUnifyContext) {
             .theorem => {},
             .defn => return error.UHypNotAllowed,
@@ -842,20 +842,7 @@ pub const Verifier = struct {
         self.unify_context = context;
         defer self.unify_context = prev_context;
 
-        var pos: usize = start_pos;
-        while (true) {
-            const cmd = try Cmd.read(self.file_bytes, pos, self.file_bytes.len);
-            pos += cmd.size;
-            switch (@as(UnifyCmd, @enumFromInt(cmd.op))) {
-                .End => break,
-                .UTerm => try self.uopTerm(cmd.data, false),
-                .UTermSave => try self.uopTerm(cmd.data, true),
-                .URef => try self.uopRef(cmd.data),
-                .UDummy => try self.uopDummy(cmd.data),
-                .UHyp => try self.uopHyp(),
-                _ => return error.UnknownUnifyCmd,
-            }
-        }
+        try UnifyReplay.run(self.file_bytes, start_pos, self);
         if (self.ustack.top != 0) return error.UnifyStackNotEmpty;
     }
 

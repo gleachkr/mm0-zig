@@ -1,15 +1,15 @@
 imp_refl
 --------
-l1: $ a -> ((a -> a) -> a) $ by h1 (a := $ a $, b := $ a -> a $) []
-l2: $ a -> (a -> a) $ by h1 (a := $ a $, b := $ a $) []
-l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 (a := $ a $, b := $ a -> a $, c := $ a $) []
-l4: $ (a -> (a -> a)) -> (a -> a) $ by mp (a := $ a -> ((a -> a) -> a) $, b := $ (a -> (a -> a)) -> (a -> a) $) [l1, l3]
-l5: $ a -> a $ by mp (a := $ a -> (a -> a) $, b := $ a -> a $) [l2, l4]
+l1: $ a -> ((a -> a) -> a) $ by h1 []
+l2: $ a -> (a -> a) $ by h1 []
+l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 []
+l4: $ (a -> (a -> a)) -> (a -> a) $ by mp [l1, l3]
+l5: $ a -> a $ by mp [l2, l4]
 
 hs
 --
-l1: $ (b -> c) -> (a -> (b -> c)) $ by h1 (a := $ b -> c $, b := $ a $) []
-l2: $ a -> (b -> c) $ by mp (a := $ b -> c $, b := $ a -> (b -> c) $) [#2, l1]
-l3: $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $ by h2 (a := $ a $, b := $ b $, c := $ c $) []
-l4: $ (a -> b) -> (a -> c) $ by mp (a := $ a -> (b -> c) $, b := $ (a -> b) -> (a -> c) $) [l2, l3]
-l5: $ a -> c $ by mp (a := $ a -> b $, b := $ a -> c $) [#1, l4]
+l1: $ (b -> c) -> (a -> (b -> c)) $ by h1 []
+l2: $ a -> (b -> c) $ by mp [#2, l1]
+l3: $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $ by h2 []
+l4: $ (a -> b) -> (a -> c) $ by mp [l2, l3]
+l5: $ a -> c $ by mp [#1, l4]

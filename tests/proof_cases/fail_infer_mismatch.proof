@@ -1,0 +1,3 @@
+keep_bad
+--------
+l1: $ b -> a -> b $ by ax_keep [#1]

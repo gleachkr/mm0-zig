@@ -148,19 +148,35 @@ pub const TheoremContext = struct {
         self.parser_vars.deinit(self.allocator);
     }
 
-    pub fn seedArgs(
+    // Seed a context with `count` theorem binders but without any parser-side
+    // `Expr*` nodes. This is used when we need a temporary binder-indexed DAG,
+    // for example to rebuild a rule's unify stream for argument inference.
+    pub fn seedBinderCount(
         self: *TheoremContext,
-        arg_exprs: []const *const Expr,
+        count: usize,
     ) !void {
-        for (arg_exprs, 0..) |arg_expr, idx| {
+        for (0..count) |idx| {
             const var_id = VarId{
                 .theorem_var = std.math.cast(TheoremVarId, idx) orelse {
                     return error.TooManyTheoremVars;
                 },
             };
-            try self.parser_vars.put(self.allocator, arg_expr, var_id);
             const expr_id = try self.interner.internVar(var_id);
             try self.theorem_vars.append(self.allocator, expr_id);
+        }
+    }
+
+    pub fn seedArgs(
+        self: *TheoremContext,
+        arg_exprs: []const *const Expr,
+    ) !void {
+        try self.seedBinderCount(arg_exprs.len);
+        for (arg_exprs, 0..) |arg_expr, idx| {
+            try self.parser_vars.put(
+                self.allocator,
+                arg_expr,
+                .{ .theorem_var = @intCast(idx) },
+            );
         }
     }
 

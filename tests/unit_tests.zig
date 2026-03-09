@@ -1195,7 +1195,7 @@ test "proof script parser reads theorem blocks and proof lines" {
         \\l2: $ a $ by ax_mp (a := $ a $, b := $ a $) [#1, l1]
         \\
         \\other
-        \\l1: $ b $ by ax_b () []
+        \\l1: $ b $ by ax_b []
     ;
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -1228,6 +1228,10 @@ test "proof script parser reads theorem blocks and proof lines" {
     try std.testing.expectEqualStrings("other", second.name);
     try std.testing.expect(second.underline_span == null);
     try std.testing.expectEqual(@as(usize, 1), second.lines.len);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        second.lines[0].arg_bindings.len,
+    );
     try std.testing.expect((try parser.nextBlock()) == null);
 }
 
@@ -1290,11 +1294,11 @@ test "compiler checks proof blocks in theorem order" {
     const proof_src =
         \\first
         \\-----
-        \\l1: $ top $ by top_i () []
+        \\l1: $ top $ by top_i []
         \\
         \\second
         \\------
-        \\l1: $ top $ by top_i () []
+        \\l1: $ top $ by top_i []
     ;
 
     var compiler = Compiler.initWithProof(
@@ -1322,7 +1326,7 @@ test "compiler rejects out-of-order and extra proof blocks" {
     var extra = Compiler.initWithProof(std.testing.allocator, mm0_src,
         \\first
         \\-----
-        \\l1: $ top $ by top_i () []
+        \\l1: $ top $ by top_i []
         \\
         \\second
         \\------
@@ -1357,6 +1361,40 @@ test "compiler records proof diagnostics for failing proof lines" {
     try std.testing.expectEqualStrings("keep_label", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("missing", diag.name.?);
+    try std.testing.expect(diag.span != null);
+}
+
+test "compiler records inference diagnostics for omitted arguments" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\axiom ax_keep (a b: wff): $ a $ > $ a -> b -> a $;
+        \\theorem keep_bad (a b: wff): $ a $ > $ a -> b -> a $;
+    ;
+    const proof_src =
+        \\keep_bad
+        \\--------
+        \\l1: $ b -> a -> b $ by ax_keep [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.UnifyMismatch, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnifyMismatch, diag.err);
+    try std.testing.expectEqualStrings(
+        "could not infer omitted rule arguments",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    try std.testing.expectEqualStrings("keep_bad", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("ax_keep", diag.rule_name.?);
     try std.testing.expect(diag.span != null);
 }
 
@@ -1511,6 +1549,10 @@ const proof_cases = [_]ProofCase{
     .{
         .stem = "fail_missing_binding",
         .outcome = .{ .fail = error.MissingBinderAssignment },
+    },
+    .{
+        .stem = "fail_infer_mismatch",
+        .outcome = .{ .fail = error.UnifyMismatch },
     },
     .{
         .stem = "fail_hyp_mismatch",
