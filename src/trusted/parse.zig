@@ -178,6 +178,10 @@ pub const MM0Parser = struct {
     coercion_table: [MAX_SORTS][MAX_SORTS + 1]CoercionRoute,
     left_delims: [256]bool,
     right_delims: [256]bool,
+    // Annotations captured from `--|` comment lines. Accumulated between
+    // statements and moved to `last_annotations` when a statement is yielded.
+    pending_annotations: std.ArrayListUnmanaged([]const u8) = .{},
+    last_annotations: []const []const u8 = &.{},
 
     pub fn init(src: []const u8, allocator: std.mem.Allocator) MM0Parser {
         return .{
@@ -203,6 +207,16 @@ pub const MM0Parser = struct {
         };
     }
 
+    fn flushAnnotations(self: *MM0Parser) void {
+        if (self.pending_annotations.items.len > 0) {
+            self.last_annotations = self.pending_annotations.toOwnedSlice(
+                self.allocator,
+            ) catch &.{};
+        } else {
+            self.last_annotations = &.{};
+        }
+    }
+
     // Returns next public statement, while processing notation and coercion
     // declarations so later math strings are parsed with the correct grammar.
     pub fn next(self: *MM0Parser) !?MM0Stmt {
@@ -211,6 +225,8 @@ pub const MM0Parser = struct {
             if (self.pos >= self.src.len) return null;
 
             const word = self.peekIdent() orelse {
+                // Non-statement tokens: discard any pending annotations
+                self.pending_annotations.clearRetainingCapacity();
                 try self.skipToSemicolon();
                 continue;
             };
@@ -221,22 +237,27 @@ pub const MM0Parser = struct {
                 std.mem.eql(u8, word, "free") or
                 std.mem.eql(u8, word, "sort"))
             {
+                self.flushAnnotations();
                 const stmt = try self.parseSortStmt();
                 return MM0Stmt{ .sort = stmt };
             }
             if (std.mem.eql(u8, word, "term")) {
+                self.flushAnnotations();
                 const stmt = try self.parseTermStmt(false);
                 return MM0Stmt{ .term = stmt };
             }
             if (std.mem.eql(u8, word, "def")) {
+                self.flushAnnotations();
                 const stmt = try self.parseTermStmt(true);
                 return MM0Stmt{ .term = stmt };
             }
             if (std.mem.eql(u8, word, "axiom")) {
+                self.flushAnnotations();
                 const stmt = try self.parseAssertionStmt(.axiom, false);
                 return MM0Stmt{ .assertion = stmt };
             }
             if (std.mem.eql(u8, word, "theorem")) {
+                self.flushAnnotations();
                 const stmt = try self.parseAssertionStmt(.theorem, false);
                 return MM0Stmt{ .assertion = stmt };
             }
@@ -245,45 +266,56 @@ pub const MM0Parser = struct {
                 self.skipWhitespaceAndComments();
                 const next_word = self.peekIdent() orelse return error.ExpectedKeyword;
                 if (std.mem.eql(u8, next_word, "def")) {
+                    self.flushAnnotations();
                     const stmt = try self.parseTermStmt(true);
                     return MM0Stmt{ .term = stmt };
                 }
                 if (std.mem.eql(u8, next_word, "theorem")) {
+                    self.flushAnnotations();
                     const stmt = try self.parseAssertionStmt(.theorem, false);
                     return MM0Stmt{ .assertion = stmt };
                 }
                 return error.UnexpectedKeyword;
             }
+            // Non-public declarations: annotations don't attach to these
             if (std.mem.eql(u8, word, "local")) {
+                self.pending_annotations.clearRetainingCapacity();
                 try self.skipToSemicolon();
                 continue;
             }
             if (std.mem.eql(u8, word, "delimiter")) {
+                self.pending_annotations.clearRetainingCapacity();
                 try self.parseDelimiterStmt();
                 continue;
             }
             if (std.mem.eql(u8, word, "prefix")) {
+                self.pending_annotations.clearRetainingCapacity();
                 try self.parseSimpleNotationStmt(.prefix);
                 continue;
             }
             if (std.mem.eql(u8, word, "infixl")) {
+                self.pending_annotations.clearRetainingCapacity();
                 try self.parseSimpleNotationStmt(.infixl);
                 continue;
             }
             if (std.mem.eql(u8, word, "infixr")) {
+                self.pending_annotations.clearRetainingCapacity();
                 try self.parseSimpleNotationStmt(.infixr);
                 continue;
             }
             if (std.mem.eql(u8, word, "notation")) {
+                self.pending_annotations.clearRetainingCapacity();
                 if (try self.parseBareNotationMarker()) continue;
                 try self.parseGeneralNotationStmt();
                 continue;
             }
             if (std.mem.eql(u8, word, "coercion")) {
+                self.pending_annotations.clearRetainingCapacity();
                 try self.parseCoercionStmt();
                 continue;
             }
 
+            self.pending_annotations.clearRetainingCapacity();
             try self.skipToSemicolon();
         }
     }
@@ -801,10 +833,12 @@ pub const MM0Parser = struct {
         const expr = try self.parseMathText(math, vars);
         const sort = try self.lookupSortId(arg.sort_name);
         const coerced = try self.coerceExpr(expr, sort);
-        if (coerced.bound() != arg.bound) return error.BoundnessMismatch;
-        if ((coerced.deps() & ~arg.deps) != 0) {
-            return error.DependencyMismatch;
-        }
+        // Match verifier semantics: bound params require bound exprs,
+        // but regular params accept any expression (including bound vars).
+        if (arg.bound and !coerced.bound()) return error.BoundnessMismatch;
+        // Note: dep checking is deferred to the verifier which checks deps
+        // relative to the theorem's own bound variables. The expression's deps
+        // here are relative to the calling theorem's context, not the callee's.
         return coerced;
     }
 
@@ -1274,8 +1308,37 @@ pub const MM0Parser = struct {
                 self.src[self.pos + 1] == '-')
             {
                 self.pos += 2;
-                while (self.pos < self.src.len and self.src[self.pos] != '\n') {
+                // Check for annotation marker `--|`
+                if (self.pos < self.src.len and self.src[self.pos] == '|') {
                     self.pos += 1;
+                    // Skip leading whitespace after `--|`
+                    while (self.pos < self.src.len and
+                        (self.src[self.pos] == ' ' or self.src[self.pos] == '\t'))
+                    {
+                        self.pos += 1;
+                    }
+                    const start = self.pos;
+                    while (self.pos < self.src.len and self.src[self.pos] != '\n') {
+                        self.pos += 1;
+                    }
+                    // Trim trailing whitespace
+                    var end = self.pos;
+                    while (end > start and
+                        (self.src[end - 1] == ' ' or self.src[end - 1] == '\t' or
+                        self.src[end - 1] == '\r'))
+                    {
+                        end -= 1;
+                    }
+                    if (end > start) {
+                        self.pending_annotations.append(
+                            self.allocator,
+                            self.src[start..end],
+                        ) catch {};
+                    }
+                } else {
+                    while (self.pos < self.src.len and self.src[self.pos] != '\n') {
+                        self.pos += 1;
+                    }
                 }
             } else break;
         }

@@ -1,0 +1,78 @@
+imp_refl
+--------
+l1: $ a -> ((a -> a) -> a) $ by h1 []
+l2: $ a -> (a -> a) $ by h1 []
+l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 []
+l4: $ (a -> (a -> a)) -> (a -> a) $ by mp [l1, l3]
+l5: $ a -> a $ by mp [l2, l4]
+
+spec_atom
+---------
+l1: $ R $ by spec (a := $ R $, b := $ P $) []
+
+spec_im
+-------
+l1: $ R -> R $ by spec (a := $ R $, b := $ P -> Q $) []
+
+spec_nested
+-----------
+l1: $ R -> (R -> T) $ by spec (a := $ R $, b := $ P -> (Q -> T) $) []
+
+spec_neg
+--------
+l1: $ ~ R $ by spec (a := $ R $, b := $ ~ P $) []
+
+spec_complex
+------------
+l1: $ ~ R -> R $ by spec (a := $ R $, b := $ ~ P -> Q $) []
+
+spec_chain
+----------
+l1: $ ~ R $ by spec (a := $ R $, b := $ ~ P $) []
+l2: $ ~ R -> (~ R -> ~ R) $ by h1 (a := $ ~ R $, b := $ ~ R $) []
+l3: $ ~ R -> ~ R $ by mp (a := $ ~ R $, b := $ ~ R -> ~ R $) [l1, l2]
+
+gen_refl
+--------
+l1: $ x = x $ by eq_refl (a := $ x $) []
+l2: $ A. x (x = x) $ by ax_gen (x := $ x $, p := $ x = x $) [l1]
+
+alim
+----
+l1: $ A. x (p -> q) -> A. x p -> A. x q $ by ax_4 (x := $ x $, p := $ p $, q := $ q $) []
+l2: $ A. x p -> A. x q $ by mp (a := $ A. x (p -> q) $, b := $ A. x p -> A. x q $) [#1, l1]
+l3: $ A. x q $ by mp (a := $ A. x p $, b := $ A. x q $) [#2, l2]
+
+trivial_gen
+-----------
+l1: $ zer = zer $ by eq_refl (a := $ zer $) []
+l2: $ zer = zer -> A. x (zer = zer) $ by ax_5 (x := $ x $, p := $ zer = zer $) []
+l3: $ A. x (zer = zer) $ by mp (a := $ zer = zer $, b := $ A. x (zer = zer) $) [l1, l2]
+
+spec_gen
+--------
+l1: $ R $ by spec (a := $ R $, b := $ P $) []
+l2: $ R -> A. x R $ by ax_5 (x := $ x $, p := $ R $) []
+l3: $ A. x R $ by mp (a := $ R $, b := $ A. x R $) [l1, l2]
+
+gen_mono
+--------
+l1: $ A. x (p -> q) $ by ax_gen (x := $ x $, p := $ p -> q $) [#1]
+l2: $ A. x (p -> q) -> A. x p -> A. x q $ by ax_4 (x := $ x $, p := $ p $, q := $ q $) []
+l3: $ A. x p -> A. x q $ by mp (a := $ A. x (p -> q) $, b := $ A. x p -> A. x q $) [l1, l2]
+
+inst_eq
+-------
+l1: $ S zer = zer $ by ax_inst (x := $ x $, t := $ S zer $, p := $ x = zer $) [#1]
+
+inst_refl
+---------
+l1: $ S zer = S zer $ by ax_inst (x := $ x $, t := $ S zer $, p := $ x = x $) [#1]
+
+inst_suc
+--------
+l1: $ S (S zer) = S (S zer) $ by ax_inst (x := $ x $, t := $ S zer $, p := $ S x = S x $) [#1]
+
+inst_im
+-------
+l1: $ S zer = zer -> zer = S zer $ by ax_inst (x := $ x $, t := $ S zer $, p := $ x = zer -> zer = x $) [#1]

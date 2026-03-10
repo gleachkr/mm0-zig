@@ -1,0 +1,39 @@
+delimiter $ ( ) $;
+
+-- Sorts
+provable sort wff;
+
+-- Terms
+term im (a b: wff): wff; infixr im: $->$ prec 25;
+term bi (a b: wff): wff; infixr bi: $<->$ prec 20;
+term P: wff;
+term Q: wff;
+term R: wff;
+term sb (a b: wff): wff;
+
+-- Relation bundle
+--| @relation wff bi biid bitr bisym mpbi
+
+-- Relation axioms
+axiom biid (a: wff): $ a <-> a $;
+axiom bitr (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+-- Rewrite rules
+--| @rewrite
+axiom sb_im (a b c: wff): $ sb a (b -> c) <-> (sb a b -> sb a c) $;
+
+--| @rewrite
+axiom sb_P (a: wff): $ sb a P <-> a $;
+
+-- Congruence for implication
+--| @congr
+axiom im_congr (a b c d: wff): $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+
+-- @normalize conc is set, but sb(Q, R) has no applicable rewrite rule
+--| @normalize conc
+axiom all_elim (a b: wff): $ sb a b $;
+
+-- sb(Q, R) has no applicable rewrite rule (we only have sb_P), so it stays as sb(Q, R)
+theorem test_noop (a: wff): $ sb Q R $;

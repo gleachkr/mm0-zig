@@ -1,0 +1,3 @@
+test_nested
+-----------
+l1: $ R -> (R -> R) $ by all_elim (a := $ R $, b := $ P -> (Q -> P) $) []

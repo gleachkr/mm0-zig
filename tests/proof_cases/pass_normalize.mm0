@@ -1,0 +1,42 @@
+delimiter $ ( ) $;
+
+-- Sorts
+provable sort wff;
+
+-- Terms
+term im (a b: wff): wff; infixr im: $->$ prec 25;
+term bi (a b: wff): wff; infixr bi: $<->$ prec 20;
+term P: wff;
+term Q: wff;
+term R: wff;
+term sb (a b: wff): wff;
+
+-- Relation bundle: bi is the equivalence relation on wff
+--| @relation wff bi biid bitr bisym mpbi
+
+-- Relation axioms
+axiom biid (a: wff): $ a <-> a $;
+axiom bitr (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+-- Rewrite rules: push substitution through implication
+--| @rewrite
+axiom sb_im (a b c: wff): $ sb a (b -> c) <-> (sb a b -> sb a c) $;
+
+-- Base case: substitution of an atom is itself (simplified)
+--| @rewrite
+axiom sb_P (a: wff): $ sb a P <-> a $;
+
+-- Congruence for implication
+--| @congr
+axiom im_congr (a b c d: wff): $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+
+-- A rule whose conclusion needs normalization
+-- all_elim produces sb(t,B) in its raw form, but the user wants the normalized result
+--| @normalize conc
+axiom all_elim (a b: wff): $ sb a b $;
+
+-- Use all_elim with normalization:
+-- all_elim [Q, P -> P] would produce sb(Q, P -> P) which normalizes to Q -> Q
+theorem test_normalize (a: wff): $ Q -> Q $;

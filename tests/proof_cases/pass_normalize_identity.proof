@@ -1,0 +1,3 @@
+test_single_step
+----------------
+l1: $ Q $ by all_elim (a := $ Q $, b := $ P $) []

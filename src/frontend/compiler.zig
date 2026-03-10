@@ -20,17 +20,20 @@ const Span = @import("./proof_script.zig").Span;
 const TheoremBlock = @import("./proof_script.zig").TheoremBlock;
 const ProofScriptParser = @import("./proof_script.zig").Parser;
 const Arg = @import("../trusted/args.zig").Arg;
+const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
+const Normalizer = @import("./normalizer.zig").Normalizer;
+const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
 const ExprSlotMap = std.AutoHashMapUnmanaged(ExprId, u32);
 
-const CheckedRef = union(enum) {
+pub const CheckedRef = union(enum) {
     hyp: usize,
     line: usize,
 };
 
-const CheckedLine = struct {
+pub const CheckedLine = struct {
     expr: ExprId,
     rule_id: u32,
     bindings: []const ExprId,
@@ -123,6 +126,7 @@ pub const Compiler = struct {
 
         var parser = MM0Parser.init(self.source, arena.allocator());
         var env = GlobalEnv.init(arena.allocator());
+        var registry = RewriteRegistry.init(arena.allocator());
         var proof_parser = if (self.proof_source) |proof|
             ProofScriptParser.init(arena.allocator(), proof)
         else
@@ -133,6 +137,7 @@ pub const Compiler = struct {
                 .assertion => |assertion| {
                     if (assertion.kind != .theorem) {
                         try env.addStmt(stmt);
+                        try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
                         continue;
                     }
 
@@ -169,6 +174,7 @@ pub const Compiler = struct {
                             arena.allocator(),
                             &parser,
                             &env,
+                            &registry,
                             assertion,
                             block,
                             &theorem,
@@ -177,6 +183,11 @@ pub const Compiler = struct {
                     }
 
                     try env.addStmt(stmt);
+                    try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
+                },
+                .term => |term_stmt| {
+                    try env.addStmt(stmt);
+                    try registry.processAnnotations(&env, term_stmt.name, parser.last_annotations);
                 },
                 else => try env.addStmt(stmt),
             }
@@ -210,6 +221,7 @@ pub const Compiler = struct {
         var parser = MM0Parser.init(self.source, allocator);
         var proof_parser = ProofScriptParser.init(allocator, proof_source);
         var env = GlobalEnv.init(allocator);
+        var registry = RewriteRegistry.init(allocator);
 
         var sort_names = std.ArrayListUnmanaged([]const u8){};
         var sorts = std.ArrayListUnmanaged(@import("../trusted/sorts.zig").Sort){};
@@ -242,6 +254,7 @@ pub const Compiler = struct {
                             &.{},
                     });
                     try env.addStmt(stmt);
+                    try registry.processAnnotations(&env, term_stmt.name, parser.last_annotations);
                 },
                 .assertion => |assertion| {
                     var theorem = TheoremContext.init(allocator);
@@ -280,6 +293,7 @@ pub const Compiler = struct {
                                 .body = body,
                             });
                             try env.addStmt(stmt);
+                            try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
                         },
                         .theorem => {
                             const block = try proof_parser.nextBlock() orelse {
@@ -306,6 +320,7 @@ pub const Compiler = struct {
                                 allocator,
                                 &parser,
                                 &env,
+                                &registry,
                                 assertion,
                                 block,
                                 &theorem,
@@ -946,6 +961,7 @@ fn checkTheoremBlock(
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *const GlobalEnv,
+    registry: *RewriteRegistry,
     assertion: AssertionStmt,
     block: TheoremBlock,
     theorem: *TheoremContext,
@@ -1071,12 +1087,99 @@ fn checkTheoremBlock(
                 partial_bindings,
             );
 
+        const norm_spec = registry.getNormalizeSpec(rule_id);
+
+        // Check hypotheses (with optional normalization)
         for (ref_exprs, line.refs, 0..) |actual, ref, idx| {
             const expected = try theorem.instantiateTemplate(
                 rule.hyps[idx],
                 bindings,
             );
             if (actual != expected) {
+                // If this hypothesis is marked for normalization, try that
+                if (norm_spec) |spec| {
+                    if (isHypMarkedForNormalize(spec, idx)) {
+                        // The theorem expects `expected`, user provides `actual`.
+                        // We need to show actual ~ expected so we can convert.
+                        // Determine the sort from the hypothesis template.
+                        const sort_name = getTemplateSort(env, rule.hyps[idx]) orelse {
+                            return error.HypothesisMismatch;
+                        };
+                        var normalizer = Normalizer.init(
+                            allocator,
+                            theorem,
+                            registry,
+                            env,
+                            &checked,
+                        );
+                        const relation = registry.resolveRelation(env, sort_name) orelse {
+                            return error.HypothesisMismatch;
+                        };
+                        // Normalize both and check they match
+                        const norm_expected = try normalizer.normalize(expected);
+                        const norm_actual = try normalizer.normalize(actual);
+                        if (norm_expected.result_expr != norm_actual.result_expr) {
+                            return error.HypothesisMismatch;
+                        }
+                        // We need: actual ~ expected
+                        // We have: actual ~ norm(actual) and expected ~ norm(expected)
+                        // Since norm(actual) == norm(expected), compose:
+                        // actual ~ norm_actual, symm(expected ~ norm_expected) => norm_expected ~ expected
+                        // trans(actual~norm, norm~expected) => actual ~ expected
+                        if (norm_actual.conv_line_idx) |actual_proof_idx| {
+                            if (norm_expected.conv_line_idx) |expected_proof_idx| {
+                                // symm: expected ~ norm => norm ~ expected
+                                const symm_idx = try normalizer.emitSymm(
+                                    relation,
+                                    expected,
+                                    norm_expected.result_expr,
+                                    expected_proof_idx,
+                                );
+                                // trans: actual~norm, norm~expected => actual~expected
+                                const conv_expr = try theorem.interner.internApp(
+                                    relation.rel_term_id,
+                                    &[_]ExprId{ actual, expected },
+                                );
+                                const trans_bindings = try allocator.alloc(ExprId, 3);
+                                trans_bindings[0] = actual;
+                                trans_bindings[1] = norm_actual.result_expr;
+                                trans_bindings[2] = expected;
+                                const trans_refs = try allocator.alloc(CheckedRef, 2);
+                                trans_refs[0] = .{ .line = actual_proof_idx };
+                                trans_refs[1] = .{ .line = symm_idx };
+                                try checked.append(allocator, .{
+                                    .expr = conv_expr,
+                                    .rule_id = relation.trans_id,
+                                    .bindings = trans_bindings,
+                                    .refs = trans_refs,
+                                });
+                            }
+                            // else: expected is already normal, just use actual~norm as actual~expected
+                        } else if (norm_expected.conv_line_idx) |expected_proof_idx| {
+                            // actual is already normal, so actual == norm; need symm(expected~norm) = norm~expected = actual~expected
+                            _ = try normalizer.emitSymm(
+                                relation,
+                                expected,
+                                norm_expected.result_expr,
+                                expected_proof_idx,
+                            );
+                        }
+                        // The transport step will be handled below when we use refs
+                        // For now, update the ref to point to a transport line
+                        const actual_ref = refs[idx];
+                        const conv_line_idx = checked.items.len - 1;
+                        // transport: rel(actual, expected) > actual > expected
+                        const transport_idx = try normalizer.emitTransport(
+                            relation,
+                            expected,
+                            actual,
+                            conv_line_idx,
+                            actual_ref,
+                        );
+                        refs[idx] = .{ .line = transport_idx };
+                        continue;
+                    }
+                }
                 const name = switch (ref) {
                     .hyp => |hyp| try hypText(allocator, hyp.index),
                     .line => |label| label.label,
@@ -1102,7 +1205,98 @@ fn checkTheoremBlock(
             rule.concl,
             bindings,
         );
+
         if (line_expr != expected_line) {
+            // If conclusion normalization is enabled, try normalizing
+            if (norm_spec) |spec| {
+                if (spec.concl) {
+                    const sort_name = getRuleConcSort(env, rule) orelse {
+                        return error.ConclusionMismatch;
+                    };
+                    const relation = registry.resolveRelation(env, sort_name) orelse {
+                        return error.ConclusionMismatch;
+                    };
+                    var normalizer = Normalizer.init(
+                        allocator,
+                        theorem,
+                        registry,
+                        env,
+                        &checked,
+                    );
+
+                    // Normalize the instantiated conclusion
+                    const norm_result = try normalizer.normalize(expected_line);
+                    if (norm_result.result_expr != line_expr) {
+                        self.setDiagnostic(.{
+                            .kind = .conclusion_mismatch,
+                            .err = error.ConclusionMismatch,
+                            .theorem_name = assertion.name,
+                            .line_label = line.label,
+                            .rule_name = line.rule_name,
+                            .span = line.assertion.span,
+                        });
+                        return error.ConclusionMismatch;
+                    }
+
+                    // Emit the raw theorem application line
+                    const raw_idx = checked.items.len;
+                    try checked.append(allocator, .{
+                        .expr = expected_line,
+                        .rule_id = rule_id,
+                        .bindings = bindings,
+                        .refs = refs,
+                    });
+
+                    if (norm_result.conv_line_idx) |conv_idx| {
+                        // Emit transport: rel(expected, line_expr) > expected > line_expr
+                        const transport_idx = try normalizer.emitTransport(
+                            relation,
+                            line_expr,
+                            expected_line,
+                            conv_idx,
+                            .{ .line = raw_idx },
+                        );
+
+                        const gop = try labels.getOrPut(line.label);
+                        if (gop.found_existing) {
+                            self.setDiagnostic(.{
+                                .kind = .duplicate_label,
+                                .err = error.DuplicateLabel,
+                                .theorem_name = assertion.name,
+                                .line_label = line.label,
+                                .name = line.label,
+                                .span = line.span,
+                            });
+                            return error.DuplicateLabel;
+                        }
+                        gop.value_ptr.* = transport_idx;
+                        last_line = line_expr;
+                        last_label = line.label;
+                        last_span = line.assertion.span;
+                        continue;
+                    }
+                    // If no conversion needed (refl), fall through to normal path
+                    // but the raw line is already emitted, so just register it
+                    const gop = try labels.getOrPut(line.label);
+                    if (gop.found_existing) {
+                        self.setDiagnostic(.{
+                            .kind = .duplicate_label,
+                            .err = error.DuplicateLabel,
+                            .theorem_name = assertion.name,
+                            .line_label = line.label,
+                            .name = line.label,
+                            .span = line.span,
+                        });
+                        return error.DuplicateLabel;
+                    }
+                    gop.value_ptr.* = raw_idx;
+                    last_line = line_expr;
+                    last_label = line.label;
+                    last_span = line.assertion.span;
+                    continue;
+                }
+            }
+
             self.setDiagnostic(.{
                 .kind = .conclusion_mismatch,
                 .err = error.ConclusionMismatch,
@@ -1399,8 +1593,11 @@ fn validateBindingExpr(
     if (!std.mem.eql(u8, info.sort_name, expected.sort_name)) {
         return error.SortMismatch;
     }
-    if (info.bound != expected.bound) return error.BoundnessMismatch;
-    if ((info.deps & ~expected.deps) != 0) return error.DependencyMismatch;
+    // Match verifier semantics: bound params require bound exprs,
+    // but regular params accept any expression (including bound vars).
+    if (expected.bound and !info.bound) return error.BoundnessMismatch;
+    // Note: dep checking is deferred to the verifier which checks deps
+    // relative to the theorem's own bound variables.
 }
 
 fn exprInfo(
@@ -1462,4 +1659,30 @@ fn hypText(
     index: usize,
 ) ![]const u8 {
     return try std.fmt.allocPrint(allocator, "#{d}", .{index});
+}
+
+fn isHypMarkedForNormalize(
+    spec: @import("./rewrite_registry.zig").NormalizeSpec,
+    hyp_idx: usize,
+) bool {
+    for (spec.hyp_indices) |marked| {
+        if (marked == hyp_idx) return true;
+    }
+    return false;
+}
+
+fn getRuleConcSort(env: *const GlobalEnv, rule: *const RuleDecl) ?[]const u8 {
+    return getTemplateSort(env, rule.concl);
+}
+
+fn getTemplateSort(env: *const GlobalEnv, template: TemplateExpr) ?[]const u8 {
+    switch (template) {
+        .app => |app| {
+            if (app.term_id < env.terms.items.len) {
+                return env.terms.items[app.term_id].ret_sort_name;
+            }
+            return null;
+        },
+        .binder => return null,
+    }
 }

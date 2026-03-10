@@ -1,0 +1,227 @@
+delimiter $ ( ) $;
+
+-- =============================================================
+-- Hilbert-style system with explicit substitution and rewrites
+-- =============================================================
+-- Extends the propositional Hilbert system with an explicit
+-- substitution operator, multiple rewrite rules, and theorems
+-- that exercise normalization through the rewrite system.
+
+-- Sorts
+provable sort wff;
+
+-- Connectives
+term im (a b: wff): wff; infixr im: $->$ prec 25;
+term not (a: wff): wff; prefix not: $~$ prec 35;
+term bi (a b: wff): wff; infixr bi: $<->$ prec 20;
+
+-- Constants (propositions as atoms)
+term P: wff;
+term Q: wff;
+term R: wff;
+term T: wff;
+
+-- Explicit substitution operator (no bound variables for simplicity)
+term sb (a b: wff): wff;
+
+-- =============================================================
+-- Relation bundle
+-- =============================================================
+--| @relation wff bi biid bitr bisym mpbi
+
+axiom biid (a: wff): $ a <-> a $;
+axiom bitr (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+-- =============================================================
+-- Propositional axioms (Hilbert)
+-- =============================================================
+axiom h1 (a b: wff): $ a -> (b -> a) $;
+axiom h2 (a b c: wff):
+  $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $;
+axiom h3 (a b: wff): $ (~ a -> ~ b) -> (b -> a) $;
+axiom mp (a b: wff): $ a $ > $ a -> b $ > $ b $;
+
+-- =============================================================
+-- Rewrite rules: push substitution through connectives
+-- =============================================================
+
+-- sb distributes over implication
+--| @rewrite
+axiom sb_im (a b c: wff): $ sb a (b -> c) <-> (sb a b -> sb a c) $;
+
+-- sb distributes over negation
+--| @rewrite
+axiom sb_not (a b: wff): $ sb a (~ b) <-> ~ (sb a b) $;
+
+-- sb on atoms: base cases
+--| @rewrite
+axiom sb_P (a: wff): $ sb a P <-> a $;
+
+--| @rewrite
+axiom sb_Q (a: wff): $ sb a Q <-> a $;
+
+--| @rewrite
+axiom sb_T (a: wff): $ sb a T <-> T $;
+
+-- =============================================================
+-- Congruence rules
+-- =============================================================
+
+--| @congr
+axiom im_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+
+--| @congr
+axiom not_congr (a b: wff):
+  $ a <-> b $ > $ ~ a <-> ~ b $;
+
+-- =============================================================
+-- Axiom with normalization (simulates universal specialization)
+-- =============================================================
+
+--| @normalize conc
+axiom spec (a b: wff): $ sb a b $;
+
+-- =============================================================
+-- Propositional theorem (no normalization)
+-- =============================================================
+theorem imp_refl (a: wff): $ a -> a $;
+
+-- =============================================================
+-- Theorems exercising the rewrite system
+-- =============================================================
+
+-- Single rewrite step: sb(R, P) -> R via sb_P
+theorem spec_atom (a: wff): $ R $;
+
+-- Implication distribution: sb(R, P -> Q) -> R -> R
+theorem spec_im (a: wff): $ R -> R $;
+
+-- Nested: sb(R, P -> (Q -> T)) -> R -> (R -> T)
+-- Uses sb_im twice and sb_P, sb_Q, sb_T with congr
+theorem spec_nested (a: wff): $ R -> (R -> T) $;
+
+-- Negation: sb(R, ~P) -> ~R
+theorem spec_neg (a: wff): $ ~ R $;
+
+-- Complex: sb(R, ~P -> Q) -> ~R -> R
+-- Combines negation and implication distribution
+theorem spec_complex (a: wff): $ ~ R -> R $;
+
+-- Proof that chains normalization with propositional reasoning
+-- From (R -> R), derive ~R -> ~R using h1 + h3
+theorem spec_chain (a: wff): $ ~ R -> ~ R $;
+
+-- =============================================================
+-- Quantifier reasoning (following peano.mm0 axioms)
+-- =============================================================
+
+sort nat;
+term zer: nat;
+term suc (n: nat): nat; prefix suc: $S$ prec 100;
+term eq (a b: nat): wff; infixl eq: $=$ prec 50;
+term all {x: nat} (p: wff x): wff; prefix all: $A.$ prec 41;
+
+-- Generalization: from |- p, derive |- A. x p
+axiom ax_gen {x: nat} (p: wff x): $ p $ > $ A. x p $;
+
+-- Distribution: forall distributes over implication
+axiom ax_4 {x: nat} (p q: wff x):
+  $ A. x (p -> q) -> A. x p -> A. x q $;
+
+-- Trivial quantification: if p doesn't depend on x, then p -> A. x p
+axiom ax_5 {x: nat} (p: wff): $ p -> A. x p $;
+
+-- Reflexivity of equality
+axiom eq_refl (a: nat): $ a = a $;
+
+-- =============================================================
+-- Quantifier theorems
+-- =============================================================
+
+-- Generalize reflexivity: A. x (x = x)
+theorem gen_refl {x: nat}: $ A. x (x = x) $;
+
+-- Modus ponens under the quantifier
+theorem alim {x: nat} (p q: wff x):
+  $ A. x (p -> q) $ > $ A. x p $ > $ A. x q $;
+
+-- Trivial quantification: A. x (0 = 0) since 0 = 0 doesn't depend on x
+theorem trivial_gen {x: nat}: $ A. x (zer = zer) $;
+
+-- Combine normalization with quantification:
+-- spec normalizes sb(R, P) to R, then ax_5 generalizes (R doesn't depend on x)
+theorem spec_gen {x: nat}: $ A. x R $;
+
+-- Monotonicity: from p -> q, derive A. x p -> A. x q
+theorem gen_mono {x: nat} (p q: wff x):
+  $ p -> q $ > $ A. x p -> A. x q $;
+
+-- =============================================================
+-- Nat-level equivalence relation (for term-level rewriting)
+-- =============================================================
+
+term nat_eq (a b: nat): wff;
+--| @relation nat nat_eq nat_eq_refl nat_eq_trans nat_eq_sym _
+
+axiom nat_eq_refl (a: nat): $ nat_eq a a $;
+axiom nat_eq_trans (a b c: nat): $ nat_eq a b $ > $ nat_eq b c $ > $ nat_eq a c $;
+axiom nat_eq_sym (a b: nat): $ nat_eq a b $ > $ nat_eq b a $;
+
+-- =============================================================
+-- Term-level and formula-level substitution (with bound vars)
+-- =============================================================
+
+term sb_t (t: nat) {x: nat} (a: nat x): nat;
+term sb_f (t: nat) {x: nat} (p: wff x): wff;
+
+-- Rewrite rules for sb_f (wff-level, using bi)
+--| @rewrite
+axiom sb_f_im {x: nat} (t: nat) (p q: wff x):
+  $ sb_f t x (p -> q) <-> (sb_f t x p -> sb_f t x q) $;
+--| @rewrite
+axiom sb_f_not {x: nat} (t: nat) (p: wff x):
+  $ sb_f t x (~ p) <-> ~ (sb_f t x p) $;
+--| @rewrite
+axiom sb_f_eq {x: nat} (t: nat) (a b: nat x):
+  $ sb_f t x (a = b) <-> (sb_t t x a = sb_t t x b) $;
+
+-- Rewrite rules for sb_t (nat-level, using nat_eq)
+--| @rewrite
+axiom sb_t_var {x: nat} (t: nat): $ nat_eq (sb_t t x x) t $;
+--| @rewrite
+axiom sb_t_zer {x: nat} (t: nat): $ nat_eq (sb_t t x zer) zer $;
+--| @rewrite
+axiom sb_t_suc {x: nat} (t: nat) (a: nat x):
+  $ nat_eq (sb_t t x (S a)) (S (sb_t t x a)) $;
+
+-- Congruence rules
+--| @congr
+axiom eq_congr (a b c d: nat):
+  $ nat_eq a b $ > $ nat_eq c d $ > $ (a = c) <-> (b = d) $;
+--| @congr
+axiom suc_congr (a b: nat):
+  $ nat_eq a b $ > $ nat_eq (S a) (S b) $;
+
+-- Universal instantiation with normalization
+--| @normalize conc
+axiom ax_inst {x: nat} (t: nat) (p: wff x): $ A. x p $ > $ sb_f t x p $;
+
+-- =============================================================
+-- Universal instantiation theorems
+-- =============================================================
+
+-- A. x (x = zer) |- S zer = zer
+theorem inst_eq {x: nat}: $ A. x (x = zer) $ > $ S zer = zer $;
+
+-- A. x (x = x) |- S zer = S zer
+theorem inst_refl {x: nat}: $ A. x (x = x) $ > $ S zer = S zer $;
+
+-- A. x (S x = S x) |- S (S zer) = S (S zer)
+theorem inst_suc {x: nat}: $ A. x (S x = S x) $ > $ S (S zer) = S (S zer) $;
+
+-- A. x (x = zer -> zer = x) |- S zer = zer -> zer = S zer
+theorem inst_im {x: nat}:
+  $ A. x (x = zer -> zer = x) $ > $ S zer = zer -> zer = S zer $;

@@ -1,0 +1,3 @@
+test_noop
+---------
+l1: $ sb Q R $ by all_elim (a := $ Q $, b := $ R $) []

@@ -223,6 +223,42 @@ pub const TheoremContext = struct {
         };
     }
 
+    /// Reverse of instantiateTemplate: given a TemplateExpr and a concrete
+    /// ExprId, solve for binder values. Returns true on success.
+    pub fn matchTemplate(
+        self: *const TheoremContext,
+        template: TemplateExpr,
+        expr_id: ExprId,
+        bindings: []?ExprId,
+    ) bool {
+        return switch (template) {
+            .binder => |idx| blk: {
+                if (idx >= bindings.len) break :blk false;
+                if (bindings[idx]) |existing| {
+                    break :blk existing == expr_id;
+                } else {
+                    bindings[idx] = expr_id;
+                    break :blk true;
+                }
+            },
+            .app => |app| blk: {
+                const node = self.interner.node(expr_id);
+                switch (node.*) {
+                    .app => |concrete| {
+                        if (concrete.term_id != app.term_id) break :blk false;
+                        if (concrete.args.len != app.args.len) break :blk false;
+                        for (app.args, concrete.args) |tmpl_arg, conc_arg| {
+                            if (!self.matchTemplate(tmpl_arg, conc_arg, bindings))
+                                break :blk false;
+                        }
+                        break :blk true;
+                    },
+                    else => break :blk false,
+                }
+            },
+        };
+    }
+
     pub fn instantiateTemplate(
         self: *TheoremContext,
         template: TemplateExpr,

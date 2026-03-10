@@ -1558,7 +1558,14 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_gen", .outcome = .pass },
     .{ .stem = "pass_dup", .outcome = .pass },
     .{ .stem = "pass_def", .outcome = .pass },
+    .{ .stem = "pass_normalize", .outcome = .pass },
+    .{ .stem = "pass_normalize_nested", .outcome = .pass },
+    .{ .stem = "pass_normalize_identity", .outcome = .pass },
+    .{ .stem = "pass_normalize_hyp", .outcome = .pass },
+    .{ .stem = "pass_normalize_noop", .outcome = .pass },
     .{ .stem = "hilbert", .outcome = .pass },
+    .{ .stem = "hilbert_quant", .outcome = .pass },
+    .{ .stem = "hilbert_russell", .outcome = .pass },
     .{
         .stem = "fail_missing_binding",
         .outcome = .{ .fail = error.MissingBinderAssignment },
@@ -1582,6 +1589,10 @@ const proof_cases = [_]ProofCase{
     .{
         .stem = "fail_unknown_label",
         .outcome = .{ .fail = error.UnknownLabel },
+    },
+    .{
+        .stem = "fail_normalize_mismatch",
+        .outcome = .{ .fail = error.ConclusionMismatch },
     },
 };
 
@@ -1616,9 +1627,24 @@ test "compiler proof cases from files" {
         var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
         switch (case.outcome) {
             .pass => {
-                const mmb = try compiler.compileMmb(allocator);
+                const mmb = compiler.compileMmb(allocator) catch |err| {
+                    std.debug.print("FAIL (compile) case={s} err={}\n", .{ case.stem, err });
+                    if (compiler.last_diagnostic) |diag| {
+                        std.debug.print("  diag: kind={} theorem={s} line={s} rule={s} name={s}\n", .{
+                            diag.kind,
+                            diag.theorem_name orelse "?",
+                            diag.line_label orelse "?",
+                            diag.rule_name orelse "?",
+                            diag.name orelse "?",
+                        });
+                    }
+                    return err;
+                };
                 defer allocator.free(mmb);
-                try mm0.verifyPair(allocator, mm0_src, mmb);
+                mm0.verifyPair(allocator, mm0_src, mmb) catch |err| {
+                    std.debug.print("FAIL (verify) case={s} err={}\n", .{ case.stem, err });
+                    return err;
+                };
             },
             .fail => |err| {
                 try std.testing.expectError(err, compiler.compileMmb(allocator));
