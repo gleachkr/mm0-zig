@@ -114,9 +114,12 @@ pub const Parser = struct {
             break :blk bindings;
         } else &.{};
         self.skipHorizontalSpace();
-        try self.expect('[');
-        const refs = try self.parseRefs();
-        try self.expect(']');
+        const refs: []const Ref = if (self.peek() == '[') blk: {
+            self.pos += 1;
+            const r = try self.parseRefs();
+            try self.expect(']');
+            break :blk r;
+        } else &.{};
         try self.expectLineEnd();
         return .{
             .label = label,

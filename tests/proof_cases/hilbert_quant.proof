@@ -1,40 +1,40 @@
 imp_refl
 --------
-l1: $ a -> ((a -> a) -> a) $ by h1 []
-l2: $ a -> (a -> a) $ by h1 []
-l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 []
+l1: $ a -> ((a -> a) -> a) $ by h1
+l2: $ a -> (a -> a) $ by h1
+l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2
 l4: $ (a -> (a -> a)) -> (a -> a) $ by mp [l1, l3]
 l5: $ a -> a $ by mp [l2, l4]
 
 spec_atom
 ---------
-l1: $ R $ by spec (a := $ R $, b := $ P $) []
+l1: $ R $ by spec (a := $ R $, b := $ P $)
 
 spec_im
 -------
-l1: $ R -> R $ by spec (a := $ R $, b := $ P -> Q $) []
+l1: $ R -> R $ by spec (a := $ R $, b := $ P -> Q $)
 
 spec_nested
 -----------
-l1: $ R -> (R -> T) $ by spec (a := $ R $, b := $ P -> (Q -> T) $) []
+l1: $ R -> (R -> T) $ by spec (a := $ R $, b := $ P -> (Q -> T) $)
 
 spec_neg
 --------
-l1: $ ~ R $ by spec (a := $ R $, b := $ ~ P $) []
+l1: $ ~ R $ by spec (a := $ R $, b := $ ~ P $)
 
 spec_complex
 ------------
-l1: $ ~ R -> R $ by spec (a := $ R $, b := $ ~ P -> Q $) []
+l1: $ ~ R -> R $ by spec (a := $ R $, b := $ ~ P -> Q $)
 
 spec_chain
 ----------
-l1: $ ~ R $ by spec (a := $ R $, b := $ ~ P $) []
-l2: $ ~ R -> (~ R -> ~ R) $ by h1 (a := $ ~ R $, b := $ ~ R $) []
+l1: $ ~ R $ by spec (a := $ R $, b := $ ~ P $)
+l2: $ ~ R -> (~ R -> ~ R) $ by h1 (a := $ ~ R $, b := $ ~ R $)
 l3: $ ~ R -> ~ R $ by mp (a := $ ~ R $, b := $ ~ R -> ~ R $) [l1, l2]
 
 gen_refl
 --------
-l1: $ x = x $ by eq_refl (a := $ x $) []
+l1: $ x = x $ by eq_refl (a := $ x $)
 l2: $ A. x (x = x) $ by ax_gen (x := $ x $, p := $ x = x $) [l1]
 
 alim
