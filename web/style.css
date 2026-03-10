@@ -361,6 +361,57 @@ textarea::selection {
   }
 }
 
+dialog {
+  border: 1px solid var(--line-strong);
+  border-radius: 1rem;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0;
+  min-width: 14rem;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 0.4);
+}
+
+dialog::backdrop {
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-title {
+  color: var(--muted);
+}
+
+#modal-close {
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85em;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem 0.85rem;
+}
+
+.example-button {
+  text-align: left;
+  border-radius: 0.6rem;
+  width: 100%;
+}
+
+.example-button.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 @media (max-width: 520px) {
   .chrome {
     padding: 0.7rem 0.8rem;

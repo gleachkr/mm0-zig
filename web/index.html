@@ -10,6 +10,31 @@
     <link rel="stylesheet" href="./style.css">
   </head>
   <body>
+    <dialog id="example-modal" aria-label="Select example">
+      <div class="modal-header">
+        <span class="modal-title">examples</span>
+        <button type="button" id="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <button
+          type="button"
+          class="example-button is-active"
+          data-example="hilbert"
+          aria-pressed="true"
+        >
+          hilbert
+        </button>
+        <button
+          type="button"
+          class="example-button"
+          data-example="hilbert_russell"
+          aria-pressed="false"
+        >
+          russell
+        </button>
+      </div>
+    </dialog>
+
     <header class="chrome">
       <div class="brand">mm0-zig</div>
 
@@ -91,6 +116,9 @@
         <span id="mmb-size" class="meta"></span>
         <button id="jump-button" type="button" hidden>
           jump to error
+        </button>
+        <button id="examples-button" type="button">
+          hilbert
         </button>
         <button id="theme-toggle" type="button">
           light

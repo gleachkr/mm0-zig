@@ -4,11 +4,23 @@ const themeKey = "mm0-zig-theme";
 const measureCanvas = document.createElement("canvas");
 const measureContext = measureCanvas.getContext("2d");
 
+const examples = {
+  hilbert: {
+    mm0: "./fixtures/hilbert.mm0",
+    proof: "./fixtures/hilbert.proof",
+  },
+  hilbert_russell: {
+    mm0: "./fixtures/hilbert_russell.mm0",
+    proof: "./fixtures/hilbert_russell.proof",
+  },
+};
+
 const ui = {
   mm0: document.querySelector("#mm0-source"),
   proof: document.querySelector("#proof-source"),
   panes: [...document.querySelectorAll(".pane")],
   tabs: [...document.querySelectorAll("[data-pane-tab]")],
+  exampleButtons: [...document.querySelectorAll("[data-example]")],
   mm0Meta: document.querySelector("#mm0-meta"),
   proofMeta: document.querySelector("#proof-meta"),
   compileStatus: document.querySelector("#compile-status"),
@@ -17,6 +29,8 @@ const ui = {
   verifyStatus: document.querySelector("#verify-status"),
   verifyTime: document.querySelector("#verify-time"),
   jump: document.querySelector("#jump-button"),
+  examplesBtn: document.querySelector("#examples-button"),
+  exampleModal: document.querySelector("#example-modal"),
   theme: document.querySelector("#theme-toggle"),
   proofShell: document.querySelector("#proof-shell"),
   inlineHighlight: document.querySelector("#proof-inline-highlight"),
@@ -33,6 +47,7 @@ let runToken = 0;
 
 initTheme();
 initTabs();
+initExamples();
 main().catch((error) => {
   renderFatal(error);
 });
@@ -46,8 +61,8 @@ async function main() {
   const [compiler, verifier, mm0Text, proofText] = await Promise.all([
     loadWasm("./compiler.wasm"),
     loadWasm("./verifier.wasm"),
-    fetchText("./fixtures/hilbert.mm0"),
-    fetchText("./fixtures/hilbert.proof"),
+    fetchText(examples.hilbert.mm0),
+    fetchText(examples.hilbert.proof),
   ]);
 
   compilerModule = compiler;
@@ -60,8 +75,38 @@ async function main() {
   ui.proof.addEventListener("input", scheduleRun);
   ui.proof.addEventListener("scroll", updateInlineDiagnosticPosition);
   ui.jump.addEventListener("click", jumpToProofDiagnostic);
+  for (const btn of ui.exampleButtons) {
+    btn.addEventListener("click", () => loadExample(btn.dataset.example));
+  }
 
   warmUpAnalysis(mm0Text, proofText);
+  await runAnalysis();
+}
+
+async function loadExample(name) {
+  const example = examples[name];
+  if (!example || !compilerModule || !verifierModule) {
+    return;
+  }
+
+  const [mm0Text, proofText] = await Promise.all([
+    fetchText(example.mm0),
+    fetchText(example.proof),
+  ]);
+
+  ui.mm0.value = mm0Text;
+  ui.proof.value = proofText;
+  updateSourceMeta();
+  clearInlineDiagnostic();
+
+  for (const btn of ui.exampleButtons) {
+    const active = btn.dataset.example === name;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  }
+  ui.examplesBtn.textContent = name;
+  ui.exampleModal.close();
+
   await runAnalysis();
 }
 
@@ -77,6 +122,16 @@ function initTabs() {
       setActivePane(tab.dataset.paneTab);
     });
   }
+}
+
+function initExamples() {
+  ui.examplesBtn.addEventListener("click", () => ui.exampleModal.showModal());
+  ui.exampleModal.addEventListener("click", (e) => {
+    if (e.target === ui.exampleModal) ui.exampleModal.close();
+  });
+  document.querySelector("#modal-close").addEventListener("click", () => {
+    ui.exampleModal.close();
+  });
 }
 
 function getStoredTheme() {

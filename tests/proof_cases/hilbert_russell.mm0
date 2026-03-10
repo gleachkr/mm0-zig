@@ -4,9 +4,9 @@ strict provable sort wff;
 sort set;
 
 term im (a b: wff): wff; infixr im: $->$ prec 25;
-term not (a: wff): wff; prefix not: $¬$ prec 41;
-term bi (a b: wff): wff; infixl bi: $↔$ prec 20;
-term all {x: set} (p: wff x): wff; prefix all: $∀$ prec 41;
+term not (a: wff): wff; prefix not: $¬$ prec 41; prefix not: $~$ prec 41;
+term bi (a b: wff): wff; infixl bi: $↔$ prec 20; infixl bi: $<->$ prec 20;
+term all {x: set} (p: wff x): wff; prefix all: $∀$ prec 41; ; prefix all: $A.$ prec 41;
 
 term R (a b: set): wff;
 term sb_f (t: set) {x: set} (p: wff x): wff;
