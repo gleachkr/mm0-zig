@@ -1,6 +1,6 @@
 russell
 --------
-l1: $ ∀ y (R y x ↔ ¬ R y y) -> (R x x ↔ ¬ R x x) $ by ax_inst (x := $ y $, t := $ x $, p := $ R y x ↔ ¬ R y y $)
+l1: $ ∀ y (R y x ↔ ¬ R y y) -> (R x x ↔ ¬ R x x) $ by ax_inst
 l2: $ (R x x ↔ ¬ R x x) -> (R x x -> ¬ R x x) $ by bi1
 l3: $ ((R x x ↔ ¬ R x x) -> (R x x -> ¬ R x x)) -> ((∀ y (R y x ↔ ¬ R y y) -> (R x x ↔ ¬ R x x)) -> (∀ y (R y x ↔ ¬ R y y) -> (R x x -> ¬ R x x))) $ by syl
 l4: $ (∀ y (R y x ↔ ¬ R y y) -> (R x x ↔ ¬ R x x)) -> (∀ y (R y x ↔ ¬ R y y) -> (R x x -> ¬ R x x)) $ by mp [l2, l3]

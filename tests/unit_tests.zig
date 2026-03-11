@@ -1402,7 +1402,7 @@ test "compiler records inference diagnostics for omitted arguments" {
     const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnifyMismatch, diag.err);
     try std.testing.expectEqualStrings(
-        "could not infer omitted rule arguments",
+        "could not infer omitted rule arguments from the line and refs",
         mm0.compilerDiagnosticSummary(diag),
     );
     try std.testing.expectEqualStrings("keep_bad", diag.theorem_name.?);
@@ -1566,6 +1566,12 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "hilbert", .outcome = .pass },
     .{ .stem = "hilbert_quant", .outcome = .pass },
     .{ .stem = "hilbert_russell", .outcome = .pass },
+    .{ .stem = "pass_view_basic", .outcome = .pass },
+    .{ .stem = "pass_view_explicit", .outcome = .pass },
+    .{ .stem = "pass_recover_basic", .outcome = .pass },
+    .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
+    .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
+    .{ .stem = "pass_struct_seq_forall_left", .outcome = .pass },
     .{
         .stem = "fail_missing_binding",
         .outcome = .{ .fail = error.MissingBinderAssignment },
@@ -1584,6 +1590,10 @@ const proof_cases = [_]ProofCase{
     },
     .{
         .stem = "fail_boundness",
+        .outcome = .{ .fail = error.BoundnessMismatch },
+    },
+    .{
+        .stem = "fail_view_boundness",
         .outcome = .{ .fail = error.BoundnessMismatch },
     },
     .{

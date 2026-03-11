@@ -63,6 +63,8 @@ axiom bi_congr (a b c d: wff):
   $ a ↔ b $ > $ c ↔ d $ > $ (a ↔ c) ↔ (b ↔ d) $;
 
 --| @normalize conc
+--| @view {x: set} (t: set) (p: wff x) (q: wff): $ ∀ x p -> q $;
+--| @recover t q p x
 axiom ax_inst {x: set} (t: set) (p: wff x):
   $ ∀ x p -> [x/t] p $;
 

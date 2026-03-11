@@ -2,3 +2,5 @@
 .zig-global-cache
 zig-out
 .direnv
+*.lec
+*.vim

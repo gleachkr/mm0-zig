@@ -8,6 +8,8 @@ const MmbWriter = @import("./mmb_writer.zig");
 const TermRecord = MmbWriter.TermRecord;
 const TheoremRecord = MmbWriter.TheoremRecord;
 const Statement = MmbWriter.Statement;
+const CompilerDiag = @import("./compiler_diag.zig");
+const CompilerViews = @import("./compiler_views.zig");
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
@@ -28,6 +30,9 @@ const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
 const ExprSlotMap = std.AutoHashMapUnmanaged(ExprId, u32);
 
+pub const ViewDecl = CompilerViews.ViewDecl;
+pub const Diagnostic = CompilerDiag.Diagnostic;
+
 pub const CheckedRef = union(enum) {
     hyp: usize,
     line: usize,
@@ -44,40 +49,6 @@ const ExprInfo = struct {
     sort_name: []const u8,
     bound: bool,
     deps: u55,
-};
-
-const DiagnosticKind = enum {
-    generic,
-    missing_proof_block,
-    extra_proof_block,
-    theorem_name_mismatch,
-    parse_assertion,
-    parse_binding,
-    inference_failed,
-    unknown_rule,
-    unknown_binder_name,
-    duplicate_binder_assignment,
-    missing_binder_assignment,
-    ref_count_mismatch,
-    unknown_hypothesis_ref,
-    unknown_label,
-    hypothesis_mismatch,
-    conclusion_mismatch,
-    duplicate_label,
-    empty_proof_block,
-    final_line_mismatch,
-};
-
-pub const Diagnostic = struct {
-    kind: DiagnosticKind,
-    err: anyerror,
-    theorem_name: ?[]const u8 = null,
-    block_name: ?[]const u8 = null,
-    line_label: ?[]const u8 = null,
-    rule_name: ?[]const u8 = null,
-    name: ?[]const u8 = null,
-    expected_name: ?[]const u8 = null,
-    span: ?Span = null,
 };
 
 const LineCol = struct {
@@ -127,6 +98,7 @@ pub const Compiler = struct {
         var parser = MM0Parser.init(self.source, arena.allocator());
         var env = GlobalEnv.init(arena.allocator());
         var registry = RewriteRegistry.init(arena.allocator());
+        var views = std.AutoHashMap(u32, ViewDecl).init(arena.allocator());
         var proof_parser = if (self.proof_source) |proof|
             ProofScriptParser.init(arena.allocator(), proof)
         else
@@ -138,6 +110,14 @@ pub const Compiler = struct {
                     if (assertion.kind != .theorem) {
                         try env.addStmt(stmt);
                         try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
+                        try CompilerViews.processViewAnnotations(
+                            arena.allocator(),
+                            &parser,
+                            &env,
+                            assertion,
+                            parser.last_annotations,
+                            &views,
+                        );
                         continue;
                     }
 
@@ -175,6 +155,7 @@ pub const Compiler = struct {
                             &parser,
                             &env,
                             &registry,
+                            &views,
                             assertion,
                             block,
                             &theorem,
@@ -184,6 +165,14 @@ pub const Compiler = struct {
 
                     try env.addStmt(stmt);
                     try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
+                    try CompilerViews.processViewAnnotations(
+                        arena.allocator(),
+                        &parser,
+                        &env,
+                        assertion,
+                        parser.last_annotations,
+                        &views,
+                    );
                 },
                 .term => |term_stmt| {
                     try env.addStmt(stmt);
@@ -222,6 +211,7 @@ pub const Compiler = struct {
         var proof_parser = ProofScriptParser.init(allocator, proof_source);
         var env = GlobalEnv.init(allocator);
         var registry = RewriteRegistry.init(allocator);
+        var views = std.AutoHashMap(u32, ViewDecl).init(allocator);
 
         var sort_names = std.ArrayListUnmanaged([]const u8){};
         var sorts = std.ArrayListUnmanaged(@import("../trusted/sorts.zig").Sort){};
@@ -294,6 +284,14 @@ pub const Compiler = struct {
                             });
                             try env.addStmt(stmt);
                             try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
+                            try CompilerViews.processViewAnnotations(
+                                allocator,
+                                &parser,
+                                &env,
+                                assertion,
+                                parser.last_annotations,
+                                &views,
+                            );
                         },
                         .theorem => {
                             const block = try proof_parser.nextBlock() orelse {
@@ -321,6 +319,7 @@ pub const Compiler = struct {
                                 &parser,
                                 &env,
                                 &registry,
+                                &views,
                                 assertion,
                                 block,
                                 &theorem,
@@ -343,6 +342,14 @@ pub const Compiler = struct {
                                 .body = body,
                             });
                             try env.addStmt(stmt);
+                            try CompilerViews.processViewAnnotations(
+                                allocator,
+                                &parser,
+                                &env,
+                                assertion,
+                                parser.last_annotations,
+                                &views,
+                            );
                         },
                     }
                 },
@@ -448,29 +455,7 @@ pub const Compiler = struct {
     }
 };
 
-pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
-    return switch (diag.kind) {
-        .generic => @errorName(diag.err),
-        .missing_proof_block => "missing proof block for theorem",
-        .extra_proof_block => "extra proof block with no matching theorem",
-        .theorem_name_mismatch => "proof block name does not match the theorem",
-        .parse_assertion => "could not parse proof line assertion",
-        .parse_binding => "could not parse binder assignment",
-        .inference_failed => "could not infer omitted rule arguments",
-        .unknown_rule => "unknown rule in proof line",
-        .unknown_binder_name => "unknown binder name in rule application",
-        .duplicate_binder_assignment => "duplicate binder assignment in rule application",
-        .missing_binder_assignment => "missing binder assignment in rule application",
-        .ref_count_mismatch => "wrong number of references for rule application",
-        .unknown_hypothesis_ref => "unknown theorem hypothesis reference",
-        .unknown_label => "unknown proof line label",
-        .hypothesis_mismatch => "rule reference does not match the expected hypothesis",
-        .conclusion_mismatch => "proof line assertion does not match the rule conclusion",
-        .duplicate_label => "duplicate proof line label",
-        .empty_proof_block => "proof block is empty",
-        .final_line_mismatch => "last proof line does not prove the theorem conclusion",
-    };
-}
+pub const diagnosticSummary = CompilerDiag.diagnosticSummary;
 
 fn lineCol(src: []const u8, pos_raw: usize) LineCol {
     const pos = @min(pos_raw, src.len);
@@ -962,6 +947,7 @@ fn checkTheoremBlock(
     parser: *MM0Parser,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
+    views: *const std.AutoHashMap(u32, ViewDecl),
     assertion: AssertionStmt,
     block: TheoremBlock,
     theorem: *TheoremContext,
@@ -1006,16 +992,6 @@ fn checkTheoremBlock(
             return error.UnknownRule;
         };
         const rule = &env.rules.items[rule_id];
-        const partial_bindings = try parseBindings(
-            self,
-            allocator,
-            parser,
-            theorem,
-            &theorem_vars,
-            assertion.name,
-            rule,
-            line,
-        );
         if (line.refs.len != rule.hyps.len) {
             self.setDiagnostic(.{
                 .kind = .ref_count_mismatch,
@@ -1068,7 +1044,39 @@ fn checkTheoremBlock(
             };
         }
 
-        const bindings = if (hasOmittedBindings(partial_bindings))
+        const partial_bindings = try parseBindings(
+            self,
+            allocator,
+            parser,
+            theorem,
+            &theorem_vars,
+            assertion.name,
+            rule,
+            line,
+        );
+        if (views.get(rule_id)) |view| {
+            CompilerViews.applyViewBindings(
+                allocator,
+                theorem,
+                &view,
+                line_expr,
+                ref_exprs,
+                partial_bindings,
+            ) catch |err| {
+                self.setDiagnostic(.{
+                    .kind = .generic,
+                    .err = err,
+                    .theorem_name = assertion.name,
+                    .line_label = line.label,
+                    .rule_name = line.rule_name,
+                    .span = line.span,
+                });
+                return err;
+            };
+        }
+
+        const had_omitted = hasOmittedBindings(partial_bindings);
+        const bindings = if (had_omitted)
             try inferBindings(
                 self,
                 allocator,
@@ -1086,6 +1094,17 @@ fn checkTheoremBlock(
                 allocator,
                 partial_bindings,
             );
+        if (!had_omitted) {
+            try validateResolvedBindings(
+                self,
+                env,
+                theorem,
+                assertion,
+                line,
+                rule,
+                bindings,
+            );
+        }
 
         const norm_spec = registry.getNormalizeSpec(rule_id);
 
@@ -1387,7 +1406,7 @@ fn parseBindings(
     theorem_name: []const u8,
     rule: *const RuleDecl,
     line: ProofLine,
-) ![]const ?ExprId {
+) ![]?ExprId {
     for (rule.arg_names) |arg_name| {
         if (arg_name == null) {
             self.setDiagnostic(.{
@@ -1578,6 +1597,37 @@ fn inferBindings(
         bindings[idx] = binding;
     }
     return bindings;
+}
+
+fn validateResolvedBindings(
+    self: *Compiler,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    rule: *const RuleDecl,
+    bindings: []const ExprId,
+) !void {
+    for (bindings, 0..) |binding, idx| {
+        validateBindingExpr(
+            env,
+            theorem,
+            assertion.args,
+            rule.args[idx],
+            binding,
+        ) catch |err| {
+            self.setDiagnostic(.{
+                .kind = .generic,
+                .err = err,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = rule.arg_names[idx],
+                .span = line.span,
+            });
+            return err;
+        };
+    }
 }
 
 // Inference only solves equalities. We still need the same sort, boundness,

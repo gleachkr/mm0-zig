@@ -1,0 +1,3 @@
+inst_use
+--------
+l1: $ A. x (P x) -> P u $ by ax_inst []

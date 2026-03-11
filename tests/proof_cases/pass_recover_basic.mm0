@@ -1,0 +1,23 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort set;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+term iff (a b: wff): wff; infixr iff: $<->$ prec 20;
+term all {x: set} (p: wff x): wff; prefix all: $A.$ prec 41;
+term pred (t: set): wff; prefix pred: $P$ prec 50;
+term sb (t: set) {x: set} (p: wff x): wff;
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+--| @rewrite
+axiom sb_pred (t: set) {x: set}: $ sb t x (P x) <-> P t $;
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+--| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
+--| @recover t q p x
+--| @normalize conc
+axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> sb t x p $;
+theorem inst_use (u: set) {x: set}: $ A. x (P x) -> P u $;
