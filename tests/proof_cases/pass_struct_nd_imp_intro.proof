@@ -1,0 +1,4 @@
+imp_intro_ctx
+------------
+
+l1: $ nd (join (hyp d) (join emp (hyp c))) (a -> b) $ by imp_intro [#1]

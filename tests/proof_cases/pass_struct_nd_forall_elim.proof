@@ -1,0 +1,4 @@
+nd_all_elim_ctx
+----------------
+
+l1: $ nd (join (hyp b) (hyp a)) (P u) $ by all_elim [#1]

@@ -17,7 +17,7 @@ const ViewSignature = struct {
     concl: *const Expr,
 };
 
-const RecoverDecl = struct {
+pub const RecoverDecl = struct {
     target_view_idx: usize,
     source_view_idx: usize,
     pattern_view_idx: usize,
@@ -28,6 +28,7 @@ pub const ViewDecl = struct {
     hyps: []const TemplateExpr,
     concl: TemplateExpr,
     num_binders: usize,
+    arg_infos: []const ArgInfo,
     /// Maps view binder index -> rule arg index, null for phantom binders.
     binder_map: []const ?usize,
     recovers: []const RecoverDecl,
@@ -90,6 +91,7 @@ pub fn processViewAnnotations(
                 .hyps = view_hyps,
                 .concl = view_concl,
                 .num_binders = sig.arg_names.len,
+                .arg_infos = sig.arg_infos,
                 .binder_map = binder_map,
                 .recovers = &.{},
             };

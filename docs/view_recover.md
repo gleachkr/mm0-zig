@@ -81,10 +81,14 @@ When the compiler checks a proof line for a rule with `@view`, it uses
 this order:
 
 1. Parse any explicit named bindings from the proof line.
-2. Match the proof line assertion against the view conclusion.
-3. Match the cited refs against the view hypotheses.
+2. If the application is simple, match the proof line assertion and refs
+   directly against the view.
+3. If omitted-bindings require normalization-aware inference, feed the
+   view constraints into the frontend solver together with the raw rule
+   constraints.
 4. Copy any solved real binders from the view into the rule bindings.
-5. Run ordinary omitted-binder inference for anything still unsolved.
+5. Run `@recover` inside the solver's fixed-point loop when enough view
+   binders are known.
 6. Validate the final bindings against the rule's sort and boundness
    constraints.
 
@@ -277,12 +281,37 @@ In particular:
 A typical pipeline is:
 
 1. parse explicit bindings
-2. apply the view
-3. run recover rules
-4. infer any remaining omitted binders
+2. feed raw-rule and view constraints into inference
+3. run recover rules inside the solver loop
+4. obtain concrete real rule binders
 5. instantiate the real rule
 6. normalize marked hypotheses or conclusion
 7. emit ordinary proof lines
 
+If a rule application does not need normalization-aware inference, the
+compiler can still use the simpler direct path for `@view` matching.
+
 The trusted verifier only checks the resulting ordinary theorem
 applications.
+
+## Interaction with structural contexts
+
+`@view` is often the cleanest way to expose a user-facing rule shape for
+systems with first-class contexts.
+
+For example, a raw rule may mention a context combiner explicitly:
+
+```mm0
+axiom imp_intro (g: ctx) (a b: wff): $ nd (g , a) b $ > $ nd g (a -> b) $;
+```
+
+When the context combiner is annotated with:
+
+```mm0
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+```
+
+both inference and post-inference checking can treat contexts modulo
+assoc / comm / unit / idem. That lets proof lines omit pointless
+structural bookkeeping while still elaborating to an ordinary theorem
+application plus generated conversion lines.

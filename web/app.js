@@ -6,12 +6,24 @@ const measureContext = measureCanvas.getContext("2d");
 
 const examples = {
   hilbert: {
+    label: "hilbert",
     mm0: "./fixtures/hilbert.mm0",
     proof: "./fixtures/hilbert.proof",
   },
   hilbert_russell: {
+    label: "russell",
     mm0: "./fixtures/hilbert_russell.mm0",
     proof: "./fixtures/hilbert_russell.proof",
+  },
+  demo_nd_excluded_middle: {
+    label: "nd excluded middle",
+    mm0: "./fixtures/demo_nd_excluded_middle.mm0",
+    proof: "./fixtures/demo_nd_excluded_middle.proof",
+  },
+  demo_seq_peirce: {
+    label: "seq peirce",
+    mm0: "./fixtures/demo_seq_peirce.mm0",
+    proof: "./fixtures/demo_seq_peirce.proof",
   },
 };
 
@@ -104,7 +116,7 @@ async function loadExample(name) {
     btn.classList.toggle("is-active", active);
     btn.setAttribute("aria-pressed", String(active));
   }
-  ui.examplesBtn.textContent = name;
+  ui.examplesBtn.textContent = example.label;
   ui.exampleModal.close();
 
   await runAnalysis();

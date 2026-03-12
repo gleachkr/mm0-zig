@@ -1,0 +1,14 @@
+excluded_middle
+----------------
+
+l1: $ emp , ¬ (a ∨ ¬ a) ⊢ ¬ (a ∨ ¬ a) $ by ax []
+l2: $ emp , ¬ (a ∨ ¬ a) , a ⊢ a $ by ax []
+l3: $ emp , ¬ (a ∨ ¬ a) , a ⊢ a ∨ ¬ a $ by or_intro_l [l2]
+l4: $ emp , ¬ (a ∨ ¬ a) , a ⊢ ¬ (a ∨ ¬ a) $ by ax []
+l5: $ emp , ¬ (a ∨ ¬ a) , a ⊢ bot $ by bot_intro [l3, l4]
+l6: $ emp , ¬ (a ∨ ¬ a) ⊢ ¬ a $ by neg_intro [l5]
+l7: $ emp , ¬ (a ∨ ¬ a) ⊢ a ∨ ¬ a $ by or_intro_r [l6]
+l8: $ emp , ¬ (a ∨ ¬ a) ⊢ ¬ (a ∨ ¬ a) $ by ax []
+l9: $ emp , ¬ (a ∨ ¬ a) ⊢ bot $ by bot_intro [l7, l8]
+l10: $ emp ⊢ ¬ ¬ (a ∨ ¬ a) $ by neg_intro [l9]
+l11: $ emp ⊢ a ∨ ¬ a $ by dne [l10]

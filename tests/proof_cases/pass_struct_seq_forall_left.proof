@@ -1,0 +1,4 @@
+seq_all_left_ctx
+----------------
+
+l1: $ seq (join (hyp b) (join (hyp (A. x (P x))) (join (hyp a) (join emp (hyp (A. y (Q y))))))) c $ by all_left [#1]

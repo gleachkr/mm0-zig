@@ -111,6 +111,22 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/hilbert_russell.proof"),
         "web-demo/fixtures/hilbert_russell.proof",
     );
+    const install_nd_em_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/demo_nd_excluded_middle.mm0"),
+        "web-demo/fixtures/demo_nd_excluded_middle.mm0",
+    );
+    const install_nd_em_proof = b.addInstallFile(
+        b.path("tests/proof_cases/demo_nd_excluded_middle.proof"),
+        "web-demo/fixtures/demo_nd_excluded_middle.proof",
+    );
+    const install_seq_peirce_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/demo_seq_peirce.mm0"),
+        "web-demo/fixtures/demo_seq_peirce.mm0",
+    );
+    const install_seq_peirce_proof = b.addInstallFile(
+        b.path("tests/proof_cases/demo_seq_peirce.proof"),
+        "web-demo/fixtures/demo_seq_peirce.proof",
+    );
     web_demo_step.dependOn(&install_compiler_wasm.step);
     web_demo_step.dependOn(&install_verifier_wasm.step);
     web_demo_step.dependOn(&install_web_assets.step);
@@ -119,6 +135,10 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_hilbert_proof.step);
     web_demo_step.dependOn(&install_hilbert_russell_mm0.step);
     web_demo_step.dependOn(&install_hilbert_russell_proof.step);
+    web_demo_step.dependOn(&install_nd_em_mm0.step);
+    web_demo_step.dependOn(&install_nd_em_proof.step);
+    web_demo_step.dependOn(&install_seq_peirce_mm0.step);
+    web_demo_step.dependOn(&install_seq_peirce_proof.step);
 
     const run_step = b.step("run", "Run the mm0-zig verifier");
     const run_cmd = b.addRunArtifact(verifier_exe);

@@ -1569,6 +1569,8 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_view_basic", .outcome = .pass },
     .{ .stem = "pass_view_explicit", .outcome = .pass },
     .{ .stem = "pass_recover_basic", .outcome = .pass },
+    .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
+    .{ .stem = "demo_seq_peirce", .outcome = .pass },
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
     .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
     .{ .stem = "pass_struct_seq_forall_left", .outcome = .pass },

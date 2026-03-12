@@ -1,0 +1,11 @@
+peirce
+------
+
+l1: $ emp , ((a → b) → a) , ¬ a , a ⇒ a $ by ax []
+l2: $ emp , ((a → b) → a) , ¬ a , a ⇒ ¬ a $ by ax []
+l3: $ emp , ((a → b) → a) , ¬ a , a ⇒ bot $ by bot_intro [l1, l2]
+l4: $ emp , ((a → b) → a) , ¬ a , a ⇒ b $ by bot_elim [l3]
+l5: $ emp , ((a → b) → a) , ¬ a ⇒ a → b $ by imp_right (g := $ emp , ((a → b) → a) , ¬ a $, a := $ a $, b := $ b $) [l4]
+l6: $ emp , ((a → b) → a) , ¬ a ⇒ bot $ by imp_app (g := $ emp , ((a → b) → a) , ¬ a $, a := $ a → b $, b := $ a $, c := $ bot $) [l5, l3]
+l7: $ emp , ((a → b) → a) ⇒ a $ by by_contra [l6]
+l8: $ emp ⇒ ((a → b) → a) → a $ by imp_right (g := $ emp $, a := $ (a → b) → a $, b := $ a $) [l7]

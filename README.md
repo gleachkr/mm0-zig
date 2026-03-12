@@ -8,18 +8,17 @@ Verifier:
 
 `mm0-zig FILE.mmb < FILE.mm0`
 
-Compiler skeleton:
+Compiler:
 
-`mm0-zigc compile INPUT.mm0 OUTPUT.mmb`
+`mm0-zigc compile INPUT.mm0 INPUT.proof OUTPUT.mmb`
 
 ## Building
 
 The shared logic lives in the reusable Zig module in `src/lib.zig`.
-There are now two binaries built on top of it:
+There are two binaries built on top of it:
 
-- `mm0-zig` in `src/main.zig`/`src/command.zig`
-- `mm0-zigc` in `src/compiler_main.zig`/
-  `src/compiler_command.zig`
+- `mm0-zig` in `src/bin/verifier/`
+- `mm0-zigc` in `src/bin/compiler/`
 
 Build both with:
 
@@ -48,6 +47,7 @@ If you cloned without submodules, run:
 ## Status
 
 - Verifier: working against the current MM0/MMB specs.
-- Compiler: front-end skeleton only for now; emission is not implemented yet.
-
-Verified against peano.mmb and peano.mm0 in ~8ms (versus ~6ms for mm0-c).
+- Compiler: supports the source proof format in `specs/proof.md`,
+  omitted-binder inference, `@view` / `@recover`, and mixed rewrite /
+  structural normalization.
+- Web demo: ships several proof-case fixtures from `tests/proof_cases`.

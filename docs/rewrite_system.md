@@ -15,14 +15,16 @@ special comments (`--|`) that declare:
   left-to-right
 - **Congruence rules**: theorems justifying rewriting inside term
   constructors
+- **Structural ACUI combiners**: context-like constructors normalized
+  modulo assoc / comm / unit / optional idem
 - **Normalize specs**: which positions (conclusion, hypotheses) of a
   rule application should be automatically normalized
 
 When a proof line applies a rule marked with `@normalize`, the compiler
-normalizes the instantiated conclusion (or hypotheses) using registered
-rewrite and congruence rules, then emits the chain of proof steps
-(rewrite applications, congruences, transitivity, symmetry, transport)
-as ordinary theorem applications in the MMB output.
+normalizes the instantiated conclusion or marked hypotheses using the
+mixed frontend normalizer. That normalizer can combine registered
+rewrite rules with structural ACUI normalization, then emits the chain
+of proof steps as ordinary theorem applications in the MMB output.
 
 ## Annotation Syntax
 
@@ -137,6 +139,47 @@ axiom suc_congr (a b: nat):
 The congruence rule's binders follow the pattern `a1, b1, a2, b2, ...`
 — pairs of original and rewritten values for each argument.
 
+### `@acui`
+
+Marks a binary constructor as a structural combiner to be normalized
+modulo assoc / comm / unit / optional idempotence.
+
+```
+--| @acui <assoc> <comm-or-_> <unit> <idem-or-_>
+```
+
+The positional order is mnemonic: `A C U I`.
+
+- `assoc`: theorem proving associativity of the combiner
+- `comm-or-_`: theorem proving commutativity, or `_` if absent
+- `unit`: the nullary unit term
+- `idem-or-_`: theorem proving idempotence, or `_` if absent
+
+Example:
+
+```
+term emp: ctx;
+term join (g h: ctx): ctx;
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+```
+
+The associated relation for the constructor's result sort must also be
+registered with `@relation`, and the constructor itself usually needs a
+`@congr` theorem.
+
+During normalization the compiler:
+
+1. normalizes children first
+2. flattens nested uses of the combiner
+3. removes unit terms
+4. sorts children deterministically when commutativity is available
+5. deduplicates equal children when idempotence is available
+6. rebuilds a canonical right-associated form
+
+The proof-producing normalizer emits ordinary theorem applications for
+assoc / comm / unit / idem and composes them with congruence,
+transitivity, symmetry, and transport as needed.
+
 ### `@normalize`
 
 Marks a rule so that its conclusion and/or hypotheses are automatically
@@ -177,12 +220,13 @@ The compiler:
 3. Checks the normalized result matches the user's assertion (`S zer = zer`)
 4. Emits transport from the raw conclusion to the normalized form
 
-## Multi-Sort Normalization
+## Mixed and Multi-Sort Normalization
 
-The normalizer supports multiple relations — one per sort. When
-normalizing a compound expression, each child is normalized using the
-relation for its sort (determined from the parent term's argument
-declarations).
+The normalizer supports multiple relations — one per sort — and can mix
+ordinary rewriting with structural ACUI normalization in the same
+expression. When normalizing a compound expression, each child is
+normalized using the relation for its sort (determined from the parent
+term's argument declarations).
 
 This enables compositional rewriting across sort boundaries. For
 example, normalizing `sb_f t x (S x = S x)`:
