@@ -1,0 +1,4 @@
+acui_order_independent_overlap
+------------------------------
+
+l1: $ emp , ((a → b) → a) , ¬ a , a ⇒ bot $ by imp_app_reordered [#1, #2]

@@ -1,0 +1,4 @@
+acui_repeated_explicit_item
+---------------------------
+
+l1: $ emp , a ⇒ a $ by dup_ax []

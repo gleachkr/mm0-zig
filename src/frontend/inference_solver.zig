@@ -9,6 +9,8 @@ const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const ViewDecl = @import("./compiler_views.zig").ViewDecl;
 const DerivedBinding = @import("./compiler_views.zig").DerivedBinding;
 const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
+const compareExprIds =
+    @import("./canonicalizer.zig").compareExprIds;
 const DerivedBindings = @import("./derived_bindings.zig");
 
 const BinderSpace = enum {
@@ -21,9 +23,20 @@ const MatchConstraint = struct {
     actual: ExprId,
 };
 
+const AcuiInterval = struct {
+    // For a single ACUI remainder binder Γ, accumulate constraints as
+    // lower_expr ⊆ Γ ⊆ upper_expr.
+    head_term_id: u32,
+    unit_term_id: u32,
+    lower_expr: ExprId,
+    upper_expr: ExprId,
+};
+
 const BranchState = struct {
     rule_bindings: []?ExprId,
     view_bindings: ?[]?ExprId,
+    rule_acui_intervals: []?AcuiInterval,
+    view_acui_intervals: ?[]?AcuiInterval,
 };
 
 pub const Solver = struct {
@@ -80,12 +93,19 @@ pub const Solver = struct {
                 .template = view.concl,
                 .actual = line_expr,
             });
-            states = try self.applyConstraints(states.items, constraints.items, .view);
+            states = try self.applyConstraints(
+                states.items,
+                constraints.items,
+                .view,
+            );
+            states = try self.finalizeAcuiStates(states.items, .view);
             states = try self.applyDerivedBindings(
                 states.items,
                 view.derived_bindings,
             );
+            states = try self.finalizeAcuiStates(states.items, .view);
             try self.propagateViewBindings(states.items, view);
+            states = try self.finalizeAcuiStates(states.items, .rule);
         } else {
             var constraints = std.ArrayListUnmanaged(MatchConstraint){};
             for (self.rule.hyps, ref_exprs) |hyp, actual| {
@@ -98,7 +118,12 @@ pub const Solver = struct {
                 .template = self.rule.concl,
                 .actual = line_expr,
             });
-            states = try self.applyConstraints(states.items, constraints.items, .rule);
+            states = try self.applyConstraints(
+                states.items,
+                constraints.items,
+                .rule,
+            );
+            states = try self.finalizeAcuiStates(states.items, .rule);
         }
 
         return try self.pickUniqueSolution(states.items);
@@ -109,6 +134,9 @@ pub const Solver = struct {
         partial_bindings: []const ?ExprId,
     ) !BranchState {
         const rule_bindings = try self.allocator.dupe(?ExprId, partial_bindings);
+        const rule_acui_intervals =
+            try self.allocator.alloc(?AcuiInterval, partial_bindings.len);
+        @memset(rule_acui_intervals, null);
         const view_bindings = if (self.view) |view| blk: {
             const result = try self.allocator.alloc(?ExprId, view.num_binders);
             @memset(result, null);
@@ -118,9 +146,17 @@ pub const Solver = struct {
             }
             break :blk result;
         } else null;
+        const view_acui_intervals = if (self.view) |view| blk: {
+            const result =
+                try self.allocator.alloc(?AcuiInterval, view.num_binders);
+            @memset(result, null);
+            break :blk result;
+        } else null;
         return .{
             .rule_bindings = rule_bindings,
             .view_bindings = view_bindings,
+            .rule_acui_intervals = rule_acui_intervals,
+            .view_acui_intervals = view_acui_intervals,
         };
     }
 
@@ -177,20 +213,67 @@ pub const Solver = struct {
         return next;
     }
 
+    fn finalizeAcuiStates(
+        self: *Solver,
+        states: []const BranchState,
+        space: BinderSpace,
+    ) anyerror!std.ArrayListUnmanaged(BranchState) {
+        var next = std.ArrayListUnmanaged(BranchState){};
+        var first_err: ?anyerror = null;
+        for (states) |state| {
+            var new_state = try self.cloneState(state);
+            self.finalizeAcuiBindings(&new_state, space) catch |err| {
+                if (first_err == null) first_err = err;
+                continue;
+            };
+            try next.append(self.allocator, new_state);
+        }
+        if (next.items.len == 0) return first_err orelse error.UnifyMismatch;
+        return next;
+    }
+
+    fn finalizeAcuiBindings(
+        self: *Solver,
+        state: *BranchState,
+        space: BinderSpace,
+    ) anyerror!void {
+        const bindings = self.getBindings(state, space);
+        const intervals = self.getAcuiIntervals(state, space);
+        for (intervals, 0..) |maybe_interval, idx| {
+            const interval = maybe_interval orelse continue;
+            if (bindings[idx]) |existing| {
+                if (!try self.exprWithinInterval(existing, interval)) {
+                    return error.UnifyMismatch;
+                }
+                continue;
+            }
+            bindings[idx] = interval.lower_expr;
+        }
+    }
+
     fn propagateViewBindings(
         self: *Solver,
         states: []BranchState,
         view: *const ViewDecl,
     ) anyerror!void {
-        _ = self;
         for (states) |*state| {
             const view_bindings = state.view_bindings orelse continue;
             for (view.binder_map, 0..) |mapping, vi| {
                 const rule_idx = mapping orelse continue;
                 const binding = view_bindings[vi] orelse continue;
                 if (state.rule_bindings[rule_idx]) |existing| {
-                    if (existing != binding) return error.ViewBindingConflict;
+                    if (!try self.bindingCompatible(existing, binding)) {
+                        return error.ViewBindingConflict;
+                    }
                 } else {
+                    if (!try self.bindingSatisfiesAcui(
+                        state,
+                        .rule,
+                        rule_idx,
+                        binding,
+                    )) {
+                        return error.ViewBindingConflict;
+                    }
                     state.rule_bindings[rule_idx] = binding;
                 }
             }
@@ -244,12 +327,21 @@ pub const Solver = struct {
                 var new_state = try self.cloneState(state);
                 const bindings = self.getBindings(&new_state, space);
                 if (idx >= bindings.len) break :blk &.{};
+                const canonical_actual = try self.canonicalizer.canonicalize(actual);
                 if (bindings[idx]) |existing| {
-                    if (!try self.bindingCompatible(existing, actual)) {
+                    if (!try self.bindingCompatible(existing, canonical_actual)) {
                         break :blk &.{};
                     }
                 } else {
-                    bindings[idx] = try self.canonicalizer.canonicalize(actual);
+                    if (!try self.bindingSatisfiesAcui(
+                        &new_state,
+                        space,
+                        idx,
+                        canonical_actual,
+                    )) {
+                        break :blk &.{};
+                    }
+                    bindings[idx] = canonical_actual;
                 }
                 const out = try self.allocator.alloc(BranchState, 1);
                 out[0] = new_state;
@@ -298,10 +390,10 @@ pub const Solver = struct {
             .app => |value| value,
             .binder => return null,
         };
-        const acui = self.registry.resolveStructuralCombiner(self.env, app.term_id)
-            orelse return null;
+        const acui = self.registry.resolveStructuralCombiner(self.env, app.term_id) orelse return null;
 
         var template_items = std.ArrayListUnmanaged(TemplateExpr){};
+        defer template_items.deinit(self.allocator);
         var remainder: ?usize = null;
         try self.collectTemplateAcuiItems(
             template,
@@ -311,50 +403,37 @@ pub const Solver = struct {
             &remainder,
         );
 
-        const canon_actual = try self.canonicalizer.canonicalize(actual);
         var actual_items = std.ArrayListUnmanaged(ExprId){};
-        try self.collectConcreteAcuiItems(canon_actual, acui, &actual_items);
+        defer actual_items.deinit(self.allocator);
+        try self.collectCanonicalAcuiSetItems(
+            actual,
+            acui.head_term_id,
+            acui.unit_term_id,
+            &actual_items,
+        );
+
+        const used = try self.allocator.alloc(bool, actual_items.items.len);
+        defer self.allocator.free(used);
+        @memset(used, false);
 
         var matches = std.ArrayListUnmanaged(BranchState){};
-        try self.matchAcuiItems(
+        try self.matchAcuiObligations(
             template_items.items,
             actual_items.items,
-            remainder,
-            space,
-            state,
-            &matches,
-            acui,
-        );
-        if (matches.items.len == 0) return &.{};
-        return try matches.toOwnedSlice(self.allocator);
-    }
-
-    fn matchAcuiItems(
-        self: *Solver,
-        template_items: []const TemplateExpr,
-        actual_items: []const ExprId,
-        remainder: ?usize,
-        space: BinderSpace,
-        state: BranchState,
-        out: *std.ArrayListUnmanaged(BranchState),
-        acui: anytype,
-    ) anyerror!void {
-        const used = try self.allocator.alloc(bool, actual_items.len);
-        @memset(used, false);
-        try self.matchAcuiItemsRec(
-            template_items,
-            actual_items,
             remainder,
             space,
             0,
             used,
             state,
-            out,
-            acui,
+            &matches,
+            acui.head_term_id,
+            acui.unit_term_id,
         );
+        if (matches.items.len == 0) return &.{};
+        return try matches.toOwnedSlice(self.allocator);
     }
 
-    fn matchAcuiItemsRec(
+    fn matchAcuiObligations(
         self: *Solver,
         template_items: []const TemplateExpr,
         actual_items: []const ExprId,
@@ -364,37 +443,24 @@ pub const Solver = struct {
         used: []bool,
         state: BranchState,
         out: *std.ArrayListUnmanaged(BranchState),
-        acui: anytype,
+        head_term_id: u32,
+        unit_term_id: u32,
     ) anyerror!void {
         if (next_item >= template_items.len) {
-            var leftover = std.ArrayListUnmanaged(ExprId){};
-            for (actual_items, used) |actual_item, is_used| {
-                if (!is_used) try leftover.append(self.allocator, actual_item);
-            }
-            const remainder_expr = try self.rebuildAcui(
-                leftover.items,
-                acui.head_term_id,
-                acui.unit_term_id,
+            try self.appendAcuiIntervalState(
+                actual_items,
+                used,
+                remainder,
+                space,
+                state,
+                out,
+                head_term_id,
+                unit_term_id,
             );
-            var final_state = try self.cloneState(state);
-            if (remainder) |idx| {
-                const bindings = self.getBindings(&final_state, space);
-                if (bindings[idx]) |existing| {
-                    if (!try self.bindingCompatible(existing, remainder_expr)) {
-                        return;
-                    }
-                } else {
-                    bindings[idx] = remainder_expr;
-                }
-            } else if (leftover.items.len != 0) {
-                return;
-            }
-            try out.append(self.allocator, final_state);
             return;
         }
 
         for (actual_items, 0..) |actual_item, actual_idx| {
-            if (used[actual_idx]) continue;
             const matches = try self.matchExpr(
                 template_items[next_item],
                 actual_item,
@@ -402,21 +468,132 @@ pub const Solver = struct {
                 state,
             );
             for (matches) |next_state| {
-                const next_used = try self.allocator.dupe(bool, used);
-                next_used[actual_idx] = true;
-                try self.matchAcuiItemsRec(
+                const was_used = used[actual_idx];
+                used[actual_idx] = true;
+                try self.matchAcuiObligations(
                     template_items,
                     actual_items,
                     remainder,
                     space,
                     next_item + 1,
-                    next_used,
+                    used,
                     next_state,
                     out,
-                    acui,
+                    head_term_id,
+                    unit_term_id,
                 );
+                used[actual_idx] = was_used;
             }
         }
+    }
+
+    fn appendAcuiIntervalState(
+        self: *Solver,
+        actual_items: []const ExprId,
+        used: []const bool,
+        remainder: ?usize,
+        space: BinderSpace,
+        state: BranchState,
+        out: *std.ArrayListUnmanaged(BranchState),
+        head_term_id: u32,
+        unit_term_id: u32,
+    ) anyerror!void {
+        if (remainder == null) {
+            for (used) |is_used| {
+                if (!is_used) return;
+            }
+            try out.append(self.allocator, try self.cloneState(state));
+            return;
+        }
+
+        const interval = try self.buildAcuiInterval(
+            actual_items,
+            used,
+            head_term_id,
+            unit_term_id,
+        );
+        var final_state = try self.cloneState(state);
+        const remainder_idx = remainder.?;
+        const intervals = self.getAcuiIntervals(&final_state, space);
+        const bindings = self.getBindings(&final_state, space);
+        const combined = if (intervals[remainder_idx]) |existing|
+            (try self.combineAcuiIntervals(existing, interval)) orelse return
+        else
+            interval;
+
+        if (bindings[remainder_idx]) |existing| {
+            if (!try self.exprWithinInterval(existing, combined)) return;
+        }
+        intervals[remainder_idx] = combined;
+        try out.append(self.allocator, final_state);
+    }
+
+    fn buildAcuiInterval(
+        self: *Solver,
+        actual_items: []const ExprId,
+        used: []const bool,
+        head_term_id: u32,
+        unit_term_id: u32,
+    ) anyerror!AcuiInterval {
+        var lower_items = std.ArrayListUnmanaged(ExprId){};
+        defer lower_items.deinit(self.allocator);
+        for (actual_items, used) |actual_item, is_used| {
+            if (!is_used) try lower_items.append(self.allocator, actual_item);
+        }
+        return .{
+            .head_term_id = head_term_id,
+            .unit_term_id = unit_term_id,
+            .lower_expr = try self.rebuildAcui(
+                lower_items.items,
+                head_term_id,
+                unit_term_id,
+            ),
+            .upper_expr = try self.rebuildAcui(
+                actual_items,
+                head_term_id,
+                unit_term_id,
+            ),
+        };
+    }
+
+    fn combineAcuiIntervals(
+        self: *Solver,
+        lhs: AcuiInterval,
+        rhs: AcuiInterval,
+    ) anyerror!?AcuiInterval {
+        if (lhs.head_term_id != rhs.head_term_id or
+            lhs.unit_term_id != rhs.unit_term_id)
+        {
+            return error.UnifyMismatch;
+        }
+
+        const lower_expr = try self.unionAcuiExprs(
+            lhs.lower_expr,
+            rhs.lower_expr,
+            lhs.head_term_id,
+            lhs.unit_term_id,
+        );
+        const upper_expr = try self.intersectAcuiExprs(
+            lhs.upper_expr,
+            rhs.upper_expr,
+            lhs.head_term_id,
+            lhs.unit_term_id,
+        );
+        if (!try self.acuiExprSubset(
+            lower_expr,
+            upper_expr,
+            lhs.head_term_id,
+            lhs.unit_term_id,
+        )) {
+            return null;
+        }
+
+        return .{
+            .head_term_id = lhs.head_term_id,
+            .unit_term_id = lhs.unit_term_id,
+            .lower_expr = lower_expr,
+            .upper_expr = upper_expr,
+        };
     }
 
     fn collectTemplateAcuiItems(
@@ -464,27 +641,92 @@ pub const Solver = struct {
         }
     }
 
-    fn collectConcreteAcuiItems(
+    fn collectCanonicalAcuiSetItems(
         self: *Solver,
         expr_id: ExprId,
-        acui: anytype,
+        head_term_id: u32,
+        unit_term_id: u32,
+        out: *std.ArrayListUnmanaged(ExprId),
+    ) anyerror!void {
+        try self.collectConcreteAcuiSetItems(
+            try self.canonicalizer.canonicalize(expr_id),
+            head_term_id,
+            unit_term_id,
+            out,
+        );
+    }
+
+    fn collectConcreteAcuiSetItems(
+        self: *Solver,
+        expr_id: ExprId,
+        head_term_id: u32,
+        unit_term_id: u32,
         out: *std.ArrayListUnmanaged(ExprId),
     ) anyerror!void {
         const node = self.theorem.interner.node(expr_id);
         switch (node.*) {
-            .variable => try out.append(self.allocator, expr_id),
+            .variable => try self.appendAcuiSetItem(out, expr_id),
             .app => |app| {
-                if (app.term_id == acui.head_term_id and app.args.len == 2) {
-                    try self.collectConcreteAcuiItems(app.args[0], acui, out);
-                    try self.collectConcreteAcuiItems(app.args[1], acui, out);
+                if (app.term_id == head_term_id and app.args.len == 2) {
+                    try self.collectConcreteAcuiSetItems(
+                        app.args[0],
+                        head_term_id,
+                        unit_term_id,
+                        out,
+                    );
+                    try self.collectConcreteAcuiSetItems(
+                        app.args[1],
+                        head_term_id,
+                        unit_term_id,
+                        out,
+                    );
                     return;
                 }
-                if (app.term_id == acui.unit_term_id and app.args.len == 0) {
+                if (app.term_id == unit_term_id and app.args.len == 0) {
                     return;
                 }
-                try out.append(self.allocator, expr_id);
+                try self.appendAcuiSetItem(out, expr_id);
             },
         }
+    }
+
+    fn appendAcuiSetItem(
+        self: *Solver,
+        out: *std.ArrayListUnmanaged(ExprId),
+        expr_id: ExprId,
+    ) anyerror!void {
+        if (out.items.len == 0) {
+            try out.append(self.allocator, expr_id);
+            return;
+        }
+
+        switch (compareExprIds(
+            self.theorem,
+            out.items[out.items.len - 1],
+            expr_id,
+        )) {
+            .lt => {
+                try out.append(self.allocator, expr_id);
+                return;
+            },
+            .eq => return,
+            .gt => {},
+        }
+
+        var insert_at: usize = 0;
+        while (insert_at < out.items.len) : (insert_at += 1) {
+            switch (compareExprIds(
+                self.theorem,
+                out.items[insert_at],
+                expr_id,
+            )) {
+                .lt => continue,
+                .eq => return,
+                .gt => break,
+            }
+        }
+
+        try out.insert(self.allocator, insert_at, expr_id);
     }
 
     fn rebuildAcui(
@@ -555,6 +797,168 @@ pub const Solver = struct {
         };
     }
 
+    fn getAcuiIntervals(
+        self: *Solver,
+        state: *BranchState,
+        space: BinderSpace,
+    ) []?AcuiInterval {
+        _ = self;
+        return switch (space) {
+            .rule => state.rule_acui_intervals,
+            .view => state.view_acui_intervals.?,
+        };
+    }
+
+    fn bindingSatisfiesAcui(
+        self: *Solver,
+        state: *BranchState,
+        space: BinderSpace,
+        idx: usize,
+        expr_id: ExprId,
+    ) anyerror!bool {
+        const intervals = self.getAcuiIntervals(state, space);
+        if (idx >= intervals.len) return true;
+        const interval = intervals[idx] orelse return true;
+        return try self.exprWithinInterval(expr_id, interval);
+    }
+
+    fn exprWithinInterval(
+        self: *Solver,
+        expr_id: ExprId,
+        interval: AcuiInterval,
+    ) anyerror!bool {
+        const canonical_expr = try self.canonicalizer.canonicalize(expr_id);
+        return try self.acuiExprSubset(
+            interval.lower_expr,
+            canonical_expr,
+            interval.head_term_id,
+            interval.unit_term_id,
+        ) and try self.acuiExprSubset(
+            canonical_expr,
+            interval.upper_expr,
+            interval.head_term_id,
+            interval.unit_term_id,
+        );
+    }
+
+    fn acuiExprSubset(
+        self: *Solver,
+        lhs_expr: ExprId,
+        rhs_expr: ExprId,
+        head_term_id: u32,
+        unit_term_id: u32,
+    ) anyerror!bool {
+        var lhs_items = std.ArrayListUnmanaged(ExprId){};
+        defer lhs_items.deinit(self.allocator);
+        var rhs_items = std.ArrayListUnmanaged(ExprId){};
+        defer rhs_items.deinit(self.allocator);
+        try self.collectCanonicalAcuiSetItems(
+            lhs_expr,
+            head_term_id,
+            unit_term_id,
+            &lhs_items,
+        );
+        try self.collectCanonicalAcuiSetItems(
+            rhs_expr,
+            head_term_id,
+            unit_term_id,
+            &rhs_items,
+        );
+        return sortedExprSetIsSubset(
+            self.theorem,
+            lhs_items.items,
+            rhs_items.items,
+        );
+    }
+
+    fn unionAcuiExprs(
+        self: *Solver,
+        lhs_expr: ExprId,
+        rhs_expr: ExprId,
+        head_term_id: u32,
+        unit_term_id: u32,
+    ) anyerror!ExprId {
+        var lhs_items = std.ArrayListUnmanaged(ExprId){};
+        defer lhs_items.deinit(self.allocator);
+        var rhs_items = std.ArrayListUnmanaged(ExprId){};
+        defer rhs_items.deinit(self.allocator);
+        try self.collectCanonicalAcuiSetItems(
+            lhs_expr,
+            head_term_id,
+            unit_term_id,
+            &lhs_items,
+        );
+        try self.collectCanonicalAcuiSetItems(
+            rhs_expr,
+            head_term_id,
+            unit_term_id,
+            &rhs_items,
+        );
+
+        var merged = std.ArrayListUnmanaged(ExprId){};
+        defer merged.deinit(self.allocator);
+        try merged.ensureTotalCapacity(
+            self.allocator,
+            lhs_items.items.len + rhs_items.items.len,
+        );
+        try appendSortedExprSetUnion(
+            self.theorem,
+            self.allocator,
+            &merged,
+            lhs_items.items,
+            rhs_items.items,
+        );
+        return try self.rebuildAcui(
+            merged.items,
+            head_term_id,
+            unit_term_id,
+        );
+    }
+
+    fn intersectAcuiExprs(
+        self: *Solver,
+        lhs_expr: ExprId,
+        rhs_expr: ExprId,
+        head_term_id: u32,
+        unit_term_id: u32,
+    ) anyerror!ExprId {
+        var lhs_items = std.ArrayListUnmanaged(ExprId){};
+        defer lhs_items.deinit(self.allocator);
+        var rhs_items = std.ArrayListUnmanaged(ExprId){};
+        defer rhs_items.deinit(self.allocator);
+        try self.collectCanonicalAcuiSetItems(
+            lhs_expr,
+            head_term_id,
+            unit_term_id,
+            &lhs_items,
+        );
+        try self.collectCanonicalAcuiSetItems(
+            rhs_expr,
+            head_term_id,
+            unit_term_id,
+            &rhs_items,
+        );
+
+        var merged = std.ArrayListUnmanaged(ExprId){};
+        defer merged.deinit(self.allocator);
+        try merged.ensureTotalCapacity(
+            self.allocator,
+            @min(lhs_items.items.len, rhs_items.items.len),
+        );
+        try appendSortedExprSetIntersection(
+            self.theorem,
+            self.allocator,
+            &merged,
+            lhs_items.items,
+            rhs_items.items,
+        );
+        return try self.rebuildAcui(
+            merged.items,
+            head_term_id,
+            unit_term_id,
+        );
+    }
+
     fn bindingCompatible(
         self: *Solver,
         lhs: ExprId,
@@ -575,9 +979,16 @@ pub const Solver = struct {
                 try self.allocator.dupe(?ExprId, bindings)
             else
                 null,
+            .rule_acui_intervals = try self.allocator.dupe(
+                ?AcuiInterval,
+                state.rule_acui_intervals,
+            ),
+            .view_acui_intervals = if (state.view_acui_intervals) |intervals|
+                try self.allocator.dupe(?AcuiInterval, intervals)
+            else
+                null,
         };
     }
-
 };
 
 fn sameRuleBindings(lhs: []const ?ExprId, rhs: []const ?ExprId) bool {
@@ -586,4 +997,84 @@ fn sameRuleBindings(lhs: []const ?ExprId, rhs: []const ?ExprId) bool {
         if (l != r) return false;
     }
     return true;
+}
+
+fn sortedExprSetIsSubset(
+    theorem: *const TheoremContext,
+    lhs: []const ExprId,
+    rhs: []const ExprId,
+) bool {
+    var lhs_idx: usize = 0;
+    var rhs_idx: usize = 0;
+    while (lhs_idx < lhs.len and rhs_idx < rhs.len) {
+        switch (compareExprIds(theorem, lhs[lhs_idx], rhs[rhs_idx])) {
+            .lt => return false,
+            .eq => {
+                lhs_idx += 1;
+                rhs_idx += 1;
+            },
+            .gt => rhs_idx += 1,
+        }
+    }
+    return lhs_idx == lhs.len;
+}
+
+fn appendSortedExprSetUnion(
+    theorem: *const TheoremContext,
+    allocator: std.mem.Allocator,
+    out: *std.ArrayListUnmanaged(ExprId),
+    lhs: []const ExprId,
+    rhs: []const ExprId,
+) !void {
+    var lhs_idx: usize = 0;
+    var rhs_idx: usize = 0;
+    while (lhs_idx < lhs.len or rhs_idx < rhs.len) {
+        if (lhs_idx >= lhs.len) {
+            try out.append(allocator, rhs[rhs_idx]);
+            rhs_idx += 1;
+            continue;
+        }
+        if (rhs_idx >= rhs.len) {
+            try out.append(allocator, lhs[lhs_idx]);
+            lhs_idx += 1;
+            continue;
+        }
+        switch (compareExprIds(theorem, lhs[lhs_idx], rhs[rhs_idx])) {
+            .lt => {
+                try out.append(allocator, lhs[lhs_idx]);
+                lhs_idx += 1;
+            },
+            .eq => {
+                try out.append(allocator, lhs[lhs_idx]);
+                lhs_idx += 1;
+                rhs_idx += 1;
+            },
+            .gt => {
+                try out.append(allocator, rhs[rhs_idx]);
+                rhs_idx += 1;
+            },
+        }
+    }
+}
+
+fn appendSortedExprSetIntersection(
+    theorem: *const TheoremContext,
+    allocator: std.mem.Allocator,
+    out: *std.ArrayListUnmanaged(ExprId),
+    lhs: []const ExprId,
+    rhs: []const ExprId,
+) !void {
+    var lhs_idx: usize = 0;
+    var rhs_idx: usize = 0;
+    while (lhs_idx < lhs.len and rhs_idx < rhs.len) {
+        switch (compareExprIds(theorem, lhs[lhs_idx], rhs[rhs_idx])) {
+            .lt => lhs_idx += 1,
+            .eq => {
+                try out.append(allocator, lhs[lhs_idx]);
+                lhs_idx += 1;
+                rhs_idx += 1;
+            },
+            .gt => rhs_idx += 1,
+        }
+    }
 }

@@ -1,0 +1,4 @@
+acui_remainder_overlap
+----------------------
+
+l1: $ emp , ((a → b) → a) , ¬ a ⇒ bot $ by imp_app [#1, #2]
