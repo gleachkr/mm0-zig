@@ -1,0 +1,3 @@
+abs_phantoms
+------------
+l1: $ ~ b $ by ax_ctx (x := $ x $) [#1, #2]

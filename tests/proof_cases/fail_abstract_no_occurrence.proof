@@ -1,0 +1,3 @@
+abs_no_occurrence
+-----------------
+l1: $ top $ by ax_ctx (x := $ x $) [#1, #2]

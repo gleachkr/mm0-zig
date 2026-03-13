@@ -1,0 +1,7 @@
+delimiter $ ( ) $;
+provable sort wff;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+--| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ p $ > $ q $
+--| @abstract r p q x a z
+axiom bad_binder {x: wff} (a b: wff) (r: wff x):
+  $ sb a x r $ > $ sb b x r $;

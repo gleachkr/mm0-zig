@@ -1,0 +1,8 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort nat;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+--| @view {x: wff} (a: wff) (b: nat) (r: wff x) (p q: wff): $ p $ > $ q $
+--| @abstract r p q x a b
+axiom bad_sort {x: wff} (a: wff) (r: wff x):
+  $ sb a x r $ > $ sb a x r $;

@@ -1569,6 +1569,15 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_view_basic", .outcome = .pass },
     .{ .stem = "pass_view_explicit", .outcome = .pass },
     .{ .stem = "pass_recover_basic", .outcome = .pass },
+    .{ .stem = "pass_abstract_basic", .outcome = .pass },
+    .{ .stem = "pass_abstract_repeated", .outcome = .pass },
+    .{ .stem = "pass_abstract_view_phantoms", .outcome = .pass },
+    .{ .stem = "pass_abstract_explicit_target", .outcome = .pass },
+    .{ .stem = "pass_abstract_chain_recover", .outcome = .pass },
+    .{ .stem = "pass_abstract_normalize", .outcome = .pass },
+    .{ .stem = "pass_dummy_hole", .outcome = .pass },
+    .{ .stem = "pass_dummy_explicit_override", .outcome = .pass },
+    .{ .stem = "demo_prop_cnf", .outcome = .pass },
     .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
     .{ .stem = "demo_seq_peirce", .outcome = .pass },
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
@@ -1605,6 +1614,46 @@ const proof_cases = [_]ProofCase{
     .{
         .stem = "fail_normalize_mismatch",
         .outcome = .{ .fail = error.ConclusionMismatch },
+    },
+    .{
+        .stem = "fail_abstract_no_occurrence",
+        .outcome = .{ .fail = error.AbstractNoPlugOccurrence },
+    },
+    .{
+        .stem = "fail_abstract_structure_mismatch",
+        .outcome = .{ .fail = error.AbstractStructureMismatch },
+    },
+    .{
+        .stem = "fail_abstract_sort_mismatch",
+        .outcome = .{ .fail = error.AbstractPlugSortMismatch },
+    },
+    .{
+        .stem = "fail_abstract_conflict",
+        .outcome = .{ .fail = error.AbstractConflict },
+    },
+    .{
+        .stem = "fail_abstract_unknown_binder",
+        .outcome = .{ .fail = error.UnknownAbstractBinder },
+    },
+    .{
+        .stem = "fail_abstract_without_view",
+        .outcome = .{ .fail = error.AbstractWithoutView },
+    },
+    .{
+        .stem = "fail_dummy_unknown_binder",
+        .outcome = .{ .fail = error.UnknownDummyBinder },
+    },
+    .{
+        .stem = "fail_dummy_duplicate",
+        .outcome = .{ .fail = error.DuplicateDummyBinder },
+    },
+    .{
+        .stem = "fail_dummy_nonbound_binder",
+        .outcome = .{ .fail = error.DummyRequiresBoundBinder },
+    },
+    .{
+        .stem = "fail_dummy_sort_restriction",
+        .outcome = .{ .fail = error.DummyFreeSort },
     },
 };
 
@@ -1708,4 +1757,40 @@ test "compiler emits name, var, and hyp index tables" {
     try std.testing.expectEqual(@as(usize, 2), hs_hyps.len());
     try std.testing.expectEqualStrings("#1", (try hs_hyps.get(0)).?);
     try std.testing.expectEqualStrings("#2", (try hs_hyps.get(1)).?);
+}
+
+test "compiler records theorem-local dummy vars in theorem var table" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(allocator, "pass_dummy_hole", "mm0");
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_dummy_hole",
+        "proof",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb_bytes = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb_bytes);
+
+    const mmb = try Mmb.parse(allocator, mmb_bytes);
+    var theorem_id: ?u32 = null;
+    var idx: u32 = 0;
+    while (idx < mmb.header.num_thms) : (idx += 1) {
+        const maybe_name = try mmb.theoremName(idx);
+        if (maybe_name) |name| {
+            if (std.mem.eql(u8, name, "dummy_hole")) {
+                theorem_id = idx;
+                break;
+            }
+        }
+    }
+
+    const dummy_hole_id = theorem_id orelse return error.MissingTheorem;
+    const vars = (try mmb.theoremVarNames(dummy_hole_id)).?;
+    try std.testing.expectEqual(@as(usize, 3), vars.len());
+    try std.testing.expectEqualStrings("a", (try vars.get(0)).?);
+    try std.testing.expectEqualStrings("b", (try vars.get(1)).?);
+    try std.testing.expectEqual(@as(?[]const u8, null), try vars.get(2));
 }

@@ -2,6 +2,8 @@ const std = @import("std");
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 const Expr = @import("../trusted/expressions.zig").Expr;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
+const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
+const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
 const TermStmt = @import("../trusted/parse.zig").TermStmt;
 
 pub const ExprId = u32;
@@ -21,6 +23,12 @@ pub const ExprNode = union(enum) {
         term_id: u32,
         args: []const ExprId,
     };
+};
+
+pub const DummyInfo = struct {
+    sort_name: []const u8,
+    sort_id: u8,
+    deps: u55,
 };
 
 const ExprNodeContext = struct {
@@ -132,7 +140,9 @@ pub const TheoremContext = struct {
     parser_vars: std.AutoHashMapUnmanaged(*const Expr, VarId) = .empty,
     theorem_vars: std.ArrayListUnmanaged(ExprId) = .{},
     theorem_hyps: std.ArrayListUnmanaged(ExprId) = .{},
+    theorem_dummies: std.ArrayListUnmanaged(DummyInfo) = .{},
     next_dummy_id: DummyVarId = 0,
+    next_dummy_dep: u32 = 0,
 
     pub fn init(allocator: std.mem.Allocator) TheoremContext {
         return .{
@@ -145,6 +155,7 @@ pub const TheoremContext = struct {
         self.interner.deinit();
         self.theorem_vars.deinit(self.allocator);
         self.theorem_hyps.deinit(self.allocator);
+        self.theorem_dummies.deinit(self.allocator);
         self.parser_vars.deinit(self.allocator);
     }
 
@@ -168,9 +179,15 @@ pub const TheoremContext = struct {
 
     pub fn seedArgs(
         self: *TheoremContext,
+        arg_infos: []const ArgInfo,
         arg_exprs: []const *const Expr,
     ) !void {
         try self.seedBinderCount(arg_exprs.len);
+        var next_bound_dep: u32 = 0;
+        for (arg_infos) |arg| {
+            if (arg.bound) next_bound_dep += 1;
+        }
+        self.next_dummy_dep = next_bound_dep;
         for (arg_exprs, 0..) |arg_expr, idx| {
             try self.parser_vars.put(
                 self.allocator,
@@ -181,23 +198,36 @@ pub const TheoremContext = struct {
     }
 
     pub fn seedTerm(self: *TheoremContext, stmt: TermStmt) !void {
-        try self.seedArgs(stmt.arg_exprs);
+        try self.seedArgs(stmt.args, stmt.arg_exprs);
     }
 
     pub fn seedAssertion(
         self: *TheoremContext,
         stmt: AssertionStmt,
     ) !void {
-        try self.seedArgs(stmt.arg_exprs);
+        try self.seedArgs(stmt.args, stmt.arg_exprs);
         for (stmt.hyps) |hyp| {
             const hyp_id = try self.internParsedExpr(hyp);
             try self.theorem_hyps.append(self.allocator, hyp_id);
         }
     }
 
-    pub fn addDummyVar(self: *TheoremContext) !ExprId {
+    pub fn addDummyVar(
+        self: *TheoremContext,
+        parser: *const MM0Parser,
+        arg: ArgInfo,
+    ) !ExprId {
+        const sort_id = parser.sort_names.get(arg.sort_name) orelse {
+            return error.UnknownSort;
+        };
         const dummy_id = self.next_dummy_id;
         self.next_dummy_id = try std.math.add(DummyVarId, dummy_id, 1);
+        try self.theorem_dummies.append(self.allocator, .{
+            .sort_name = arg.sort_name,
+            .sort_id = sort_id,
+            .deps = @as(u55, 1) << @intCast(self.next_dummy_dep),
+        });
+        self.next_dummy_dep = try std.math.add(u32, self.next_dummy_dep, 1);
         return try self.interner.internVar(.{ .dummy_var = dummy_id });
     }
 

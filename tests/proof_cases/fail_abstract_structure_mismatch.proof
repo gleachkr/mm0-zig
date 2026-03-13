@@ -1,0 +1,3 @@
+abs_structure_mismatch
+----------------------
+l1: $ b -> b $ by ax_ctx (x := $ x $) [#1, #2]

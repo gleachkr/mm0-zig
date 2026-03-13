@@ -1,0 +1,28 @@
+delimiter $ ( ) $;
+provable sort wff;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+term iff (a b: wff): wff; infixr iff: $<->$ prec 20;
+term top: wff;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+--| @rewrite
+axiom sb_var (t: wff) {x: wff}: $ sb t x x <-> t $;
+--| @rewrite
+axiom sb_top (t: wff) {x: wff}: $ sb t x top <-> top $;
+--| @rewrite
+axiom sb_imp (t: wff) {x: wff} (a b: wff x):
+  $ sb t x (a -> b) <-> (sb t x a -> sb t x b) $;
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+--| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
+--| @abstract r p q x a b
+--| @normalize hyp1 conc
+axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
+  $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
+theorem abs_explicit {x: wff} (a b: wff):
+  $ a <-> b $ > $ a -> top $ > $ b -> top $;

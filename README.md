@@ -48,6 +48,6 @@ If you cloned without submodules, run:
 
 - Verifier: working against the current MM0/MMB specs.
 - Compiler: supports the source proof format in `specs/proof.md`,
-  omitted-binder inference, `@view` / `@recover`, and mixed rewrite /
-  structural normalization.
+  omitted-binder inference, `@view` / `@recover` / `@abstract` /
+  `@dummy`, and mixed rewrite / structural normalization.
 - Web demo: ships several proof-case fixtures from `tests/proof_cases`.

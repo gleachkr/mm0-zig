@@ -15,6 +15,11 @@ const examples = {
     mm0: "./fixtures/hilbert_russell.mm0",
     proof: "./fixtures/hilbert_russell.proof",
   },
+  demo_prop_cnf: {
+    label: "prop cnf",
+    mm0: "./fixtures/demo_prop_cnf.mm0",
+    proof: "./fixtures/demo_prop_cnf.proof",
+  },
   demo_nd_excluded_middle: {
     label: "nd excluded middle",
     mm0: "./fixtures/demo_nd_excluded_middle.mm0",

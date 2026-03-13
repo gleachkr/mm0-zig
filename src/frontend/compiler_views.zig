@@ -4,6 +4,7 @@ const RuleDecl = @import("./compiler_env.zig").RuleDecl;
 const ExprId = @import("./compiler_expr.zig").ExprId;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
+const DerivedBindings = @import("./derived_bindings.zig");
 const Expr = @import("../trusted/expressions.zig").Expr;
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
@@ -17,12 +18,9 @@ const ViewSignature = struct {
     concl: *const Expr,
 };
 
-pub const RecoverDecl = struct {
-    target_view_idx: usize,
-    source_view_idx: usize,
-    pattern_view_idx: usize,
-    hole_view_idx: usize,
-};
+pub const RecoverDecl = DerivedBindings.RecoverDecl;
+pub const AbstractDecl = DerivedBindings.AbstractDecl;
+pub const DerivedBinding = DerivedBindings.DerivedBinding;
 
 pub const ViewDecl = struct {
     hyps: []const TemplateExpr,
@@ -31,7 +29,7 @@ pub const ViewDecl = struct {
     arg_infos: []const ArgInfo,
     /// Maps view binder index -> rule arg index, null for phantom binders.
     binder_map: []const ?usize,
-    recovers: []const RecoverDecl,
+    derived_bindings: []const DerivedBinding,
 };
 
 pub fn processViewAnnotations(
@@ -46,11 +44,12 @@ pub fn processViewAnnotations(
     const rule = &env.rules.items[rule_id];
     const view_prefix = "@view ";
     const recover_prefix = "@recover ";
+    const abstract_prefix = "@abstract ";
 
     var maybe_view: ?ViewDecl = null;
     var view_sig: ?ViewSignature = null;
-    var recovers = std.ArrayListUnmanaged(RecoverDecl){};
-    defer recovers.deinit(allocator);
+    var derived_bindings = std.ArrayListUnmanaged(DerivedBinding){};
+    defer derived_bindings.deinit(allocator);
 
     for (annotations) |ann| {
         if (std.mem.startsWith(u8, ann, view_prefix)) {
@@ -93,7 +92,7 @@ pub fn processViewAnnotations(
                 .num_binders = sig.arg_names.len,
                 .arg_infos = sig.arg_infos,
                 .binder_map = binder_map,
-                .recovers = &.{},
+                .derived_bindings = &.{},
             };
             view_sig = sig;
             continue;
@@ -102,26 +101,40 @@ pub fn processViewAnnotations(
         if (std.mem.startsWith(u8, ann, recover_prefix)) {
             const sig = view_sig orelse return error.RecoverWithoutView;
             const view = maybe_view orelse return error.RecoverWithoutView;
-            try recovers.append(
+            try derived_bindings.append(
                 allocator,
-                try parseRecoverAnnotation(
+                .{ .recover = try parseRecoverAnnotation(
                     ann[recover_prefix.len..],
                     sig,
                     view.binder_map,
-                ),
+                ) },
+            );
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, ann, abstract_prefix)) {
+            const sig = view_sig orelse return error.AbstractWithoutView;
+            const view = maybe_view orelse return error.AbstractWithoutView;
+            try derived_bindings.append(
+                allocator,
+                .{ .abstract = try parseAbstractAnnotation(
+                    ann[abstract_prefix.len..],
+                    sig,
+                    view.binder_map,
+                ) },
             );
         }
     }
 
     if (maybe_view) |*view| {
-        view.recovers = try recovers.toOwnedSlice(allocator);
+        view.derived_bindings = try derived_bindings.toOwnedSlice(allocator);
         try views.put(rule_id, view.*);
     }
 }
 
 pub fn applyViewBindings(
     allocator: std.mem.Allocator,
-    theorem: *const TheoremContext,
+    theorem: *TheoremContext,
     view: *const ViewDecl,
     line_expr: ExprId,
     ref_exprs: []const ExprId,
@@ -144,9 +157,11 @@ pub fn applyViewBindings(
         }
     }
 
-    for (view.recovers) |recover| {
-        try applyRecoverBinding(theorem, view_bindings, recover);
-    }
+    try DerivedBindings.applyDerivedBindings(
+        theorem,
+        view_bindings,
+        view.derived_bindings,
+    );
 
     for (view.binder_map, 0..) |mapping, vi| {
         const rule_idx = mapping orelse continue;
@@ -255,6 +270,75 @@ fn parseRecoverAnnotation(
     };
 }
 
+fn parseAbstractAnnotation(
+    text: []const u8,
+    sig: ViewSignature,
+    binder_map: []const ?usize,
+) !AbstractDecl {
+    var it = std.mem.tokenizeAny(
+        u8,
+        std.mem.trimRight(u8, text, " \t\r\n;"),
+        " \t\r\n",
+    );
+    const target_name = it.next() orelse return error.InvalidAbstractAnnotation;
+    const left_name = it.next() orelse return error.InvalidAbstractAnnotation;
+    const right_name = it.next() orelse return error.InvalidAbstractAnnotation;
+    const hole_name = it.next() orelse return error.InvalidAbstractAnnotation;
+    const left_plug_name = it.next() orelse return error.InvalidAbstractAnnotation;
+    const right_plug_name = it.next() orelse return error.InvalidAbstractAnnotation;
+    if (it.next() != null) return error.InvalidAbstractAnnotation;
+
+    const target_view_idx = findViewBinderIndex(sig, target_name) orelse {
+        return error.UnknownAbstractBinder;
+    };
+    const left_view_idx = findViewBinderIndex(sig, left_name) orelse {
+        return error.UnknownAbstractBinder;
+    };
+    const right_view_idx = findViewBinderIndex(sig, right_name) orelse {
+        return error.UnknownAbstractBinder;
+    };
+    const hole_view_idx = findViewBinderIndex(sig, hole_name) orelse {
+        return error.UnknownAbstractBinder;
+    };
+    const left_plug_view_idx = findViewBinderIndex(sig, left_plug_name) orelse {
+        return error.UnknownAbstractBinder;
+    };
+    const right_plug_view_idx = findViewBinderIndex(sig, right_plug_name) orelse {
+        return error.UnknownAbstractBinder;
+    };
+
+    if (binder_map[target_view_idx] == null) {
+        return error.AbstractTargetNotRuleBinder;
+    }
+    if (!std.mem.eql(
+        u8,
+        sig.arg_infos[target_view_idx].sort_name,
+        sig.arg_infos[hole_view_idx].sort_name,
+    )) {
+        return error.AbstractHoleSortMismatch;
+    }
+    if (!std.mem.eql(
+        u8,
+        sig.arg_infos[hole_view_idx].sort_name,
+        sig.arg_infos[left_plug_view_idx].sort_name,
+    ) or !std.mem.eql(
+        u8,
+        sig.arg_infos[hole_view_idx].sort_name,
+        sig.arg_infos[right_plug_view_idx].sort_name,
+    )) {
+        return error.AbstractPlugSortMismatch;
+    }
+
+    return .{
+        .target_view_idx = target_view_idx,
+        .left_view_idx = left_view_idx,
+        .right_view_idx = right_view_idx,
+        .hole_view_idx = hole_view_idx,
+        .left_plug_view_idx = left_plug_view_idx,
+        .right_plug_view_idx = right_plug_view_idx,
+    };
+}
+
 fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
     for (rule.arg_names, 0..) |arg_name, idx| {
         if (arg_name) |actual_name| {
@@ -273,77 +357,3 @@ fn findViewBinderIndex(sig: ViewSignature, name: []const u8) ?usize {
     return null;
 }
 
-fn applyRecoverBinding(
-    theorem: *const TheoremContext,
-    view_bindings: []?ExprId,
-    recover: RecoverDecl,
-) !void {
-    if (view_bindings[recover.target_view_idx] != null) return;
-
-    const source_expr = view_bindings[recover.source_view_idx] orelse {
-        return error.RecoverSourceUnsolved;
-    };
-    const pattern_expr = view_bindings[recover.pattern_view_idx] orelse {
-        return error.RecoverPatternUnsolved;
-    };
-    const hole_expr = view_bindings[recover.hole_view_idx] orelse {
-        return error.RecoverHoleUnsolved;
-    };
-
-    var candidate: ?ExprId = null;
-    const found = try recoverBindingCandidate(
-        theorem,
-        source_expr,
-        pattern_expr,
-        hole_expr,
-        &candidate,
-    );
-    if (!found) return error.RecoverHoleNotFound;
-    view_bindings[recover.target_view_idx] = candidate;
-}
-
-fn recoverBindingCandidate(
-    theorem: *const TheoremContext,
-    source_expr: ExprId,
-    pattern_expr: ExprId,
-    hole_expr: ExprId,
-    candidate: *?ExprId,
-) !bool {
-    if (pattern_expr == hole_expr) {
-        if (candidate.*) |existing| {
-            if (existing != source_expr) return error.RecoverConflict;
-        } else {
-            candidate.* = source_expr;
-        }
-        return true;
-    }
-    if (source_expr == pattern_expr) return false;
-
-    const source_node = theorem.interner.node(source_expr);
-    const pattern_node = theorem.interner.node(pattern_expr);
-    return switch (pattern_node.*) {
-        .variable => return error.RecoverStructureMismatch,
-        .app => |pattern_app| switch (source_node.*) {
-            .variable => return error.RecoverStructureMismatch,
-            .app => |source_app| blk: {
-                if (source_app.term_id != pattern_app.term_id) {
-                    return error.RecoverStructureMismatch;
-                }
-                if (source_app.args.len != pattern_app.args.len) {
-                    return error.RecoverStructureMismatch;
-                }
-                var found = false;
-                for (source_app.args, pattern_app.args) |source_arg, pattern_arg| {
-                    found = (try recoverBindingCandidate(
-                        theorem,
-                        source_arg,
-                        pattern_arg,
-                        hole_expr,
-                        candidate,
-                    )) or found;
-                }
-                break :blk found;
-            },
-        },
-    };
-}

@@ -1,0 +1,7 @@
+delimiter $ ( ) $;
+provable sort wff;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+--| @dummy x
+--| @dummy x
+axiom dup_dummy {x: wff} (a b: wff) (r: wff x):
+  $ sb a x r $ > $ sb b x r $;

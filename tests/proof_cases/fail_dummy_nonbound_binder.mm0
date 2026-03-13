@@ -1,0 +1,4 @@
+delimiter $ ( ) $;
+provable sort wff;
+--| @dummy x
+axiom bad_dummy (x: wff): $ x $;

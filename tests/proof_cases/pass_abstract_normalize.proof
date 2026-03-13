@@ -1,0 +1,3 @@
+abs_normalize
+-------------
+l1: $ top -> (b -> top) $ by ax_ctx (x := $ x $) [#1, #2]

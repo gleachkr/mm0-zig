@@ -1,0 +1,6 @@
+delimiter $ ( ) $;
+provable sort wff;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+--| @abstract r p q x a b
+axiom bad_without_view {x: wff} (a b: wff) (r: wff x):
+  $ sb a x r $ > $ sb b x r $;

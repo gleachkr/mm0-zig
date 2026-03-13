@@ -111,6 +111,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/hilbert_russell.proof"),
         "web-demo/fixtures/hilbert_russell.proof",
     );
+    const install_prop_cnf_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/demo_prop_cnf.mm0"),
+        "web-demo/fixtures/demo_prop_cnf.mm0",
+    );
+    const install_prop_cnf_proof = b.addInstallFile(
+        b.path("tests/proof_cases/demo_prop_cnf.proof"),
+        "web-demo/fixtures/demo_prop_cnf.proof",
+    );
     const install_nd_em_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/demo_nd_excluded_middle.mm0"),
         "web-demo/fixtures/demo_nd_excluded_middle.mm0",
@@ -135,6 +143,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_hilbert_proof.step);
     web_demo_step.dependOn(&install_hilbert_russell_mm0.step);
     web_demo_step.dependOn(&install_hilbert_russell_proof.step);
+    web_demo_step.dependOn(&install_prop_cnf_mm0.step);
+    web_demo_step.dependOn(&install_prop_cnf_proof.step);
     web_demo_step.dependOn(&install_nd_em_mm0.step);
     web_demo_step.dependOn(&install_nd_em_proof.step);
     web_demo_step.dependOn(&install_seq_peirce_mm0.step);

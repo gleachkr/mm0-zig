@@ -9,6 +9,7 @@ const TermRecord = MmbWriter.TermRecord;
 const TheoremRecord = MmbWriter.TheoremRecord;
 const Statement = MmbWriter.Statement;
 const CompilerDiag = @import("./compiler_diag.zig");
+const CompilerDummies = @import("./compiler_dummies.zig");
 const CompilerViews = @import("./compiler_views.zig");
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
@@ -32,6 +33,7 @@ const LabelIndexMap = std.StringHashMap(usize);
 const ExprSlotMap = std.AutoHashMapUnmanaged(ExprId, u32);
 
 pub const ViewDecl = CompilerViews.ViewDecl;
+pub const DummyDecl = CompilerDummies.DummyDecl;
 pub const Diagnostic = CompilerDiag.Diagnostic;
 
 pub const CheckedRef = union(enum) {
@@ -99,6 +101,9 @@ pub const Compiler = struct {
         var parser = MM0Parser.init(self.source, arena.allocator());
         var env = GlobalEnv.init(arena.allocator());
         var registry = RewriteRegistry.init(arena.allocator());
+        var dummies = std.AutoHashMap(u32, []const DummyDecl).init(
+            arena.allocator(),
+        );
         var views = std.AutoHashMap(u32, ViewDecl).init(arena.allocator());
         var proof_parser = if (self.proof_source) |proof|
             ProofScriptParser.init(arena.allocator(), proof)
@@ -111,6 +116,14 @@ pub const Compiler = struct {
                     if (assertion.kind != .theorem) {
                         try env.addStmt(stmt);
                         try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
+                        try CompilerDummies.processDummyAnnotations(
+                            arena.allocator(),
+                            &parser,
+                            &env,
+                            assertion,
+                            parser.last_annotations,
+                            &dummies,
+                        );
                         try CompilerViews.processViewAnnotations(
                             arena.allocator(),
                             &parser,
@@ -156,6 +169,7 @@ pub const Compiler = struct {
                             &parser,
                             &env,
                             &registry,
+                            &dummies,
                             &views,
                             assertion,
                             block,
@@ -166,6 +180,14 @@ pub const Compiler = struct {
 
                     try env.addStmt(stmt);
                     try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
+                    try CompilerDummies.processDummyAnnotations(
+                        arena.allocator(),
+                        &parser,
+                        &env,
+                        assertion,
+                        parser.last_annotations,
+                        &dummies,
+                    );
                     try CompilerViews.processViewAnnotations(
                         arena.allocator(),
                         &parser,
@@ -212,6 +234,9 @@ pub const Compiler = struct {
         var proof_parser = ProofScriptParser.init(allocator, proof_source);
         var env = GlobalEnv.init(allocator);
         var registry = RewriteRegistry.init(allocator);
+        var dummies = std.AutoHashMap(u32, []const DummyDecl).init(
+            allocator,
+        );
         var views = std.AutoHashMap(u32, ViewDecl).init(allocator);
 
         var sort_names = std.ArrayListUnmanaged([]const u8){};
@@ -276,7 +301,11 @@ pub const Compiler = struct {
                                 .args = args,
                                 .unify = unify,
                                 .name = assertion.name,
-                                .var_names = assertion.arg_names,
+                                .var_names = try buildTheoremVarNames(
+                                    allocator,
+                                    assertion.arg_names,
+                                    theorem.theorem_dummies.items.len,
+                                ),
                                 .hyp_names = hyp_names,
                             });
                             try statements.append(allocator, .{
@@ -285,6 +314,14 @@ pub const Compiler = struct {
                             });
                             try env.addStmt(stmt);
                             try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
+                            try CompilerDummies.processDummyAnnotations(
+                                allocator,
+                                &parser,
+                                &env,
+                                assertion,
+                                parser.last_annotations,
+                                &dummies,
+                            );
                             try CompilerViews.processViewAnnotations(
                                 allocator,
                                 &parser,
@@ -320,6 +357,7 @@ pub const Compiler = struct {
                                 &parser,
                                 &env,
                                 &registry,
+                                &dummies,
                                 &views,
                                 assertion,
                                 block,
@@ -335,7 +373,11 @@ pub const Compiler = struct {
                                 .args = args,
                                 .unify = unify,
                                 .name = assertion.name,
-                                .var_names = assertion.arg_names,
+                                .var_names = try buildTheoremVarNames(
+                                    allocator,
+                                    assertion.arg_names,
+                                    theorem.theorem_dummies.items.len,
+                                ),
                                 .hyp_names = hyp_names,
                             });
                             try statements.append(allocator, .{
@@ -343,6 +385,14 @@ pub const Compiler = struct {
                                 .body = body,
                             });
                             try env.addStmt(stmt);
+                            try CompilerDummies.processDummyAnnotations(
+                                allocator,
+                                &parser,
+                                &env,
+                                assertion,
+                                parser.last_annotations,
+                                &dummies,
+                            );
                             try CompilerViews.processViewAnnotations(
                                 allocator,
                                 &parser,
@@ -923,7 +973,24 @@ const TheoremProofEmitter = struct {
 
         const node = self.theorem.interner.node(expr_id);
         switch (node.*) {
-            .variable => return error.UnboundExprVariable,
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => return error.UnboundExprVariable,
+                .dummy_var => |dummy_id| {
+                    if (dummy_id >= self.theorem.theorem_dummies.items.len) {
+                        return error.UnknownDummyVar;
+                    }
+                    const info = self.theorem.theorem_dummies.items[dummy_id];
+                    try MmbWriter.appendCmd(
+                        &self.bytes,
+                        self.allocator,
+                        ProofCmd.Dummy,
+                        info.sort_id,
+                    );
+                    const slot = self.heap_len;
+                    self.heap_len = try std.math.add(u32, self.heap_len, 1);
+                    try self.expr_slots.put(self.allocator, expr_id, slot);
+                },
+            },
             .app => |app| {
                 for (app.args) |arg| {
                     try self.emitExpr(arg);
@@ -948,6 +1015,7 @@ fn checkTheoremBlock(
     parser: *MM0Parser,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
+    dummies: *const std.AutoHashMap(u32, []const DummyDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
     assertion: AssertionStmt,
     block: TheoremBlock,
@@ -1055,6 +1123,18 @@ fn checkTheoremBlock(
             rule,
             line,
         );
+        if (dummies.get(rule_id)) |rule_dummies| {
+            try applyDummyBindings(
+                self,
+                parser,
+                theorem,
+                assertion.name,
+                rule,
+                line,
+                partial_bindings,
+                rule_dummies,
+            );
+        }
         const maybe_view = views.get(rule_id);
         const had_omitted = hasOmittedBindings(partial_bindings);
         const use_advanced_inference = had_omitted and
@@ -1388,6 +1468,36 @@ fn parseBindings(
     return bindings;
 }
 
+fn applyDummyBindings(
+    self: *Compiler,
+    parser: *MM0Parser,
+    theorem: *TheoremContext,
+    theorem_name: []const u8,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    bindings: []?ExprId,
+    dummies: []const DummyDecl,
+) !void {
+    for (dummies) |dummy| {
+        if (bindings[dummy.target_arg_idx] != null) continue;
+        bindings[dummy.target_arg_idx] = theorem.addDummyVar(
+            parser,
+            rule.args[dummy.target_arg_idx],
+        ) catch |err| {
+            self.setDiagnostic(.{
+                .kind = .parse_dummy,
+                .err = err,
+                .theorem_name = theorem_name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = rule.arg_names[dummy.target_arg_idx].?,
+                .span = line.span,
+            });
+            return err;
+        };
+    }
+}
+
 fn hasOmittedBindings(bindings: []const ?ExprId) bool {
     for (bindings) |binding| {
         if (binding == null) return true;
@@ -1420,7 +1530,7 @@ fn inferBindings(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
-    theorem: *const TheoremContext,
+    theorem: *TheoremContext,
     assertion: AssertionStmt,
     rule: *const RuleDecl,
     line: ProofLine,
@@ -1626,7 +1736,17 @@ fn exprInfo(
                     .deps = arg.deps,
                 };
             },
-            .dummy_var => return error.UnexpectedDummyVar,
+            .dummy_var => |idx| blk: {
+                if (idx >= theorem.theorem_dummies.items.len) {
+                    return error.UnknownDummyVar;
+                }
+                const dummy = theorem.theorem_dummies.items[idx];
+                break :blk .{
+                    .sort_name = dummy.sort_name,
+                    .bound = true,
+                    .deps = dummy.deps,
+                };
+            },
         },
         .app => |app| blk: {
             if (app.term_id >= env.terms.items.len) return error.UnknownTerm;
@@ -1660,6 +1780,17 @@ fn buildHypNames(
     for (0..count) |idx| {
         names[idx] = try hypText(allocator, idx + 1);
     }
+    return names;
+}
+
+fn buildTheoremVarNames(
+    allocator: std.mem.Allocator,
+    arg_names: []const ?[]const u8,
+    dummy_count: usize,
+) ![]const ?[]const u8 {
+    const names = try allocator.alloc(?[]const u8, arg_names.len + dummy_count);
+    @memcpy(names[0..arg_names.len], arg_names);
+    @memset(names[arg_names.len..], null);
     return names;
 }
 

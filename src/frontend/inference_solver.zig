@@ -7,8 +7,9 @@ const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const ViewDecl = @import("./compiler_views.zig").ViewDecl;
-const RecoverDecl = @import("./compiler_views.zig").RecoverDecl;
+const DerivedBinding = @import("./compiler_views.zig").DerivedBinding;
 const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
+const DerivedBindings = @import("./derived_bindings.zig");
 
 const BinderSpace = enum {
     rule,
@@ -28,7 +29,7 @@ const BranchState = struct {
 pub const Solver = struct {
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
-    theorem: *const TheoremContext,
+    theorem: *TheoremContext,
     registry: *RewriteRegistry,
     rule: *const RuleDecl,
     view: ?*const ViewDecl,
@@ -37,7 +38,7 @@ pub const Solver = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         env: *const GlobalEnv,
-        theorem: *const TheoremContext,
+        theorem: *TheoremContext,
         registry: *RewriteRegistry,
         rule: *const RuleDecl,
         view: ?*const ViewDecl,
@@ -80,7 +81,10 @@ pub const Solver = struct {
                 .actual = line_expr,
             });
             states = try self.applyConstraints(states.items, constraints.items, .view);
-            states = try self.applyRecovers(states.items, view.recovers);
+            states = try self.applyDerivedBindings(
+                states.items,
+                view.derived_bindings,
+            );
             try self.propagateViewBindings(states.items, view);
         } else {
             var constraints = std.ArrayListUnmanaged(MatchConstraint){};
@@ -146,24 +150,30 @@ pub const Solver = struct {
         return current;
     }
 
-    fn applyRecovers(
+    fn applyDerivedBindings(
         self: *Solver,
         states: []const BranchState,
-        recovers: []const RecoverDecl,
+        derived_bindings: []const DerivedBinding,
     ) anyerror!std.ArrayListUnmanaged(BranchState) {
         var next = std.ArrayListUnmanaged(BranchState){};
+        var first_err: ?anyerror = null;
         for (states) |state| {
-            var new_state = try self.cloneState(state);
-            var ok = true;
-            for (recovers) |recover| {
-                self.applyRecover(&new_state, recover) catch {
-                    ok = false;
-                    break;
-                };
-            }
-            if (ok) try next.append(self.allocator, new_state);
+            const new_state = try self.cloneState(state);
+            const view_bindings = new_state.view_bindings orelse {
+                try next.append(self.allocator, new_state);
+                continue;
+            };
+            DerivedBindings.applyDerivedBindings(
+                self.theorem,
+                view_bindings,
+                derived_bindings,
+            ) catch |err| {
+                if (first_err == null) first_err = err;
+                continue;
+            };
+            try next.append(self.allocator, new_state);
         }
-        if (next.items.len == 0) return error.UnifyMismatch;
+        if (next.items.len == 0) return first_err orelse error.UnifyMismatch;
         return next;
     }
 
@@ -568,78 +578,6 @@ pub const Solver = struct {
         };
     }
 
-    fn applyRecover(
-        self: *Solver,
-        state: *BranchState,
-        recover: RecoverDecl,
-    ) anyerror!void {
-        const view_bindings = state.view_bindings orelse return error.RecoverWithoutView;
-        if (view_bindings[recover.target_view_idx] != null) return;
-
-        const source = view_bindings[recover.source_view_idx] orelse {
-            return error.RecoverSourceUnsolved;
-        };
-        const pattern = view_bindings[recover.pattern_view_idx] orelse {
-            return error.RecoverPatternUnsolved;
-        };
-        const hole = view_bindings[recover.hole_view_idx] orelse {
-            return error.RecoverHoleUnsolved;
-        };
-
-        var candidate: ?ExprId = null;
-        const found = try self.recoverBindingCandidate(
-            source,
-            pattern,
-            hole,
-            &candidate,
-        );
-        if (!found) return error.RecoverHoleNotFound;
-        view_bindings[recover.target_view_idx] = candidate;
-    }
-
-    fn recoverBindingCandidate(
-        self: *Solver,
-        source_expr: ExprId,
-        pattern_expr: ExprId,
-        hole_expr: ExprId,
-        candidate: *?ExprId,
-    ) anyerror!bool {
-        if (pattern_expr == hole_expr) {
-            if (candidate.*) |existing| {
-                if (existing != source_expr) return error.RecoverConflict;
-            } else {
-                candidate.* = source_expr;
-            }
-            return true;
-        }
-        if (source_expr == pattern_expr) return false;
-
-        const source_node = self.theorem.interner.node(source_expr);
-        const pattern_node = self.theorem.interner.node(pattern_expr);
-        return switch (pattern_node.*) {
-            .variable => error.RecoverStructureMismatch,
-            .app => |pattern_app| switch (source_node.*) {
-                .variable => error.RecoverStructureMismatch,
-                .app => |source_app| blk: {
-                    if (source_app.term_id != pattern_app.term_id or
-                        source_app.args.len != pattern_app.args.len)
-                    {
-                        return error.RecoverStructureMismatch;
-                    }
-                    var found = false;
-                    for (source_app.args, pattern_app.args) |source_arg, pattern_arg| {
-                        found = (try self.recoverBindingCandidate(
-                            source_arg,
-                            pattern_arg,
-                            hole_expr,
-                            candidate,
-                        )) or found;
-                    }
-                    break :blk found;
-                },
-            },
-        };
-    }
 };
 
 fn sameRuleBindings(lhs: []const ?ExprId, rhs: []const ?ExprId) bool {
