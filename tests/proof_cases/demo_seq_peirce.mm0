@@ -20,7 +20,7 @@ infixl join: $,$ prec 5;
 term hyp (a: wff): ctx;
 coercion hyp: wff > ctx;
 term seq (g: ctx) (a: wff): wff;
-infixl seq: $⇒$ prec 0;
+infixl seq: $==>$ prec 0;
 
 --| @relation wff iff iff_refl iff_trans iff_sym iff_mp
 axiom iff_refl (a: wff): $ a ↔ a $;
@@ -45,25 +45,25 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 
 --| @congr
 axiom seq_congr (g h: ctx) (a b: wff):
-  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⇒ a) ↔ (h ⇒ b) $;
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ==> a) ↔ (h ==> b) $;
 
 --| @normalize conc
-axiom ax (g: ctx) (a: wff): $ g , a ⇒ a $;
+axiom ax (g: ctx) (a: wff): $ g , a ==> a $;
 
 --| @normalize hyp0 conc
-axiom imp_right (g: ctx) (a b: wff): $ g , a ⇒ b $ > $ g ⇒ a → b $;
+axiom imp_right (g: ctx) (a b: wff): $ g , a ==> b $ > $ g ==> a → b $;
 
 --| @normalize hyp0 hyp1 conc
 axiom imp_app (g: ctx) (a b c: wff):
-  $ g ⇒ a $ > $ g , b ⇒ c $ > $ g , (a → b) ⇒ c $;
+  $ g ==> a $ > $ g , b ==> c $ > $ g , (a → b) ==> c $;
 
 --| @normalize hyp0 hyp1 conc
-axiom bot_intro (g: ctx) (a: wff): $ g ⇒ a $ > $ g ⇒ ¬ a $ > $ g ⇒ bot $;
+axiom bot_intro (g: ctx) (a: wff): $ g ==> a $ > $ g ==> ¬ a $ > $ g ==> bot $;
 
 --| @normalize hyp0 conc
-axiom bot_elim (g: ctx) (a: wff): $ g ⇒ bot $ > $ g ⇒ a $;
+axiom bot_elim (g: ctx) (a: wff): $ g ==> bot $ > $ g ==> a $;
 
 --| @normalize hyp0 conc
-axiom by_contra (g: ctx) (a: wff): $ g , ¬ a ⇒ bot $ > $ g ⇒ a $;
+axiom by_contra (g: ctx) (a: wff): $ g , ¬ a ==> bot $ > $ g ==> a $;
 
-theorem peirce (a b: wff): $ emp ⇒ (((a → b) → a) → a) $;
+theorem peirce (a b: wff): $ emp ==> (((a → b) → a) → a) $;
