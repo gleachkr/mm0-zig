@@ -1681,8 +1681,76 @@ fn readProofCaseFile(
     );
 }
 
+const mm0c_cache_dir = ".zig-cache-local/mm0c-test";
+
+fn mm0cExists() bool {
+    const result = std.process.Child.run(.{
+        .allocator = std.testing.allocator,
+        .argv = &.{"mm0-c"},
+        .max_output_bytes = 8 * 1024,
+    }) catch return false;
+    std.testing.allocator.free(result.stdout);
+    std.testing.allocator.free(result.stderr);
+    // mm0-c with no args prints usage and exits 1
+    return switch (result.term) {
+        .Exited => true,
+        else => false,
+    };
+}
+
+fn verifyWithMm0c(mm0_src: []const u8, mmb: []const u8) !void {
+    const mmb_path = mm0c_cache_dir ++ "/out.mmb";
+    std.fs.cwd().makePath(mm0c_cache_dir) catch |err| {
+        std.debug.print("FAIL (mm0-c) could not create cache dir: {}\n", .{err});
+        return err;
+    };
+    std.fs.cwd().writeFile(.{ .sub_path = mmb_path, .data = mmb }) catch |err| {
+        std.debug.print("FAIL (mm0-c) could not write temp mmb: {}\n", .{err});
+        return err;
+    };
+    defer std.fs.cwd().deleteFile(mmb_path) catch {};
+
+    var child = std.process.Child.init(&.{ "mm0-c", mmb_path }, std.testing.allocator);
+    child.stdin_behavior = .Pipe;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+
+    child.spawn() catch |err| {
+        std.debug.print("FAIL (mm0-c) could not spawn: {}\n", .{err});
+        return err;
+    };
+
+    child.stdin.?.writeAll(mm0_src) catch {};
+    child.stdin.?.close();
+    child.stdin = null;
+
+    // Read stderr before wait to avoid pipe buffer deadlock
+    var stderr_buf: [4096]u8 = undefined;
+    const stderr_len = child.stderr.?.readAll(&stderr_buf) catch 0;
+    const stderr = stderr_buf[0..stderr_len];
+
+    const term = child.wait() catch |err| {
+        std.debug.print("FAIL (mm0-c) wait failed: {}\n", .{err});
+        return err;
+    };
+
+    switch (term) {
+        .Exited => |code| {
+            if (code != 0) {
+                std.debug.print("FAIL (mm0-c) exit code {d}\n{s}\n", .{ code, stderr });
+                return error.Mm0cVerificationFailed;
+            }
+        },
+        else => {
+            std.debug.print("FAIL (mm0-c) abnormal termination\n", .{});
+            return error.Mm0cVerificationFailed;
+        },
+    }
+}
+
 test "compiler proof cases from files" {
     const allocator = std.testing.allocator;
+    const have_mm0c = mm0cExists();
 
     for (proof_cases) |case| {
         const mm0_src = try readProofCaseFile(allocator, case.stem, "mm0");
@@ -1712,6 +1780,12 @@ test "compiler proof cases from files" {
                     std.debug.print("FAIL (verify) case={s} err={}\n", .{ case.stem, err });
                     return err;
                 };
+                if (have_mm0c) {
+                    verifyWithMm0c(mm0_src, mmb) catch |err| {
+                        std.debug.print("FAIL (mm0-c) case={s}\n", .{case.stem});
+                        return err;
+                    };
+                }
             },
             .fail => |err| {
                 try std.testing.expectError(err, compiler.compileMmb(allocator));
