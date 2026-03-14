@@ -392,8 +392,12 @@ pub const Solver = struct {
         };
         const acui = self.registry.resolveStructuralCombiner(self.env, app.term_id) orelse return null;
 
+        const bindings = self.getBindings(@constCast(&state), space);
+
         var template_items = std.ArrayListUnmanaged(TemplateExpr){};
         defer template_items.deinit(self.allocator);
+        var pre_required = std.ArrayListUnmanaged(ExprId){};
+        defer pre_required.deinit(self.allocator);
         var remainder: ?usize = null;
         try self.collectTemplateAcuiItems(
             template,
@@ -401,6 +405,8 @@ pub const Solver = struct {
             acui,
             &template_items,
             &remainder,
+            bindings,
+            &pre_required,
         );
 
         var actual_items = std.ArrayListUnmanaged(ExprId){};
@@ -415,6 +421,19 @@ pub const Solver = struct {
         const used = try self.allocator.alloc(bool, actual_items.items.len);
         defer self.allocator.free(used);
         @memset(used, false);
+
+        // Pre-mark actual items that match bound remainder binders
+        for (pre_required.items) |required| {
+            var found = false;
+            for (actual_items.items, 0..) |actual_item, idx| {
+                if (compareExprIds(self.theorem, required, actual_item) == .eq) {
+                    used[idx] = true;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return &.{};
+        }
 
         var matches = std.ArrayListUnmanaged(BranchState){};
         try self.matchAcuiObligations(
@@ -603,10 +622,23 @@ pub const Solver = struct {
         acui: anytype,
         out: *std.ArrayListUnmanaged(TemplateExpr),
         remainder: *?usize,
+        bindings: []const ?ExprId,
+        pre_required: *std.ArrayListUnmanaged(ExprId),
     ) anyerror!void {
         switch (template) {
             .binder => |idx| {
                 if (self.isAcuiRemainderBinder(space, idx, acui.head_term_id)) {
+                    if (idx < bindings.len) {
+                        if (bindings[idx]) |bound_value| {
+                            try self.collectConcreteAcuiSetItems(
+                                bound_value,
+                                acui.head_term_id,
+                                acui.unit_term_id,
+                                pre_required,
+                            );
+                            return;
+                        }
+                    }
                     if (remainder.* != null) {
                         return error.MultipleAcuiRemainders;
                     }
@@ -623,6 +655,8 @@ pub const Solver = struct {
                         acui,
                         out,
                         remainder,
+                        bindings,
+                        pre_required,
                     );
                     try self.collectTemplateAcuiItems(
                         app.args[1],
@@ -630,6 +664,8 @@ pub const Solver = struct {
                         acui,
                         out,
                         remainder,
+                        bindings,
+                        pre_required,
                     );
                     return;
                 }
