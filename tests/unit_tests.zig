@@ -1588,6 +1588,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
     .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
     .{ .stem = "pass_struct_seq_forall_left", .outcome = .pass },
+    .{ .stem = "quant_nd", .outcome = .pass },
     .{
         .stem = "fail_missing_binding",
         .outcome = .{ .fail = error.MissingBinderAssignment },

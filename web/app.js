@@ -30,6 +30,11 @@ const examples = {
     mm0: "./fixtures/demo_seq_peirce.mm0",
     proof: "./fixtures/demo_seq_peirce.proof",
   },
+  quant_nd: {
+    label: "quant nd",
+    mm0: "./fixtures/quant_nd.mm0",
+    proof: "./fixtures/quant_nd.proof",
+  },
 };
 
 const ui = {

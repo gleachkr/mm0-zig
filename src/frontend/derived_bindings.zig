@@ -69,6 +69,10 @@ fn applyRecoverBinding(
     view_bindings: []?ExprId,
     recover: RecoverDecl,
 ) !ApplyResult {
+    if (view_bindings[recover.target_view_idx] != null) {
+        return .no_progress;
+    }
+
     const source_expr = view_bindings[recover.source_view_idx] orelse {
         return .no_progress;
     };
@@ -89,10 +93,6 @@ fn applyRecoverBinding(
     );
     if (!found) return error.RecoverHoleNotFound;
 
-    if (view_bindings[recover.target_view_idx]) |existing| {
-        if (existing != candidate.?) return error.RecoverConflict;
-        return .no_progress;
-    }
     view_bindings[recover.target_view_idx] = candidate;
     return .progress;
 }
@@ -112,12 +112,14 @@ fn recoverBindingCandidate(
         }
         return true;
     }
-    if (source_expr == pattern_expr) return false;
 
     const source_node = theorem.interner.node(source_expr);
     const pattern_node = theorem.interner.node(pattern_expr);
     return switch (pattern_node.*) {
-        .variable => return error.RecoverStructureMismatch,
+        .variable => switch (source_node.*) {
+            .variable => return false,
+            .app => return error.RecoverStructureMismatch,
+        },
         .app => |pattern_app| switch (source_node.*) {
             .variable => return error.RecoverStructureMismatch,
             .app => |source_app| blk: {

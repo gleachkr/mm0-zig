@@ -639,29 +639,49 @@ pub const Normalizer = struct {
         };
 
         const bindings = try self.allocator.alloc(ExprId, congr_rule.num_binders);
-        for (old_args, new_args, 0..) |old_arg, new_arg, idx| {
-            bindings[idx * 2] = old_arg;
-            bindings[idx * 2 + 1] = new_arg;
+        var binding_idx: usize = 0;
+        var ref_count: usize = 0;
+        for (term_decl.args) |arg| {
+            if (!arg.bound) ref_count += 1;
         }
 
-        const refs = try self.allocator.alloc(CheckedRef, old_args.len);
-        for (old_args, new_args, 0..) |old_arg, new_arg, idx| {
+        const refs = try self.allocator.alloc(CheckedRef, ref_count);
+        var ref_idx: usize = 0;
+        for (old_args, new_args, term_decl.args, 0..) |
+            old_arg,
+            new_arg,
+            arg_decl,
+            idx,
+        | {
+            if (arg_decl.bound) {
+                if (old_arg != new_arg) return error.MissingCongruenceRule;
+                bindings[binding_idx] = old_arg;
+                binding_idx += 1;
+                continue;
+            }
+
+            bindings[binding_idx] = old_arg;
+            bindings[binding_idx + 1] = new_arg;
+            binding_idx += 2;
+
             if (child_proofs[idx]) |proof_idx| {
-                refs[idx] = .{ .line = proof_idx };
+                refs[ref_idx] = .{ .line = proof_idx };
+                ref_idx += 1;
                 continue;
             }
             if (old_arg == new_arg) {
-                const child_sort = if (idx < term_decl.args.len)
-                    term_decl.args[idx].sort_name
-                else
-                    return error.MissingCongruenceRule;
                 const child_rel = self.registry.resolveRelation(
                     self.env,
-                    child_sort,
+                    arg_decl.sort_name,
                 ) orelse return error.MissingCongruenceRule;
-                refs[idx] = .{ .line = try self.emitRefl(child_rel, old_arg) };
+                refs[ref_idx] = .{ .line = try self.emitRefl(child_rel, old_arg) };
+                ref_idx += 1;
                 continue;
             }
+            return error.MissingCongruenceRule;
+        }
+
+        if (binding_idx != bindings.len or ref_idx != refs.len) {
             return error.MissingCongruenceRule;
         }
 

@@ -1,0 +1,22 @@
+quant_functionality
+------------------
+
+l1: $ emp ⊢ ∀ y ∀ z (F w (g y z) ↔ h w y = h w z) $ by all_elim [#1]
+l2: $ emp ⊢ ∀ z (F w (g x z) ↔ h w x = h w z) $ by all_elim [l1]
+l3: $ emp ⊢ F w (g x y) ↔ h w x = h w y $ by all_elim [l2]
+l4: $ emp ⊢ F w (g x z) ↔ h w x = h w z $ by all_elim [l2]
+l5: $ emp ⊢ ∀ z (F w (g y z) ↔ h w y = h w z) $ by all_elim [l1]
+l6: $ emp ⊢ F w (g y z) ↔ h w y = h w z $ by all_elim [l5]
+l7: $ (F w (g x y) ∧ F w (g x z)) ⊢ (F w (g x y) ∧ F w (g x z)) $ by ax []
+l8: $ (F w (g x y) ∧ F w (g x z)) ⊢ F w (g x y) $ by and_elim_l [l7]
+l9: $ (F w (g x y) ∧ F w (g x z)) ⊢ F w (g x z) $ by and_elim_r [l7]
+l10: $ (F w (g x y) ∧ F w (g x z)) ⊢ h w x = h w y $ by iff_elim_l [l3, l8]
+l11: $ (F w (g x y) ∧ F w (g x z)) ⊢ h w x = h w z $ by iff_elim_l [l4, l9]
+l12: $ (F w (g x y) ∧ F w (g x z)) ⊢ h w y = h w x $ by eq_symm [l10]
+l13: $ (F w (g x y) ∧ F w (g x z)) ⊢ h w y = h w z $ by eq_transitivity [l12, l11]
+l14: $ (F w (g x y) ∧ F w (g x z)) ⊢ F w (g y z) $ by iff_elim_r [l6, l13]
+l15: $ emp ⊢ (F w (g x y) ∧ F w (g x z)) → F w (g y z) $ by imp_intro [l14]
+l16: $ emp ⊢ ∀ z ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $ by all_intro [l15]
+l17: $ emp ⊢ ∀ y ∀ z ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $ by all_intro [l16]
+l18: $ emp ⊢ ∀ x ∀ y ∀ z ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $ by all_intro [l17]
+l19: $ emp ⊢ ∀ w ∀ x ∀ y ∀ z ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $ by all_intro [l18]
