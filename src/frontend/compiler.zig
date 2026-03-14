@@ -605,6 +605,11 @@ fn buildAxiomProofBody(
 ) ![]const u8 {
     var emitter = ExprProofEmitter.init(allocator, theorem);
     defer emitter.deinit();
+    for (theorem.theorem_hyps.items) |hyp| {
+        try emitter.emitExpr(hyp);
+        try MmbWriter.appendCmd(&emitter.bytes, allocator, ProofCmd.Hyp, 0);
+        emitter.heap_len = try std.math.add(u32, emitter.heap_len, 1);
+    }
     try emitter.emitExpr(concl);
     try MmbWriter.appendCmd(&emitter.bytes, allocator, ProofCmd.End, 0);
     return try emitter.bytes.toOwnedSlice(allocator);

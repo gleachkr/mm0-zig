@@ -1698,8 +1698,9 @@ fn mm0cExists() bool {
     };
 }
 
-fn verifyWithMm0c(mm0_src: []const u8, mmb: []const u8) !void {
-    const mmb_path = mm0c_cache_dir ++ "/out.mmb";
+fn verifyWithMm0c(mm0_src: []const u8, mmb: []const u8, stem: []const u8) !void {
+    var path_buf: [256]u8 = undefined;
+    const mmb_path = std.fmt.bufPrint(&path_buf, mm0c_cache_dir ++ "/{s}.mmb", .{stem}) catch mm0c_cache_dir ++ "/out.mmb";
     std.fs.cwd().makePath(mm0c_cache_dir) catch |err| {
         std.debug.print("FAIL (mm0-c) could not create cache dir: {}\n", .{err});
         return err;
@@ -1781,7 +1782,7 @@ test "compiler proof cases from files" {
                     return err;
                 };
                 if (have_mm0c) {
-                    verifyWithMm0c(mm0_src, mmb) catch |err| {
+                    verifyWithMm0c(mm0_src, mmb, case.stem) catch |err| {
                         std.debug.print("FAIL (mm0-c) case={s}\n", .{case.stem});
                         return err;
                     };
