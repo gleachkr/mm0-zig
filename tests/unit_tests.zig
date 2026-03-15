@@ -1585,6 +1585,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_acui_repeated_explicit_item", .outcome = .pass },
     .{ .stem = "pass_acui_duplicate_binders_same_item", .outcome = .pass },
     .{ .stem = "pass_acui_principal_remainder", .outcome = .pass },
+    .{ .stem = "pass_au_category", .outcome = .pass },
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
     .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
     .{ .stem = "pass_struct_seq_forall_left", .outcome = .pass },

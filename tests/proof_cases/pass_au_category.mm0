@@ -1,0 +1,92 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+sort mor;
+
+-- Biconditional (used as wff-level relation)
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+
+-- Morphism equality
+term mor_eq (f g: mor): wff;
+infixl mor_eq: $~$ prec 15;
+
+-- Composition and identity
+term id: mor;
+--| @acui comp_assoc _ id _
+term comp (f g: mor): mor;
+infixl comp: $o$ prec 30;
+
+-- iff relation (provable sort, with transport)
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+-- mor_eq relation (non-provable sort, no transport)
+--| @relation mor mor_eq mor_refl mor_trans mor_sym _
+axiom mor_refl (f: mor): $ f ~ f $;
+axiom mor_trans (f g h: mor):
+  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+axiom mor_sym (f g: mor): $ f ~ g $ > $ g ~ f $;
+
+-- AU composition: associative with unit, NOT commutative, NOT idempotent
+axiom comp_assoc (f g h: mor):
+  $ (f o g) o h ~ f o (g o h) $;
+axiom comp_unit (f: mor): $ id o f ~ f $;
+
+-- Right unit via rewriting (supplements AU's left-unit handling)
+--| @rewrite
+axiom comp_unit_r (f: mor): $ f o id ~ f $;
+
+-- Congruence rules (used by normalizer)
+--| @congr
+axiom comp_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ f1 o g1 ~ f2 o g2 $;
+
+--| @congr
+axiom mor_eq_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) <-> (f2 ~ g2) $;
+
+-- Proof-step rules with @normalize conc (trigger AU normalization)
+--| @normalize conc
+axiom comp_right (f g h: mor): $ f ~ g $ > $ f o h ~ g o h $;
+
+--| @normalize conc
+axiom comp_left (f g h: mor): $ f ~ g $ > $ h o f ~ h o g $;
+
+-- Pullback constants
+term A_: obj;
+term B_: obj;
+term C_: obj;
+term P_: obj;
+term f_: mor;
+term g_: mor;
+term p1: mor;
+term p2: mor;
+
+-- Pullback square: f_ o p1 = g_ o p2
+axiom pb_square: $ f_ o p1 ~ g_ o p2 $;
+
+-- f_ is a monomorphism
+axiom f_mono (a b: mor): $ f_ o a ~ f_ o b $ > $ a ~ b $;
+
+-- Mediating morphism (Skolemized universal property)
+term pb_med (q1 q2: mor): mor;
+
+axiom pb_med_unique (q1 q2 u: mor):
+  $ p1 o u ~ q1 $ > $ p2 o u ~ q2 $ > $ u ~ pb_med q1 q2 $;
+
+--| @congr
+axiom pb_med_congr (a1 b1 a2 b2: mor):
+  $ a1 ~ b1 $ > $ a2 ~ b2 $ > $ pb_med a1 a2 ~ pb_med b1 b2 $;
+
+-- Warm-up: basic AU axiom application (no normalization exercised)
+theorem assoc_norm (f g h: mor): $ (f o g) o h ~ f o (g o h) $;
+theorem unit_norm (f: mor): $ id o f ~ f $;
+
+-- Main theorem: pullback preserves monomorphisms (exercises AU normalization)
+theorem pb_preserves_mono (alpha beta: mor):
+  $ p2 o alpha ~ p2 o beta $ > $ alpha ~ beta $;

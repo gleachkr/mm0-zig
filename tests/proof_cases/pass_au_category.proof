@@ -1,0 +1,31 @@
+assoc_norm
+----------
+
+l1: $ (f o g) o h ~ f o (g o h) $ by comp_assoc []
+
+unit_norm
+---------
+
+l1: $ id o f ~ f $ by comp_unit []
+
+pb_preserves_mono
+-----------------
+
+l0: $ f_ o p1 ~ g_ o p2 $ by pb_square []
+l1: $ f_ o (p1 o alpha) ~ g_ o (p2 o alpha) $ by comp_right (f := $ f_ o p1 $, g := $ g_ o p2 $, h := $ alpha $) [l0]
+l2: $ f_ o (p1 o beta) ~ g_ o (p2 o beta) $ by comp_right (f := $ f_ o p1 $, g := $ g_ o p2 $, h := $ beta $) [l0]
+l3: $ g_ o (p2 o alpha) ~ g_ o (p2 o beta) $ by comp_left (f := $ p2 o alpha $, g := $ p2 o beta $, h := $ g_ $) [#1]
+l4: $ f_ o (p1 o alpha) ~ g_ o (p2 o beta) $ by mor_trans [l1, l3]
+l5: $ g_ o (p2 o beta) ~ f_ o (p1 o beta) $ by mor_sym [l2]
+l6: $ f_ o (p1 o alpha) ~ f_ o (p1 o beta) $ by mor_trans [l4, l5]
+l7: $ p1 o alpha ~ p1 o beta $ by f_mono [l6]
+l8: $ p1 o alpha ~ p1 o alpha $ by mor_refl []
+l9: $ p2 o alpha ~ p2 o alpha $ by mor_refl []
+l10: $ alpha ~ pb_med (p1 o alpha) (p2 o alpha) $ by pb_med_unique [l8, l9]
+l11: $ p1 o beta ~ p1 o beta $ by mor_refl []
+l12: $ p2 o beta ~ p2 o beta $ by mor_refl []
+l13: $ beta ~ pb_med (p1 o beta) (p2 o beta) $ by pb_med_unique [l11, l12]
+l14: $ pb_med (p1 o alpha) (p2 o alpha) ~ pb_med (p1 o beta) (p2 o beta) $ by pb_med_congr [l7, #1]
+l15: $ alpha ~ pb_med (p1 o beta) (p2 o beta) $ by mor_trans [l10, l14]
+l16: $ pb_med (p1 o beta) (p2 o beta) ~ beta $ by mor_sym [l13]
+l17: $ alpha ~ beta $ by mor_trans [l15, l16]

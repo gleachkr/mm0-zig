@@ -180,6 +180,18 @@ The proof-producing normalizer emits ordinary theorem applications for
 assoc / comm / unit / idem and composes them with congruence,
 transitivity, symmetry, and transport as needed.
 
+**ACUI subsets.** Associativity (A) and unit (U) are mandatory; commutativity
+(C) and idempotence (I) are independently optional. The supported
+combinations are AU, ACU, AUI, and ACUI. A and U are required because the
+canonical form algorithm always flattens nested uses of the combiner into a
+flat list and eliminates unit elements; without associativity, flattening is
+unjustified, and without a unit element there is no base case for empty or
+singleton lists. Commutativity and idempotence are independent passes over
+the flattened item list — sorting (C) and deduplication (I) — so either can
+be omitted by passing `_` in the corresponding position of the `@acui`
+annotation. For example, `@acui comp_assoc _ id _` declares an AU combiner
+(non-commutative, no idempotence), suitable for monoid composition.
+
 ### `@normalize`
 
 Marks a rule so that its conclusion and/or hypotheses are automatically
