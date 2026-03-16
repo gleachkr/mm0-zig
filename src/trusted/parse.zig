@@ -29,6 +29,8 @@ pub const TermStmt = struct {
     args: []const ArgInfo,
     arg_names: []const ?[]const u8,
     arg_exprs: []const *const Expr,
+    dummy_args: []const ArgInfo = &.{},
+    dummy_exprs: []const *const Expr = &.{},
     ret_sort_name: []const u8,
     is_def: bool,
     body: ?*const Expr,
@@ -98,6 +100,8 @@ const BinderContext = struct {
     arg_names: std.ArrayListUnmanaged(?[]const u8) = .{},
     arg_exprs: std.ArrayListUnmanaged(*const Expr) = .{},
     bound_names: std.ArrayListUnmanaged([]const u8) = .{},
+    dummy_infos: std.ArrayListUnmanaged(ArgInfo) = .{},
+    dummy_exprs: std.ArrayListUnmanaged(*const Expr) = .{},
 
     fn init(allocator: std.mem.Allocator) BinderContext {
         return .{ .vars = std.StringHashMap(*const Expr).init(allocator) };
@@ -398,6 +402,8 @@ pub const MM0Parser = struct {
             .args = arg_slice,
             .arg_names = arg_names,
             .arg_exprs = arg_exprs,
+            .dummy_args = try ctx.dummy_infos.toOwnedSlice(self.allocator),
+            .dummy_exprs = try ctx.dummy_exprs.toOwnedSlice(self.allocator),
             .ret_sort_name = ret_sort_name,
             .is_def = is_def,
             .body = body,
@@ -549,6 +555,9 @@ pub const MM0Parser = struct {
                         name;
                     try ctx.arg_names.append(self.allocator, arg_name);
                     try ctx.arg_exprs.append(self.allocator, expr);
+                } else {
+                    try ctx.dummy_infos.append(self.allocator, actual_arg);
+                    try ctx.dummy_exprs.append(self.allocator, expr);
                 }
             }
             self.skipWhitespaceAndComments();

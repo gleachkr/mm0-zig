@@ -197,8 +197,13 @@ pub const TheoremContext = struct {
         }
     }
 
-    pub fn seedTerm(self: *TheoremContext, stmt: TermStmt) !void {
+    pub fn seedTerm(self: *TheoremContext, parser: *const MM0Parser, stmt: TermStmt) !void {
         try self.seedArgs(stmt.args, stmt.arg_exprs);
+        for (stmt.dummy_args, stmt.dummy_exprs) |arg, expr| {
+            const dummy_var_id = try self.addDummyVar(parser, arg);
+            const var_id = self.interner.node(dummy_var_id).*.variable;
+            try self.parser_vars.put(self.allocator, expr, var_id);
+        }
     }
 
     pub fn seedAssertion(

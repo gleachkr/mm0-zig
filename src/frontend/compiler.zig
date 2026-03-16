@@ -265,7 +265,7 @@ pub const Compiler = struct {
                     try statements.append(allocator, .{
                         .cmd = .TermDef,
                         .body = if (term_stmt.is_def)
-                            try buildDefProofBody(allocator, term_stmt)
+                            try buildDefProofBody(allocator, &parser, term_stmt)
                         else
                             &.{},
                     });
@@ -543,7 +543,7 @@ fn compileTermRecord(
 ) !TermRecord {
     var theorem = TheoremContext.init(allocator);
     defer theorem.deinit();
-    try theorem.seedTerm(stmt);
+    try theorem.seedTerm(parser, stmt);
 
     const unify = if (stmt.body) |body| blk: {
         const expr_id = try theorem.internParsedExpr(body);
@@ -583,11 +583,12 @@ fn lookupSortId(parser: *const MM0Parser, sort_name: []const u8) !u7 {
 
 fn buildDefProofBody(
     allocator: std.mem.Allocator,
+    parser: *const MM0Parser,
     stmt: TermStmt,
 ) ![]const u8 {
     var theorem = TheoremContext.init(allocator);
     defer theorem.deinit();
-    try theorem.seedTerm(stmt);
+    try theorem.seedTerm(parser, stmt);
     const body = stmt.body orelse return error.ExpectedDefinitionBody;
     const expr_id = try theorem.internParsedExpr(body);
 
@@ -727,7 +728,19 @@ const ExprProofEmitter = struct {
 
         const node = self.theorem.interner.node(expr_id);
         switch (node.*) {
-            .variable => return error.UnboundExprVariable,
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => return error.UnboundExprVariable,
+                .dummy_var => |dummy_id| {
+                    if (dummy_id >= self.theorem.theorem_dummies.items.len) {
+                        return error.UnknownDummyVar;
+                    }
+                    const info = self.theorem.theorem_dummies.items[dummy_id];
+                    try MmbWriter.appendCmd(&self.bytes, self.allocator, ProofCmd.Dummy, info.sort_id);
+                    const slot = self.heap_len;
+                    self.heap_len = try std.math.add(u32, self.heap_len, 1);
+                    try self.expr_slots.put(self.allocator, expr_id, slot);
+                },
+            },
             .app => |app| {
                 for (app.args) |arg| {
                     try self.emitExpr(arg);
@@ -781,7 +794,19 @@ const UnifyEmitter = struct {
 
         const node = self.theorem.interner.node(expr_id);
         switch (node.*) {
-            .variable => return error.UnboundExprVariable,
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => return error.UnboundExprVariable,
+                .dummy_var => |dummy_id| {
+                    if (dummy_id >= self.theorem.theorem_dummies.items.len) {
+                        return error.UnknownDummyVar;
+                    }
+                    const info = self.theorem.theorem_dummies.items[dummy_id];
+                    try MmbWriter.appendCmd(&self.bytes, self.allocator, UnifyCmd.UDummy, info.sort_id);
+                    const slot = self.heap_len;
+                    self.heap_len = try std.math.add(u32, self.heap_len, 1);
+                    try self.slots.put(self.allocator, expr_id, slot);
+                },
+            },
             .app => |app| {
                 try MmbWriter.appendCmd(
                     &self.bytes,

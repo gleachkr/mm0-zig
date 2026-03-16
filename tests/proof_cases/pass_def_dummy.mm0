@@ -1,0 +1,41 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort obj;
+
+term imp (a b: wff): wff;
+infixr imp: $->$ prec 25;
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 35;
+
+-- Quantifier and substitution
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
+term sb_f {x: obj} (t: obj x) (p: wff x): wff;
+notation sb_f {x: obj} (t: obj x) (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+term sb_t {x: obj} (t: obj x) (a: obj x): obj;
+
+-- Binary operation
+term g (a b: obj): obj;
+
+-- A def with a single dummy binder
+def injective (f: obj) {.a .b: obj}: wff
+  = $ A. a (A. b ((eq (g f a) (g f b)) -> (a = b))) $;
+
+-- A def with dummy binder where dummy appears only once
+def exists_preimage (f y: obj) {.x: obj}: wff
+  = $ A. x ((g f x = y) -> (x = x)) $;
+
+-- Axiom using injective (verifier unfolds the def)
+axiom ax_inj (f: obj): $ injective f $;
+
+-- Theorem that just forwards the axiom
+theorem test_inj (f: obj): $ injective f $;
+
+-- Axiom using exists_preimage
+axiom ax_pre (f y: obj): $ exists_preimage f y $;
+
+-- Theorem that forwards it
+theorem test_pre (f y: obj): $ exists_preimage f y $;

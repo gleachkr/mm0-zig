@@ -2,6 +2,7 @@ const std = @import("std");
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const AssertionKind = @import("../trusted/parse.zig").AssertionKind;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
+const Expr = @import("../trusted/expressions.zig").Expr;
 const MM0Stmt = @import("../trusted/parse.zig").MM0Stmt;
 const TermStmt = @import("../trusted/parse.zig").TermStmt;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
@@ -52,9 +53,19 @@ pub const GlobalEnv = struct {
         const term_id = std.math.cast(u32, self.terms.items.len) orelse {
             return error.TooManyCompilerTerms;
         };
-        const body = if (stmt.body) |expr|
-            try TemplateExpr.fromExpr(self.allocator, expr, stmt.arg_exprs)
-        else
+        const body = if (stmt.body) |expr| blk: {
+            if (stmt.dummy_exprs.len > 0) {
+                const all_exprs = try self.allocator.alloc(
+                    *const Expr,
+                    stmt.arg_exprs.len + stmt.dummy_exprs.len,
+                );
+                @memcpy(all_exprs[0..stmt.arg_exprs.len], stmt.arg_exprs);
+                @memcpy(all_exprs[stmt.arg_exprs.len..], stmt.dummy_exprs);
+                break :blk try TemplateExpr.fromExpr(self.allocator, expr, all_exprs);
+            } else {
+                break :blk try TemplateExpr.fromExpr(self.allocator, expr, stmt.arg_exprs);
+            }
+        } else
             null;
         try self.terms.append(self.allocator, .{
             .name = stmt.name,

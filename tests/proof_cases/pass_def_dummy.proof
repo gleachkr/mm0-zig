@@ -1,0 +1,7 @@
+test_inj
+--------
+l1: $ injective f $ by ax_inj []
+
+test_pre
+--------
+l1: $ exists_preimage f y $ by ax_pre []

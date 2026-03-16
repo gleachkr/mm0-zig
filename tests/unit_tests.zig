@@ -1558,6 +1558,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_gen", .outcome = .pass },
     .{ .stem = "pass_dup", .outcome = .pass },
     .{ .stem = "pass_def", .outcome = .pass },
+    .{ .stem = "pass_def_dummy", .outcome = .pass },
     .{ .stem = "pass_normalize", .outcome = .pass },
     .{ .stem = "pass_normalize_nested", .outcome = .pass },
     .{ .stem = "pass_normalize_identity", .outcome = .pass },
