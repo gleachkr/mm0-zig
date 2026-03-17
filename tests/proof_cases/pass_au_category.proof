@@ -11,7 +11,7 @@ l1: $ id o f ~ f $ by comp_unit []
 pb_preserves_mono
 -----------------
 
-l0: $ f_ o p1 ~ g_ o p2 $ by pb_square []
+l0: $ f_ o p1 ~ g_ o p2 $ by cm_square []
 l1: $ f_ o (p1 o alpha) ~ g_ o (p2 o alpha) $ by comp_right (f := $ f_ o p1 $, g := $ g_ o p2 $, h := $ alpha $) [l0]
 l2: $ f_ o (p1 o beta) ~ g_ o (p2 o beta) $ by comp_right (f := $ f_ o p1 $, g := $ g_ o p2 $, h := $ beta $) [l0]
 l3: $ g_ o (p2 o alpha) ~ g_ o (p2 o beta) $ by comp_left (f := $ p2 o alpha $, g := $ p2 o beta $, h := $ g_ $) [#1]

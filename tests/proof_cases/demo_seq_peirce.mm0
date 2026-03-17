@@ -14,6 +14,8 @@ infixr iff: $↔$ prec 20;
 infixr iff: $<->$ prec 20;
 term ctx_eq (g h: ctx): wff;
 term emp: ctx;
+notation emp: ctx = ($_$:max);
+
 --| @acui ctx_assoc ctx_comm emp ctx_idem
 term join (g h: ctx): ctx;
 infixl join: $,$ prec 5;

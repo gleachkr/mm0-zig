@@ -31,6 +31,7 @@ notation sb_f {x: obj} (t: obj x) (p: wff x): wff =
 
 term ctx_eq (g h: ctx): wff;
 term emp: ctx;
+notation emp: ctx = ($_$:max);
 
 --| @acui ctx_assoc ctx_comm emp ctx_idem
 term join (g h: ctx): ctx;
@@ -162,8 +163,8 @@ axiom imp_elim (g h: ctx) (a b: wff):
   $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
 --| @normalize hyp0 hyp1 conc
-axiom and_intro (g h: ctx) (a b: wff):
-  $ g ⊢ a $ > $ h ⊢ b $ > $ g , h ⊢ a ∧ b $;
+axiom and_intro (g: ctx) (a b: wff):
+  $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
 
 --| @normalize hyp0 conc
 axiom and_elim_l (g: ctx) (a b: wff):
@@ -173,10 +174,12 @@ axiom and_elim_l (g: ctx) (a b: wff):
 axiom and_elim_r (g: ctx) (a b: wff):
   $ g ⊢ a ∧ b $ > $ g ⊢ b $;
 
+--| @view (g h _k : ctx) (a b: wff): $ g ⊢ a ↔ b $ > $ h ⊢ a $ > $ _k ⊢ b $
 --| @normalize hyp0 hyp1 conc
 axiom iff_elim_l (g h : ctx) (a b: wff):
   $ g ⊢ a ↔ b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
+--| @view (g h _k : ctx) (a b: wff): $ g ⊢ a ↔ b $ > $ h ⊢ b $ > $ _k ⊢ a $
 --| @normalize hyp0 hyp1 conc
 axiom iff_elim_r (g h : ctx) (a b: wff):
   $ g ⊢ a ↔ b $ > $ h ⊢ b $ > $ g , h ⊢ a $;
@@ -189,8 +192,8 @@ axiom eq_symm (g: ctx) (a b: obj):
   $ g ⊢ a = b $ > $ g ⊢ b = a $;
 
 --| @normalize hyp0 hyp1 conc
-axiom eq_transitivity (g h: ctx) (a b c: obj):
-  $ g ⊢ a = b $ > $ h ⊢ b = c $ > $ g , h ⊢ a = c $;
+axiom eq_transitivity (g: ctx) (a b c: obj):
+  $ g ⊢ a = b $ > $ g ⊢ b = c $ > $ g ⊢ a = c $;
 
 --| @normalize hyp0 conc
 axiom all_intro (g: ctx) {x: obj} (p: wff x):

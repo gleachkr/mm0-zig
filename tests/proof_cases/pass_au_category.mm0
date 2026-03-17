@@ -67,8 +67,8 @@ term g_: mor;
 term p1: mor;
 term p2: mor;
 
--- Pullback square: f_ o p1 = g_ o p2
-axiom pb_square: $ f_ o p1 ~ g_ o p2 $;
+-- commuting square: f_ o p1 = g_ o p2
+axiom cm_square: $ f_ o p1 ~ g_ o p2 $;
 
 -- f_ is a monomorphism
 axiom f_mono (a b: mor): $ f_ o a ~ f_ o b $ > $ a ~ b $;

@@ -10,5 +10,5 @@ l6: $ ¬ (a ∨ ¬ a) ⊢ ¬ a $ by neg_intro [l5]
 l7: $ ¬ (a ∨ ¬ a) ⊢ a ∨ ¬ a $ by or_intro_r [l6]
 l8: $ ¬ (a ∨ ¬ a) ⊢ ¬ (a ∨ ¬ a) $ by ax
 l9: $ ¬ (a ∨ ¬ a) ⊢ bot $ by bot_intro [l7, l8]
-l10: $ emp ⊢ ¬ ¬ (a ∨ ¬ a) $ by neg_intro [l9]
-l11: $ emp ⊢ a ∨ ¬ a $ by dne [l10]
+l10: $ _ ⊢ ¬ ¬ (a ∨ ¬ a) $ by neg_intro [l9]
+l11: $ _ ⊢ a ∨ ¬ a $ by dne [l10]
