@@ -1,0 +1,4 @@
+def_view_mismatch
+-----------------
+l1: $ id a $ by ax_id (a := $ a $) []
+l2: $ b $ by ax_mp (a := $ a $, b := $ b $) [l1, #1]

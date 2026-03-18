@@ -1,0 +1,6 @@
+delimiter $ ( ) $;
+provable sort wff;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+def double (a: wff): wff = $ a -> a $;
+axiom ax_double (a: wff): $ double a $;
+theorem def_infer_user_side_final (a: wff): $ a -> a $;

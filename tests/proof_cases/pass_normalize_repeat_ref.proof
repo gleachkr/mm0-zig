@@ -1,0 +1,4 @@
+test_repeat_ref
+---------------
+l1: $ Q -> Q $ by all_elim (a := $ Q $, b := $ P -> P $) []
+l2: $ Q $ by use_sub_twice (a := $ Q $, b := $ P -> P $) [l1, l1]

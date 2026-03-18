@@ -1,0 +1,4 @@
+def_view_basic
+--------------
+l1: $ id a $ by ax_id []
+l2: $ a $ by ax_mp [l1, #1]

@@ -1,0 +1,3 @@
+def_infer_ambiguous
+-------------------
+l1: $ emp , (a -> a) , (b -> b) ⇒ bot $ by pair_bot_id []

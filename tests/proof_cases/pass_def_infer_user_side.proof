@@ -1,0 +1,7 @@
+imp_refl
+--------
+l1: $ a -> ((a -> a) -> a) $ by h1 []
+l2: $ a -> (a -> a) $ by h1 []
+l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 []
+l4: $ (a -> double a) -> (a -> a) $ by mp [l1, l3]
+l5: $ double a $ by mp [l2, l4]

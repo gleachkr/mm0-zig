@@ -11,6 +11,8 @@ const Statement = MmbWriter.Statement;
 const CompilerDiag = @import("./compiler_diag.zig");
 const CompilerDummies = @import("./compiler_dummies.zig");
 const CompilerViews = @import("./compiler_views.zig");
+const DefOps = @import("./def_ops.zig");
+const TermAnnotations = @import("./term_annotations.zig");
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
@@ -43,10 +45,60 @@ pub const CheckedRef = union(enum) {
 
 pub const CheckedLine = struct {
     expr: ExprId,
+    data: union(enum) {
+        rule: RuleLine,
+        transport: TransportLine,
+    },
+
+    pub const RuleLine = struct {
+        rule_id: u32,
+        bindings: []const ExprId,
+        refs: []const CheckedRef,
+    };
+
+    pub const TransportLine = struct {
+        source: CheckedRef,
+        source_expr: ExprId,
+    };
+};
+
+pub fn appendRuleLine(
+    lines: *std.ArrayListUnmanaged(CheckedLine),
+    allocator: std.mem.Allocator,
+    expr: ExprId,
     rule_id: u32,
     bindings: []const ExprId,
     refs: []const CheckedRef,
-};
+) !usize {
+    const idx = lines.items.len;
+    try lines.append(allocator, .{
+        .expr = expr,
+        .data = .{ .rule = .{
+            .rule_id = rule_id,
+            .bindings = bindings,
+            .refs = refs,
+        } },
+    });
+    return idx;
+}
+
+pub fn appendTransportLine(
+    lines: *std.ArrayListUnmanaged(CheckedLine),
+    allocator: std.mem.Allocator,
+    expr: ExprId,
+    source_expr: ExprId,
+    source: CheckedRef,
+) !usize {
+    const idx = lines.items.len;
+    try lines.append(allocator, .{
+        .expr = expr,
+        .data = .{ .transport = .{
+            .source = source,
+            .source_expr = source_expr,
+        } },
+    });
+    return idx;
+}
 
 const ExprInfo = struct {
     sort_name: []const u8,
@@ -115,22 +167,15 @@ pub const Compiler = struct {
                 .assertion => |assertion| {
                     if (assertion.kind != .theorem) {
                         try env.addStmt(stmt);
-                        try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
-                        try CompilerDummies.processDummyAnnotations(
+                        try processAssertionMetadata(
                             arena.allocator(),
                             &parser,
                             &env,
-                            assertion,
-                            parser.last_annotations,
+                            &registry,
                             &dummies,
-                        );
-                        try CompilerViews.processViewAnnotations(
-                            arena.allocator(),
-                            &parser,
-                            &env,
+                            &views,
                             assertion,
                             parser.last_annotations,
-                            &views,
                         );
                         continue;
                     }
@@ -179,27 +224,25 @@ pub const Compiler = struct {
                     }
 
                     try env.addStmt(stmt);
-                    try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
-                    try CompilerDummies.processDummyAnnotations(
+                    try processAssertionMetadata(
                         arena.allocator(),
                         &parser,
                         &env,
-                        assertion,
-                        parser.last_annotations,
+                        &registry,
                         &dummies,
-                    );
-                    try CompilerViews.processViewAnnotations(
-                        arena.allocator(),
-                        &parser,
-                        &env,
+                        &views,
                         assertion,
                         parser.last_annotations,
-                        &views,
                     );
                 },
                 .term => |term_stmt| {
                     try env.addStmt(stmt);
-                    try registry.processAnnotations(&env, term_stmt.name, parser.last_annotations);
+                    try processTermMetadata(
+                        &env,
+                        &registry,
+                        term_stmt,
+                        parser.last_annotations,
+                    );
                 },
                 else => try env.addStmt(stmt),
             }
@@ -254,6 +297,7 @@ pub const Compiler = struct {
                         .cmd = .Sort,
                         .body = &.{},
                     });
+                    try env.addStmt(stmt);
                 },
                 .term => |term_stmt| {
                     const term_record = try compileTermRecord(
@@ -270,7 +314,12 @@ pub const Compiler = struct {
                             &.{},
                     });
                     try env.addStmt(stmt);
-                    try registry.processAnnotations(&env, term_stmt.name, parser.last_annotations);
+                    try processTermMetadata(
+                        &env,
+                        &registry,
+                        term_stmt,
+                        parser.last_annotations,
+                    );
                 },
                 .assertion => |assertion| {
                     var theorem = TheoremContext.init(allocator);
@@ -313,22 +362,15 @@ pub const Compiler = struct {
                                 .body = body,
                             });
                             try env.addStmt(stmt);
-                            try registry.processAnnotations(&env, assertion.name, parser.last_annotations);
-                            try CompilerDummies.processDummyAnnotations(
+                            try processAssertionMetadata(
                                 allocator,
                                 &parser,
                                 &env,
-                                assertion,
-                                parser.last_annotations,
+                                &registry,
                                 &dummies,
-                            );
-                            try CompilerViews.processViewAnnotations(
-                                allocator,
-                                &parser,
-                                &env,
+                                &views,
                                 assertion,
                                 parser.last_annotations,
-                                &views,
                             );
                         },
                         .theorem => {
@@ -367,6 +409,7 @@ pub const Compiler = struct {
                             const body = try buildTheoremProofBody(
                                 allocator,
                                 &theorem,
+                                &env,
                                 checked,
                             );
                             try theorems.append(allocator, .{
@@ -385,21 +428,15 @@ pub const Compiler = struct {
                                 .body = body,
                             });
                             try env.addStmt(stmt);
-                            try CompilerDummies.processDummyAnnotations(
+                            try processAssertionMetadata(
                                 allocator,
                                 &parser,
                                 &env,
-                                assertion,
-                                parser.last_annotations,
+                                &registry,
                                 &dummies,
-                            );
-                            try CompilerViews.processViewAnnotations(
-                                allocator,
-                                &parser,
-                                &env,
+                                &views,
                                 assertion,
                                 parser.last_annotations,
-                                &views,
                             );
                         },
                     }
@@ -507,6 +544,49 @@ pub const Compiler = struct {
 };
 
 pub const diagnosticSummary = CompilerDiag.diagnosticSummary;
+
+fn processTermMetadata(
+    env: *GlobalEnv,
+    registry: *RewriteRegistry,
+    term_stmt: TermStmt,
+    annotations: []const []const u8,
+) !void {
+    try TermAnnotations.processTermAnnotations(
+        env,
+        term_stmt,
+        annotations,
+    );
+    try registry.processAnnotations(env, term_stmt.name, annotations);
+}
+
+fn processAssertionMetadata(
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *GlobalEnv,
+    registry: *RewriteRegistry,
+    dummies: *std.AutoHashMap(u32, []const DummyDecl),
+    views: *std.AutoHashMap(u32, ViewDecl),
+    assertion: AssertionStmt,
+    annotations: []const []const u8,
+) !void {
+    try registry.processAnnotations(env, assertion.name, annotations);
+    try CompilerDummies.processDummyAnnotations(
+        allocator,
+        parser,
+        env,
+        assertion,
+        annotations,
+        dummies,
+    );
+    try CompilerViews.processViewAnnotations(
+        allocator,
+        parser,
+        env,
+        assertion,
+        annotations,
+        views,
+    );
+}
 
 fn lineCol(src: []const u8, pos_raw: usize) LineCol {
     const pos = @min(pos_raw, src.len);
@@ -683,9 +763,10 @@ fn buildRuleUnifyStream(
 fn buildTheoremProofBody(
     allocator: std.mem.Allocator,
     theorem: *const TheoremContext,
+    env: *const GlobalEnv,
     lines: []const CheckedLine,
 ) ![]const u8 {
-    var emitter = try TheoremProofEmitter.init(allocator, theorem, lines);
+    var emitter = try TheoremProofEmitter.init(allocator, theorem, env, lines);
     defer emitter.deinit();
     try emitter.emitHyps();
     try emitter.emitLine(lines.len - 1);
@@ -828,6 +909,7 @@ const UnifyEmitter = struct {
 const InferenceContext = struct {
     allocator: std.mem.Allocator,
     theorem: *const TheoremContext,
+    env: *const GlobalEnv,
     // Heap prefix `0..rule.args.len` stores inferred theorem arguments.
     // These slots start as either an explicit binding or `null` if omitted.
     // Any entries appended later by `UTermSave` are concrete by construction.
@@ -839,6 +921,7 @@ const InferenceContext = struct {
     fn init(
         allocator: std.mem.Allocator,
         theorem: *const TheoremContext,
+        env: *const GlobalEnv,
         partial_bindings: []const ?ExprId,
         hyps: []const ExprId,
         line_expr: ExprId,
@@ -846,6 +929,7 @@ const InferenceContext = struct {
         var ctx = InferenceContext{
             .allocator = allocator,
             .theorem = theorem,
+            .env = env,
             .hyps = hyps,
             .next_hyp = hyps.len,
         };
@@ -879,17 +963,33 @@ const InferenceContext = struct {
     ) !void {
         if (self.ustack.items.len == 0) return error.UStackUnderflow;
         const expr_id = self.ustack.pop().?;
-        const node = self.theorem.interner.node(expr_id);
-        const app = switch (node.*) {
-            .app => |app| app,
-            .variable => return error.ExpectedTermApp,
-        };
-        if (app.term_id != term_id) return error.TermMismatch;
-        if (save) try self.uheap.append(self.allocator, expr_id);
-        var i = app.args.len;
-        while (i > 0) {
-            i -= 1;
-            try self.ustack.append(self.allocator, app.args[i]);
+        var current = expr_id;
+        while (true) {
+            const node = self.theorem.interner.node(current);
+            const app = switch (node.*) {
+                .app => |value| value,
+                .variable => return error.ExpectedTermApp,
+            };
+            if (app.term_id == term_id) {
+                if (save) try self.uheap.append(self.allocator, current);
+                var i = app.args.len;
+                while (i > 0) {
+                    i -= 1;
+                    try self.ustack.append(self.allocator, app.args[i]);
+                }
+                return;
+            }
+
+            var def_ops = DefOps.Context.init(
+                self.allocator,
+                @constCast(self.theorem),
+                self.env,
+                .all_defs,
+            );
+            defer def_ops.deinit();
+            current = try def_ops.openConcreteDef(current) orelse {
+                return error.TermMismatch;
+            };
         }
     }
 
@@ -910,6 +1010,7 @@ const InferenceContext = struct {
 const TheoremProofEmitter = struct {
     allocator: std.mem.Allocator,
     theorem: *const TheoremContext,
+    env: *const GlobalEnv,
     lines: []const CheckedLine,
     bytes: std.ArrayListUnmanaged(u8) = .{},
     expr_slots: ExprSlotMap = .empty,
@@ -921,11 +1022,13 @@ const TheoremProofEmitter = struct {
     fn init(
         allocator: std.mem.Allocator,
         theorem: *const TheoremContext,
+        env: *const GlobalEnv,
         lines: []const CheckedLine,
     ) !TheoremProofEmitter {
         var emitter = TheoremProofEmitter{
             .allocator = allocator,
             .theorem = theorem,
+            .env = env,
             .lines = lines,
             .heap_len = @intCast(theorem.theorem_vars.items.len),
             .hyp_slots = try allocator.alloc(u32, theorem.theorem_hyps.items.len),
@@ -956,7 +1059,10 @@ const TheoremProofEmitter = struct {
         }
     }
 
-    fn emitLine(self: *TheoremProofEmitter, line_idx: usize) !void {
+    fn emitLine(
+        self: *TheoremProofEmitter,
+        line_idx: usize,
+    ) anyerror!void {
         if (self.emitted[line_idx]) {
             try MmbWriter.appendCmd(
                 &self.bytes,
@@ -968,31 +1074,134 @@ const TheoremProofEmitter = struct {
         }
 
         const line = self.lines[line_idx];
-        for (line.refs) |ref| {
-            switch (ref) {
-                .hyp => |idx| try MmbWriter.appendCmd(
+        switch (line.data) {
+            .rule => |rule| {
+                for (rule.refs) |ref| {
+                    try self.emitRef(ref);
+                }
+                for (rule.bindings) |binding| {
+                    try self.emitExpr(binding);
+                }
+                try self.emitExpr(line.expr);
+                try MmbWriter.appendCmd(
                     &self.bytes,
                     self.allocator,
-                    ProofCmd.Ref,
-                    self.hyp_slots[idx],
-                ),
-                .line => |idx| try self.emitLine(idx),
-            }
+                    ProofCmd.ThmSave,
+                    rule.rule_id,
+                );
+            },
+            .transport => |transport| {
+                try self.emitExpr(line.expr);
+                try self.emitRef(transport.source);
+                try MmbWriter.appendCmd(
+                    &self.bytes,
+                    self.allocator,
+                    ProofCmd.Conv,
+                    0,
+                );
+                try self.emitConversion(line.expr, transport.source_expr);
+                try MmbWriter.appendCmd(
+                    &self.bytes,
+                    self.allocator,
+                    ProofCmd.Save,
+                    0,
+                );
+            },
         }
-
-        for (line.bindings) |binding| {
-            try self.emitExpr(binding);
-        }
-        try self.emitExpr(line.expr);
-        try MmbWriter.appendCmd(
-            &self.bytes,
-            self.allocator,
-            ProofCmd.ThmSave,
-            line.rule_id,
-        );
         self.line_slots[line_idx] = self.heap_len;
         self.heap_len = try std.math.add(u32, self.heap_len, 1);
         self.emitted[line_idx] = true;
+    }
+
+    fn emitRef(
+        self: *TheoremProofEmitter,
+        ref: CheckedRef,
+    ) anyerror!void {
+        switch (ref) {
+            .hyp => |idx| try MmbWriter.appendCmd(
+                &self.bytes,
+                self.allocator,
+                ProofCmd.Ref,
+                self.hyp_slots[idx],
+            ),
+            .line => |idx| try self.emitLine(idx),
+        }
+    }
+
+    fn emitConversion(
+        self: *TheoremProofEmitter,
+        target_expr: ExprId,
+        source_expr: ExprId,
+    ) !void {
+        var def_ops = DefOps.Context.init(
+            self.allocator,
+            @constCast(self.theorem),
+            self.env,
+            .all_defs,
+        );
+        defer def_ops.deinit();
+        const plan = try def_ops.planConversionByDefOpening(
+            target_expr,
+            source_expr,
+        ) orelse return error.MissingConversionPlan;
+        try self.emitConversionPlan(plan);
+    }
+
+    fn emitConversionPlan(
+        self: *TheoremProofEmitter,
+        plan: *const DefOps.ConversionPlan,
+    ) !void {
+        switch (plan.*) {
+            .refl => try MmbWriter.appendCmd(
+                &self.bytes,
+                self.allocator,
+                ProofCmd.Refl,
+                0,
+            ),
+            .unfold_lhs => |step| {
+                try self.emitExpr(step.witness);
+                try MmbWriter.appendCmd(
+                    &self.bytes,
+                    self.allocator,
+                    ProofCmd.Unfold,
+                    0,
+                );
+                try self.emitConversionPlan(step.next);
+            },
+            .unfold_rhs => |step| {
+                try MmbWriter.appendCmd(
+                    &self.bytes,
+                    self.allocator,
+                    ProofCmd.Symm,
+                    0,
+                );
+                try self.emitExpr(step.witness);
+                try MmbWriter.appendCmd(
+                    &self.bytes,
+                    self.allocator,
+                    ProofCmd.Unfold,
+                    0,
+                );
+                try MmbWriter.appendCmd(
+                    &self.bytes,
+                    self.allocator,
+                    ProofCmd.Symm,
+                    0,
+                );
+                try self.emitConversionPlan(step.next);
+            },
+            .cong => |step| {
+                try MmbWriter.appendCmd(
+                    &self.bytes,
+                    self.allocator,
+                    ProofCmd.Cong,
+                    0,
+                );
+                for (step.children) |child| {
+                    try self.emitConversionPlan(child);
+                }
+            },
+        }
     }
 
     fn emitExpr(self: *TheoremProofEmitter, expr_id: ExprId) !void {
@@ -1060,6 +1269,7 @@ fn checkTheoremBlock(
 
     var checked = std.ArrayListUnmanaged(CheckedLine){};
     var last_line: ?ExprId = null;
+    var last_line_idx: ?usize = null;
     var last_label: ?[]const u8 = null;
     var last_span: ?Span = null;
 
@@ -1175,6 +1385,7 @@ fn checkTheoremBlock(
                 CompilerViews.applyViewBindings(
                     allocator,
                     theorem,
+                    env,
                     &view,
                     line_expr,
                     ref_exprs,
@@ -1235,6 +1446,23 @@ fn checkTheoremBlock(
                 bindings,
             );
             if (actual != expected) {
+                if (try canConvertByDefOpening(
+                    allocator,
+                    theorem,
+                    env,
+                    expected,
+                    actual,
+                )) {
+                    const transport_idx = try appendTransportLine(
+                        &checked,
+                        allocator,
+                        expected,
+                        actual,
+                        refs[idx],
+                    );
+                    refs[idx] = .{ .line = transport_idx };
+                    continue;
+                }
                 if (norm_spec) |spec| {
                     if (isHypMarkedForNormalize(spec, idx)) {
                         if (try buildNormalizedConversion(
@@ -1249,15 +1477,29 @@ fn checkTheoremBlock(
                             var conversion_mut = conversion;
                             const actual_ref = refs[idx];
                             if (conversion_mut.conv_line_idx) |conv_line_idx| {
-                                const transport_idx = try conversion_mut.normalizer.emitTransport(
-                                    conversion_mut.relation,
-                                    expected,
-                                    actual,
-                                    conv_line_idx,
-                                    actual_ref,
-                                );
+                                const transport_idx =
+                                    try conversion_mut.normalizer.emitTransport(
+                                        conversion_mut.relation,
+                                        expected,
+                                        actual,
+                                        conv_line_idx,
+                                        actual_ref,
+                                    );
                                 refs[idx] = .{ .line = transport_idx };
                             }
+                            continue;
+                        }
+                        if (try buildDefAwareNormalizedHypRef(
+                            allocator,
+                            theorem,
+                            registry,
+                            env,
+                            &checked,
+                            refs[idx],
+                            actual,
+                            expected,
+                        )) |transport_ref| {
+                            refs[idx] = transport_ref;
                             continue;
                         }
                         return error.HypothesisMismatch;
@@ -1290,6 +1532,48 @@ fn checkTheoremBlock(
         );
 
         if (line_expr != expected_line) {
+            if (try canConvertByDefOpening(
+                allocator,
+                theorem,
+                env,
+                line_expr,
+                expected_line,
+            )) {
+                const raw_idx = try appendRuleLine(
+                    &checked,
+                    allocator,
+                    expected_line,
+                    rule_id,
+                    bindings,
+                    refs,
+                );
+                const line_idx = try appendTransportLine(
+                    &checked,
+                    allocator,
+                    line_expr,
+                    expected_line,
+                    .{ .line = raw_idx },
+                );
+
+                const gop = try labels.getOrPut(line.label);
+                if (gop.found_existing) {
+                    self.setDiagnostic(.{
+                        .kind = .duplicate_label,
+                        .err = error.DuplicateLabel,
+                        .theorem_name = assertion.name,
+                        .line_label = line.label,
+                        .name = line.label,
+                        .span = line.span,
+                    });
+                    return error.DuplicateLabel;
+                }
+                gop.value_ptr.* = line_idx;
+                last_line = line_expr;
+                last_line_idx = line_idx;
+                last_label = line.label;
+                last_span = line.assertion.span;
+                continue;
+            }
             if (norm_spec) |spec| {
                 if (spec.concl) {
                     if (try buildNormalizedConversion(
@@ -1302,24 +1586,26 @@ fn checkTheoremBlock(
                         line_expr,
                     )) |conversion| {
                         var conversion_mut = conversion;
-                        const raw_idx = checked.items.len;
-                        try checked.append(allocator, .{
-                            .expr = expected_line,
-                            .rule_id = rule_id,
-                            .bindings = bindings,
-                            .refs = refs,
-                        });
+                        const raw_idx = try appendRuleLine(
+                            &checked,
+                            allocator,
+                            expected_line,
+                            rule_id,
+                            bindings,
+                            refs,
+                        );
 
-                        const line_idx = if (conversion_mut.conv_line_idx) |conv_idx|
-                            try conversion_mut.normalizer.emitTransport(
-                                conversion_mut.relation,
-                                line_expr,
-                                expected_line,
-                                conv_idx,
-                                .{ .line = raw_idx },
-                            )
-                        else
-                            raw_idx;
+                        const line_idx =
+                            if (conversion_mut.conv_line_idx) |conv_idx|
+                                try conversion_mut.normalizer.emitTransport(
+                                    conversion_mut.relation,
+                                    line_expr,
+                                    expected_line,
+                                    conv_idx,
+                                    .{ .line = raw_idx },
+                                )
+                            else
+                                raw_idx;
 
                         const gop = try labels.getOrPut(line.label);
                         if (gop.found_existing) {
@@ -1335,6 +1621,38 @@ fn checkTheoremBlock(
                         }
                         gop.value_ptr.* = line_idx;
                         last_line = line_expr;
+                        last_line_idx = line_idx;
+                        last_label = line.label;
+                        last_span = line.assertion.span;
+                        continue;
+                    }
+                    if (try buildDefAwareNormalizedConclusionLine(
+                        allocator,
+                        theorem,
+                        registry,
+                        env,
+                        &checked,
+                        line_expr,
+                        expected_line,
+                        rule_id,
+                        bindings,
+                        refs,
+                    )) |line_idx| {
+                        const gop = try labels.getOrPut(line.label);
+                        if (gop.found_existing) {
+                            self.setDiagnostic(.{
+                                .kind = .duplicate_label,
+                                .err = error.DuplicateLabel,
+                                .theorem_name = assertion.name,
+                                .line_label = line.label,
+                                .name = line.label,
+                                .span = line.span,
+                            });
+                            return error.DuplicateLabel;
+                        }
+                        gop.value_ptr.* = line_idx;
+                        last_line = line_expr;
+                        last_line_idx = line_idx;
                         last_label = line.label;
                         last_span = line.assertion.span;
                         continue;
@@ -1365,14 +1683,17 @@ fn checkTheoremBlock(
             });
             return error.DuplicateLabel;
         }
-        gop.value_ptr.* = checked.items.len;
-        try checked.append(allocator, .{
-            .expr = line_expr,
-            .rule_id = rule_id,
-            .bindings = bindings,
-            .refs = refs,
-        });
+        const line_idx = try appendRuleLine(
+            &checked,
+            allocator,
+            line_expr,
+            rule_id,
+            bindings,
+            refs,
+        );
+        gop.value_ptr.* = line_idx;
         last_line = line_expr;
+        last_line_idx = line_idx;
         last_label = line.label;
         last_span = line.assertion.span;
     }
@@ -1388,6 +1709,24 @@ fn checkTheoremBlock(
         return error.EmptyProofBlock;
     };
     if (final_line != theorem_concl) {
+        if (last_line_idx) |line_idx| {
+            if (try canConvertByDefOpening(
+                allocator,
+                theorem,
+                env,
+                theorem_concl,
+                final_line,
+            )) {
+                _ = try appendTransportLine(
+                    &checked,
+                    allocator,
+                    theorem_concl,
+                    final_line,
+                    .{ .line = line_idx },
+                );
+                return try checked.toOwnedSlice(allocator);
+            }
+        }
         self.setDiagnostic(.{
             .kind = .final_line_mismatch,
             .err = error.FinalLineMismatch,
@@ -1546,6 +1885,63 @@ fn requireConcreteBindings(
     return bindings;
 }
 
+fn canConvertByDefOpening(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    target_expr: ExprId,
+    source_expr: ExprId,
+) !bool {
+    var def_ops = DefOps.Context.init(
+        allocator,
+        theorem,
+        env,
+        .all_defs,
+    );
+    defer def_ops.deinit();
+    return (try def_ops.planConversionByDefOpening(
+        target_expr,
+        source_expr,
+    )) != null;
+}
+
+fn inferBindingsByDefOpening(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *TheoremContext,
+    rule: *const RuleDecl,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ![]const ExprId {
+    const bindings = try allocator.dupe(?ExprId, partial_bindings);
+    var def_ops = DefOps.Context.init(
+        allocator,
+        theorem,
+        env,
+        .all_defs,
+    );
+    defer def_ops.deinit();
+
+    if (!try def_ops.matchTemplateWithDefOpening(
+        rule.concl,
+        line_expr,
+        bindings,
+    )) {
+        return error.UnifyMismatch;
+    }
+    for (rule.hyps, ref_exprs) |hyp, ref_expr| {
+        if (!try def_ops.matchTemplateWithDefOpening(
+            hyp,
+            ref_expr,
+            bindings,
+        )) {
+            return error.UnifyMismatch;
+        }
+    }
+    return try requireConcreteBindings(allocator, bindings);
+}
+
 fn shouldUseAdvancedInference(
     rule_id: u32,
     maybe_view: ?ViewDecl,
@@ -1606,7 +2002,39 @@ fn inferBindings(
         return bindings;
     }
 
-    const unify = buildRuleUnifyStream(allocator, rule) catch |err| {
+    return strictInferBindings(
+        self,
+        allocator,
+        env,
+        theorem,
+        assertion,
+        rule,
+        line,
+        partial_bindings,
+        ref_exprs,
+        line_expr,
+    ) catch |err| {
+        const fallback = inferBindingsByDefOpening(
+            allocator,
+            env,
+            theorem,
+            rule,
+            partial_bindings,
+            ref_exprs,
+            line_expr,
+        ) catch null;
+        if (fallback) |bindings| {
+            try validateResolvedBindings(
+                self,
+                env,
+                theorem,
+                assertion,
+                line,
+                rule,
+                bindings,
+            );
+            return bindings;
+        }
         self.setDiagnostic(.{
             .kind = .inference_failed,
             .err = err,
@@ -1617,82 +2045,55 @@ fn inferBindings(
         });
         return err;
     };
+}
+
+fn strictInferBindings(
+    self: *Compiler,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ![]const ExprId {
+    _ = self;
+    _ = line;
+
+    const unify = try buildRuleUnifyStream(allocator, rule);
 
     var inference = try InferenceContext.init(
         allocator,
         theorem,
+        env,
         partial_bindings,
         ref_exprs,
         line_expr,
     );
     defer inference.deinit();
 
-    UnifyReplay.run(unify, 0, &inference) catch |err| {
-        self.setDiagnostic(.{
-            .kind = .inference_failed,
-            .err = err,
-            .theorem_name = assertion.name,
-            .line_label = line.label,
-            .rule_name = line.rule_name,
-            .span = line.span,
-        });
-        return err;
-    };
+    try UnifyReplay.run(unify, 0, &inference);
     if (inference.ustack.items.len != 0) {
-        self.setDiagnostic(.{
-            .kind = .inference_failed,
-            .err = error.UnifyStackNotEmpty,
-            .theorem_name = assertion.name,
-            .line_label = line.label,
-            .rule_name = line.rule_name,
-            .span = line.span,
-        });
         return error.UnifyStackNotEmpty;
     }
     if (inference.next_hyp != 0) {
-        self.setDiagnostic(.{
-            .kind = .inference_failed,
-            .err = error.HypCountMismatch,
-            .theorem_name = assertion.name,
-            .line_label = line.label,
-            .rule_name = line.rule_name,
-            .span = line.span,
-        });
         return error.HypCountMismatch;
     }
 
     const bindings = try allocator.alloc(ExprId, rule.args.len);
     for (0..rule.args.len) |idx| {
         const binding = inference.uheap.items[idx] orelse {
-            self.setDiagnostic(.{
-                .kind = .missing_binder_assignment,
-                .err = error.MissingBinderAssignment,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .name = rule.arg_names[idx].?,
-                .span = line.span,
-            });
             return error.MissingBinderAssignment;
         };
-        validateBindingExpr(
+        try validateBindingExpr(
             env,
             theorem,
             assertion.args,
             rule.args[idx],
             binding,
-        ) catch |err| {
-            self.setDiagnostic(.{
-                .kind = .inference_failed,
-                .err = err,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .name = rule.arg_names[idx].?,
-                .span = line.span,
-            });
-            return err;
-        };
+        );
         bindings[idx] = binding;
     }
     return bindings;
@@ -1837,6 +2238,13 @@ const NormalizedConversion = struct {
     normalizer: Normalizer,
 };
 
+const ExpectedNormalization = struct {
+    relation: @import("./rewrite_registry.zig").ResolvedRelation,
+    normalized_expr: ExprId,
+    conv_line_idx: ?usize,
+    normalizer: Normalizer,
+};
+
 fn buildNormalizedConversion(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
@@ -1892,6 +2300,154 @@ fn buildNormalizedConversion(
     };
 }
 
+fn buildExpectedNormalization(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    expected: ExprId,
+) !?ExpectedNormalization {
+    var normalizer = Normalizer.init(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+    );
+    const relation = normalizer.resolveRelationForExpr(expected) orelse {
+        return null;
+    };
+    const normalized = try normalizer.normalize(expected);
+    if (normalized.result_expr == expected and normalized.conv_line_idx == null) {
+        return null;
+    }
+    return .{
+        .relation = relation,
+        .normalized_expr = normalized.result_expr,
+        .conv_line_idx = normalized.conv_line_idx,
+        .normalizer = normalizer,
+    };
+}
+
+fn buildDefAwareNormalizedHypRef(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    actual_ref: CheckedRef,
+    actual: ExprId,
+    expected: ExprId,
+) !?CheckedRef {
+    var normalization = try buildExpectedNormalization(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        expected,
+    ) orelse return null;
+    if (!try canConvertByDefOpening(
+        allocator,
+        theorem,
+        env,
+        normalization.normalized_expr,
+        actual,
+    )) {
+        return null;
+    }
+
+    const normalized_ref = if (actual == normalization.normalized_expr)
+        actual_ref
+    else
+        CheckedRef{ .line = try appendTransportLine(
+            checked,
+            allocator,
+            normalization.normalized_expr,
+            actual,
+            actual_ref,
+        ) };
+
+    if (normalization.conv_line_idx) |conv_line_idx| {
+        const symm_idx = try normalization.normalizer.emitSymm(
+            normalization.relation,
+            expected,
+            normalization.normalized_expr,
+            conv_line_idx,
+        );
+        return .{ .line = try normalization.normalizer.emitTransport(
+            normalization.relation,
+            expected,
+            normalization.normalized_expr,
+            symm_idx,
+            normalized_ref,
+        ) };
+    }
+    return normalized_ref;
+}
+
+fn buildDefAwareNormalizedConclusionLine(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    line_expr: ExprId,
+    expected_line: ExprId,
+    rule_id: u32,
+    bindings: []const ExprId,
+    refs: []const CheckedRef,
+) !?usize {
+    var normalization = try buildExpectedNormalization(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        expected_line,
+    ) orelse return null;
+    if (!try canConvertByDefOpening(
+        allocator,
+        theorem,
+        env,
+        line_expr,
+        normalization.normalized_expr,
+    )) {
+        return null;
+    }
+
+    const raw_idx = try appendRuleLine(
+        checked,
+        allocator,
+        expected_line,
+        rule_id,
+        bindings,
+        refs,
+    );
+    const normalized_idx = if (normalization.conv_line_idx) |conv_line_idx|
+        try normalization.normalizer.emitTransport(
+            normalization.relation,
+            normalization.normalized_expr,
+            expected_line,
+            conv_line_idx,
+            .{ .line = raw_idx },
+        )
+    else
+        raw_idx;
+
+    if (line_expr == normalization.normalized_expr) {
+        return normalized_idx;
+    }
+    return try appendTransportLine(
+        checked,
+        allocator,
+        line_expr,
+        normalization.normalized_expr,
+        .{ .line = normalized_idx },
+    );
+}
+
 fn isHypMarkedForNormalize(
     spec: @import("./rewrite_registry.zig").NormalizeSpec,
     hyp_idx: usize,
@@ -1900,20 +2456,4 @@ fn isHypMarkedForNormalize(
         if (marked == hyp_idx) return true;
     }
     return false;
-}
-
-fn getRuleConcSort(env: *const GlobalEnv, rule: *const RuleDecl) ?[]const u8 {
-    return getTemplateSort(env, rule.concl);
-}
-
-fn getTemplateSort(env: *const GlobalEnv, template: TemplateExpr) ?[]const u8 {
-    switch (template) {
-        .app => |app| {
-            if (app.term_id < env.terms.items.len) {
-                return env.terms.items[app.term_id].ret_sort_name;
-            }
-            return null;
-        },
-        .binder => return null,
-    }
 }

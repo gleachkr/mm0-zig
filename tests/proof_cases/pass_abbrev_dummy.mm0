@@ -1,0 +1,33 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term imp (a b: wff): wff;
+infixr imp: $->$ prec 25;
+term top: wff;
+term mark (a: wff): wff;
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 35;
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
+term g (a b: obj): obj;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @rewrite
+axiom mark_any (a: wff): $ mark a <-> top $;
+
+--| @abbrev
+def pre_wrap (f y: obj) {.x: obj}: wff
+  = $ mark (A. x (((g f x) = y) -> (x = x))) $;
+
+--| @normalize conc
+axiom pre_ax (f y: obj): $ pre_wrap f y $;
+
+theorem abbrev_dummy (f y: obj): $ top $;

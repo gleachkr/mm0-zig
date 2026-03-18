@@ -138,6 +138,7 @@ pub const TheoremContext = struct {
     allocator: std.mem.Allocator,
     interner: ExprInterner,
     parser_vars: std.AutoHashMapUnmanaged(*const Expr, VarId) = .empty,
+    arg_infos: []const ArgInfo = &.{},
     theorem_vars: std.ArrayListUnmanaged(ExprId) = .{},
     theorem_hyps: std.ArrayListUnmanaged(ExprId) = .{},
     theorem_dummies: std.ArrayListUnmanaged(DummyInfo) = .{},
@@ -182,6 +183,7 @@ pub const TheoremContext = struct {
         arg_infos: []const ArgInfo,
         arg_exprs: []const *const Expr,
     ) !void {
+        self.arg_infos = arg_infos;
         try self.seedBinderCount(arg_exprs.len);
         var next_bound_dep: u32 = 0;
         for (arg_infos) |arg| {
@@ -225,10 +227,18 @@ pub const TheoremContext = struct {
         const sort_id = parser.sort_names.get(arg.sort_name) orelse {
             return error.UnknownSort;
         };
+        return try self.addDummyVarResolved(arg.sort_name, sort_id);
+    }
+
+    pub fn addDummyVarResolved(
+        self: *TheoremContext,
+        sort_name: []const u8,
+        sort_id: u8,
+    ) !ExprId {
         const dummy_id = self.next_dummy_id;
         self.next_dummy_id = try std.math.add(DummyVarId, dummy_id, 1);
         try self.theorem_dummies.append(self.allocator, .{
-            .sort_name = arg.sort_name,
+            .sort_name = sort_name,
             .sort_id = sort_id,
             .deps = @as(u55, 1) << @intCast(self.next_dummy_dep),
         });

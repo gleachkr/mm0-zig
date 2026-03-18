@@ -1,0 +1,3 @@
+abbrev_dummy
+------------
+l1: $ top $ by pre_ax (f := $ f $, y := $ y $) []

@@ -4,6 +4,7 @@ const RuleDecl = @import("./compiler_env.zig").RuleDecl;
 const ExprId = @import("./compiler_expr.zig").ExprId;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
+const DefOps = @import("./def_ops.zig");
 const DerivedBindings = @import("./derived_bindings.zig");
 const Expr = @import("../trusted/expressions.zig").Expr;
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
@@ -135,6 +136,7 @@ pub fn processViewAnnotations(
 pub fn applyViewBindings(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
+    env: *const GlobalEnv,
     view: *const ViewDecl,
     line_expr: ExprId,
     ref_exprs: []const ExprId,
@@ -148,11 +150,27 @@ pub fn applyViewBindings(
         view_bindings[vi] = partial_bindings[rule_idx];
     }
 
-    if (!theorem.matchTemplate(view.concl, line_expr, view_bindings)) {
+    var def_ops = DefOps.Context.init(
+        allocator,
+        theorem,
+        env,
+        .all_defs,
+    );
+    defer def_ops.deinit();
+
+    if (!try def_ops.matchTemplateWithDefOpening(
+        view.concl,
+        line_expr,
+        view_bindings,
+    )) {
         return error.ViewConclusionMismatch;
     }
     for (view.hyps, ref_exprs) |hyp_template, ref_expr| {
-        if (!theorem.matchTemplate(hyp_template, ref_expr, view_bindings)) {
+        if (!try def_ops.matchTemplateWithDefOpening(
+            hyp_template,
+            ref_expr,
+            view_bindings,
+        )) {
             return error.ViewHypothesisMismatch;
         }
     }
@@ -356,4 +374,3 @@ fn findViewBinderIndex(sig: ViewSignature, name: []const u8) ?usize {
     }
     return null;
 }
-

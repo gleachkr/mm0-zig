@@ -1,0 +1,4 @@
+def_unfold_ref
+--------------
+l1: $ a -> a $ by ax_expanded []
+l2: $ a $ by use_id (a := $ a $) [l1]

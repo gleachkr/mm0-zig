@@ -1,0 +1,6 @@
+delimiter $ ( ) $;
+provable sort wff;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+def double (a: wff): wff = $ a -> a $;
+axiom use_nested (a b: wff): $ (a -> b) $ > $ ((a -> b) -> a) $;
+theorem def_infer_user_side_hyp (a: wff): $ a -> a $ > $ ((double a) -> a) $;

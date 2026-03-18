@@ -66,6 +66,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
             "bound-variable constraint",
         error.SortMismatch => "binding does not satisfy the rule's sort constraint",
         error.UnifyMismatch, error.TermMismatch, error.ExpectedTermApp, error.UnifyStackNotEmpty, error.HypCountMismatch => "could not infer omitted rule arguments from the line and refs",
+        error.AmbiguousAcuiMatch => "omitted rule arguments are ambiguous after structural or def-aware matching",
         error.UnknownTheoremVariable => "binding refers to a theorem variable that is not in scope",
         error.DuplicateViewAnnotation => "multiple @view annotations were attached to one rule",
         error.InvalidViewAnnotation => "could not parse @view annotation",
@@ -99,6 +100,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.DummyRequiresBoundBinder => "@dummy target must be a bound rule binder",
         error.DummyStrictSort => "@dummy cannot target a binder in a strict sort",
         error.DummyFreeSort => "@dummy cannot target a binder in a free sort",
+        error.AbbrevOnNonDef => "@abbrev may only be attached to defs",
         else => @errorName(err),
     };
 }

@@ -1,0 +1,3 @@
+abbrev_rewrite
+--------------
+l1: $ Q -> Q $ by all_elim (a := $ Q $, b := $ pp $) []

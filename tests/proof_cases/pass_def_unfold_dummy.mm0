@@ -1,0 +1,19 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort obj;
+
+term imp (a b: wff): wff;
+infixr imp: $->$ prec 25;
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 35;
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
+term g (a b: obj): obj;
+
+def exists_preimage (f y: obj) {.x: obj}: wff
+  = $ A. x (((g f x) = y) -> (x = x)) $;
+
+axiom ax_pre (f y: obj): $ exists_preimage f y $;
+
+theorem def_unfold_dummy (f y: obj) {x: obj}:
+  $ A. x (((g f x) = y) -> (x = x)) $;

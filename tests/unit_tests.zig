@@ -5,12 +5,14 @@ const Arg = mm0.Arg;
 const Compiler = mm0.Compiler;
 const CompilerEnv = mm0.CompilerEnv;
 const CompilerExpr = mm0.CompilerExpr;
+const TermAnnotations = mm0.TermAnnotations;
 const Expr = mm0.Expr;
 const Header = mm0.Header;
 const MAGIC = mm0.MAGIC;
 const Heap = mm0.Heap;
 const MM0Parser = mm0.MM0Parser;
 const Mmb = mm0.Mmb;
+const DefOps = mm0.DefOps;
 const CrossChecker = mm0.CrossChecker;
 const Proof = mm0.Proof;
 const ProofScript = mm0.ProofScript;
@@ -1248,6 +1250,176 @@ test "proof script parser reads theorem blocks and proof lines" {
     try std.testing.expect((try parser.nextBlock()) == null);
 }
 
+test "compiler env retains def dummy metadata" {
+    const src = try readProofCaseFile(
+        std.testing.allocator,
+        "pass_def_dummy",
+        "mm0",
+    );
+    defer std.testing.allocator.free(src);
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+    }
+
+    const term_id = env.term_names.get("injective") orelse {
+        return error.MissingTerm;
+    };
+    const term = env.terms.items[term_id];
+    try std.testing.expect(term.is_def);
+    try std.testing.expectEqual(@as(usize, 2), term.dummy_args.len);
+    try std.testing.expectEqualStrings("obj", term.dummy_args[0].sort_name);
+    try std.testing.expectEqualStrings("obj", term.dummy_args[1].sort_name);
+}
+
+test "compiler env records @abbrev on defs" {
+    const src =
+        \\sort nat;
+        \\term plus (a b: nat): nat;
+        \\--| @abbrev
+        \\def double (a: nat): nat = $ plus a a $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .term => |term| try TermAnnotations.processTermAnnotations(
+                &env,
+                term,
+                parser.last_annotations,
+            ),
+            else => {},
+        }
+    }
+
+    try std.testing.expectEqual(@as(usize, 2), env.terms.items.len);
+    try std.testing.expect(!env.terms.items[0].is_abbrev);
+    try std.testing.expect(env.terms.items[1].is_abbrev);
+}
+
+fn expectExprMatchesByDefOpening(
+    src: []const u8,
+    lhs_text: []const u8,
+    rhs_text: []const u8,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const lhs_expr = try parser.parseFormulaText(lhs_text, &theorem_vars);
+    const rhs_expr = try parser.parseFormulaText(rhs_text, &theorem_vars);
+    const lhs = try theorem.internParsedExpr(lhs_expr);
+    const rhs = try theorem.internParsedExpr(rhs_expr);
+
+    var def_ops = DefOps.Context.init(
+        arena.allocator(),
+        &theorem,
+        &env,
+        .all_defs,
+    );
+    defer def_ops.deinit();
+
+    try std.testing.expect(try def_ops.exprMatchesByDefOpening(lhs, rhs));
+    try std.testing.expect(try def_ops.exprMatchesByDefOpening(rhs, lhs));
+}
+
+test "def matcher opens nested user-side defs under matching heads" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def double (a: wff): wff = $ a -> a $;
+        \\theorem demo (a: wff): $ (a -> a) -> (a -> a) $;
+    ;
+
+    try expectExprMatchesByDefOpening(
+        src,
+        " (a -> double a) -> (a -> a) ",
+        " (a -> (a -> a)) -> (a -> a) ",
+    );
+}
+
+test "def matcher opens nested user-side defs on both sides" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def double (a: wff): wff = $ a -> a $;
+        \\def alias (a: wff): wff = $ double a $;
+        \\def wrap (a: wff): wff = $ a -> a $;
+        \\theorem demo (a: wff): $ (a -> a) -> (a -> a) $;
+    ;
+
+    try expectExprMatchesByDefOpening(
+        src,
+        " (a -> alias a) -> (a -> a) ",
+        " (a -> wrap a) -> (a -> a) ",
+    );
+}
+
+test "def matcher opens nested user-side defs through repeated heads" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def double (a: wff): wff = $ a -> a $;
+        \\def alias (a: wff): wff = $ double a $;
+        \\def wrap (a: wff): wff = $ a -> a $;
+        \\theorem demo (a: wff): $ ((a -> a) -> (a -> a)) -> (a -> a) $;
+    ;
+
+    try expectExprMatchesByDefOpening(
+        src,
+        " ((a -> alias a) -> (a -> a)) -> (a -> a) ",
+        " ((a -> wrap a) -> (a -> a)) -> (a -> a) ",
+    );
+}
+
+test "compiler rejects @abbrev on non-def terms" {
+    const mm0_src =
+        \\sort nat;
+        \\--| @abbrev
+        \\term zero: nat;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(error.AbbrevOnNonDef, compiler.check());
+}
+
 test "compiler env converts rules into binder-indexed templates" {
     const src =
         \\provable sort wff;
@@ -1559,10 +1731,31 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_dup", .outcome = .pass },
     .{ .stem = "pass_def", .outcome = .pass },
     .{ .stem = "pass_def_dummy", .outcome = .pass },
+    .{ .stem = "pass_def_transport", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_line", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_ref", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_final", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_final_reverse", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_dummy", .outcome = .pass },
+    .{ .stem = "pass_def_view_basic", .outcome = .pass },
+    .{ .stem = "pass_def_rewrite_concl", .outcome = .pass },
+    .{ .stem = "pass_def_rewrite_hyp", .outcome = .pass },
+    .{ .stem = "pass_def_infer_expected", .outcome = .pass },
+    .{ .stem = "pass_def_infer_actual", .outcome = .pass },
+    .{ .stem = "pass_def_infer_hyp", .outcome = .pass },
+    .{ .stem = "pass_def_infer_dummy", .outcome = .pass },
+    .{ .stem = "pass_def_infer_user_side", .outcome = .pass },
+    .{ .stem = "pass_def_infer_user_side_hyp", .outcome = .pass },
+    .{ .stem = "pass_def_infer_user_side_final", .outcome = .pass },
+    .{ .stem = "pass_abbrev_assoc", .outcome = .pass },
+    .{ .stem = "pass_abbrev_rewrite", .outcome = .pass },
+    .{ .stem = "pass_abbrev_nested", .outcome = .pass },
+    .{ .stem = "pass_abbrev_dummy", .outcome = .pass },
     .{ .stem = "pass_normalize", .outcome = .pass },
     .{ .stem = "pass_normalize_nested", .outcome = .pass },
     .{ .stem = "pass_normalize_identity", .outcome = .pass },
     .{ .stem = "pass_normalize_hyp", .outcome = .pass },
+    .{ .stem = "pass_normalize_repeat_ref", .outcome = .pass },
     .{ .stem = "pass_normalize_noop", .outcome = .pass },
     .{ .stem = "hilbert", .outcome = .pass },
     .{ .stem = "hilbert_quant", .outcome = .pass },
@@ -1594,6 +1787,22 @@ const proof_cases = [_]ProofCase{
     .{
         .stem = "fail_missing_binding",
         .outcome = .{ .fail = error.MissingBinderAssignment },
+    },
+    .{
+        .stem = "fail_def_unfold_mismatch",
+        .outcome = .{ .fail = error.HypothesisMismatch },
+    },
+    .{
+        .stem = "fail_def_view_mismatch",
+        .outcome = .{ .fail = error.ViewHypothesisMismatch },
+    },
+    .{
+        .stem = "fail_def_infer_ambiguous",
+        .outcome = .{ .fail = error.AmbiguousAcuiMatch },
+    },
+    .{
+        .stem = "fail_abbrev_on_nondef",
+        .outcome = .{ .fail = error.AbbrevOnNonDef },
     },
     .{
         .stem = "fail_infer_mismatch",

@@ -4,6 +4,7 @@ const AssertionKind = @import("../trusted/parse.zig").AssertionKind;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const Expr = @import("../trusted/expressions.zig").Expr;
 const MM0Stmt = @import("../trusted/parse.zig").MM0Stmt;
+const SortStmt = @import("../trusted/parse.zig").SortStmt;
 const TermStmt = @import("../trusted/parse.zig").TermStmt;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 
@@ -11,8 +12,10 @@ pub const TermDecl = struct {
     name: []const u8,
     args: []const ArgInfo,
     arg_names: []const ?[]const u8,
+    dummy_args: []const ArgInfo,
     ret_sort_name: []const u8,
     is_def: bool,
+    is_abbrev: bool,
     body: ?TemplateExpr,
 };
 
@@ -28,6 +31,7 @@ pub const RuleDecl = struct {
 
 pub const GlobalEnv = struct {
     allocator: std.mem.Allocator,
+    sort_names: std.StringHashMap(u8),
     term_names: std.StringHashMap(u32),
     rule_names: std.StringHashMap(u32),
     terms: std.ArrayListUnmanaged(TermDecl) = .{},
@@ -36,6 +40,7 @@ pub const GlobalEnv = struct {
     pub fn init(allocator: std.mem.Allocator) GlobalEnv {
         return .{
             .allocator = allocator,
+            .sort_names = std.StringHashMap(u8).init(allocator),
             .term_names = std.StringHashMap(u32).init(allocator),
             .rule_names = std.StringHashMap(u32).init(allocator),
         };
@@ -43,10 +48,17 @@ pub const GlobalEnv = struct {
 
     pub fn addStmt(self: *GlobalEnv, stmt: MM0Stmt) !void {
         switch (stmt) {
-            .sort => {},
+            .sort => |sort| try self.addSort(sort),
             .term => |term| try self.addTerm(term),
             .assertion => |rule| try self.addRule(rule),
         }
+    }
+
+    pub fn addSort(self: *GlobalEnv, stmt: SortStmt) !void {
+        const sort_id = std.math.cast(u8, self.sort_names.count()) orelse {
+            return error.TooManySorts;
+        };
+        try self.sort_names.put(stmt.name, sort_id);
     }
 
     pub fn addTerm(self: *GlobalEnv, stmt: TermStmt) !void {
@@ -65,14 +77,15 @@ pub const GlobalEnv = struct {
             } else {
                 break :blk try TemplateExpr.fromExpr(self.allocator, expr, stmt.arg_exprs);
             }
-        } else
-            null;
+        } else null;
         try self.terms.append(self.allocator, .{
             .name = stmt.name,
             .args = stmt.args,
             .arg_names = stmt.arg_names,
+            .dummy_args = stmt.dummy_args,
             .ret_sort_name = stmt.ret_sort_name,
             .is_def = stmt.is_def,
+            .is_abbrev = false,
             .body = body,
         });
         try self.term_names.put(stmt.name, term_id);

@@ -10,9 +10,12 @@ const RewriteRule = @import("./rewrite_registry.zig").RewriteRule;
 const ResolvedStructuralCombiner =
     @import("./rewrite_registry.zig").ResolvedStructuralCombiner;
 const compareExprIds = @import("./canonicalizer.zig").compareExprIds;
+const DefOps = @import("./def_ops.zig");
 
 const CheckedRef = @import("./compiler.zig").CheckedRef;
 const CheckedLine = @import("./compiler.zig").CheckedLine;
+const appendRuleLine = @import("./compiler.zig").appendRuleLine;
+const appendTransportLine = @import("./compiler.zig").appendTransportLine;
 
 pub const NormalizeResult = struct {
     result_expr: ExprId,
@@ -55,6 +58,8 @@ pub const Normalizer = struct {
         OutOfMemory,
         TemplateBinderOutOfRange,
         TooManyTheoremExprs,
+        UnknownSort,
+        Overflow,
     };
 
     pub fn normalize(self: *Normalizer, expr_id: ExprId) Error!NormalizeResult {
@@ -116,25 +121,28 @@ pub const Normalizer = struct {
                     relation,
                     acui,
                 );
-                current_proof = try self.composeTransitivity(
-                    relation,
-                    expr_id,
-                    current,
-                    structural.result_expr,
-                    current_proof,
-                    structural.conv_line_idx,
-                );
-                current = structural.result_expr;
-                return .{
-                    .result_expr = current,
-                    .conv_line_idx = current_proof,
-                };
+                if (structural.result_expr != current or
+                    structural.conv_line_idx != null)
+                {
+                    current_proof = try self.composeTransitivity(
+                        relation,
+                        expr_id,
+                        current,
+                        structural.result_expr,
+                        current_proof,
+                        structural.conv_line_idx,
+                    );
+                    current = structural.result_expr;
+                    return .{
+                        .result_expr = current,
+                        .conv_line_idx = current_proof,
+                    };
+                }
             }
         }
 
-        var changed = true;
-        while (changed) {
-            changed = false;
+        var changed = false;
+        while (true) {
             const cur_node = self.theorem.interner.node(current);
             const head_id = switch (cur_node.*) {
                 .app => |app| app.term_id,
@@ -142,6 +150,7 @@ pub const Normalizer = struct {
             };
 
             const rules = self.registry.getRewriteRules(head_id);
+            var applied = false;
             for (rules) |rule| {
                 if (self.step_count >= self.step_limit) break;
 
@@ -167,8 +176,34 @@ pub const Normalizer = struct {
                     );
                     current = rhs_norm.result_expr;
                     changed = true;
+                    applied = true;
                     break;
                 }
+            }
+            if (!applied) break;
+        }
+
+        if (!changed and self.step_count < self.step_limit) {
+            if (try self.openAbbrevStep(current, relation)) |opened| {
+                self.step_count += 1;
+                const normalized = try self.normalize(opened.result_expr);
+                const opened_proof = try self.composeTransitivity(
+                    relation,
+                    current,
+                    opened.result_expr,
+                    normalized.result_expr,
+                    opened.conv_line_idx,
+                    normalized.conv_line_idx,
+                );
+                current_proof = try self.composeTransitivity(
+                    relation,
+                    expr_id,
+                    current,
+                    normalized.result_expr,
+                    current_proof,
+                    opened_proof,
+                );
+                current = normalized.result_expr;
             }
         }
 
@@ -603,16 +638,49 @@ pub const Normalizer = struct {
         const rhs_expr = try self.theorem.instantiateTemplate(rule.rhs, concrete);
         const step_expr = try self.buildRelExpr(relation, expr_id, rhs_expr);
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = step_expr,
-            .rule_id = rule.rule_id,
-            .bindings = concrete,
-            .refs = &.{},
-        });
+        const line_idx = try appendRuleLine(
+            self.lines,
+            self.allocator,
+            step_expr,
+            rule.rule_id,
+            concrete,
+            &.{},
+        );
 
         return .{
             .result_expr = rhs_expr,
+            .conv_line_idx = line_idx,
+        };
+    }
+
+    fn openAbbrevStep(
+        self: *Normalizer,
+        expr_id: ExprId,
+        relation: ResolvedRelation,
+    ) Error!?NormalizeResult {
+        var def_ops = DefOps.Context.init(
+            self.allocator,
+            self.theorem,
+            self.env,
+            .abbrev_only,
+        );
+        defer def_ops.deinit();
+
+        const opened = try def_ops.openConcreteDef(expr_id) orelse return null;
+        if (opened == expr_id) return null;
+
+        const opened_refl = try self.buildRelExpr(relation, opened, opened);
+        const opened_refl_idx = try self.emitRefl(relation, opened);
+        const target = try self.buildRelExpr(relation, expr_id, opened);
+        const line_idx = try appendTransportLine(
+            self.lines,
+            self.allocator,
+            target,
+            opened_refl,
+            .{ .line = opened_refl_idx },
+        );
+        return .{
+            .result_expr = opened,
             .conv_line_idx = line_idx,
         };
     }
@@ -692,14 +760,14 @@ pub const Normalizer = struct {
         };
         const expr = try self.buildRelExpr(parent_relation, old_expr, new_expr);
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = expr,
-            .rule_id = congr_rule.rule_id,
-            .bindings = bindings,
-            .refs = refs,
-        });
-        return line_idx;
+        return try appendRuleLine(
+            self.lines,
+            self.allocator,
+            expr,
+            congr_rule.rule_id,
+            bindings,
+            refs,
+        );
     }
 
     fn emitRefl(
@@ -711,14 +779,14 @@ pub const Normalizer = struct {
         const bindings = try self.allocator.alloc(ExprId, 1);
         bindings[0] = expr_id;
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = refl_expr,
-            .rule_id = relation.refl_id,
-            .bindings = bindings,
-            .refs = &.{},
-        });
-        return line_idx;
+        return try appendRuleLine(
+            self.lines,
+            self.allocator,
+            refl_expr,
+            relation.refl_id,
+            bindings,
+            &.{},
+        );
     }
 
     fn emitAssoc(
@@ -755,14 +823,14 @@ pub const Normalizer = struct {
         bindings[1] = b;
         bindings[2] = c;
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = expr,
-            .rule_id = acui.assoc_id,
-            .bindings = bindings,
-            .refs = &.{},
-        });
-        return line_idx;
+        return try appendRuleLine(
+            self.lines,
+            self.allocator,
+            expr,
+            acui.assoc_id,
+            bindings,
+            &.{},
+        );
     }
 
     fn emitAssocSymm(
@@ -817,14 +885,14 @@ pub const Normalizer = struct {
         bindings[0] = a;
         bindings[1] = b;
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = expr,
-            .rule_id = acui.comm_id orelse return error.MissingStructuralMetadata,
-            .bindings = bindings,
-            .refs = &.{},
-        });
-        return line_idx;
+        return try appendRuleLine(
+            self.lines,
+            self.allocator,
+            expr,
+            acui.comm_id orelse return error.MissingStructuralMetadata,
+            bindings,
+            &.{},
+        );
     }
 
     fn emitIdem(
@@ -841,14 +909,14 @@ pub const Normalizer = struct {
         const bindings = try self.allocator.alloc(ExprId, 1);
         bindings[0] = a;
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = expr,
-            .rule_id = acui.idem_id orelse return error.MissingStructuralMetadata,
-            .bindings = bindings,
-            .refs = &.{},
-        });
-        return line_idx;
+        return try appendRuleLine(
+            self.lines,
+            self.allocator,
+            expr,
+            acui.idem_id orelse return error.MissingStructuralMetadata,
+            bindings,
+            &.{},
+        );
     }
 
     fn emitLeftUnit(
@@ -866,13 +934,14 @@ pub const Normalizer = struct {
         else
             try self.buildRelExpr(relation, current_expr, result_expr);
 
-        const unit_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = theorem_expr,
-            .rule_id = acui.left_unit_rule_id,
-            .bindings = bindings,
-            .refs = &.{},
-        });
+        const unit_idx = try appendRuleLine(
+            self.lines,
+            self.allocator,
+            theorem_expr,
+            acui.left_unit_rule_id,
+            bindings,
+            &.{},
+        );
         if (!acui.left_unit_rule_reversed) return unit_idx;
         return try self.emitSymm(relation, result_expr, current_expr, unit_idx);
     }
@@ -944,14 +1013,14 @@ pub const Normalizer = struct {
         refs[0] = .{ .line = first_proof };
         refs[1] = .{ .line = second_proof };
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = trans_expr,
-            .rule_id = relation.trans_id,
-            .bindings = bindings,
-            .refs = refs,
-        });
-        return line_idx;
+        return try appendRuleLine(
+            self.lines,
+            self.allocator,
+            trans_expr,
+            relation.trans_id,
+            bindings,
+            refs,
+        );
     }
 
     fn buildRelExpr(
@@ -992,14 +1061,14 @@ pub const Normalizer = struct {
         refs[0] = .{ .line = conv_line_idx };
         refs[1] = source_line;
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = target_expr,
-            .rule_id = transport_id,
-            .bindings = bindings,
-            .refs = refs,
-        });
-        return line_idx;
+        return try appendRuleLine(
+            self.lines,
+            self.allocator,
+            target_expr,
+            transport_id,
+            bindings,
+            refs,
+        );
     }
 
     pub fn emitSymm(
@@ -1017,14 +1086,14 @@ pub const Normalizer = struct {
         const refs = try self.allocator.alloc(CheckedRef, 1);
         refs[0] = .{ .line = proof_line_idx };
 
-        const line_idx = self.lines.items.len;
-        try self.lines.append(self.allocator, .{
-            .expr = symm_expr,
-            .rule_id = relation.symm_id,
-            .bindings = bindings,
-            .refs = refs,
-        });
-        return line_idx;
+        return try appendRuleLine(
+            self.lines,
+            self.allocator,
+            symm_expr,
+            relation.symm_id,
+            bindings,
+            refs,
+        );
     }
 };
 
@@ -1046,4 +1115,3 @@ fn switchAssoc(
         },
     );
 }
-

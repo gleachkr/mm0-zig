@@ -12,6 +12,7 @@ const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
 const compareExprIds =
     @import("./canonicalizer.zig").compareExprIds;
 const DerivedBindings = @import("./derived_bindings.zig");
+const DefOps = @import("./def_ops.zig");
 
 const BinderSpace = enum {
     rule,
@@ -295,7 +296,7 @@ pub const Solver = struct {
                 unique_idx = idx;
                 continue;
             }
-            if (!sameRuleBindings(
+            if (!try self.sameRuleBindingsCompatible(
                 states[unique_idx.?].rule_bindings,
                 state.rule_bindings,
             )) {
@@ -351,12 +352,24 @@ pub const Solver = struct {
                 const node = self.theorem.interner.node(actual);
                 const actual_app = switch (node.*) {
                     .app => |value| value,
-                    .variable => break :blk &.{},
+                    .variable => {
+                        break :blk try self.matchExprByDefOpening(
+                            template,
+                            actual,
+                            space,
+                            state,
+                        );
+                    },
                 };
                 if (actual_app.term_id != app.term_id or
                     actual_app.args.len != app.args.len)
                 {
-                    break :blk &.{};
+                    break :blk try self.matchExprByDefOpening(
+                        template,
+                        actual,
+                        space,
+                        state,
+                    );
                 }
                 var states = std.ArrayListUnmanaged(BranchState){};
                 try states.append(self.allocator, try self.cloneState(state));
@@ -1001,8 +1014,87 @@ pub const Solver = struct {
         rhs: ExprId,
     ) anyerror!bool {
         if (lhs == rhs) return true;
-        return try self.canonicalizer.canonicalize(lhs) ==
-            try self.canonicalizer.canonicalize(rhs);
+        const lhs_canon = try self.canonicalizer.canonicalize(lhs);
+        const rhs_canon = try self.canonicalizer.canonicalize(rhs);
+        if (lhs_canon == rhs_canon) return true;
+        return try self.exprMatchesByDefOpening(lhs_canon, rhs_canon);
+    }
+
+    fn exprMatchesByDefOpening(
+        self: *Solver,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) anyerror!bool {
+        var def_ops = DefOps.Context.init(
+            self.allocator,
+            self.theorem,
+            self.env,
+            .all_defs,
+        );
+        defer def_ops.deinit();
+        return try def_ops.exprMatchesByDefOpening(lhs, rhs);
+    }
+
+    fn matchExprByDefOpening(
+        self: *Solver,
+        template: TemplateExpr,
+        actual: ExprId,
+        space: BinderSpace,
+        state: BranchState,
+    ) anyerror![]BranchState {
+        var new_state = try self.cloneState(state);
+        const bindings = self.getBindings(&new_state, space);
+        const old_bindings = switch (space) {
+            .rule => state.rule_bindings,
+            .view => state.view_bindings.?,
+        };
+
+        var def_ops = DefOps.Context.init(
+            self.allocator,
+            self.theorem,
+            self.env,
+            .all_defs,
+        );
+        defer def_ops.deinit();
+        if (!try def_ops.matchTemplateWithDefOpening(
+            template,
+            actual,
+            bindings,
+        )) {
+            return &.{};
+        }
+        for (bindings, old_bindings, 0..) |binding, old_binding, idx| {
+            const expr_id = binding orelse continue;
+            if (old_binding != null) continue;
+            if (!try self.bindingSatisfiesAcui(
+                &new_state,
+                space,
+                idx,
+                expr_id,
+            )) {
+                return &.{};
+            }
+        }
+
+        const out = try self.allocator.alloc(BranchState, 1);
+        out[0] = new_state;
+        return out;
+    }
+
+    fn sameRuleBindingsCompatible(
+        self: *Solver,
+        lhs: []const ?ExprId,
+        rhs: []const ?ExprId,
+    ) anyerror!bool {
+        if (lhs.len != rhs.len) return false;
+        for (lhs, rhs) |l, r| {
+            if (l == null or r == null) {
+                if (l != r) return false;
+                continue;
+            }
+            if (!try self.bindingCompatible(l.?, r.?)) return false;
+        }
+        return true;
     }
 
     fn cloneState(
@@ -1026,14 +1118,6 @@ pub const Solver = struct {
         };
     }
 };
-
-fn sameRuleBindings(lhs: []const ?ExprId, rhs: []const ?ExprId) bool {
-    if (lhs.len != rhs.len) return false;
-    for (lhs, rhs) |l, r| {
-        if (l != r) return false;
-    }
-    return true;
-}
 
 fn sortedExprSetIsSubset(
     theorem: *const TheoremContext,

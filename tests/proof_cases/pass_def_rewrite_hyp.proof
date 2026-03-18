@@ -1,0 +1,4 @@
+def_rewrite_hyp
+---------------
+l1: $ id Q $ by ax_id (a := $ Q $) []
+l2: $ Q $ by use_sub (a := $ Q $, b := $ P -> P $) [l1]

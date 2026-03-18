@@ -1,0 +1,12 @@
+hyp_transport
+-------------
+l1: $ a -> a $ by ax_expanded (a := $ a $) []
+l2: $ a $ by use_id (a := $ a $) [l1]
+
+concl_transport
+---------------
+l1: $ id a $ by ax_expanded (a := $ a $) []
+
+final_transport
+---------------
+l1: $ a -> a $ by ax_expanded (a := $ a $) []

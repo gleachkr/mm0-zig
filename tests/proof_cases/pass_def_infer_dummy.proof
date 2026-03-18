@@ -1,0 +1,3 @@
+def_infer_dummy
+---------------
+l1: $ A. x (((g f x) = y) -> (x = x)) $ by ax_pre []

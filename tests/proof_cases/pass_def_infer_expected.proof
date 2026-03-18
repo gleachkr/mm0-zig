@@ -1,0 +1,3 @@
+def_infer_expected
+------------------
+l1: $ a -> a $ by ax_id []

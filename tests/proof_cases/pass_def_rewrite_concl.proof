@@ -1,0 +1,3 @@
+def_rewrite_concl
+-----------------
+l1: $ id Q $ by all_elim (a := $ Q $, b := $ P -> P $) []

@@ -1,0 +1,3 @@
+def_infer_user_side_hyp
+-----------------------
+l1: $ (double a) -> a $ by use_nested [#1]
