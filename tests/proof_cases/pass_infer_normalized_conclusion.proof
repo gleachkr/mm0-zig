@@ -1,0 +1,9 @@
+comp_right_omits
+----------------
+
+l1: $ emp ⊢ r ∘ (s ∘ a) ~ t ∘ (u ∘ a) $ by comp_right [#1]
+
+comp_left_omits
+---------------
+
+l1: $ emp ⊢ g ∘ (k ∘ a) ~ g ∘ (k ∘ b) $ by comp_left [#1]

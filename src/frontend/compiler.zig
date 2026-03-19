@@ -1532,6 +1532,41 @@ fn checkTheoremBlock(
         );
 
         if (line_expr != expected_line) {
+            if (try canMatchAlphaOnly(
+                allocator,
+                theorem,
+                env,
+                line_expr,
+                expected_line,
+            )) {
+                const line_idx = try appendRuleLine(
+                    &checked,
+                    allocator,
+                    expected_line,
+                    rule_id,
+                    bindings,
+                    refs,
+                );
+
+                const gop = try labels.getOrPut(line.label);
+                if (gop.found_existing) {
+                    self.setDiagnostic(.{
+                        .kind = .duplicate_label,
+                        .err = error.DuplicateLabel,
+                        .theorem_name = assertion.name,
+                        .line_label = line.label,
+                        .name = line.label,
+                        .span = line.span,
+                    });
+                    return error.DuplicateLabel;
+                }
+                gop.value_ptr.* = line_idx;
+                last_line = expected_line;
+                last_line_idx = line_idx;
+                last_label = line.label;
+                last_span = line.assertion.span;
+                continue;
+            }
             if (try canConvertByDefOpening(
                 allocator,
                 theorem,
@@ -1620,7 +1655,7 @@ fn checkTheoremBlock(
                             return error.DuplicateLabel;
                         }
                         gop.value_ptr.* = line_idx;
-                        last_line = line_expr;
+                        last_line = checked.items[line_idx].expr;
                         last_line_idx = line_idx;
                         last_label = line.label;
                         last_span = line.assertion.span;
@@ -1651,7 +1686,7 @@ fn checkTheoremBlock(
                             return error.DuplicateLabel;
                         }
                         gop.value_ptr.* = line_idx;
-                        last_line = line_expr;
+                        last_line = checked.items[line_idx].expr;
                         last_line_idx = line_idx;
                         last_label = line.label;
                         last_span = line.assertion.span;
@@ -1885,6 +1920,23 @@ fn requireConcreteBindings(
     return bindings;
 }
 
+fn canMatchAlphaOnly(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    lhs: ExprId,
+    rhs: ExprId,
+) !bool {
+    var def_ops = DefOps.Context.init(
+        allocator,
+        theorem,
+        env,
+        .all_defs,
+    );
+    defer def_ops.deinit();
+    return try def_ops.exprMatchesAlphaOnly(lhs, rhs);
+}
+
 fn canConvertByDefOpening(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
@@ -1942,6 +1994,295 @@ fn inferBindingsByDefOpening(
     return try requireConcreteBindings(allocator, bindings);
 }
 
+const MirroredTheoremContext = struct {
+    theorem: TheoremContext,
+    source_dummy_map: []const ExprId,
+    mirror_dummy_map: []const ExprId,
+
+    fn init(
+        allocator: std.mem.Allocator,
+        source: *const TheoremContext,
+    ) !MirroredTheoremContext {
+        var theorem = TheoremContext.init(allocator);
+        theorem.arg_infos = source.arg_infos;
+        try theorem.seedBinderCount(source.theorem_vars.items.len);
+        theorem.next_dummy_dep = countBoundArgs(source.arg_infos);
+
+        const source_dummy_map = try allocator.alloc(
+            ExprId,
+            source.theorem_dummies.items.len,
+        );
+        const mirror_dummy_map = try allocator.alloc(
+            ExprId,
+            source.theorem_dummies.items.len,
+        );
+        for (source.theorem_dummies.items, 0..) |dummy, idx| {
+            const mirror_dummy = try theorem.addDummyVarResolved(
+                dummy.sort_name,
+                dummy.sort_id,
+            );
+            source_dummy_map[idx] = mirror_dummy;
+            mirror_dummy_map[idx] = try originalDummyExprId(source, idx);
+        }
+
+        return .{
+            .theorem = theorem,
+            .source_dummy_map = source_dummy_map,
+            .mirror_dummy_map = mirror_dummy_map,
+        };
+    }
+
+    fn deinit(
+        self: *MirroredTheoremContext,
+        allocator: std.mem.Allocator,
+    ) void {
+        allocator.free(self.source_dummy_map);
+        allocator.free(self.mirror_dummy_map);
+        self.theorem.deinit();
+    }
+};
+
+fn countBoundArgs(args: []const ArgInfo) u32 {
+    var count: u32 = 0;
+    for (args) |arg| {
+        if (arg.bound) count += 1;
+    }
+    return count;
+}
+
+fn originalDummyExprId(
+    theorem: *const TheoremContext,
+    idx: usize,
+) !ExprId {
+    return try @constCast(&theorem.interner).internVar(.{
+        .dummy_var = @intCast(idx),
+    });
+}
+
+fn copyExprBetweenTheorems(
+    allocator: std.mem.Allocator,
+    source: *const TheoremContext,
+    target: *TheoremContext,
+    source_expr: ExprId,
+    source_dummy_map: []const ExprId,
+    cache: *std.AutoHashMapUnmanaged(ExprId, ExprId),
+) !ExprId {
+    if (cache.get(source_expr)) |existing| return existing;
+
+    const copied = switch (source.interner.node(source_expr).*) {
+        .variable => |var_id| switch (var_id) {
+            .theorem_var => |idx| blk: {
+                if (idx >= target.theorem_vars.items.len) {
+                    return error.UnknownTheoremVariable;
+                }
+                break :blk target.theorem_vars.items[idx];
+            },
+            .dummy_var => |idx| blk: {
+                if (idx >= source_dummy_map.len) {
+                    return error.UnknownDummyVar;
+                }
+                break :blk source_dummy_map[idx];
+            },
+        },
+        .app => |app| blk: {
+            const args = try allocator.alloc(ExprId, app.args.len);
+            errdefer allocator.free(args);
+            for (app.args, 0..) |arg, idx| {
+                args[idx] = try copyExprBetweenTheorems(
+                    allocator,
+                    source,
+                    target,
+                    arg,
+                    source_dummy_map,
+                    cache,
+                );
+            }
+            break :blk try target.interner.internAppOwned(app.term_id, args);
+        },
+    };
+
+    try cache.put(allocator, source_expr, copied);
+    return copied;
+}
+
+fn matchNormalizedPattern(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    mirror: *const MirroredTheoremContext,
+    pattern_expr: ExprId,
+    actual_expr: ExprId,
+    placeholders: *const std.AutoHashMapUnmanaged(ExprId, usize),
+    bindings: []?ExprId,
+    reverse_cache: *std.AutoHashMapUnmanaged(ExprId, ExprId),
+) !bool {
+    if (placeholders.get(pattern_expr)) |idx| {
+        const actual = try copyExprBetweenTheorems(
+            allocator,
+            &mirror.theorem,
+            theorem,
+            actual_expr,
+            mirror.mirror_dummy_map,
+            reverse_cache,
+        );
+        if (bindings[idx]) |existing| {
+            return existing == actual;
+        }
+        bindings[idx] = actual;
+        return true;
+    }
+
+    const pattern_node = mirror.theorem.interner.node(pattern_expr);
+    const actual_node = mirror.theorem.interner.node(actual_expr);
+    return switch (pattern_node.*) {
+        .variable => switch (actual_node.*) {
+            .variable => pattern_expr == actual_expr,
+            .app => false,
+        },
+        .app => |pattern_app| switch (actual_node.*) {
+            .variable => false,
+            .app => |actual_app| blk: {
+                if (pattern_app.term_id != actual_app.term_id) break :blk false;
+                if (pattern_app.args.len != actual_app.args.len) {
+                    break :blk false;
+                }
+                for (pattern_app.args, actual_app.args) |pattern_arg, actual_arg| {
+                    if (!try matchNormalizedPattern(
+                        allocator,
+                        theorem,
+                        mirror,
+                        pattern_arg,
+                        actual_arg,
+                        placeholders,
+                        bindings,
+                        reverse_cache,
+                    )) {
+                        break :blk false;
+                    }
+                }
+                break :blk true;
+            },
+        },
+    };
+}
+
+fn inferBindingsByNormalizedConclusion(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    theorem: *TheoremContext,
+    rule: *const RuleDecl,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ![]const ExprId {
+    const bindings = try allocator.dupe(?ExprId, partial_bindings);
+    var def_ops = DefOps.Context.init(
+        allocator,
+        theorem,
+        env,
+        .all_defs,
+    );
+    defer def_ops.deinit();
+    for (rule.hyps, ref_exprs) |hyp, ref_expr| {
+        if (!try def_ops.matchTemplateWithDefOpening(
+            hyp,
+            ref_expr,
+            bindings,
+        )) {
+            return error.UnifyMismatch;
+        }
+    }
+    if (!hasOmittedBindings(bindings)) {
+        return try requireConcreteBindings(allocator, bindings);
+    }
+
+    var mirror = try MirroredTheoremContext.init(allocator, theorem);
+    defer mirror.deinit(allocator);
+
+    var to_mirror = std.AutoHashMapUnmanaged(ExprId, ExprId){};
+    defer to_mirror.deinit(allocator);
+
+    const mirror_line = try copyExprBetweenTheorems(
+        allocator,
+        theorem,
+        &mirror.theorem,
+        line_expr,
+        mirror.source_dummy_map,
+        &to_mirror,
+    );
+
+    const mirror_binders = try allocator.alloc(ExprId, rule.args.len);
+    defer allocator.free(mirror_binders);
+    var placeholders = std.AutoHashMapUnmanaged(ExprId, usize){};
+    defer placeholders.deinit(allocator);
+
+    for (bindings, 0..) |binding, idx| {
+        if (binding) |expr_id| {
+            mirror_binders[idx] = try copyExprBetweenTheorems(
+                allocator,
+                theorem,
+                &mirror.theorem,
+                expr_id,
+                mirror.source_dummy_map,
+                &to_mirror,
+            );
+            continue;
+        }
+        const sort_id = env.sort_names.get(rule.args[idx].sort_name) orelse {
+            return error.UnknownSort;
+        };
+        const placeholder = try mirror.theorem.addDummyVarResolved(
+            rule.args[idx].sort_name,
+            sort_id,
+        );
+        mirror_binders[idx] = placeholder;
+        try placeholders.put(allocator, placeholder, idx);
+    }
+
+    const mirror_concl = try mirror.theorem.instantiateTemplate(
+        rule.concl,
+        mirror_binders,
+    );
+
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer checked.deinit(allocator);
+
+    var expected_normalizer = Normalizer.init(
+        allocator,
+        &mirror.theorem,
+        registry,
+        env,
+        &checked,
+    );
+    const normalized_expected = try expected_normalizer.normalize(mirror_concl);
+
+    var actual_normalizer = Normalizer.init(
+        allocator,
+        &mirror.theorem,
+        registry,
+        env,
+        &checked,
+    );
+    const normalized_actual = try actual_normalizer.normalize(mirror_line);
+
+    var reverse_cache = std.AutoHashMapUnmanaged(ExprId, ExprId){};
+    defer reverse_cache.deinit(allocator);
+    if (!try matchNormalizedPattern(
+        allocator,
+        theorem,
+        &mirror,
+        normalized_expected.result_expr,
+        normalized_actual.result_expr,
+        &placeholders,
+        bindings,
+        &reverse_cache,
+    )) {
+        return error.UnifyMismatch;
+    }
+
+    return try requireConcreteBindings(allocator, bindings);
+}
+
 fn shouldUseAdvancedInference(
     rule_id: u32,
     maybe_view: ?ViewDecl,
@@ -1980,6 +2321,30 @@ fn inferBindings(
             ref_exprs,
             line_expr,
         ) catch |err| {
+            if (maybe_view == null) {
+                const fallback = inferBindingsByNormalizedConclusion(
+                    allocator,
+                    env,
+                    registry,
+                    theorem,
+                    rule,
+                    partial_bindings,
+                    ref_exprs,
+                    line_expr,
+                ) catch null;
+                if (fallback) |bindings| {
+                    try validateResolvedBindings(
+                        self,
+                        env,
+                        theorem,
+                        assertion,
+                        line,
+                        rule,
+                        bindings,
+                    );
+                    return bindings;
+                }
+            }
             self.setDiagnostic(.{
                 .kind = .inference_failed,
                 .err = err,
@@ -2407,7 +2772,23 @@ fn buildDefAwareNormalizedConclusionLine(
         checked,
         expected_line,
     ) orelse return null;
-    if (!try canConvertByDefOpening(
+
+    var line_normalizer = Normalizer.init(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+    );
+    const normalized_line = try line_normalizer.normalize(line_expr);
+    const alpha_only = try canMatchAlphaOnly(
+        allocator,
+        theorem,
+        env,
+        normalized_line.result_expr,
+        normalization.normalized_expr,
+    );
+    if (!alpha_only and !try canConvertByDefOpening(
         allocator,
         theorem,
         env,
@@ -2436,7 +2817,7 @@ fn buildDefAwareNormalizedConclusionLine(
     else
         raw_idx;
 
-    if (line_expr == normalization.normalized_expr) {
+    if (line_expr == normalization.normalized_expr or alpha_only) {
         return normalized_idx;
     }
     return try appendTransportLine(

@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const ExprId = @import("./compiler_expr.zig").ExprId;
 const ExprNode = @import("./compiler_expr.zig").ExprNode;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
@@ -635,6 +636,25 @@ pub const Normalizer = struct {
             };
         }
 
+        if (rule.rule_id >= self.env.rules.items.len) {
+            self.allocator.free(concrete);
+            return null;
+        }
+        const rule_decl = &self.env.rules.items[rule.rule_id];
+        if (rule_decl.args.len != concrete.len) {
+            self.allocator.free(concrete);
+            return null;
+        }
+        validateRewriteBindings(
+            self.env,
+            self.theorem,
+            rule_decl.args,
+            concrete,
+        ) catch {
+            self.allocator.free(concrete);
+            return null;
+        };
+
         const rhs_expr = try self.theorem.instantiateTemplate(rule.rhs, concrete);
         const step_expr = try self.buildRelExpr(relation, expr_id, rhs_expr);
 
@@ -1114,4 +1134,87 @@ fn switchAssoc(
             c,
         },
     );
+}
+
+const ExprInfo = struct {
+    sort_name: []const u8,
+    bound: bool,
+    deps: u55,
+};
+
+fn validateRewriteBindings(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    expected_args: []const ArgInfo,
+    bindings: []const ExprId,
+) !void {
+    if (expected_args.len != bindings.len) return error.SortMismatch;
+
+    var deps_buf: [56]u55 = undefined;
+    var deps_len: usize = 0;
+    for (expected_args, bindings) |expected, expr_id| {
+        const info = try rewriteExprInfo(env, theorem, expr_id);
+        if (!std.mem.eql(u8, info.sort_name, expected.sort_name)) {
+            return error.SortMismatch;
+        }
+        if (expected.bound) {
+            if (!info.bound) return error.BoundnessMismatch;
+            var k: usize = 0;
+            while (k < deps_len) : (k += 1) {
+                if (deps_buf[k] & info.deps != 0) return error.DepViolation;
+            }
+            deps_buf[deps_len] = info.deps;
+            deps_len += 1;
+            continue;
+        }
+        for (0..deps_len) |k| {
+            if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0) continue;
+            if (deps_buf[k] & info.deps != 0) return error.DepViolation;
+        }
+    }
+}
+
+fn rewriteExprInfo(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    expr_id: ExprId,
+) !ExprInfo {
+    return switch (theorem.interner.node(expr_id).*) {
+        .variable => |var_id| switch (var_id) {
+            .theorem_var => |idx| blk: {
+                if (idx >= theorem.arg_infos.len) {
+                    return error.UnknownTheoremVariable;
+                }
+                const arg = theorem.arg_infos[idx];
+                break :blk .{
+                    .sort_name = arg.sort_name,
+                    .bound = arg.bound,
+                    .deps = arg.deps,
+                };
+            },
+            .dummy_var => |idx| blk: {
+                if (idx >= theorem.theorem_dummies.items.len) {
+                    return error.UnknownDummyVar;
+                }
+                const dummy = theorem.theorem_dummies.items[idx];
+                break :blk .{
+                    .sort_name = dummy.sort_name,
+                    .bound = true,
+                    .deps = dummy.deps,
+                };
+            },
+        },
+        .app => |app| blk: {
+            if (app.term_id >= env.terms.items.len) return error.UnknownTerm;
+            var deps: u55 = 0;
+            for (app.args) |arg_id| {
+                deps |= (try rewriteExprInfo(env, theorem, arg_id)).deps;
+            }
+            break :blk .{
+                .sort_name = env.terms.items[app.term_id].ret_sort_name,
+                .bound = false,
+                .deps = deps,
+            };
+        },
+    };
 }

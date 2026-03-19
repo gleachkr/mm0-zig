@@ -35,6 +35,11 @@ const examples = {
     mm0: "./fixtures/quant_nd.mm0",
     proof: "./fixtures/quant_nd.proof",
   },
+  demo_category_pullback: {
+    label: "category pullback",
+    mm0: "./fixtures/demo_category_pullback.mm0",
+    proof: "./fixtures/demo_category_pullback.proof",
+  },
 };
 
 const ui = {

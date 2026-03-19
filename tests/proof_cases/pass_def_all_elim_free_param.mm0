@@ -1,0 +1,84 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort obj;
+
+term imp (a b: wff): wff;
+infixr imp: $→$ prec 25;
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+term all {x: obj} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 35;
+term pair (a b: obj): obj;
+
+term sb_t {x: obj} (t: obj x) (a: obj x): obj;
+notation sb_t {x: obj} (t: obj x) (a: obj x): obj =
+  ($subst$:41) x ($/$:0) t a;
+term sb_f {x: obj} (t: obj x) (p: wff x): wff;
+notation sb_f {x: obj} (t: obj x) (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff): $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation obj eq eq_refl eq_trans eq_sym _
+axiom eq_refl (a: obj): $ a = a $;
+axiom eq_trans (a b c: obj): $ a = b $ > $ b = c $ > $ a = c $;
+axiom eq_sym (a b: obj): $ a = b $ > $ b = a $;
+
+--| @congr
+axiom pair_congr (a b c d: obj):
+  $ a = b $ > $ c = d $ > $ pair a c = pair b d $;
+
+--| @congr
+axiom eq_congr (a b c d: obj):
+  $ a = b $ > $ c = d $ > $ (a = c) ↔ (b = d) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a → c) ↔ (b → d) $;
+
+--| @congr
+axiom all_congr {x: obj} (p q: wff x):
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @rewrite
+axiom sb_t_var {x: obj} (t: obj x): $ subst x / t x = t $;
+
+--| @rewrite
+axiom sb_t_pair {x: obj} (t: obj x) (a b: obj x):
+  $ subst x / t (pair a b) = pair (subst x / t a) (subst x / t b) $;
+
+--| @rewrite
+axiom sb_t_other {x y: obj} (t: obj x): $ subst x / t y = y $;
+
+--| @rewrite
+axiom sb_t_irrel {x: obj} (t: obj x) (a: obj): $ subst x / t a = a $;
+
+--| @rewrite
+axiom sb_f_eq {x: obj} (t: obj x) (a b: obj x):
+  $ [x/t] (a = b) ↔ (subst x / t a = subst x / t b) $;
+
+--| @rewrite
+axiom sb_f_imp {x: obj} (t: obj x) (p q: wff x):
+  $ [x/t] (p → q) ↔ ([x/t] p → [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_all {x y: obj} (t: obj x) (p: wff x y):
+  $ [x/t] (∀ y p) ↔ ∀ y ([x/t] p) $;
+
+--| @view {x: obj} (t: obj x) (p: wff x) (q: wff): $ ∀ x p $ > $ q $
+--| @recover t q p x
+--| @normalize conc
+axiom all_elim {x: obj} (t: obj x) (p: wff x):
+  $ ∀ x p $ > $ [x/t] p $;
+
+def mono {.a .b: obj} (f: obj): wff =
+  $ ∀ a ∀ b ((pair f a = pair f b) → (a = b)) $;
+
+theorem def_all_elim_free_param {u v: obj} (f: obj):
+  $ mono f $ > $ (pair f u = pair f v) → (u = v) $;

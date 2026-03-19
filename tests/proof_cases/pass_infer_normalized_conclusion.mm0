@@ -1,0 +1,67 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+sort mor;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+term mor_eq (f g: mor): wff;
+infixl mor_eq: $~$ prec 15;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+term comp (f g: mor): mor;
+infixl comp: $∘$ prec 35;
+infixl comp: $o$ prec 35;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation mor mor_eq mor_refl_raw mor_trans_raw mor_sym_raw _
+axiom mor_refl_raw (f: mor): $ f ~ f $;
+axiom mor_trans_raw (f g h: mor):
+  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+axiom mor_sym_raw (f g: mor): $ f ~ g $ > $ g ~ f $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom mor_eq_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) ↔ (f2 ~ g2) $;
+
+--| @congr
+axiom comp_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ f1 ∘ g1 ~ f2 ∘ g2 $;
+
+--| @rewrite
+axiom comp_assoc (f g h: mor): $ (f ∘ g) ∘ h ~ f ∘ (g ∘ h) $;
+
+--| @normalize hyp0 conc
+axiom comp_right (g: ctx) (f h i: mor):
+  $ g ⊢ f ~ h $ > $ g ⊢ f ∘ i ~ h ∘ i $;
+
+--| @normalize hyp0 conc
+axiom comp_left (g: ctx) (f h i: mor):
+  $ g ⊢ f ~ h $ > $ g ⊢ i ∘ f ~ i ∘ h $;
+
+theorem comp_right_omits (r s t u a: mor):
+  $ emp ⊢ r ∘ s ~ t ∘ u $ >
+  $ emp ⊢ r ∘ (s ∘ a) ~ t ∘ (u ∘ a) $;
+
+theorem comp_left_omits (g k a b: mor):
+  $ emp ⊢ k ∘ a ~ k ∘ b $ >
+  $ emp ⊢ g ∘ (k ∘ a) ~ g ∘ (k ∘ b) $;

@@ -1,0 +1,4 @@
+view_infer_ctx_raw
+------------------
+
+l1: $ nd (join (hyp b) (hyp a)) (P u) $ by all_elim [#1]

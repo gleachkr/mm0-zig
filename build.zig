@@ -143,6 +143,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/quant_nd.proof"),
         "web-demo/fixtures/quant_nd.proof",
     );
+    const install_category_pullback_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/demo_category_pullback.mm0"),
+        "web-demo/fixtures/demo_category_pullback.mm0",
+    );
+    const install_category_pullback_proof = b.addInstallFile(
+        b.path("tests/proof_cases/demo_category_pullback.proof"),
+        "web-demo/fixtures/demo_category_pullback.proof",
+    );
     web_demo_step.dependOn(&install_compiler_wasm.step);
     web_demo_step.dependOn(&install_verifier_wasm.step);
     web_demo_step.dependOn(&install_web_assets.step);
@@ -159,6 +167,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_seq_peirce_proof.step);
     web_demo_step.dependOn(&install_quant_nd_mm0.step);
     web_demo_step.dependOn(&install_quant_nd_proof.step);
+    web_demo_step.dependOn(&install_category_pullback_mm0.step);
+    web_demo_step.dependOn(&install_category_pullback_proof.step);
 
     const run_step = b.step("run", "Run the mm0-zig verifier");
     const run_cmd = b.addRunArtifact(verifier_exe);

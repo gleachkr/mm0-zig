@@ -328,9 +328,8 @@ pub const Solver = struct {
                 var new_state = try self.cloneState(state);
                 const bindings = self.getBindings(&new_state, space);
                 if (idx >= bindings.len) break :blk &.{};
-                const canonical_actual = try self.canonicalizer.canonicalize(actual);
                 if (bindings[idx]) |existing| {
-                    if (!try self.bindingCompatible(existing, canonical_actual)) {
+                    if (!try self.bindingCompatible(existing, actual)) {
                         break :blk &.{};
                     }
                 } else {
@@ -338,11 +337,11 @@ pub const Solver = struct {
                         &new_state,
                         space,
                         idx,
-                        canonical_actual,
+                        actual,
                     )) {
                         break :blk &.{};
                     }
-                    bindings[idx] = canonical_actual;
+                    bindings[idx] = actual;
                 }
                 const out = try self.allocator.alloc(BranchState, 1);
                 out[0] = new_state;
