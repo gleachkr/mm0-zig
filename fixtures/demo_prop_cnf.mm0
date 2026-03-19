@@ -1,0 +1,86 @@
+delimiter $ ( [ / ] ) $;
+provable sort wff;
+
+term imp (a b: wff): wff;
+infixr imp: $→$ prec 25;
+infixr imp: $->$ prec 25;
+term and (a b: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
+term or (a b: wff): wff;
+infixr or: $∨$ prec 30;
+infixr or: $\\/$ prec 30;
+term not (a: wff): wff;
+prefix not: $¬$ prec 35;
+prefix not: $~$ prec 35;
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+
+term P: wff;
+term Q: wff;
+term R: wff;
+term S: wff;
+
+term sb (t: wff) {x: wff} (r: wff x): wff;
+notation sb (t: wff) {x: wff} (r: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) r;
+
+-- Biconditional infrastructure used by normalization.
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff): $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+-- Rewrite rules for explicit substitution through propositional syntax.
+--| @rewrite
+axiom sb_var (t: wff) {x: wff}: $ [x/t] x ↔ t $;
+--| @rewrite
+axiom sb_P (t: wff) {x: wff}: $ [x/t] P ↔ P $;
+--| @rewrite
+axiom sb_Q (t: wff) {x: wff}: $ [x/t] Q ↔ Q $;
+--| @rewrite
+axiom sb_R (t: wff) {x: wff}: $ [x/t] R ↔ R $;
+--| @rewrite
+axiom sb_S (t: wff) {x: wff}: $ [x/t] S ↔ S $;
+--| @rewrite
+axiom sb_not (t: wff) {x: wff} (a: wff x):
+  $ [x/t] (¬ a) ↔ ¬ ([x/t] a) $;
+--| @rewrite
+axiom sb_and (t: wff) {x: wff} (a b: wff x):
+  $ [x/t] (a ∧ b) ↔ ([x/t] a ∧ [x/t] b) $;
+--| @rewrite
+axiom sb_or (t: wff) {x: wff} (a b: wff x):
+  $ [x/t] (a ∨ b) ↔ ([x/t] a ∨ [x/t] b) $;
+
+-- Congruence rules for normalization under connectives.
+--| @congr
+axiom not_congr (a b: wff): $ a ↔ b $ > $ ¬ a ↔ ¬ b $;
+--| @congr
+axiom and_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
+--| @congr
+axiom or_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∨ c) ↔ (b ∨ d) $;
+--| @congr
+axiom iff_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ↔ c) ↔ (b ↔ d) $;
+
+-- A user-facing substitution rule for biconditional reasoning.
+--| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a ↔ b $ > $ p ↔ q $
+--| @abstract r p q x a b
+--| @dummy x
+--| @normalize conc
+axiom iff_subst {x: wff} (a b: wff) (r: wff x):
+  $ a ↔ b $ > $ [x/a] r ↔ [x/b] r $;
+
+-- Biconditional axioms for CNF-style rewriting.
+axiom imp_as_or (a b: wff): $ (a → b) ↔ (¬ a ∨ b) $;
+axiom demorgan_or (a b: wff): $ ¬ (a ∨ b) ↔ (¬ a ∧ ¬ b) $;
+axiom demorgan_and (a b: wff): $ ¬ (a ∧ b) ↔ (¬ a ∨ ¬ b) $;
+axiom double_neg (a: wff): $ ¬ ¬ a ↔ a $;
+axiom or_dist (a b c: wff): $ a ∨ (b ∧ c) ↔ ((a ∨ b) ∧ (a ∨ c)) $;
+
+theorem cnf_demo:
+  $ S ∨ ¬ (P → (Q ∧ ¬ R)) ↔ ((S ∨ P) ∧ (S ∨ (¬ Q ∨ R))) $;

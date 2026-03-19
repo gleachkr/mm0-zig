@@ -1,0 +1,141 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort mor;
+
+-- Implication (term-level, for quantified formulas)
+term imp (a b: wff): wff;
+infixr imp: $->$ prec 25;
+
+-- Biconditional (wff-level relation)
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+
+-- Morphism equality
+term mor_eq (f g: mor): wff;
+infixl mor_eq: $~$ prec 15;
+
+-- Composition and identity
+term id: mor;
+--| @acui comp_assoc _ id _
+term comp (f g: mor): mor;
+infixl comp: $o$ prec 30;
+
+-- Universal quantifier over morphisms
+term all_m {x: mor} (p: wff x): wff;
+prefix all_m: $Am.$ prec 41;
+
+-- Morphism-level substitution
+term sb_m {x: mor} (t: mor x) (a: mor x): mor;
+notation sb_m {x: mor} (t: mor x) (a: mor x): mor =
+  ($sub$:41) x ($/$:0) t a;
+
+-- Formula-level substitution
+term sb_wf {x: mor} (t: mor x) (p: wff x): wff;
+notation sb_wf {x: mor} (t: mor x) (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+
+-- iff relation (provable sort, with transport)
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+-- mor_eq relation (non-provable sort, no transport)
+--| @relation mor mor_eq mor_refl mor_trans mor_sym _
+axiom mor_refl (f: mor): $ f ~ f $;
+axiom mor_trans (f g h: mor):
+  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+axiom mor_sym (f g: mor): $ f ~ g $ > $ g ~ f $;
+
+-- AU composition: associative with unit, NOT commutative
+axiom comp_assoc (f g h: mor):
+  $ (f o g) o h ~ f o (g o h) $;
+axiom comp_unit (f: mor): $ id o f ~ f $;
+
+--| @rewrite
+axiom comp_unit_r (f: mor): $ f o id ~ f $;
+
+-- Congruence rules
+--| @congr
+axiom comp_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ f1 o g1 ~ f2 o g2 $;
+
+--| @congr
+axiom mor_eq_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) <-> (f2 ~ g2) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+
+--| @congr
+axiom all_m_congr {x: mor} (p q: wff x):
+  $ p <-> q $ > $ Am. x p <-> Am. x q $;
+
+-- Substitution rewrite rules (morphism-level, produce ~)
+-- Order matters: specific rules before the catch-all sb_m_const.
+--| @rewrite
+axiom sb_m_var {x: mor} (t: mor x): $ sub x / t x ~ t $;
+
+--| @rewrite
+axiom sb_m_comp {x: mor} (t: mor x) (a b: mor x):
+  $ sub x / t (a o b) ~ (sub x / t a) o (sub x / t b) $;
+
+--| @rewrite
+axiom sb_m_id {x: mor} (t: mor x): $ sub x / t id ~ id $;
+
+--| @rewrite
+axiom sb_m_const {x: mor} (t: mor x) (c: mor): $ sub x / t c ~ c $;
+
+-- Substitution rewrite rules (formula-level, produce <->)
+--| @rewrite
+axiom sb_wf_mor_eq {x: mor} (t: mor x) (a b: mor x):
+  $ [x/t] (a ~ b) <-> ((sub x / t a) ~ (sub x / t b)) $;
+
+--| @rewrite
+axiom sb_wf_imp {x: mor} (t: mor x) (p q: wff x):
+  $ [x/t] (p -> q) <-> ([x/t] p -> [x/t] q) $;
+
+--| @rewrite
+axiom sb_wf_all_m {x y: mor} (t: mor x) (p: wff x y):
+  $ [x/t] (Am. y p) <-> Am. y ([x/t] p) $;
+
+-- Modus ponens
+axiom mp (a b: wff): $ a $ > $ a -> b $ > $ b $;
+
+-- Proof-step rules with AU normalization
+--| @normalize conc
+axiom comp_right (f g h: mor): $ f ~ g $ > $ f o h ~ g o h $;
+
+--| @normalize conc
+axiom comp_left (f g h: mor): $ f ~ g $ > $ h o f ~ h o g $;
+
+-- Universal instantiation with view/recover/normalize
+--| @view {x: mor} (t: mor x) (p: wff x) (q: wff): $ Am. x p $ > $ q $
+--| @recover t q p x
+--| @normalize conc
+axiom all_m_elim {x: mor} (t: mor x) (p: wff x):
+  $ Am. x p $ > $ [x/t] p $;
+
+-- Mediating morphism (Skolemized universal property of pullback)
+term pb_med (p1 p2 q1 q2: mor): mor;
+
+axiom pb_med_unique (p1 p2 q1 q2 u: mor):
+  $ p1 o u ~ q1 $ > $ p2 o u ~ q2 $ > $ u ~ pb_med p1 p2 q1 q2 $;
+
+--| @congr
+axiom pb_med_congr (a1 b1 a2 b2 a3 b3 a4 b4: mor):
+  $ a1 ~ b1 $ > $ a2 ~ b2 $ > $ a3 ~ b3 $ > $ a4 ~ b4 $
+  > $ pb_med a1 a2 a3 a4 ~ pb_med b1 b2 b3 b4 $;
+
+-- Main theorem: pullback preserves monomorphisms
+-- #1: pullback square  #2: f is mono (quantified)  #3: equal p2-projections
+-- Exercises: universal quantifier elimination with @view/@recover,
+-- substitution normalization, AU normalization, and pullback reasoning.
+theorem pb_preserves_mono (f g p1 p2 alpha beta: mor) {a b: mor}:
+  $ f o p1 ~ g o p2 $ >
+  $ Am. a (Am. b ((f o a ~ f o b) -> (a ~ b))) $ >
+  $ p2 o alpha ~ p2 o beta $ >
+  $ alpha ~ beta $;

@@ -1,0 +1,25 @@
+square_holds
+------------
+
+l1: $ square $ by cm_square []
+
+pullback_preserves_mono
+-----------------------
+
+l1: $ over_f (left alpha) ~ over_g (right alpha) $ by comp_right (f := $ f_ ∘ p1 $, g := $ g_ ∘ p2 $, h := $ alpha $) [#1]
+l2: $ over_f (left beta) ~ over_g (right beta) $ by comp_right (f := $ f_ ∘ p1 $, g := $ g_ ∘ p2 $, h := $ beta $) [#1]
+l3: $ over_g (right alpha) ~ over_g (right beta) $ by comp_left (f := $ right alpha $, g := $ right beta $, h := $ g_ $) [#2]
+l4: $ over_f (left alpha) ~ over_g (right beta) $ by mor_trans [l1, l3]
+l5: $ over_g (right beta) ~ over_f (left beta) $ by mor_sym [l2]
+l6: $ over_f (left alpha) ~ over_f (left beta) $ by mor_trans [l4, l5]
+l7: $ same_left alpha beta $ by f_mono [l6]
+l8: $ same_left alpha alpha $ by mor_refl []
+l9: $ same_right alpha alpha $ by mor_refl []
+l10: $ same alpha (lift (left alpha) (right alpha)) $ by pb_med_unique (q1 := $ left alpha $, q2 := $ right alpha $, u := $ alpha $) [l8, l9]
+l11: $ same_left beta beta $ by mor_refl []
+l12: $ same_right beta beta $ by mor_refl []
+l13: $ same beta (lift (left beta) (right beta)) $ by pb_med_unique (q1 := $ left beta $, q2 := $ right beta $, u := $ beta $) [l11, l12]
+l14: $ same (lift (left alpha) (right alpha)) (lift (left beta) (right beta)) $ by pb_med_congr [l7, #2]
+l15: $ same alpha (lift (left beta) (right beta)) $ by mor_trans [l10, l14]
+l16: $ same (lift (left beta) (right beta)) beta $ by mor_sym [l13]
+l17: $ same alpha beta $ by mor_trans [l15, l16]

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    >
+    <title>mm0-zig web demo</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+  <body>
+    <dialog id="example-modal" aria-label="Select example">
+      <div class="modal-header">
+        <span class="modal-title">examples</span>
+        <button type="button" id="modal-close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <button
+          type="button"
+          class="example-button is-active"
+          data-example="hilbert"
+          aria-pressed="true"
+        >
+          hilbert
+        </button>
+        <button
+          type="button"
+          class="example-button"
+          data-example="hilbert_russell"
+          aria-pressed="false"
+        >
+          russell
+        </button>
+        <button
+          type="button"
+          class="example-button"
+          data-example="demo_prop_cnf"
+          aria-pressed="false"
+        >
+          prop cnf
+        </button>
+        <button
+          type="button"
+          class="example-button"
+          data-example="demo_nd_excluded_middle"
+          aria-pressed="false"
+        >
+          nd excluded middle
+        </button>
+        <button
+          type="button"
+          class="example-button"
+          data-example="demo_seq_peirce"
+          aria-pressed="false"
+        >
+          seq peirce
+        </button>
+        <button
+          type="button"
+          class="example-button"
+          data-example="quant_nd"
+          aria-pressed="false"
+        >
+          quant nd
+        </button>
+        <button
+          type="button"
+          class="example-button"
+          data-example="demo_category_pullback"
+          aria-pressed="false"
+        >
+          category pullback
+        </button>
+      </div>
+    </dialog>
+
+    <header class="chrome">
+      <div class="brand">mm0-zig</div>
+
+      <nav class="tab-bar" aria-label="Source panes">
+        <button
+          type="button"
+          class="tab-button is-active"
+          data-pane-tab="mm0"
+          aria-selected="true"
+        >
+          MM0
+        </button>
+        <button
+          type="button"
+          class="tab-button"
+          data-pane-tab="proof"
+          aria-selected="false"
+        >
+          Proof
+        </button>
+      </nav>
+    </header>
+
+    <main class="workspace">
+      <article class="pane is-active" data-pane="mm0">
+        <div class="pane-header">
+          <span>MM0</span>
+          <span id="mm0-meta" class="meta"></span>
+        </div>
+        <div class="editor-shell">
+          <textarea
+            id="mm0-source"
+            wrap="off"
+            spellcheck="false"
+            aria-label="MM0 source"
+          ></textarea>
+        </div>
+      </article>
+
+      <article class="pane" data-pane="proof">
+        <div class="pane-header">
+          <span>Proof</span>
+          <span id="proof-meta" class="meta"></span>
+        </div>
+        <div class="editor-shell" id="proof-shell">
+          <textarea
+            id="proof-source"
+            wrap="off"
+            spellcheck="false"
+            aria-label="Proof script"
+          ></textarea>
+          <div class="inline-layer" aria-hidden="true">
+            <div
+              id="proof-inline-highlight"
+              class="inline-highlight"
+              hidden
+            ></div>
+            <div id="proof-inline-bubble" class="inline-bubble" hidden>
+              <p id="proof-inline-message" class="inline-message"></p>
+              <p id="proof-inline-meta" class="inline-meta"></p>
+            </div>
+          </div>
+        </div>
+      </article>
+    </main>
+
+    <aside class="hud" aria-live="polite">
+      <div class="hud-line">
+        <span class="hud-label">compile</span>
+        <span id="compile-status" class="status warn">loading…</span>
+        <span id="compile-time" class="timing"></span>
+      </div>
+      <div class="hud-line">
+        <span class="hud-label">verify</span>
+        <span id="verify-status" class="status muted">waiting…</span>
+        <span id="verify-time" class="timing"></span>
+      </div>
+      <div class="hud-line hud-actions">
+        <span id="mmb-size" class="meta"></span>
+        <button id="jump-button" type="button" hidden>
+          jump to error
+        </button>
+        <button id="examples-button" type="button">
+          hilbert
+        </button>
+        <button id="theme-toggle" type="button">
+          light
+        </button>
+      </div>
+    </aside>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

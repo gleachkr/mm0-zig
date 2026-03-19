@@ -1,0 +1,211 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort ctx;
+sort obj;
+
+term imp (a b: wff): wff;
+infixr imp: $→$ prec 25;
+infixr imp: $->$ prec 25;
+term and (a b: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+term all {x: obj} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+prefix all: $A.$ prec 41;
+
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 35;
+term g (a b: obj): obj;
+term h (a b: obj): obj;
+term F (a b: obj): wff;
+
+term sb_t {x: obj} (t: obj x) (a: obj x): obj;
+notation sb_t {x: obj} (t: obj x) (a: obj x): obj =
+  ($subst$:41) x ($/$:0) t a;
+term sb_f {x: obj} (t: obj x) (p: wff x): wff;
+notation sb_f {x: obj} (t: obj x) (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+-- Contexts are ACUI collections of closed hypotheses.
+-- This is how the ∀-intro side condition is represented here:
+-- `g: ctx` cannot depend on `x`, while the goal `p: wff x` may.
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation obj eq eq_refl eq_trans eq_sym _
+axiom eq_refl (a: obj): $ a = a $;
+axiom eq_trans (a b c: obj):
+  $ a = b $ > $ b = c $ > $ a = c $;
+axiom eq_sym (a b: obj): $ a = b $ > $ b = a $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom g_congr (a b c d: obj):
+  $ a = b $ > $ c = d $ > $ g a c = g b d $;
+
+--| @congr
+axiom h_congr (a b c d: obj):
+  $ a = b $ > $ c = d $ > $ h a c = h b d $;
+
+--| @congr
+axiom F_congr (a b c d: obj):
+  $ a = b $ > $ c = d $ > $ F a c ↔ F b d $;
+
+--| @congr
+axiom eq_congr (a b c d: obj):
+  $ a = b $ > $ c = d $ > $ (a = c) ↔ (b = d) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a → c) ↔ (b → d) $;
+
+--| @congr
+axiom and_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
+
+--| @congr
+axiom iff_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ↔ c) ↔ (b ↔ d) $;
+
+--| @congr
+axiom all_congr {x: obj} (p q: wff x):
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @rewrite
+axiom sb_t_var {x: obj} (t: obj x): $ subst x / t x = t $;
+
+--| @rewrite
+axiom sb_t_g {x: obj} (t: obj x) (a b: obj x):
+  $ subst x / t (g a b) = g (subst x / t a) (subst x / t b) $;
+
+--| @rewrite
+axiom sb_t_h {x: obj} (t: obj x) (a b: obj x):
+  $ subst x / t (h a b) = h (subst x / t a) (subst x / t b) $;
+
+--| @rewrite
+axiom sb_t_other {x y: obj} (t: obj x): $ subst x / t y = y $;
+
+--| @rewrite
+axiom sb_f_pred {x: obj} (t: obj x) (a b: obj x):
+  $ [x/t] (F a b) ↔ F (subst x / t a) (subst x / t b) $;
+
+--| @rewrite
+axiom sb_f_eq {x: obj} (t: obj x) (a b: obj x):
+  $ [x/t] (a = b) ↔ (subst x / t a = subst x / t b) $;
+
+--| @rewrite
+axiom sb_f_imp {x: obj} (t: obj x) (p q: wff x):
+  $ [x/t] (p → q) ↔ ([x/t] p → [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_and {x: obj} (t: obj x) (p q: wff x):
+  $ [x/t] (p ∧ q) ↔ ([x/t] p ∧ [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_iff {x: obj} (t: obj x) (p q: wff x):
+  $ [x/t] (p ↔ q) ↔ ([x/t] p ↔ [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_all {x y: obj} (t: obj x) (p: wff x y):
+  $ [x/t] (∀ y p) ↔ ∀ y ([x/t] p) $;
+
+--| @normalize conc
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+
+--| @normalize hyp0 hyp1 conc
+axiom imp_intro (g: ctx) (a b: wff):
+  $ g , a ⊢ b $ > $ g ⊢ a → b $;
+
+--| @normalize hyp0 hyp1 conc
+axiom imp_elim (g h: ctx) (a b: wff):
+  $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
+
+--| @normalize hyp0 hyp1 conc
+axiom and_intro (g: ctx) (a b: wff):
+  $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
+
+--| @normalize hyp0 conc
+axiom and_elim_l (g: ctx) (a b: wff):
+  $ g ⊢ a ∧ b $ > $ g ⊢ a $;
+
+--| @normalize hyp0 conc
+axiom and_elim_r (g: ctx) (a b: wff):
+  $ g ⊢ a ∧ b $ > $ g ⊢ b $;
+
+--| @view (g h _k : ctx) (a b: wff): $ g ⊢ a ↔ b $ > $ h ⊢ a $ > $ _k ⊢ b $
+--| @normalize hyp0 hyp1 conc
+axiom iff_elim_l (g h : ctx) (a b: wff):
+  $ g ⊢ a ↔ b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
+
+--| @view (g h _k : ctx) (a b: wff): $ g ⊢ a ↔ b $ > $ h ⊢ b $ > $ _k ⊢ a $
+--| @normalize hyp0 hyp1 conc
+axiom iff_elim_r (g h : ctx) (a b: wff):
+  $ g ⊢ a ↔ b $ > $ h ⊢ b $ > $ g , h ⊢ a $;
+
+--| @normalize conc
+axiom eq_intro (g: ctx) (a: obj): $ g ⊢ a = a $;
+
+--| @normalize hyp0 conc
+axiom eq_symm (g: ctx) (a b: obj):
+  $ g ⊢ a = b $ > $ g ⊢ b = a $;
+
+--| @normalize hyp0 hyp1 conc
+axiom eq_transitivity (g: ctx) (a b c: obj):
+  $ g ⊢ a = b $ > $ g ⊢ b = c $ > $ g ⊢ a = c $;
+
+--| @normalize hyp0 conc
+axiom all_intro (g: ctx) {x: obj} (p: wff x):
+  $ g ⊢ p $ > $ g ⊢ ∀ x p $;
+
+--| @view  {x: obj} (g: ctx x) (t: obj x) (p: wff x) (q: wff): $ g ⊢ ∀ x p $ > $ g ⊢ q $
+--| @recover t q p x
+--| @normalize conc
+axiom all_elim {x: obj} (g: ctx) (t: obj x) (p: wff x):
+  $ g ⊢ ∀ x p $ > $ g ⊢ [x/t] p $;
+
+theorem quant_functionality {w x y z: obj}:
+  $ emp ⊢ ∀ x ∀ y ∀ z (F x (g y z) ↔ h x y = h x z) $
+  > $ emp ⊢ ∀ w ∀ x ∀ y ∀ z
+      ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $;

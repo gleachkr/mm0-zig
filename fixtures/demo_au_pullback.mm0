@@ -1,0 +1,84 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+sort mor;
+
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term mor_eq (f g: mor): wff;
+infixl mor_eq: $~$ prec 15;
+term id: mor;
+--| @acui comp_assoc _ id _
+term comp (f g: mor): mor;
+infixl comp: $∘$ prec 30;
+infixl comp: $o$ prec 30;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @relation mor mor_eq mor_refl mor_trans mor_sym _
+axiom mor_refl (f: mor): $ f ~ f $;
+axiom mor_trans (f g h: mor):
+  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+axiom mor_sym (f g: mor): $ f ~ g $ > $ g ~ f $;
+
+axiom comp_assoc (f g h: mor):
+  $ (f ∘ g) ∘ h ~ f ∘ (g ∘ h) $;
+axiom comp_unit (f: mor): $ id ∘ f ~ f $;
+
+--| @rewrite
+axiom comp_unit_r (f: mor): $ f ∘ id ~ f $;
+
+--| @congr
+axiom comp_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ f1 ∘ g1 ~ f2 ∘ g2 $;
+
+--| @congr
+axiom mor_eq_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) <-> (f2 ~ g2) $;
+
+--| @normalize conc
+axiom comp_right (f g h: mor): $ f ~ g $ > $ f ∘ h ~ g ∘ h $;
+
+--| @normalize conc
+axiom comp_left (f g h: mor): $ f ~ g $ > $ h ∘ f ~ h ∘ g $;
+
+term A_: obj;
+term B_: obj;
+term C_: obj;
+term P_: obj;
+term f_: mor;
+term g_: mor;
+term p1: mor;
+term p2: mor;
+
+axiom cm_square: $ f_ ∘ p1 ~ g_ ∘ p2 $;
+axiom f_mono (a b: mor): $ f_ ∘ a ~ f_ ∘ b $ > $ a ~ b $;
+
+term pb_med (q1 q2: mor): mor;
+
+axiom pb_med_unique (q1 q2 u: mor):
+  $ p1 ∘ u ~ q1 $ > $ p2 ∘ u ~ q2 $ > $ u ~ pb_med q1 q2 $;
+
+--| @congr
+axiom pb_med_congr (a1 b1 a2 b2: mor):
+  $ a1 ~ b1 $ > $ a2 ~ b2 $ > $ pb_med a1 a2 ~ pb_med b1 b2 $;
+
+def square: wff = $ f_ ∘ p1 ~ g_ ∘ p2 $;
+def left (u: mor): mor = $ p1 ∘ u $;
+def right (u: mor): mor = $ p2 ∘ u $;
+def over_f (u: mor): mor = $ f_ ∘ u $;
+def over_g (u: mor): mor = $ g_ ∘ u $;
+def same (u v: mor): wff = $ u ~ v $;
+def same_left (u v: mor): wff = $ left u ~ left v $;
+def same_right (u v: mor): wff = $ right u ~ right v $;
+def lift (q1 q2: mor): mor = $ pb_med q1 q2 $;
+
+theorem square_holds: $ square $;
+
+theorem pullback_preserves_mono (alpha beta: mor):
+  $ square $ > $ same_right alpha beta $ > $ same alpha beta $;

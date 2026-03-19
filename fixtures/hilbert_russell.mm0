@@ -1,0 +1,71 @@
+delimiter $ ( [ / ] ) $;
+
+strict provable sort wff;
+sort set;
+
+term im (a b: wff): wff; infixr im: $->$ prec 25;
+term not (a: wff): wff; prefix not: $¬$ prec 41; prefix not: $~$ prec 41;
+term bi (a b: wff): wff; infixl bi: $↔$ prec 20; infixl bi: $<->$ prec 20;
+term all {x: set} (p: wff x): wff; prefix all: $∀$ prec 41; prefix all: $A.$ prec 41;
+
+term R (a b: set): wff;
+term sb_f (t: set) {x: set} (p: wff x): wff;
+notation sb_f (t: set) {x: set} (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+
+--| @relation wff bi biid bitr bisym mpbi
+
+axiom biid (a: wff): $ a ↔ a $;
+axiom bitr (a b c: wff): $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom bisym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom mpbi (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+axiom mp (a b: wff): $ a $ > $ a -> b $ > $ b $;
+
+axiom syl (a b c: wff):
+  $ (b -> c) -> ((a -> b) -> (a -> c)) $;
+axiom mpd (a b c: wff):
+  $ (a -> b) -> ((a -> (b -> c)) -> (a -> c)) $;
+axiom con2 (a b: wff): $ (a -> ¬ b) -> (b -> ¬ a) $;
+axiom bi1 (a b: wff): $ (a ↔ b) -> (a -> b) $;
+axiom bi2 (a b: wff): $ (a ↔ b) -> (b -> a) $;
+axiom inot (a: wff): $ (a -> ¬ a) -> ¬ a $;
+
+axiom ax_gen {x: set} (p: wff x): $ p $ > $ ∀ x p $;
+
+--| @rewrite
+axiom sb_f_bi {x: set} (t: set) (p q: wff x):
+  $ [x/t] (p ↔ q) ↔ ([x/t] p ↔ [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_not {x: set} (t: set) (p: wff x):
+  $ [x/t] (¬ p) ↔ ¬ ([x/t] p) $;
+
+-- Put the diagonal rule first so `R x x` rewrites the way we want.
+--| @rewrite
+axiom sb_f_rel_diag {x: set} (t: set):
+  $ [x/t] (R x x) ↔ R t t $;
+
+--| @rewrite
+axiom sb_f_rel_left {x: set} (t: set) (a: set):
+  $ [x/t] (R x a) ↔ R t a $;
+
+--| @congr
+axiom im_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a -> c) ↔ (b -> d) $;
+
+--| @congr
+axiom not_congr (a b: wff):
+  $ a ↔ b $ > $ ¬ a ↔ ¬ b $;
+
+--| @congr
+axiom bi_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ↔ c) ↔ (b ↔ d) $;
+
+--| @normalize conc
+--| @view {x: set} (t: set) (p: wff x) (q: wff): $ ∀ x p -> q $;
+--| @recover t q p x
+axiom ax_inst {x: set} (t: set) (p: wff x):
+  $ ∀ x p -> [x/t] p $;
+
+theorem russell {x y: set}: $ ∀ x ¬ ∀ y (R y x ↔ ¬ R y y) $;

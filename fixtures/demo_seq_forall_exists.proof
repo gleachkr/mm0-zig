@@ -1,0 +1,10 @@
+seq_forall_exists
+-----------------
+
+l1: $ emp , (∀ u (∃ v (F u ∧ G v))) , F a , G w ==> G w $ by ax []
+l2: $ emp , (∀ u (∃ v (F u ∧ G v))) , (F a ∧ G w) ==> G w $ by and_left [l1]
+l3: $ emp , (∀ u (∃ v (F u ∧ G v))) , (F a ∧ G w) ==> F x $ by pick_F []
+l4: $ emp , (∀ u (∃ v (F u ∧ G v))) , (F a ∧ G w) ==> F x ∧ G w $ by and_right [l3, l2]
+l5: $ emp , (∀ u (∃ v (F u ∧ G v))) , (F a ∧ G w) ==> ∀ x (F x ∧ G w) $ by all_right [l4]
+l6: $ emp , (∀ u (∃ v (F u ∧ G v))) , (F a ∧ G w) ==> ∃ y (∀ x (F x ∧ G y)) $ by ex_right_goal [l5]
+l7: $ emp , (∀ u (∃ v (F u ∧ G v))) ==> ∃ y (∀ x (F x ∧ G y)) $ by left_pick [l6]

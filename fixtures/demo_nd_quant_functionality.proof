@@ -1,0 +1,17 @@
+nd_quant_functionality
+----------------------
+
+l1: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ F w (pair x y) ∧ F w (pair x z) $ by ax []
+l2: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ F w (pair x y) $ by and_elim_l [l1]
+l3: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ F w (pair x y) ∧ F w (pair x z) $ by ax []
+l4: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ F w (pair x z) $ by and_elim_r [l3]
+l5: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ F w (pair x y) ↔ h w x = h w y $ by fun_spec []
+l6: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ h w x = h w y $ by iff_elim_l [l5, l2]
+l7: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ F w (pair x z) ↔ h w x = h w z $ by fun_spec []
+l8: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ h w x = h w z $ by iff_elim_l [l7, l4]
+l9: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ F w (pair y z) ↔ h w y = h w z $ by fun_spec []
+l10: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ h w y = h w x $ by eq_sym_rule [l6]
+l11: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ h w y = h w z $ by eq_trans_rule [l10, l8]
+l12: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) , (F w (pair x y) ∧ F w (pair x z)) ⊢ F w (pair y z) $ by iff_elim_r [l9, l11]
+l13: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) ⊢ (F w (pair x y) ∧ F w (pair x z)) → F w (pair y z) $ by imp_intro [l12]
+l14: $ emp , (∀ u (∀ v (∀ s (F u (pair v s) ↔ h u v = h u s)))) ⊢ ∀ w (∀ x (∀ y (∀ z ((F w (pair x y) ∧ F w (pair x z)) → F w (pair y z))))) $ by all_intro4 (w := $ w $, x := $ x $, y := $ y $, z := $ z $) [l13]

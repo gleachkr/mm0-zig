@@ -1,0 +1,131 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+sort obj;
+
+term and (a b: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term obj_eq (a b: obj): wff;
+term emp: ctx;
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term seq (g: ctx) (a: wff): wff;
+infixl seq: $==>$ prec 0;
+term all {x: obj} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+prefix all: $A.$ prec 41;
+term ex {x: obj} (p: wff x): wff;
+prefix ex: $∃$ prec 41;
+prefix ex: $E.$ prec 41;
+term F (a: obj): wff;
+term G (a: obj): wff;
+term sb_t (t: obj) {x: obj} (a: obj x): obj;
+term sb_f (t: obj) {x: obj} (p: wff x): wff;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff): $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @relation obj obj_eq obj_eq_refl obj_eq_trans obj_eq_sym _
+axiom obj_eq_refl (a: obj): $ obj_eq a a $;
+axiom obj_eq_trans (a b c: obj):
+  $ obj_eq a b $ > $ obj_eq b c $ > $ obj_eq a c $;
+axiom obj_eq_sym (a b: obj): $ obj_eq a b $ > $ obj_eq b a $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ > $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom seq_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ seq g a ↔ seq h b $;
+
+--| @congr
+axiom and_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
+
+--| @congr
+axiom F_congr (a b: obj): $ obj_eq a b $ > $ F a ↔ F b $;
+
+--| @congr
+axiom G_congr (a b: obj): $ obj_eq a b $ > $ G a ↔ G b $;
+
+--| @rewrite
+axiom sb_t_var {x: obj} (t: obj): $ obj_eq (sb_t t x x) t $;
+
+--| @rewrite
+axiom sb_t_other {x y: obj} (t: obj): $ obj_eq (sb_t t x y) y $;
+
+--| @rewrite
+axiom sb_f_and {x: obj} (t: obj) (p q: wff x):
+  $ sb_f t x (p ∧ q) ↔ (sb_f t x p ∧ sb_f t x q) $;
+
+--| @rewrite
+axiom sb_f_F {x: obj} (t: obj) (a: obj x):
+  $ sb_f t x (F a) ↔ F (sb_t t x a) $;
+
+--| @rewrite
+axiom sb_f_G {x: obj} (t: obj) (a: obj x):
+  $ sb_f t x (G a) ↔ G (sb_t t x a) $;
+
+--| @rewrite
+axiom sb_f_ex_fg {x: obj} (t: obj) {y: obj}:
+  $ sb_f t x (∃ y (F x ∧ G y)) ↔ ∃ y (F t ∧ G y) $;
+
+--| @normalize conc
+axiom ax (g: ctx) (a: wff): $ g , a ==> a $;
+
+axiom and_left (g: ctx) (a b c: wff): $ g , a , b ==> c $ > $ g , (a ∧ b) ==> c $;
+axiom and_right (g: ctx) (a b: wff): $ g ==> a $ > $ g ==> b $ > $ g ==> a ∧ b $;
+axiom all_right {x: obj} (g: ctx) (p: wff x): $ g ==> p $ > $ g ==> ∀ x p $;
+
+--| @view (g: ctx) {x: obj} (t: obj) (p: wff x) (q: wff) (c: wff): $ seq (join g (hyp q)) c $ > $ seq (join g (hyp (A. x p))) c $
+--| @recover t q p x
+--| @normalize hyp0 conc
+axiom all_left {x: obj} (g: ctx) (t: obj) (p: wff x) (c: wff):
+  $ seq (join g (hyp (sb_f t x p))) c $ > $ seq (join g (hyp (A. x p))) c $;
+
+--| @view (g: ctx) {x: obj} (t: obj) (p: wff x) (q: wff) (c: wff): $ seq (join g (hyp q)) c $ > $ seq (join g (hyp (E. x p))) c $
+--| @recover t q p x
+--| @normalize hyp0 conc
+axiom ex_left {x: obj} (g: ctx) (t: obj) (p: wff x) (c: wff):
+  $ seq (join g (hyp (sb_f t x p))) c $ > $ seq (join g (hyp (E. x p))) c $;
+
+axiom ex_right_goal (g: ctx) {x y: obj} (w: obj):
+  $ g ==> ∀ x (F x ∧ G w) $ > $ g ==> ∃ y (∀ x (F x ∧ G y)) $;
+
+axiom pick_F {u v a w x: obj}:
+  $ emp , (∀ u (∃ v (F u ∧ G v))) , (F a ∧ G w) ==> F x $;
+
+axiom left_pick {u v a w x y: obj}:
+  $ emp , (∀ u (∃ v (F u ∧ G v))) , (F a ∧ G w)
+      ==> ∃ y (∀ x (F x ∧ G y)) $
+  > $ emp , (∀ u (∃ v (F u ∧ G v)))
+      ==> ∃ y (∀ x (F x ∧ G y)) $;
+
+theorem seq_forall_exists {u v a w x y z: obj}:
+  $ emp , (∀ u (∃ v (F u ∧ G v))) ==> ∃ y (∀ x (F x ∧ G y)) $;

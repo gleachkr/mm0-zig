@@ -1,0 +1,19 @@
+cnf_demo
+--------
+
+l1: $ (P → (Q ∧ ¬ R)) ↔ (¬ P ∨ (Q ∧ ¬ R)) $ by imp_as_or
+l2: $ S ∨ ¬ (P → (Q ∧ ¬ R)) ↔ S ∨ ¬ (¬ P ∨ (Q ∧ ¬ R)) $ by iff_subst [l1]
+l3: $ ¬ (¬ P ∨ (Q ∧ ¬ R)) ↔ (¬ ¬ P ∧ ¬ (Q ∧ ¬ R)) $ by demorgan_or
+l4: $ S ∨ ¬ (¬ P ∨ (Q ∧ ¬ R)) ↔ S ∨ (¬ ¬ P ∧ ¬ (Q ∧ ¬ R)) $ by iff_subst [l3]
+l5: $ ¬ ¬ P ↔ P $ by double_neg
+l6: $ S ∨ (¬ ¬ P ∧ ¬ (Q ∧ ¬ R)) ↔ S ∨ (P ∧ ¬ (Q ∧ ¬ R)) $ by iff_subst [l5]
+l7: $ ¬ (Q ∧ ¬ R) ↔ (¬ Q ∨ ¬ ¬ R) $ by demorgan_and
+l8: $ S ∨ (P ∧ ¬ (Q ∧ ¬ R)) ↔ S ∨ (P ∧ (¬ Q ∨ ¬ ¬ R)) $ by iff_subst [l7]
+l9: $ ¬ ¬ R ↔ R $ by double_neg
+l10: $ S ∨ (P ∧ (¬ Q ∨ ¬ ¬ R)) ↔ S ∨ (P ∧ (¬ Q ∨ R)) $ by iff_subst [l9]
+l11: $ S ∨ (P ∧ (¬ Q ∨ R)) ↔ ((S ∨ P) ∧ (S ∨ (¬ Q ∨ R))) $ by or_dist
+l12: $ S ∨ ¬ (P → (Q ∧ ¬ R)) ↔ S ∨ (¬ ¬ P ∧ ¬ (Q ∧ ¬ R)) $ by iff_trans [l2, l4]
+l13: $ S ∨ ¬ (P → (Q ∧ ¬ R)) ↔ S ∨ (P ∧ ¬ (Q ∧ ¬ R)) $ by iff_trans [l12, l6]
+l14: $ S ∨ ¬ (P → (Q ∧ ¬ R)) ↔ S ∨ (P ∧ (¬ Q ∨ ¬ ¬ R)) $ by iff_trans [l13, l8]
+l15: $ S ∨ ¬ (P → (Q ∧ ¬ R)) ↔ S ∨ (P ∧ (¬ Q ∨ R)) $ by iff_trans [l14, l10]
+l16: $ S ∨ ¬ (P → (Q ∧ ¬ R)) ↔ ((S ∨ P) ∧ (S ∨ (¬ Q ∨ R))) $ by iff_trans [l15, l11]
