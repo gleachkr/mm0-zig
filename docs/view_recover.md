@@ -1,335 +1,354 @@
 # `@view`, `@recover`, `@abstract`, and `@dummy`
 
 These annotations let the proof compiler recover rule arguments from the
-shape of a proof line, even when ordinary unify-style inference is not a
-good fit.
+shape of a proof line, even when ordinary unification is not a good fit.
+They are all frontend features: the trusted verifier sees only ordinary
+theorem applications.
 
-They are frontend features. The compiler uses them to elaborate an
-ordinary theorem application. The trusted verifier does not see a
-special `@view`, `@recover`, `@abstract`, or `@dummy` opcode.
+## Mental model
 
-## Why `@view` exists
+### The core problem
 
-Some rules are easier to apply from an alternate surface shape than from
-their raw binder list.
+Every rule has a *raw form* — the conclusion as literally stated in the
+`.mm0` file — and a *user-facing form* — the expression a proof author
+actually wants to write. For simple rules these are the same thing, and
+ordinary unification suffices to recover any omitted arguments. For more
+complex rules, especially rules whose conclusions are subject to
+`@normalize`, the two can diverge significantly.
 
-A simple example is modus ponens:
+Consider a universal instantiation rule:
+```
+--| @normalize conc
+axiom ax_inst {x: set} (t: set) (p: wff x):
+  $ A. x p -> sb t x p $;
+```
 
-```mm0
+The raw conclusion is `sb t x p` — a substitution term. After normalization
+it reduces to something like `P u`, with `t` no longer syntactically visible.
+Ordinary unification matches the user's line against the raw conclusion, so
+it cannot recover `t` from `P u`. The user would be forced to supply `t`
+explicitly every time.
+
+`@view`, `@recover`, and `@abstract` address this problem in three ways,
+covering progressively more complex shapes of "witness hidden by
+normalization":
+
+- **`@view`** provides an alternative surface shape for the rule that the
+  compiler can match against the user's line and cited references. It solves
+  the common case where the witness is directly readable from the user-facing
+  form of the rule, even if it is not recoverable from the raw conclusion
+  alone.
+
+- **`@recover`** handles the case where normalization has buried the witness
+  inside a structured term. It reconstructs the witness by walking the
+  solved view expressions in parallel and extracting the subtree that
+  corresponds to the hole.
+
+- **`@abstract`** handles the case where the missing argument is not a
+  subtree but a *one-hole context* — a shared surrounding structure that
+  explains the difference between two solved expressions.
+
+**`@dummy`** is a simpler companion that handles a different problem: omitted
+*bound* binders that serve only as fresh local variables and cannot be
+recovered by any matching strategy. It tells the compiler to allocate a
+fresh dummy variable rather than requiring the user to name one.
+
+### Elaboration pipeline
+
+When the compiler processes a proof line, it determines the concrete rule
+arguments in the following order:
+
+1. **Explicit bindings** from the proof line are recorded first and cannot
+   be overridden by later steps.
+2. **`@dummy` annotations** fill any omitted bound binders with fresh
+   theorem-local dummy variables, before inference begins.
+3. **`@view` matching** unifies the view's conclusion and hypotheses against
+   the user's line and cited references, solving view binders. If a view
+   binder maps to a real rule binder, the solution is copied across. When
+   all arguments can be determined directly from the line and refs, this
+   matching takes a simple direct path. When normalization-aware inference
+   is needed — because some omitted binders can only be recovered after
+   normalization — the view constraints are fed into the frontend solver
+   together with the raw rule constraints.
+4. **`@recover` and `@abstract` rules** run in a fixed-point loop over the
+   view bindings, deriving additional binders from the ones already solved.
+5. **Standard unification replay** fills any remaining omitted rule binders
+   by replaying the rule's unify stream against the user's line and refs.
+6. **Validation** checks all resolved bindings against the rule's sort and
+   boundness constraints.
+7. **Normalization** (if `@normalize` is present) normalizes the instantiated
+   conclusion and/or hypotheses and checks against the user's expressions.
+
+If any real rule binder is still unresolved after all of these steps, the
+compiler reports an inference failure.
+
+---
+
+## `@view`
+
+### Purpose
+
+`@view` declares an alternative signature that the compiler can match against
+the user's proof line instead of the raw rule conclusion. This is useful when
+the natural way to apply a rule differs from its literal statement — for
+instance, when the raw conclusion contains unexpanded substitution terms that
+are invisible in the normalized form the user writes.
+
+This matching is also def-aware: if a view expects an expanded expression and
+a cited line or user assertion uses a def, the compiler may unfold through
+that boundary. See `docs/transparent_defs.md` for the def-specific rules.
+
+### Syntax
+```
+--| @view <binders> : <hypotheses> > <conclusion>
+```
+
+The text after `@view` is parsed as a theorem-like signature: it may declare
+binders, has zero or more hypotheses separated by `>`, and ends with a
+conclusion. The whole annotation must fit on one line.
+```
 --| @view (a b: wff): $ a -> b $ > $ a $ > $ b $
 axiom ax_mp (a b: wff): $ a -> b $ > $ a $ > $ b $;
 ```
 
-With that annotation, a proof line can omit explicit binder assignments:
+A view must declare exactly as many hypotheses as the underlying rule, since
+it is providing an alternative shape for the same application, not adding or
+removing cited references.
 
-```proof
-l5: $ a -> a $ by ax_mp [l4, l2]
+### Binder mapping and phantom binders
+
+Each view binder is matched to a rule binder by name. If the names agree, the
+view binder is *mapped*: solving it in the view also solves the corresponding
+rule binder. If a view binder name does not appear among the rule's binders,
+it is a *phantom* binder — local to the view, used only to help recover other
+binders via `@recover` or `@abstract`.
+
+| View binder | Rule binder with same name exists? | Effect |
+|-------------|-------------------------------------|--------|
+| Mapped | Yes | Solving it solves the rule binder |
+| Phantom | No | Local to view; used by `@recover`/`@abstract` |
+
+**Example:**
 ```
-
-The compiler matches the line assertion and referenced hypotheses
-against the view, solves `a` and `b`, and then applies `ax_mp` with the
-resulting concrete bindings.
-
-Without `@view`, the compiler would still try ordinary inference, but
-`@view` gives a more direct pattern for the rule application.
-
-## `@view`
-
-### Syntax
-
-Attach `@view` to an axiom or theorem annotation block.
-Each `--|` annotation is a single-line comment, so the whole `@view`
-signature must stay on one line:
-
-```mm0
 --| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
 axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> sb t x p $;
 ```
 
-The text after `@view` is parsed as a theorem-like signature:
+Here `x`, `t`, and `p` are mapped binders (they appear in the rule). `q` is
+a phantom binder: it captures what the user wrote as the consequent of the
+implication, which after normalization of `sb t x p` will be the normalized
+form. The phantom `q` can then be used by `@recover` to extract `t`.
 
-- it may declare binders
-- it has zero or more hypotheses
-- it has one conclusion
+### Explicit bindings coexist with `@view`
 
-In other words, it looks like the right-hand side of an `axiom` or
-`theorem` declaration, but without the keyword and name.
+Explicit binder assignments on the proof line take precedence. If the user
+supplies `(t := $ u $)` and the view would solve `t` to a different value,
+the compiler reports a binding conflict. Partial explicit assignments are
+fine: the view fills in what is missing.
 
-### Binder mapping
+### Validation still applies
 
-A view binder is matched to a real rule binder by name.
-
-If a view binder name matches one of the annotated rule's binder names,
-it is treated as another way to solve that rule argument.
-
-If a view binder name does not match any real rule binder, it is a
-view-local phantom binder. Phantom binders can still be solved while
-matching the view, and `@recover` / `@abstract` can refer to them, but
-they are not emitted as theorem arguments.
-
-In this example:
-
-```mm0
---| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
-axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> sb t x p $;
+Bindings inferred through a view are checked against the rule's actual sort
+and boundness constraints. A view does not relax these requirements. For
+example, a rule requiring a bound variable for `x` will still reject a
+non-bound expression even if the view matched successfully:
 ```
-
-- `x`, `t`, and `p` are real rule binders
-- `q` is a phantom binder that exists only in the view
-
-### Application order
-
-When the compiler checks a proof line for a rule with `@view`, it uses
-this order:
-
-1. Parse any explicit named bindings from the proof line.
-2. If the application is simple, match the proof line assertion and refs
-   directly against the view.
-3. If omitted-bindings require normalization-aware inference, feed the
-   view constraints into the frontend solver together with the raw rule
-   constraints.
-4. Seed any still-omitted real bound binders from `@dummy`
-   annotations.
-5. Copy any solved real binders from the view into the rule bindings.
-6. Run derived-binding rules such as `@recover` and `@abstract` inside
-   the solver's fixed-point loop when enough view binders are known.
-7. Validate the final bindings against the rule's sort and boundness
-   constraints.
-
-This means `@view` is partial and compositional.
-
-It does not replace explicit bindings, and it does not have to solve
-everything by itself.
-
-### Explicit bindings are allowed
-
-`@view` does not forbid explicit assignments.
-
-For example, this is valid:
-
-```proof
-l4: $ (a -> (a -> a)) -> (a -> a) $ by ax_mp
-  (a := $ a -> ((a -> a) -> a) $,
-   b := $ (a -> (a -> a)) -> (a -> a) $) [l3, l1]
-```
-
-The compiler seeds the rule bindings from the explicit assignments and
-then runs the view matcher. If the view would solve a real binder to a
-different expression, the application fails with a binding-conflict
-error.
-
-### Hypothesis count
-
-A view must have the same number of hypotheses as the underlying rule.
-
-The point of the view is to give another shape for matching the same
-rule application, not to add or remove cited refs.
-
-### Validation still happens
-
-Bindings inferred through a view are still checked against the rule's
-actual binder declarations.
-
-So `@view` does not bypass sort or boundness constraints.
-
-This matters for rules like generalization:
-
-```mm0
 --| @view {x: nat} (p: wff x): $ p $ > $ A. x p $
 axiom ax_gen {x: nat} (p: wff x): $ p $ > $ A. x p $;
 ```
 
-A proof line such as:
+A proof line writing `A. n p` (where `n` is a regular variable, not bound)
+will fail the boundness check even though the view matched `x` to `n`.
 
-```proof
-l1: $ A. n p $ by ax_gen [#1]
-```
-
-still fails, because the solved binder for `x` is not a bound variable of
-the right kind.
+---
 
 ## `@dummy`
 
-### Why it exists
+### Purpose
 
-Some rules have an omitted bound binder whose only purpose is to mark a
-hole for later structural recovery.
-
-`@dummy` tells the compiler to fill that omitted binder with a fresh
-local dummy variable. This lines up with real MMB `Dummy` commands and
-avoids forcing callers to thread a vacuous theorem binder through the
-proof just to name the hole.
+Some rules have bound binders that serve only as a structural placeholder —
+a fresh local variable introduced to mark a hole — with no value that
+inference or view matching could discover. `@dummy` tells the compiler to
+fill such a binder with a fresh theorem-local dummy variable automatically,
+rather than requiring the user to name one on every proof line.
 
 ### Syntax
-
-`@dummy` attaches to a real bound rule binder:
-
-```mm0
---| @dummy x
+```
+--| @dummy <binder-name>
 ```
 
-This means: if the proof line omits `x`, bind it to a fresh theorem-local
-bound dummy variable of the right sort.
+The named binder must be a real bound rule binder in a sort that permits
+dummy variables (not strict, not free).
+```
+--| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
+--| @abstract r p q x a b
+--| @dummy x
+--| @normalize hyp1 conc
+axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
+  $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
+```
 
-The binder must already be a real bound rule binder, and its sort must
-allow MMB dummy variables.
+Here `x` is the hole variable in the substitution context. The user never
+needs to name it; `@dummy` allocates a fresh one for each rule application.
 
 ### Precedence
 
-`@dummy` only fills omitted binders.
+An explicit binding on the proof line overrides `@dummy`. If no explicit
+binding is given, `@dummy` fills the binder before inference runs. Each rule
+application gets its own fresh dummy; they are never shared across lines.
 
-- an explicit proof-line binding wins
-- otherwise `@dummy` fills the binder before inference
-- each rule application gets a fresh dummy
-- if later view matching or inference disagrees, the application fails in
-  the ordinary way
+---
 
 ## `@recover`
 
-### Why it exists
+### Purpose
 
-Sometimes a useful witness is visible in the view shape, but not in the
-final theorem conclusion.
+`@recover` handles the case where the witness for a rule binder is visible
+inside a view expression but has been structurally buried. After `@view`
+matching has solved both a *source* expression (what the user wrote) and a
+*pattern* expression (the corresponding raw form), `@recover` walks them in
+parallel and extracts the subtree of the source that sits where a designated
+*hole* binder appears in the pattern.
 
-This comes up when a rule's raw conclusion will later be normalized.
-Before normalization, the witness is present in some structured term.
-After normalization, it may disappear into a simpler expression.
-
-`@recover` lets the compiler reconstruct a real rule binder from a
-phantom binder and a structural pattern inside the view.
+The motivating case is a normalized instantiation rule: the raw conclusion
+contains `sb t x p` and the user writes `P u`. After view matching, the
+compiler has solved `p` to `P x` (the raw body) and `q` to `P u` (the
+normalized result). `@recover` compares these two expressions, finds `x`
+inside `p`, and extracts the corresponding subtree `u` from `q` as the value
+of `t`.
 
 ### Syntax
 
-`@recover` must appear after a preceding `@view` on the same rule:
+`@recover` must follow a `@view` annotation on the same rule:
+```
+--| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
+--| @recover t q p x
+axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> sb t x p $;
+```
 
-```mm0
+The four names are positional:
+
+| Position | Name | Meaning |
+|----------|------|---------|
+| 1 | `target` | The real rule binder to solve |
+| 2 | `source` | A solved view expression (what the user wrote) |
+| 3 | `pattern` | A solved view expression containing the hole |
+| 4 | `hole` | The binder that marks where `target` should be found |
+
+All four names refer to view binders. The target must map to a real rule
+binder. The target and hole must have the same sort.
+
+### Structural algorithm
+
+The compiler walks the concrete expressions for `source` and `pattern` in
+parallel:
+
+1. Whenever the pattern expression reaches the concrete value of `hole`,
+   record the corresponding subtree of the source as a candidate for `target`.
+2. If `hole` occurs more than once, all candidates must agree.
+3. If the structures diverge (different head terms, different arities), the
+   recovery fails.
+4. If no occurrence of `hole` is found, the recovery fails.
+
+If `target` already has an explicit binding, recovery is skipped for that
+binder.
+
+### Worked example
+```
+term all {x: set} (p: wff x): wff; prefix all: $A.$ prec 41;
+term pred (t: set): wff; prefix pred: $P$ prec 50;
+term sb (t: set) {x: set} (p: wff x): wff;
+
+--| @rewrite
+axiom sb_pred (t: set) {x: set}: $ sb t x (P x) <-> P t $;
+
 --| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
 --| @recover t q p x
 --| @normalize conc
 axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> sb t x p $;
 ```
 
-The four names mean:
+With this setup, a proof line like:
+```
+l1: $ A. x (P x) -> P u $ by ax_inst []
+```
 
-- `target`: the real rule binder to solve
-- `source`: a solved concrete view expression
-- `pattern`: another solved concrete view expression that contains the
-  hole binder
-- `hole`: the designated hole inside the pattern
+is elaborated as follows:
 
-All four names refer to binders from the `@view`, not directly to the
-rule.
+- The view conclusion `A. x p -> q` matches the user's line `A. x (P x) -> P u`,
+  solving `p` to `P x` and `q` to `P u`.
+- `@recover t q p x` compares `q = P u` with `p = P x`: the hole `x` appears
+  under `P`, and the corresponding subtree in `q` is `u`. So `t` is solved
+  to `u`.
+- The compiler instantiates `ax_inst` with `t = u`, `p = P x`, producing the
+  raw conclusion `sb u x (P x)`.
+- `@normalize conc` reduces `sb u x (P x)` via `sb_pred` to `P u`, which
+  matches the user's assertion.
 
-The target must correspond to a real rule binder. The target and hole
-must also have the same sort.
-
-### Intuition
-
-Think of `@recover t q p x` as saying:
-
-- we know the concrete expression matched for `q`
-- we know the concrete expression matched for `p`
-- inside the pattern for `p`, the binder `x` marks where `t` should be
-  found
-- walk both concrete expressions in parallel and extract the subtree of
-  `q` that sits where `x` appears inside `p`
-
-### Structural algorithm
-
-The compiler does the following:
-
-1. Take the solved concrete expressions for `source` and `pattern`.
-2. Traverse them in parallel.
-3. Whenever the concrete `pattern` expression reaches the concrete value
-   of `hole`, record the corresponding subtree from `source` as a
-   candidate for `target`.
-4. If the hole occurs more than once, all candidates must agree.
-5. If the structures do not line up, recovery fails.
-6. If no hole occurrence is found, recovery fails.
-
-If the target binder already has an explicit binding, recovery leaves it
-alone.
+---
 
 ## `@abstract`
 
-### Why it exists
+### Purpose
 
-Sometimes the missing witness is not a subtree but a shared one-hole
-context.
+`@abstract` addresses a related but structurally different problem. Where
+`@recover` extracts a *subtree*, `@abstract` recovers a *one-hole context*
+— the shared surrounding structure that explains the difference between two
+solved expressions. The motivating shape is Leibniz-style substitution: given
+`C[a]` on the left and `C[b]` on the right, recover the context `C[x]`.
 
-The motivating shape is:
-
-- left: `C[a]`
-- right: `C[b]`
-- recover: `C[x]`
-
-This comes up in Leibniz-style rules and context-sensitive rewrites where
-normal omitted-binder inference can see the instantiated source and
-target expressions, but not the abstracted context binder.
+This arises naturally with context-sensitive rewrite rules where the rule
+operates on `sb a x r` and `sb b x r`, but the user writes the already-
+normalized forms. After view matching the compiler has the normalized left
+and right expressions; `@abstract` walks them in parallel, identifies where
+`a` and `b` appear, and reconstructs `r` by replacing those positions with
+the hole variable `x`.
 
 ### Syntax
 
-`@abstract` must appear after a preceding `@view` on the same rule:
-
-```mm0
+`@abstract` must follow a `@view` annotation on the same rule:
+```
 --| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
 --| @abstract r p q x a b
+--| @normalize hyp1 conc
 axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
 ```
 
-The six names mean:
+The six names are positional:
 
-- `target`: the real rule binder to solve
-- `left`: a solved concrete view expression
-- `right`: another solved concrete view expression
-- `hole`: the designated hole binder that will appear in the recovered
-  context
-- `left_plug`: the expression that should be abstracted to the hole on
-  the left
-- `right_plug`: the corresponding expression on the right
+| Position | Name | Meaning |
+|----------|------|---------|
+| 1 | `target` | The real rule binder to solve (the context) |
+| 2 | `left` | A solved view expression containing `left_plug` |
+| 3 | `right` | A solved view expression containing `right_plug` |
+| 4 | `hole` | The binder that will mark the abstracted position |
+| 5 | `left_plug` | The expression abstracted to `hole` on the left |
+| 6 | `right_plug` | The corresponding expression on the right |
 
-All six names refer to binders from the `@view`, not directly to the
-rule.
-
-The target must correspond to a real rule binder. The target and hole
-must have the same sort. The hole and both plug binders must also have
-the same sort.
-
-### Intuition
-
-Think of `@abstract r p q x a b` as saying:
-
-- we know the concrete expressions matched for `p` and `q`
-- every difference between them should be explained by `a` on the left
-  and `b` on the right
-- replace those aligned `a` / `b` occurrences by `x`
-- the resulting one-hole context is the binding for `r`
+All six names refer to view binders. The target must map to a real rule
+binder. The target and hole must have the same sort. The hole and both plug
+binders must also have the same sort.
 
 ### Structural algorithm
 
-The compiler walks the solved concrete expressions for `left` and
-`right` in parallel.
+The compiler walks the concrete expressions for `left` and `right` in
+parallel:
 
-1. If the current pair is exactly `left_plug` and `right_plug`, return
-   the concrete value of `hole`.
-2. If the current pair is exactly the same variable, keep that variable.
-3. If the current pair is the same term application head with the same
-   arity, recurse on the arguments and rebuild the application.
-4. Otherwise fail.
+1. If the current pair is exactly `(left_plug, right_plug)`, return the
+   concrete value of `hole`. This is the abstracted position.
+2. If the current pair is the same variable on both sides, keep it as-is.
+3. If the current pair has the same term constructor and arity on both sides,
+   recurse on the arguments and rebuild.
+4. Otherwise fail — the structures are incompatible and cannot be explained
+   by a single plug pair.
 
-At least one plug occurrence must be found.
-
-This means `@abstract` is deliberately narrow:
-
-- it is one-hole structural abstraction
-- all differences must be explained by the same plug pair
-- multiple occurrences are allowed and become repeated uses of the hole
-  binder in the recovered context
+At least one occurrence of the plug pair must be found. Multiple occurrences
+are allowed; each becomes a separate use of the hole binder in the recovered
+context, which is the correct behavior for multi-hole substitution.
 
 ### Example
-
-```mm0
+```
 term imp (a b: wff): wff; infixr imp: $->$ prec 25;
 term top: wff;
 term sb (t: wff) {x: wff} (r: wff x): wff;
@@ -349,126 +368,121 @@ axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
 ```
 
-A proof line like:
-
-```proof
+A proof line:
+```
 l1: $ b -> top $ by ax_ctx [#1, #2]
 ```
 
-can recover `r := x -> top` by abstracting the shared context from the
-matched pair `a -> top` and `b -> top`.
+where `#1 : a <-> b` and `#2 : a -> top`.
 
-## Worked example
+- The view matches `p` to `a -> top` and `q` to `b -> top`.
+- `@abstract r p q x a b` walks `(a -> top, b -> top)` in parallel. At the
+  head of the implication, the left child is `a` and the right is `b` —
+  exactly the plug pair. The hole `x` is substituted there, recovering
+  `r = x -> top`.
+- The compiler instantiates `ax_ctx` with `r = x -> top`, producing
+  hypotheses `sb a x (x -> top)` and conclusion `sb b x (x -> top)`.
+- `@normalize hyp1 conc` reduces these via `sb_var`, `sb_top`, and `sb_imp`
+  to `a -> top` and `b -> top` respectively, matching `#2` and the user's
+  assertion.
 
-This is the main motivating shape:
+---
 
-```mm0
-term all {x: set} (p: wff x): wff; prefix all: $A.$ prec 41;
-term pred (t: set): wff; prefix pred: $P$ prec 50;
-term sb (t: set) {x: set} (p: wff x): wff;
+## How the annotations compose
 
---| @rewrite
-axiom sb_pred (t: set) {x: set}: $ sb t x (P x) <-> P t $;
+The full elaboration pipeline for a proof line applying a rule with view
+annotations is:
 
---| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
---| @recover t q p x
---| @normalize conc
-axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> sb t x p $;
-```
+1. **Parse explicit bindings.** Any `(name := $ expr $)` assignments are
+   recorded. These are final and cannot be overridden.
 
-Now consider this proof line:
+2. **Seed `@dummy` binders.** For each bound binder marked `@dummy` that
+   has no explicit assignment, allocate a fresh dummy variable.
 
-```proof
-l1: $ A. x (P x) -> P u $ by ax_inst []
-```
+3. **Match the `@view`.** Unify the view's conclusion and hypotheses against
+   the user's line and cited references. Map solved view binders to their
+   corresponding rule binders. Check for conflicts with explicit bindings.
+   When all arguments can be determined directly from the line and refs, this
+   matching takes a simple direct path. When normalization-aware inference is
+   needed — because some omitted binders can only be recovered after
+   normalization — the view constraints are fed into the frontend solver
+   together with the raw rule constraints.
 
-The raw rule conclusion is `sb t x p`, so plain omitted-binder inference
-cannot read `t` directly from the line assertion `P u`.
+4. **Run `@recover` and `@abstract` in a fixed-point loop.** Each derived-
+   binding rule checks whether its required source expressions are solved yet;
+   if so, it attempts to solve its target. The loop continues until no
+   further progress is made.
 
-But the view binds:
+5. **Run standard unification replay.** Replay the rule's unify stream
+   against the user's line and refs to fill any remaining unsolved rule
+   binders.
 
-- `p` to `P x`
-- `q` to `P u`
-- `x` to the bound variable `x`
+6. **Validate all bindings.** Check sort and boundness constraints for every
+   resolved binder.
 
-Then `@recover t q p x` compares `q = P u` with `p = P x`, sees that the
-hole `x` sits under `P`, and extracts the corresponding subtree `u` from
-`q`. So it solves `t := u`.
+7. **Instantiate the rule** with the final concrete bindings.
 
-After that, the compiler can instantiate the real rule and normalize its
-conclusion as usual.
+8. **Normalize** marked hypotheses and/or the conclusion (if `@normalize` is
+   present), check against the user's expressions, and emit transport steps.
 
-## Limits and intended use
+At any step, a conflict or failure produces a diagnostic identifying the
+annotation responsible.
 
-`@view`, `@recover`, `@abstract`, and `@dummy` are deliberately
-narrow.
-
-They are good for:
-
-- theorem applications whose "natural" user-facing shape differs from
-  the raw binder list
-- rules whose binders are visible from the line and refs by structural
-  matching
-- rules where normalization hides a witness that can still be recovered
-  from a designated pattern
-- rules where the missing witness is a shared one-hole context recovered
-  from two solved expressions
-
-They are not a general higher-order inference mechanism.
-
-In particular:
-
-- `@view` only matches the proof line assertion and cited refs
-- `@dummy` only fills omitted real bound binders with fresh local dummy
-  variables
-- `@recover` only performs structural subtree recovery relative to one
-  designated hole binder
-- `@abstract` only performs structural one-hole context recovery for one
-  designated plug pair
-- any real rule binder left unsolved after view and ordinary inference is
-  still an error
-
-## Interaction with other annotations
-
-`@view`, `@recover`, `@abstract`, and `@dummy` fit into the same
-frontend elaboration model as `@normalize`.
-
-A typical pipeline is:
-
-1. parse explicit bindings
-2. seed omitted bound binders from `@dummy`
-3. feed raw-rule and view constraints into inference
-4. run derived-binding rules such as `@recover` and `@abstract` inside
-   the solver loop
-5. obtain concrete real rule binders
-6. instantiate the real rule
-7. normalize marked hypotheses or conclusion
-8. emit ordinary proof lines
-
-If a rule application does not need normalization-aware inference, the
-compiler can still use the simpler direct path for `@view` matching.
-
-The trusted verifier only checks the resulting ordinary theorem
-applications.
+---
 
 ## Interaction with structural contexts
 
 `@view` is often the cleanest way to expose a user-facing rule shape for
-systems with first-class contexts.
+systems with first-class contexts — natural deduction, sequent calculus, or
+resource-sensitive logics where a context combiner collects hypotheses.
 
-For example, a raw rule may mention a context combiner explicitly:
-
-```mm0
+Consider a raw rule that mentions a context combiner explicitly:
+```
 axiom imp_intro (g: ctx) (a b: wff): $ nd (g , a) b $ > $ nd g (a -> b) $;
 ```
 
 When the context combiner is annotated with:
-
-```mm0
+```
 --| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
 ```
 
-both inference and post-inference checking can treat contexts modulo
-assoc / comm / unit / idem. That lets proof lines omit pointless
-structural bookkeeping while still elaborating to an ordinary theorem
-application plus generated conversion lines.
+both inference and post-inference checking treat contexts modulo assoc /
+comm / unit / idem. This means a proof line can write the hypotheses in any
+order and omit redundant structural bookkeeping — the compiler normalizes the
+context to its canonical form, checks that it matches, and emits the
+necessary conversion steps. The user sees a clean, order-independent rule
+application; the verifier sees a fully elaborated sequence of ordinary
+theorem applications.
+
+`@view` and `@acui` therefore combine naturally: `@view` handles the
+user-facing shape of the rule's *formula* arguments, while `@acui` handles
+the structural normalization of the *context* arguments. Neither requires
+the other, but systems that use both get proof lines that are nearly as
+concise as informal natural deduction.
+
+---
+
+## Limits and intended use
+
+These annotations are deliberately narrow in scope. They are well suited for:
+
+- Rules whose natural user-facing shape differs from the raw binder list.
+- Rules where normalization hides a witness that can be recovered by
+  structural matching against the view.
+- Rules where the missing witness is a shared one-hole context recoverable
+  from two solved expressions.
+
+They are **not** a general higher-order inference mechanism:
+
+- `@view` only matches the proof line assertion and cited references.
+- `@dummy` only fills omitted *bound* binders with fresh local dummy
+  variables.
+- `@recover` performs structural subtree recovery relative to exactly one
+  designated hole binder.
+- `@abstract` performs structural one-hole context recovery for exactly one
+  designated plug pair.
+
+Any real rule binder left unsolved after the full pipeline is still an error.
+The annotations extend what the compiler can infer; they do not remove the
+requirement that every binder be determined.

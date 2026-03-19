@@ -1,55 +1,151 @@
 # Rewrite System and Annotation Syntax
 
 The compiler includes a proof-producing rewrite system that automates
-normalization of expressions during theorem application. It operates
-entirely in the frontend — the verifier and MMB format are unchanged.
+normalization of expressions during theorem application. It is entirely a
+frontend concern: the verifier and the MMB binary format are unchanged.
+Every rewrite step the system takes is compiled down to ordinary theorem
+applications that the verifier checks in the usual way.
 
-## Overview
+## Mental model
 
-The rewrite system allows axioms and theorems to be annotated with
-special comments (`--|`) that declare:
+### Axiom instantiation
 
-- **Relations**: equivalence relations on a sort (reflexivity,
-  transitivity, symmetry, and optionally transport)
-- **Rewrite rules**: oriented equations that the normalizer applies
-  left-to-right
-- **Congruence rules**: theorems justifying rewriting inside term
-  constructors
-- **Structural ACUI combiners**: context-like constructors normalized
-  modulo assoc / comm / unit / optional idem
-- **Normalize specs**: which positions (conclusion, hypotheses) of a
-  rule application should be automatically normalized
+Every proof line in the proof script applies a named rule — an axiom or a
+previously proved theorem — to produce a new assertion. Before the rewrite
+system enters the picture, the compiler needs to determine the *concrete
+arguments* to that rule application: what expressions to substitute for each
+binder declared by the rule.
 
-When a proof line applies a rule marked with `@normalize`, the compiler
-normalizes the instantiated conclusion or marked hypotheses using the
-mixed frontend normalizer. That normalizer can combine registered
-rewrite rules with structural ACUI normalization, then emits the chain
-of proof steps as ordinary theorem applications in the MMB output.
+There are four mechanisms that can supply these arguments, and they compose:
 
-## Annotation Syntax
+1. **Explicit bindings.** The proof line names arguments directly:
+   `(x := $ x $, t := $ S zer $, p := $ x = zer $)`. These take precedence
+   over everything else.
 
-Annotations are written as `--|` comments on the line immediately before
-the statement they annotate. Multiple annotations can precede a single
-statement.
+2. **Unification replay.** If some arguments are omitted, the compiler
+   replays the rule's unify stream against the expression the user wrote and
+   the expressions they cited as references. This is the standard MM0
+   unification mechanism: the compiler walks the rule's conclusion and
+   hypotheses in parallel with the user's line and refs, solving for any
+   unspecified binders.
 
-### `@relation`
+3. **`@view` matching.** A `@view` annotation provides an alternative surface
+   shape for the same rule. The compiler matches this alternate shape against
+   the user's line and refs via the same unify-stream mechanism, then maps the
+   solved binders back to the underlying rule's argument list. `@recover` and
+   `@abstract` can further derive additional binders from the view solution.
 
-Declares an equivalence relation on a sort.
+4. **`@dummy` annotations.** For omitted bound binders that serve only as
+   fresh local variables (no inference can solve them), `@dummy` tells the
+   compiler to allocate a fresh theorem-local dummy variable of the right sort
+   rather than requiring the user to name one.
 
+Once all arguments are known, the compiler *instantiates* the rule: it
+substitutes the concrete expressions for each binder throughout the rule's
+conclusion and hypotheses, producing fully concrete expressions. That
+instantiated conclusion is then subject to normalization.
+
+### How normalization fits in
+
+When a rule is marked `@normalize conc`, the instantiated conclusion may be
+in a "raw" form that differs from what the user wrote. Both the raw
+instantiated conclusion and the user's assertion are normalized using the
+registered rewrite and congruence rules, and the two *normalized* forms must
+match. The compiler then emits the full chain of proof steps — the raw rule
+application, every intermediate rewrite and congruence step, and a final
+transport step — so the verifier can confirm the whole thing.
+
+To make this concrete, consider `ax_inst`:
+```
+--| @normalize conc
+axiom ax_inst {x: nat} (t: nat) (p: wff x):
+  $ A. x p $ > $ sb_f t x p $;
+```
+
+The shape of this rule is: given a proof of `A. x p`, produce `sb_f t x p`
+— a raw substitution term with `p` not yet reduced.
+
+Now suppose you write:
+```
+l1: $ S zer = zer $ by ax_inst (x := $ x $, t := $ S zer $, p := $ x = zer $) [#1]
+```
+
+Three distinct expressions are in play:
+
+| Stage | Expression |
+|-------|------------|
+| **Instantiated conclusion (before normalization)** | `sb_f (S zer) x (x = zer)` |
+| **User assertion (before normalization)** | `S zer = zer` |
+| **Both sides after normalization** | `S zer = zer` |
+
+The normalizer reduces `sb_f (S zer) x (x = zer)` by applying `sb_f_eq`,
+`sb_t_var`, and `sb_t_zer` with their associated congruence rules, arriving
+at `S zer = zer`. The user's assertion `S zer = zer` is already in normal
+form. The two normalized forms agree, so the line is accepted.
+
+## Overview of the annotation vocabulary
+
+| Annotation      | Attaches to         | Purpose |
+|-----------------|---------------------|---------|
+| `@relation`     | `axiom`             | Declares an equivalence relation on a sort |
+| `@rewrite`      | `axiom`             | Marks an axiom as an oriented rewrite rule |
+| `@congr`        | `axiom`             | Marks an axiom as a congruence rule for a term constructor |
+| `@acui`         | `term`              | Marks a binary combiner for structural ACUI normalization |
+| `@normalize`    | `axiom` / `theorem` | Specifies which positions should be auto-normalized |
+| `@abbrev`       | `def`               | Lets the frontend open a def during normalization and canonicalization |
+
+Transparent def unfolding at theorem-application boundaries, and the more
+limited `@abbrev` behavior used by normalization and canonicalization, are
+covered in `docs/transparent_defs.md`.
+
+---
+
+## `@relation`
+
+### Purpose
+
+Before the normalizer can emit any proof steps, it needs to know which
+equivalence relation governs each sort — which axioms are reflexivity,
+transitivity, symmetry, and (optionally) a modus-ponens-style transport rule.
+`@relation` supplies that information.
+
+### Syntax
 ```
 --| @relation <sort> <rel_term> <refl> <trans> <symm> <transport>
 ```
 
-- `sort`: the sort this relation operates on
-- `rel_term`: the binary relation term (e.g., `bi` for biconditional)
-- `refl`: reflexivity axiom — `rel(a, a)`
-- `trans`: transitivity axiom — `rel(a,b) > rel(b,c) > rel(a,c)`
-- `symm`: symmetry axiom — `rel(a,b) > rel(b,a)`
-- `transport`: modus-ponens-like axiom — `rel(a,b) > a > b`. Use `_`
-  if the sort is not provable and transport is not applicable.
+| Field | Meaning |
+|-------|---------|
+| `sort` | The sort this relation operates on |
+| `rel_term` | The binary relation term (e.g. `bi` for biconditional) |
+| `refl` | Reflexivity: `rel(a, a)` |
+| `trans` | Transitivity: `rel(a,b) > rel(b,c) > rel(a,c)` |
+| `symm` | Symmetry: `rel(a,b) > rel(b,a)` |
+| `transport` | Modus ponens: `rel(a,b) > a > b`, or `_` if not applicable |
+
+### Provable sorts, non-provable sorts, and why transport matters
+
+**For a provable sort** (like `wff`), normalization ultimately needs to
+deliver a *proof* of the user's assertion, not merely a proof that the raw
+conclusion is equivalent to it. After normalization the compiler holds two
+things: a proof of the raw conclusion (from the rule application) and a proof
+of `rel(raw, normalized)` (from the normalization chain). Transport is the
+axiom that combines these — `rel(a, b) > a > b` — to produce a proof of the
+normalized form. Without transport there would be no way to cross from "I
+know `raw` and I know `raw <-> normalized`" to "I have proved `normalized`".
+
+**For a non-provable sort** (like `nat`), the situation is different in a
+fundamental way. There is no notion of "a proof of a nat". The relation
+`nat_eq(a, b)` lives in `wff`, not in `nat`, so you cannot write an axiom of
+the form `nat_eq(a, b) > a > b` — the `a` and `b` are terms, not
+propositions. But this is fine: nat-level normalization is never the *final*
+step in a proof. It always feeds upward into a congruence rule that lifts the
+nat-level equivalence into a `wff`-level proof. For example, `eq_congr` takes
+two `nat_eq` proofs and produces a `bi`-level proof about `wff`. The `wff`
+relation has transport, so the chain can be completed at the `wff` level.
+Write `_` as the transport sentinel for any sort where this pattern applies.
 
 **Example — provable sort with transport:**
-
 ```
 term bi (a b: wff): wff;
 --| @relation wff bi biid bitr bisym mpbi
@@ -61,71 +157,107 @@ axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
 ```
 
 **Example — non-provable sort without transport:**
-
 ```
 term nat_eq (a b: nat): wff;
 --| @relation nat nat_eq nat_eq_refl nat_eq_trans nat_eq_sym _
 ```
 
-The `_` sentinel indicates no transport theorem. This is appropriate for
-sorts like `nat` where the relation (`nat_eq`) produces a `wff`, not a
-`nat`, so there is no meaningful transport.
+`nat_eq` produces a `wff`, not a `nat`, so no transport axiom exists or is
+needed. Nat-level equivalences are always consumed by a congruence step that
+lifts them into the `wff` level, where `mpbi` can close the proof.
 
-### `@rewrite`
+---
 
-Marks an axiom as an oriented rewrite rule. The axiom's conclusion must
-have the form `rel(lhs, rhs)` where `rel` is a registered relation
-term. The normalizer applies the rule left-to-right: when it encounters
-an expression matching `lhs`, it rewrites to `rhs`.
+## `@rewrite`
 
+### Purpose
+
+`@rewrite` marks an axiom as an oriented rewrite rule. The axiom's conclusion
+must have the form `rel(lhs, rhs)` where `rel` is a relation previously
+declared with `@relation`. The normalizer interprets this as "whenever you
+see an expression matching `lhs`, replace it with `rhs`."
+
+### Syntax
 ```
 --| @rewrite
 axiom sb_im (a b c: wff): $ sb a (b -> c) <-> (sb a b -> sb a c) $;
 ```
 
-Rules are indexed by the head term of the LHS. The normalizer tries all
-rules for a given head term and applies the first one that matches, then
-restarts. This continues until no more rules apply (fixed-point
-normalization).
+### How the normalizer applies rewrite rules
 
-Rewrite rules can use any registered relation, not just the one for the
-sort they appear to "belong to". The normalizer determines which
-relation to use based on the sort of the expression being normalized.
+Rules are indexed by the *head term* of the LHS — that is, the outermost
+function symbol of the left-hand side. When the normalizer encounters an
+expression, it looks up all rules whose head term matches the top-level
+constructor of that expression and tries them in declaration order. The first
+rule whose LHS pattern unifies with the expression fires. After a rule fires,
+the normalizer recursively normalizes the resulting RHS and then re-checks
+the same expression for more applicable rules from the beginning. This
+continues until no rules apply (fixed-point normalization).
 
-**Multi-sort example:**
+There is no backtracking: if the first matching rule leads to a form that
+doesn't match the user's assertion, the compiler does not retry with a
+different rule. See *Rule Selection and Ordering* for guidance on rule
+ordering when rules overlap.
 
+### Multi-sort example
+
+Rewrite rules are not restricted to a single sort. A single `.mm0` file can
+have rules for both wff-level and nat-level relations:
 ```
--- wff-level rule (uses bi as relation)
+-- wff-level rule: sb_f distributes over equality (uses bi)
 --| @rewrite
 axiom sb_f_eq {x: nat} (t: nat) (a b: nat x):
   $ sb_f t x (a = b) <-> (sb_t t x a = sb_t t x b) $;
 
--- nat-level rule (uses nat_eq as relation)
+-- nat-level rule: sb_t distributes through successor (uses nat_eq)
 --| @rewrite
 axiom sb_t_suc {x: nat} (t: nat) (a: nat x):
   $ nat_eq (sb_t t x (S a)) (S (sb_t t x a)) $;
 ```
 
-### `@congr`
+The normalizer selects the correct relation for each subexpression based on
+its sort, so wff-level and nat-level rules interoperate transparently.
 
-Marks an axiom as a congruence rule for a specific term constructor. The
-conclusion must have the form `rel(f(a1..an), f(b1..bn))`. The
-normalizer uses congruence rules to justify rewriting inside compound
-expressions.
+---
 
+## `@congr`
+
+### Purpose
+
+Rewrite rules reduce the head of an expression, but they cannot descend into
+the arguments of a compound expression on their own. `@congr` provides the
+axioms that justify rewriting *inside* a term constructor: given proofs that
+each argument changed, a congruence rule combines them into a proof that the
+whole application changed.
+
+### Syntax
 ```
 --| @congr
 axiom im_congr (a b c d: wff):
   $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
 ```
 
-The congruence rule's hypotheses must provide a relation proof for each
-argument of the term constructor, in order. Unchanged arguments get a
-reflexivity proof.
+### Binder pairing convention
 
-**Cross-sort congruence** is supported. A congruence rule for a
-wff-level term can have nat-level relation hypotheses:
+The binders of a congruence axiom follow a specific interleaved pattern that
+the normalizer depends on: for each *regular* (non-bound) argument of the
+term constructor, provide the *before* value and then the *after* value. Bound
+arguments appear once (they cannot change). This gives the pattern
+`a1, b1, a2, b2, ...` for a binary constructor with two regular arguments.
 
+For `im_congr` above, `a` is the before-value of the first argument, `b` is
+the after-value of the first argument, `c` is the before-value of the second,
+and `d` is the after-value of the second.
+
+When an argument does not change, the normalizer supplies a reflexivity proof
+for it automatically; you do not need a separate congruence axiom for every
+possible combination of changed and unchanged arguments.
+
+### Cross-sort congruence
+
+A congruence axiom for a wff-level term constructor can have nat-level
+hypotheses. The normalizer resolves the appropriate relation for each argument
+based on its declared sort:
 ```
 --| @congr
 axiom eq_congr (a b c d: nat):
@@ -136,234 +268,323 @@ axiom suc_congr (a b: nat):
   $ nat_eq a b $ > $ nat_eq (S a) (S b) $;
 ```
 
-The congruence rule's binders follow the pattern `a1, b1, a2, b2, ...`
-— pairs of original and rewritten values for each argument.
+Here `eq_congr` justifies rewriting inside `=` (a wff-level term) when
+nat-level arguments change, and `suc_congr` justifies rewriting inside `S`
+(a nat-level term) when its nat-level argument changes.
 
-### `@acui`
+---
 
-Marks a binary constructor as a structural combiner to be normalized
-modulo assoc / comm / unit / optional idempotence.
+## `@acui`
 
+### Purpose
+
+Some term constructors are used to build structured "collections" — contexts,
+multisets, resource environments — where the proof-relevant notion of equality
+is not syntactic identity but equivalence modulo associativity, commutativity,
+unit elements, and possibly idempotence. `@acui` marks such a constructor so
+the normalizer can canonicalize it structurally rather than relying solely on
+rewrite rules.
+
+### Syntax
 ```
 --| @acui <assoc> <comm-or-_> <unit> <idem-or-_>
 ```
 
-The positional order is mnemonic: `A C U I`.
+The positional order is **A C U I** (Assoc, Comm, Unit, Idem).
 
-- `assoc`: theorem proving associativity of the combiner
-- `comm-or-_`: theorem proving commutativity, or `_` if absent
-- `unit`: the nullary unit term
-- `idem-or-_`: theorem proving idempotence, or `_` if absent
+| Field | Meaning |
+|-------|---------|
+| `assoc` | Axiom proving `(a ∘ b) ∘ c ~ a ∘ (b ∘ c)` |
+| `comm-or-_` | Axiom proving `a ∘ b ~ b ∘ a`, or `_` if the combiner is not commutative |
+| `unit` | The nullary unit term |
+| `idem-or-_` | Axiom proving `a ∘ a ~ a`, or `_` if no idempotence |
 
-Example:
-
+**Example:**
 ```
 term emp: ctx;
 term join (g h: ctx): ctx;
 --| @acui ctx_assoc ctx_comm emp ctx_idem
 ```
 
-The associated relation for the constructor's result sort must also be
-registered with `@relation`, and the constructor itself usually needs a
-`@congr` theorem.
+### What the normalizer does with an ACUI combiner
 
-During normalization the compiler:
+When the normalizer encounters an expression built from an ACUI combiner, it
+performs the following steps:
 
-1. normalizes children first
-2. flattens nested uses of the combiner
-3. removes unit terms
-4. sorts children deterministically when commutativity is available
-5. deduplicates equal children when idempotence is available
-6. rebuilds a canonical right-associated form
+1. **Normalize children first.** Each element is normalized using the
+   appropriate rules before the structural pass begins.
+2. **Flatten nested uses.** `(a ∘ b) ∘ c` and `a ∘ (b ∘ c)` are treated as
+   the flat list `[a, b, c]`.
+3. **Remove unit elements.** Any occurrence of the unit is dropped from the
+   list.
+4. **Sort deterministically** (if commutativity is declared). Elements are
+   ordered using a canonical comparison, making the normal form
+   order-independent.
+5. **Deduplicate** (if idempotence is declared). Equal adjacent elements in
+   the sorted list are merged.
+6. **Rebuild right-associated.** The canonical list is reassembled as a
+   right-associated binary tree: `a ∘ (b ∘ (c ∘ ...))`.
 
-The proof-producing normalizer emits ordinary theorem applications for
-assoc / comm / unit / idem and composes them with congruence,
-transitivity, symmetry, and transport as needed.
+A proof is emitted for every structural step — associativity rearrangements,
+unit eliminations, commutativity swaps, and idempotence merges — and composed
+via transitivity into a single relation proof `rel(original, canonical)`.
 
-**ACUI subsets.** Associativity (A) and unit (U) are mandatory; commutativity
-(C) and idempotence (I) are independently optional. The supported
-combinations are AU, ACU, AUI, and ACUI. A and U are required because the
-canonical form algorithm always flattens nested uses of the combiner into a
-flat list and eliminates unit elements; without associativity, flattening is
-unjustified, and without a unit element there is no base case for empty or
-singleton lists. Commutativity and idempotence are independent passes over
-the flattened item list — sorting (C) and deduplication (I) — so either can
-be omitted by passing `_` in the corresponding position of the `@acui`
-annotation. For example, `@acui comp_assoc _ id _` declares an AU combiner
-(non-commutative, no idempotence), suitable for monoid composition.
+### Supported subsets
 
-### `@normalize`
+Associativity (A) and unit (U) are mandatory. Without associativity,
+flattening is unjustified. Without a unit, there is no base case for empty
+or singleton lists. Commutativity (C) and idempotence (I) are optional and
+independent:
 
-Marks a rule so that its conclusion and/or hypotheses are automatically
-normalized after instantiation.
+| Declared | Behavior |
+|----------|----------|
+| AU   | Flatten and eliminate units only; order is preserved |
+| ACU  | Flatten, eliminate units, sort canonically |
+| AUI  | Flatten, eliminate units, deduplicate |
+| ACUI | Flatten, eliminate units, sort, deduplicate |
 
+**Example — AU (non-commutative monoid):**
+```
+term id: mor;
+term comp (f g: mor): mor;
+--| @acui comp_assoc _ id _
+```
+
+This is suitable for morphism composition: `(f ∘ g) ∘ h` normalizes to
+`f ∘ (g ∘ h)` and `id ∘ f` normalizes to `f`, but the order of distinct
+morphisms is preserved.
+
+### Required companions
+
+A term annotated with `@acui` must also have:
+- A `@relation` declared for its result sort (so the normalizer knows which
+  relation to use for the proof steps).
+- A `@congr` rule (so the normalizer can justify rewriting inside a larger
+  expression that contains the combiner).
+
+---
+
+## `@normalize`
+
+### Purpose
+
+`@normalize` marks an axiom or theorem so that its conclusion and/or specified
+hypotheses are automatically normalized after instantiation. Without this
+annotation, the compiler checks proof lines by exact equality between the
+raw instantiated form and the expression you wrote. With it, both sides are
+normalized first and the normalized forms are compared.
+
+### Syntax
 ```
 --| @normalize conc
 --| @normalize hyp0
 --| @normalize conc hyp0 hyp1
 ```
 
-- `conc`: normalize the conclusion
-- `hyp0`, `hyp1`, ...: normalize the hypothesis at the given index
-  (0-based)
+- `conc`: normalize the conclusion after instantiation
+- `hyp0`, `hyp1`, ...: normalize the hypothesis at the given 0-based index
 
-Multiple positions can be listed on a single annotation line.
+Multiple positions can appear on a single annotation line.
 
-**Example:**
+### What happens at a normalized proof line
 
+Given:
 ```
 --| @normalize conc
 axiom ax_inst {x: nat} (t: nat) (p: wff x):
   $ A. x p $ > $ sb_f t x p $;
 ```
 
-When the user writes:
+When you write a proof line like:
 ```
 l1: $ S zer = zer $ by ax_inst (x := $ x $, t := $ S zer $, p := $ x = zer $) [#1]
 ```
 
-The compiler:
-1. Instantiates `ax_inst`'s conclusion: `sb_f (S zer) x (x = zer)`
-2. Normalizes it using rewrite rules:
+the compiler performs these steps:
+
+1. **Instantiate** `ax_inst`'s conclusion with the given bindings:
+   `sb_f (S zer) x (x = zer)`
+2. **Normalize** the instantiated expression using the registered rewrite and
+   congruence rules:
    - `sb_f_eq` rewrites to `sb_t (S zer) x x = sb_t (S zer) x zer`
    - `sb_t_var` rewrites `sb_t (S zer) x x` to `S zer`
    - `sb_t_zer` rewrites `sb_t (S zer) x zer` to `zer`
-   - Congruence via `eq_congr` combines them
-3. Checks the normalized result matches the user's assertion (`S zer = zer`)
-4. Emits transport from the raw conclusion to the normalized form
+   - `eq_congr` and `suc_congr` provide congruence proofs for each step
+3. **Compare** the normalized result to what you wrote (`S zer = zer`).
+4. **Emit** the full proof chain: the raw `ax_inst` application, each
+   intermediate rewrite step as a theorem application, and a final transport
+   step that converts the raw conclusion to the normalized form.
 
-## Mixed and Multi-Sort Normalization
+If the normalized result does not match your assertion, the compiler reports
+a `ConclusionMismatch` error.
 
-The normalizer supports multiple relations — one per sort — and can mix
-ordinary rewriting with structural ACUI normalization in the same
-expression. When normalizing a compound expression, each child is
-normalized using the relation for its sort (determined from the parent
-term's argument declarations).
+### Hypothesis normalization
 
-This enables compositional rewriting across sort boundaries. For
-example, normalizing `sb_f t x (S x = S x)`:
+When `hyp0` (or another hypothesis index) is listed, the same process applies
+in reverse: the compiler normalizes the *expected* hypothesis form (from the
+rule's instantiated signature) and checks that your cited reference, after
+normalization, matches it. A transport step is emitted to bridge the gap
+before the reference is fed into the theorem application.
 
-1. The top-level expression has sort `wff`, so the `bi` relation is used
-   for head rules
-2. `sb_f_eq` rewrites to `sb_t t x (S x) = sb_t t x (S x)`
-3. Recursively normalizing the `eq` children: each `sb_t t x (S x)` has
-   sort `nat`, so the `nat_eq` relation is used
-4. `sb_t_suc` and `sb_t_var` reduce each to `S t`
-5. `suc_congr` and `eq_congr` provide the congruence proofs
+---
 
-If no relation is registered for a sort, the normalizer skips that
-child (no rewriting, no congruence proof needed).
+## Mixed and multi-sort normalization
 
-## Proof Generation
+The normalizer supports multiple active relations simultaneously — one per
+sort. When normalizing a compound expression, each child is normalized using
+the relation for its own sort, determined from the parent term's argument
+declarations. This allows seamless composition across sort boundaries.
 
-The normalizer is proof-producing. Every rewrite step emits a proof line
-referencing the rewrite axiom with concrete bindings. The full
-normalization proof is composed from:
+**Example — normalizing `sb_f t x (S x = S x)`:**
 
-- **Rewrite steps**: direct applications of `@rewrite` axioms
-- **Reflexivity**: `refl(a)` for unchanged subexpressions
-- **Congruence**: `@congr` rules combining child proofs
-- **Transitivity**: composing sequential rewrite steps
-- **Symmetry**: reversing a normalization direction (used in hypothesis
-  normalization)
-- **Transport**: converting a relation proof `rel(a,b)` plus a proof of
-  `a` into a proof of `b`
+1. The top-level expression has sort `wff`, so the `bi` relation governs head
+   rewrites.
+2. `sb_f_eq` fires, rewriting to `sb_t t x (S x) = sb_t t x (S x)`.
+3. The normalizer descends into each argument of `=`, which have sort `nat`,
+   so the `nat_eq` relation is used there.
+4. `sb_t_suc` and `sb_t_var` reduce each `sb_t t x (S x)` to `S t`.
+5. `suc_congr` and `eq_congr` assemble the nat-level and wff-level congruence
+   proofs.
 
-All generated proof steps are ordinary theorem applications. The
-verifier sees no rewriting — only a sequence of axiom/theorem
-invocations.
+If no relation is registered for a sort, the normalizer leaves children of
+that sort unrewritten and does not require a congruence proof for them.
 
-## Rule Selection and Ordering
+---
 
-When multiple `@rewrite` rules share the same LHS head term, the
-normalizer tries them in **declaration order** — the order the `@rewrite`
-annotations appear in the `.mm0` file. It applies the first rule whose
-LHS pattern matches the current expression, then restarts from the
-beginning of the rule list for that head term. This is a standard
-first-match strategy.
+## Proof generation
 
-If more than one rule could match at a given step, only the first
-matching rule fires. The remaining rules are not tried for that step
-(though they may fire on subsequent iterations if the expression
-changes). There is no backtracking: if the first matching rule leads to
-a normal form that doesn't match the user's assertion, the normalizer
-does not try alternative rule orderings.
+The normalizer is proof-producing: every transformation it performs becomes
+a sequence of ordinary theorem applications in the MMB output. The verifier
+sees no normalization opcodes — only axiom/theorem invocations it can check
+independently.
 
-This means rule ordering matters. If you have overlapping rules, place
-the more specific rule before the more general one:
+The components of a generated normalization proof are:
 
+| Component | When emitted |
+|-----------|--------------|
+| **Rewrite step** | Each successful `@rewrite` rule application |
+| **Reflexivity** | For unchanged subexpressions inside a congruence step |
+| **Congruence** | Combining child-level proofs via a `@congr` axiom |
+| **Transitivity** | Composing sequential steps into a single relation proof |
+| **Symmetry** | Used when normalizing a hypothesis (the proof direction reverses) |
+| **Transport** | Converting `rel(a, b)` plus a proof of `a` into a proof of `b` |
+
+For ACUI combiners, the structural steps (associativity rearrangements, unit
+eliminations, commutativity swaps, idempotence merges) each emit their
+respective axiom applications and are composed via transitivity in the same
+way as rewrite steps.
+
+---
+
+## Rule selection and ordering
+
+When multiple `@rewrite` rules share the same LHS head term, the normalizer
+tries them in **declaration order** — the order the `@rewrite` annotations
+appear in the `.mm0` file. The first rule whose LHS pattern matches the
+current expression fires. After it fires, the normalizer recursively
+normalizes the RHS, then returns to check for further applicable rules on the
+resulting expression. There is no backtracking.
+
+This means **more specific rules should come before more general ones:**
 ```
--- Specific case first: sb_t on a variable gives the substitution term
+-- Specific: sb_t on the bound variable itself yields the substitution term
 --| @rewrite
 axiom sb_t_var {x: nat} (t: nat): $ nat_eq (sb_t t x x) t $;
 
--- General case: sb_t distributes through successor
+-- General: sb_t distributes through successor
 --| @rewrite
 axiom sb_t_suc {x: nat} (t: nat) (a: nat x):
   $ nat_eq (sb_t t x (S a)) (S (sb_t t x a)) $;
 ```
 
-In practice, overlapping rules are uncommon because rules are indexed by
-head term — `sb_t_var` and `sb_t_suc` both match `sb_t` at the head,
-but their LHS substructure (`x` vs `S a`) disambiguates them via
-pattern matching.
+In practice, overlapping rules are uncommon because rules are indexed by their
+head term — `sb_t_var` and `sb_t_suc` both match `sb_t` at the head, but
+their LHS substructure (`x` vs `S a`) already disambiguates them via pattern
+matching. Still, when genuine overlap exists, declaration order is the
+tiebreaker.
 
-## Termination and Step Limits
+---
 
-The normalizer does **not** guarantee termination. A set of rewrite
-rules that cycle (e.g., `a ~ b` and `b ~ a`) or that expand
-indefinitely will not terminate on their own.
+## Termination and step limits
 
-To prevent infinite loops, the normalizer enforces a **step limit** of
-1000 rewrite steps per normalization call. Each successful rule
-application counts as one step. When the limit is reached, the
-normalizer stops applying head rules and returns whatever expression it
-has reached so far.
+The normalizer does **not** guarantee termination. A set of rules that cycle
+(`a ~ b` and `b ~ a`) or that expand indefinitely will not terminate on their
+own.
 
-If the partially-normalized expression does not match the user's
-assertion, the compiler reports a `ConclusionMismatch` (or
-`HypothesisMismatch`) error as usual. The error message does not
-currently distinguish "normalization was incomplete due to step limit"
-from "normalization completed but the result doesn't match". If you
-suspect a step limit issue, check whether your rules have cycles or
-unbounded expansion.
+To prevent infinite loops, the normalizer enforces a **step limit** of 1000
+rewrite steps per normalization invocation. Each successful rule application
+counts as one step. When the limit is reached, normalization halts and returns
+whatever expression has been reached so far.
 
-The step limit is shared across all recursive normalization within a
-single `@normalize` invocation. For example, if normalizing the
-conclusion of a rule triggers recursive normalization of
-subexpressions, all of those steps count toward the same 1000-step
-budget.
+If the partially-normalized expression does not match your assertion, the
+compiler reports a `ConclusionMismatch` (or `HypothesisMismatch`) error as
+usual. The error message does not currently distinguish "step limit reached"
+from "normalization completed but result doesn't match". If you suspect a step
+limit issue, check for cycles or unbounded expansion in your rule set.
 
-Congruence steps (descending into children) and reflexivity/transitivity
-proof assembly do not count toward the step limit — only successful
-head rewrite rule applications are counted.
+The step limit is shared across all recursive normalization within a single
+`@normalize` invocation: descending into children and assembling
+reflexivity/transitivity proofs do not consume steps, but every head rewrite
+rule application does.
 
-## Worked Example
+---
 
-Given:
+## Worked example
+
+### The axiom
+```
+--| @normalize conc
+axiom ax_inst {x: nat} (t: nat) (p: wff x):
+  $ A. x p $ > $ sb_f t x p $;
+```
+
+The rule takes a proof of `A. x p` and produces the raw substitution term
+`sb_f t x p` — `p` with `t` substituted for `x`, not yet reduced.
+
+### The theorem and proof line
 ```
 theorem inst_suc {x: nat}:
   $ A. x (S x = S x) $ > $ S (S zer) = S (S zer) $;
 ```
-
-Proof:
 ```
-l1: $ S (S zer) = S (S zer) $ by ax_inst (x := $ x $, t := $ S zer $, p := $ S x = S x $) [#1]
+l1: $ S (S zer) = S (S zer) $
+      by ax_inst (x := $ x $, t := $ S zer $, p := $ S x = S x $) [#1]
 ```
 
-The compiler normalizes `sb_f (S zer) x (S x = S x)`:
+### The three expressions
 
+| | Expression |
+|-|------------|
+| **Instantiated conclusion (raw)** | `sb_f (S zer) x (S x = S x)` |
+| **User assertion** | `S (S zer) = S (S zer)` |
+| **Both after normalization** | `S (S zer) = S (S zer)` |
+
+### Normalization trace
 ```
 sb_f(Sz, x, eq(suc(x), suc(x)))
-  -- sb_f_eq -->  eq(sb_t(Sz,x,suc(x)), sb_t(Sz,x,suc(x)))
-  -- child 0: sb_t(Sz,x,suc(x))
-     -- sb_t_suc -->  suc(sb_t(Sz,x,x))
-     -- sb_t_var -->  Sz
-     -- suc_congr -->  suc(Sz) = S(S zer)
-  -- child 1: same as child 0
-  -- eq_congr -->  eq(S(Sz), S(Sz))
-= S (S zer) = S (S zer)
+
+  -- sb_f_eq (wff level, bi relation) -->
+     eq(sb_t(Sz,x,suc(x)), sb_t(Sz,x,suc(x)))
+
+  -- left child (nat level, nat_eq relation):
+     sb_t(Sz, x, suc(x))
+       -- sb_t_suc --> suc(sb_t(Sz, x, x))
+       -- sb_t_var --> suc(Sz)
+     proof: suc_congr assembles nat_eq(sb_t(Sz,x,suc(x)), suc(Sz))
+
+  -- right child: identical steps, same result
+
+  -- eq_congr assembles:
+     bi(eq(sb_t(Sz,x,suc(x)), sb_t(Sz,x,suc(x))),
+        eq(suc(Sz), suc(Sz)))
+  -- i.e.: sb_f(Sz,x,S x = S x) <-> S(S zer) = S(S zer)
 ```
 
-This matches the user's assertion, so the compiler emits the full proof
-chain and a transport step.
+The user's assertion `S (S zer) = S (S zer)` is already normal. Both sides
+agree, so the compiler emits:
+
+1. The raw `ax_inst` application, producing `sb_f (S zer) x (S x = S x)`
+2. `sb_f_eq`, `sb_t_suc`, `sb_t_var` as rewrite steps
+3. `suc_congr` and `eq_congr` as congruence steps, composing via transitivity
+4. A transport step via `mpbi`: from the `bi`-proof and the proof of the
+   raw conclusion, derive a proof of `S (S zer) = S (S zer)`
