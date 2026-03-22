@@ -3,8 +3,6 @@ const std = @import("std");
 pub const Arg = @import("./trusted/args.zig").Arg;
 pub const Compiler = @import("./frontend/compiler.zig").Compiler;
 pub const DebugConfig = @import("./frontend/debug.zig").DebugConfig;
-pub const TransparentExpr = @import("./frontend/transparent_expr.zig");
-pub const TransparentOps = @import("./frontend/transparent_ops.zig");
 pub const CompilerDiagnostic = @import("./frontend/compiler.zig").Diagnostic;
 pub const compilerDiagnosticSummary =
     @import("./frontend/compiler.zig").diagnosticSummary;
