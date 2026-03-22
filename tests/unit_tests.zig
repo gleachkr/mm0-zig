@@ -21,6 +21,8 @@ const Stack = mm0.Stack;
 const Term = mm0.Term;
 const Theorem = mm0.Theorem;
 const Verifier = mm0.Verifier;
+const TransparentExpr = mm0.TransparentExpr;
+const TransparentOps = mm0.TransparentOps;
 
 fn fillHeaderBytes(
     out: *align(@alignOf(Header)) [@sizeOf(Header)]u8,
@@ -2116,4 +2118,340 @@ test "compiler records theorem-local dummy vars in theorem var table" {
     try std.testing.expectEqualStrings("a", (try vars.get(0)).?);
     try std.testing.expectEqualStrings("b", (try vars.get(1)).?);
     try std.testing.expectEqual(@as(?[]const u8, null), try vars.get(2));
+}
+
+// ---------------------------------------------------------------
+// Transparent expression / symbolic unfolding tests (Stage 1)
+// ---------------------------------------------------------------
+
+/// Helper: parse MM0 source, build env, find first theorem context,
+/// return (parser, env, theorem, theorem_vars) all on an arena.
+fn setupTransparentTestEnv(
+    arena: *std.heap.ArenaAllocator,
+    src: []const u8,
+) !struct {
+    parser: MM0Parser,
+    env: CompilerEnv.GlobalEnv,
+    theorem: CompilerExpr.TheoremContext,
+    theorem_vars: std.StringHashMap(*const Expr),
+} {
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    var found_theorem = false;
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            .term => |term| try TermAnnotations.processTermAnnotations(
+                &env,
+                term,
+                parser.last_annotations,
+            ),
+            else => {},
+        }
+    }
+    return .{
+        .parser = parser,
+        .env = env,
+        .theorem = theorem,
+        .theorem_vars = theorem_vars,
+    };
+}
+
+test "symbolic def opening produces Fresh atoms, not dummies" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\term eq (a b: obj): wff; infixl eq: $=$ prec 50;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def hasdup {.a: obj} (f: obj): wff = $ a = f $;
+        \\theorem demo (f: obj): $ hasdup f $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var setup = try setupTransparentTestEnv(&arena, src);
+    var ctx = TransparentOps.Context.init(
+        arena.allocator(),
+        &setup.theorem,
+        &setup.env,
+    );
+    defer ctx.deinit();
+
+    const formula = try setup.parser.parseFormulaText(
+        " hasdup f ",
+        &setup.theorem_vars,
+    );
+    const expr_id = try setup.theorem.internParsedExpr(formula);
+
+    const opened = try ctx.openDefSymbolic(expr_id) orelse {
+        return error.ExpectedSymbolicOpening;
+    };
+
+    // The result should be a symbolic App, not a concrete ExprId
+    const node = ctx.interner.node(opened);
+    try std.testing.expect(node.* == .app);
+
+    // No theorem dummies should have been allocated
+    try std.testing.expectEqual(@as(usize, 0), setup.theorem.theorem_dummies.items.len);
+}
+
+test "symbolic def opening without hidden dummies produces no Fresh atoms" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\--| @abbrev
+        \\def double (a: wff): wff = $ a -> a $;
+        \\theorem demo (a: wff): $ double a $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var setup = try setupTransparentTestEnv(&arena, src);
+    var ctx = TransparentOps.Context.init(
+        arena.allocator(),
+        &setup.theorem,
+        &setup.env,
+    );
+    defer ctx.deinit();
+
+    const formula = try setup.parser.parseFormulaText(
+        " double a ",
+        &setup.theorem_vars,
+    );
+    const expr_id = try setup.theorem.internParsedExpr(formula);
+
+    const opened = try ctx.openDefSymbolic(expr_id) orelse {
+        return error.ExpectedSymbolicOpening;
+    };
+
+    // Result should be App(imp, [Concrete(a), Concrete(a)])
+    const node = ctx.interner.node(opened);
+    try std.testing.expect(node.* == .app);
+
+    // Check there are no Fresh nodes in the tree
+    const app = node.app;
+    for (app.args) |arg| {
+        const arg_node = ctx.interner.node(arg);
+        try std.testing.expect(arg_node.* != .fresh);
+    }
+
+    // No dummies allocated
+    try std.testing.expectEqual(@as(usize, 0), setup.theorem.theorem_dummies.items.len);
+}
+
+test "two symbolic unfolds of the same def get distinct occurrence ids" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\term eq (a b: obj): wff; infixl eq: $=$ prec 50;
+        \\def hasdup {.a: obj} (f: obj): wff = $ a = f $;
+        \\theorem demo (f g: obj): $ hasdup f $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var setup = try setupTransparentTestEnv(&arena, src);
+    var ctx = TransparentOps.Context.init(
+        arena.allocator(),
+        &setup.theorem,
+        &setup.env,
+    );
+    defer ctx.deinit();
+
+    const formula_f = try setup.parser.parseFormulaText(
+        " hasdup f ",
+        &setup.theorem_vars,
+    );
+    const expr_f = try setup.theorem.internParsedExpr(formula_f);
+
+    const formula_g = try setup.parser.parseFormulaText(
+        " hasdup g ",
+        &setup.theorem_vars,
+    );
+    const expr_g = try setup.theorem.internParsedExpr(formula_g);
+
+    const opened_f = try ctx.openDefSymbolic(expr_f) orelse return error.ExpectedOpening;
+    const opened_g = try ctx.openDefSymbolic(expr_g) orelse return error.ExpectedOpening;
+
+    // Different opening results (different args)
+    try std.testing.expect(opened_f != opened_g);
+
+    // The two openings should have used different occurrence ids (0 and 1)
+    try std.testing.expectEqual(@as(u32, 2), ctx.next_occurrence);
+
+    // No theorem dummies allocated
+    try std.testing.expectEqual(@as(usize, 0), setup.theorem.theorem_dummies.items.len);
+}
+
+test "alpha comparison of matching symbolic unfoldings" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\term eq (a b: obj): wff; infixl eq: $=$ prec 50;
+        \\def hasdup {.a: obj} (f: obj): wff = $ a = f $;
+        \\theorem demo (f: obj): $ hasdup f $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var setup = try setupTransparentTestEnv(&arena, src);
+    var ctx = TransparentOps.Context.init(
+        arena.allocator(),
+        &setup.theorem,
+        &setup.env,
+    );
+    defer ctx.deinit();
+
+    const formula = try setup.parser.parseFormulaText(
+        " hasdup f ",
+        &setup.theorem_vars,
+    );
+    const expr_id = try setup.theorem.internParsedExpr(formula);
+
+    // Unfold the same expression twice — different occurrence ids
+    const opened_1 = try ctx.openDefSymbolic(expr_id) orelse return error.ExpectedOpening;
+    const opened_2 = try ctx.openDefSymbolic(expr_id) orelse return error.ExpectedOpening;
+
+    // They should NOT be structurally equal (different Fresh occurrence ids)
+    try std.testing.expect(opened_1 != opened_2);
+
+    // But they SHOULD be alpha-equivalent
+    var alpha = TransparentExpr.AlphaEnv.init(arena.allocator());
+    defer alpha.deinit();
+    try std.testing.expect(try alpha.alphaEq(&ctx.interner, opened_1, opened_2));
+}
+
+test "WHNF stops at non-def heads" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\theorem demo (a b: wff): $ a -> b $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var setup = try setupTransparentTestEnv(&arena, src);
+    var ctx = TransparentOps.Context.init(
+        arena.allocator(),
+        &setup.theorem,
+        &setup.env,
+    );
+    defer ctx.deinit();
+
+    const formula = try setup.parser.parseFormulaText(
+        " a -> b ",
+        &setup.theorem_vars,
+    );
+    const expr_id = try setup.theorem.internParsedExpr(formula);
+
+    // imp is not a def, so WHNF should return opaque_concrete
+    const result = try ctx.whnfTransparent(expr_id);
+    switch (result) {
+        .opaque_concrete => |id| try std.testing.expectEqual(expr_id, id),
+        .exposed => return error.ExpectedOpaque,
+    }
+}
+
+test "WHNF unfolds through transparent defs" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def double (a: wff): wff = $ a -> a $;
+        \\theorem demo (a: wff): $ double a $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var setup = try setupTransparentTestEnv(&arena, src);
+    var ctx = TransparentOps.Context.init(
+        arena.allocator(),
+        &setup.theorem,
+        &setup.env,
+    );
+    defer ctx.deinit();
+
+    const formula = try setup.parser.parseFormulaText(
+        " double a ",
+        &setup.theorem_vars,
+    );
+    const expr_id = try setup.theorem.internParsedExpr(formula);
+
+    // double is a def, so WHNF should expose it
+    const result = try ctx.whnfTransparent(expr_id);
+    switch (result) {
+        .opaque_concrete => return error.ExpectedExposed,
+        .exposed => |sid| {
+            // The exposed head should be imp (not double)
+            const head = ctx.symbolicHeadTermId(sid);
+            const imp_id = setup.env.term_names.get("imp") orelse return error.MissingTerm;
+            try std.testing.expectEqual(imp_id, head.?);
+        },
+    }
+}
+
+test "ACUI exposure flattens through transparent def" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term disj (a b: wff): wff;
+        \\term tru: wff;
+        \\def disj3 (a b c: wff): wff = $ disj a (disj b c) $;
+        \\theorem demo (x y z: wff): $ disj3 x y z $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var setup = try setupTransparentTestEnv(&arena, src);
+    var ctx = TransparentOps.Context.init(
+        arena.allocator(),
+        &setup.theorem,
+        &setup.env,
+    );
+    defer ctx.deinit();
+
+    const disj_id = setup.env.term_names.get("disj") orelse return error.MissingTerm;
+    const tru_id = setup.env.term_names.get("tru") orelse return error.MissingTerm;
+
+    const formula = try setup.parser.parseFormulaText(
+        " disj3 x y z ",
+        &setup.theorem_vars,
+    );
+    const expr_id = try setup.theorem.internParsedExpr(formula);
+
+    // Expose through ACUI: disj3(x,y,z) should flatten to [x, y, z]
+    const items = try ctx.exposeAcui(expr_id, disj_id, tru_id);
+    defer ctx.allocator.free(items);
+
+    try std.testing.expectEqual(@as(usize, 3), items.len);
+
+    // Each item should be a Concrete wrapping the corresponding variable
+    for (items) |item| {
+        const item_node = ctx.interner.node(item);
+        try std.testing.expect(item_node.* == .concrete);
+    }
 }
