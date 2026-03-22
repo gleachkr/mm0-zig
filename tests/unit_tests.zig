@@ -1750,6 +1750,11 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_all_elim_free_param", .outcome = .pass },
     .{ .stem = "pass_category_defs_direct", .outcome = .pass },
     .{ .stem = "pass_infer_normalized_conclusion", .outcome = .pass },
+    .{ .stem = "pass_abbrev_hidden_dummy_explicit", .outcome = .pass },
+    .{ .stem = "pass_abbrev_hidden_dummy_infer", .outcome = .pass },
+    .{ .stem = "pass_abbrev_hidden_dummy_and_elim", .outcome = .pass },
+    .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx", .outcome = .pass },
+    .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx_reorder", .outcome = .pass },
     .{ .stem = "pass_abbrev_assoc", .outcome = .pass },
     .{ .stem = "pass_abbrev_rewrite", .outcome = .pass },
     .{ .stem = "pass_abbrev_nested", .outcome = .pass },
@@ -1778,6 +1783,9 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
     .{ .stem = "demo_seq_peirce", .outcome = .pass },
     .{ .stem = "demo_category_pullback", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_abbrev_mono", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_abbrev_pullback", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_abbrev_both", .outcome = .pass },
     .{ .stem = "pass_acui_remainder_overlap", .outcome = .pass },
     .{ .stem = "pass_acui_order_independent_overlap", .outcome = .pass },
     .{ .stem = "pass_acui_repeated_explicit_item", .outcome = .pass },
@@ -1805,6 +1813,7 @@ const proof_cases = [_]ProofCase{
         .stem = "fail_def_infer_ambiguous",
         .outcome = .{ .fail = error.AmbiguousAcuiMatch },
     },
+    .{ .stem = "fail_abbrev_hidden_dummy_ax", .outcome = .pass },
     .{
         .stem = "fail_abbrev_on_nondef",
         .outcome = .{ .fail = error.AbbrevOnNonDef },
@@ -1969,6 +1978,9 @@ test "compiler proof cases from files" {
     const allocator = std.testing.allocator;
     const have_mm0c = mm0cExists();
 
+    var failure_count: usize = 0;
+    var failed_cases: [proof_cases.len][]const u8 = undefined;
+
     for (proof_cases) |case| {
         const mm0_src = try readProofCaseFile(allocator, case.stem, "mm0");
         defer allocator.free(mm0_src);
@@ -1990,17 +2002,23 @@ test "compiler proof cases from files" {
                             diag.name orelse "?",
                         });
                     }
-                    return err;
+                    failed_cases[failure_count] = case.stem;
+                    failure_count += 1;
+                    continue;
                 };
                 defer allocator.free(mmb);
                 mm0.verifyPair(allocator, mm0_src, mmb) catch |err| {
                     std.debug.print("FAIL (verify) case={s} err={}\n", .{ case.stem, err });
-                    return err;
+                    failed_cases[failure_count] = case.stem;
+                    failure_count += 1;
+                    continue;
                 };
                 if (have_mm0c) {
-                    verifyWithMm0c(mm0_src, mmb, case.stem) catch |err| {
+                    verifyWithMm0c(mm0_src, mmb, case.stem) catch {
                         std.debug.print("FAIL (mm0-c) case={s}\n", .{case.stem});
-                        return err;
+                        failed_cases[failure_count] = case.stem;
+                        failure_count += 1;
+                        continue;
                     };
                 }
             },
@@ -2008,6 +2026,14 @@ test "compiler proof cases from files" {
                 try std.testing.expectError(err, compiler.compileMmb(allocator));
             },
         }
+    }
+
+    if (failure_count > 0) {
+        std.debug.print("\n{d} test case(s) failed:\n", .{failure_count});
+        for (failed_cases[0..failure_count]) |stem| {
+            std.debug.print("  - {s}\n", .{stem});
+        }
+        return error.TestCasesFailed;
     }
 }
 

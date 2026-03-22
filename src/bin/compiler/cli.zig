@@ -1,5 +1,6 @@
 const std = @import("std");
 const mm0 = @import("mm0");
+const DebugConfig = mm0.DebugConfig;
 
 const UsageError = error{InvalidUsage};
 
@@ -19,6 +20,11 @@ const JoinPaths = struct {
     output: []const u8,
 };
 
+const ParsedArgs = struct {
+    command: Command,
+    debug: DebugConfig,
+};
+
 pub fn usage() !void {
     var buf: [512]u8 = undefined;
     var w = std.fs.File.stdout().writer(&buf);
@@ -27,24 +33,52 @@ pub fn usage() !void {
     try stdout.writeAll(
         "Usage:\n" ++
             "  mm0-zigc compile INPUT.mm0 INPUT.proof OUTPUT.mmb\n" ++
-            "  mm0-zigc join INPUT.mm0 OUTPUT.mm0\n",
+            "  mm0-zigc join INPUT.mm0 OUTPUT.mm0\n" ++
+            "\nOptions:\n" ++
+            "  --debug SYSTEMS  Enable debug output (comma-separated:\n" ++
+            "                   inference,unfolding,normalization,emission,check,all)\n",
     );
     try stdout.flush();
 }
 
-fn parseArgs(argv: []const []const u8) !Command {
-    if (argv.len == 4 and std.mem.eql(u8, argv[0], "compile")) {
-        return .{ .compile = .{
-            .input = argv[1],
-            .proof = argv[2],
-            .output = argv[3],
-        } };
+fn parseArgs(argv: []const []const u8) !ParsedArgs {
+    var debug = DebugConfig.none;
+    var positional = std.ArrayListUnmanaged([]const u8){};
+    // Use a small fixed buffer; we won't allocate.
+    var buf: [64][]const u8 = undefined;
+    positional.items = buf[0..0];
+    positional.capacity = buf.len;
+
+    var i: usize = 0;
+    while (i < argv.len) : (i += 1) {
+        if (std.mem.eql(u8, argv[i], "--debug")) {
+            i += 1;
+            if (i >= argv.len) return UsageError.InvalidUsage;
+            debug = DebugConfig.parse(argv[i]) catch return UsageError.InvalidUsage;
+        } else {
+            positional.appendAssumeCapacity(argv[i]);
+        }
     }
-    if (argv.len == 3 and std.mem.eql(u8, argv[0], "join")) {
-        return .{ .join = .{
-            .input = argv[1],
-            .output = argv[2],
-        } };
+
+    const pos = positional.items;
+    if (pos.len == 4 and std.mem.eql(u8, pos[0], "compile")) {
+        return .{
+            .command = .{ .compile = .{
+                .input = pos[1],
+                .proof = pos[2],
+                .output = pos[3],
+            } },
+            .debug = debug,
+        };
+    }
+    if (pos.len == 3 and std.mem.eql(u8, pos[0], "join")) {
+        return .{
+            .command = .{ .join = .{
+                .input = pos[1],
+                .output = pos[2],
+            } },
+            .debug = debug,
+        };
     }
     return UsageError.InvalidUsage;
 }
@@ -64,9 +98,9 @@ pub fn run(
     allocator: std.mem.Allocator,
     argv: []const []const u8,
 ) !void {
-    const command = try parseArgs(argv);
+    const parsed = try parseArgs(argv);
 
-    switch (command) {
+    switch (parsed.command) {
         .compile => |cmd| {
             const source = try loadSource(allocator, cmd.input);
             defer allocator.free(source);
@@ -79,6 +113,7 @@ pub fn run(
                 source,
                 proof,
             );
+            compiler.debug = parsed.debug;
             const mmb = compiler.compileMmb(allocator) catch |err| {
                 std.debug.print("Failed to compile {s}\n", .{cmd.input});
                 compiler.reportError(err);
@@ -96,6 +131,7 @@ pub fn run(
             defer allocator.free(source);
 
             var compiler = mm0.Compiler.init(allocator, source);
+            compiler.debug = parsed.debug;
             compiler.writeMm0() catch |err| switch (err) {
                 error.Unimplemented => {
                     std.debug.print(

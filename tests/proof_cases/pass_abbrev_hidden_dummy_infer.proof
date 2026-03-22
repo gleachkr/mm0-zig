@@ -1,0 +1,5 @@
+abbrev_hidden_dummy_infer
+-------------------------
+
+l1: $ mono f , (f o h ~ g o k) |- f o h ~ g o k $ by ax
+l2: $ mono f , (f o h ~ g o k) |- f o (h o alpha) ~ g o (k o alpha) $ by comp_right [l1]

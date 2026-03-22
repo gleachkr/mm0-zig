@@ -1,0 +1,4 @@
+abbrev_hidden_dummy_ax
+----------------------
+
+l1: $ packed a q ⊢ packed a q $ by ax

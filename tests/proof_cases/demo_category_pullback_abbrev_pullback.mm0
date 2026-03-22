@@ -1,0 +1,240 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort ctx;
+strict sort obj;
+sort mor;
+
+term imp (a b: wff): wff;
+infixr imp: $→$ prec 25;
+infixr imp: $->$ prec 25;
+term and (a b: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+term all {x: mor} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+prefix all: $A.$ prec 41;
+
+term mor_eq (f g: mor): wff;
+infixl mor_eq: $~$ prec 15;
+term hom (f: mor) (A B: obj): wff;
+term id (A: obj): mor;
+term comp (f g: mor): mor;
+infixl comp: $∘$ prec 35;
+infixl comp: $o$ prec 35;
+term pb_med (f g h k a b: mor): mor;
+
+term sb_m {x: mor} (t: mor x) (a: mor x): mor;
+notation sb_m {x: mor} (t: mor x) (a: mor x): mor =
+  ($subst$:41) x ($/$:0) t a;
+term sb_f {x: mor} (t: mor x) (p: wff x): wff;
+notation sb_f {x: mor} (t: mor x) (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation mor mor_eq mor_refl_raw mor_trans_raw mor_sym_raw _
+axiom mor_refl_raw (f: mor): $ f ~ f $;
+axiom mor_trans_raw (f g h: mor):
+  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+axiom mor_sym_raw (f g: mor): $ f ~ g $ > $ g ~ f $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a → c) ↔ (b → d) $;
+
+--| @congr
+axiom and_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
+
+--| @congr
+axiom all_congr {x: mor} (p q: wff x):
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @congr
+axiom mor_eq_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) ↔ (f2 ~ g2) $;
+
+--| @congr
+axiom hom_congr (f g: mor) (A B: obj):
+  $ f ~ g $ > $ hom f A B ↔ hom g A B $;
+
+--| @congr
+axiom comp_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ f1 ∘ g1 ~ f2 ∘ g2 $;
+
+--| @rewrite
+axiom comp_assoc (f g h: mor): $ (f ∘ g) ∘ h ~ f ∘ (g ∘ h) $;
+
+--| @rewrite
+axiom sb_m_var {x: mor} (t: mor x): $ subst x / t x ~ t $;
+
+--| @rewrite
+axiom sb_m_other {x y: mor} (t: mor x): $ subst x / t y ~ y $;
+
+--| @rewrite
+axiom sb_m_irrel {x: mor} (t: mor x) (a: mor): $ subst x / t a ~ a $;
+
+--| @rewrite
+axiom sb_m_id {x: mor} (t: mor x) (A: obj): $ subst x / t (id A) ~ id A $;
+
+--| @rewrite
+axiom sb_m_comp {x: mor} (t: mor x) (a b: mor x):
+  $ subst x / t (a ∘ b) ~ (subst x / t a ∘ subst x / t b) $;
+
+--| @rewrite
+axiom sb_m_pb_med {x: mor} (t: mor x) (f g h k a b: mor x):
+  $ subst x / t (pb_med f g h k a b) ~
+    pb_med (subst x / t f) (subst x / t g) (subst x / t h)
+      (subst x / t k) (subst x / t a) (subst x / t b) $;
+
+--| @rewrite
+axiom sb_f_mor_eq {x: mor} (t: mor x) (a b: mor x):
+  $ [x/t] (a ~ b) ↔ (subst x / t a ~ subst x / t b) $;
+
+--| @rewrite
+axiom sb_f_hom {x: mor} (t: mor x) (a: mor x) (A B: obj):
+  $ [x/t] hom a A B ↔ hom (subst x / t a) A B $;
+
+--| @rewrite
+axiom sb_f_imp {x: mor} (t: mor x) (p q: wff x):
+  $ [x/t] (p → q) ↔ ([x/t] p → [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_and {x: mor} (t: mor x) (p q: wff x):
+  $ [x/t] (p ∧ q) ↔ ([x/t] p ∧ [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_all {x y: mor} (t: mor x) (p: wff x y):
+  $ [x/t] (∀ y p) ↔ ∀ y ([x/t] p) $;
+
+--| @normalize conc
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+
+--| @normalize hyp0 conc
+axiom imp_intro (g: ctx) (a b: wff): $ g , a ⊢ b $ > $ g ⊢ a → b $;
+
+--| @normalize hyp0 hyp1 conc
+axiom imp_elim (g h: ctx) (a b: wff):
+  $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
+
+--| @normalize hyp0 conc
+axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
+
+--| @normalize hyp0 conc
+axiom and_elim_r (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ b $;
+
+--| @normalize hyp0 conc
+axiom all_intro (g: ctx) {x: mor} (p: wff x): $ g ⊢ p $ > $ g ⊢ ∀ x p $;
+
+--| @view {x: mor} (g: ctx x) (t: mor x) (p: wff x) (q: wff): $ g ⊢ ∀ x p $ > $ g ⊢ q $
+--| @recover t q p x
+--| @normalize conc
+axiom all_elim {x: mor} (g: ctx) (t: mor x) (p: wff x):
+  $ g ⊢ ∀ x p $ > $ g ⊢ [x/t] p $;
+
+--| @normalize conc
+axiom mor_refl (g: ctx) (f: mor): $ g ⊢ f ~ f $;
+
+--| @normalize hyp0 conc
+axiom mor_sym (g: ctx) (f h: mor): $ g ⊢ f ~ h $ > $ g ⊢ h ~ f $;
+
+--| @normalize hyp0 hyp1 conc
+axiom mor_trans (g: ctx) (f h i: mor):
+  $ g ⊢ f ~ h $ > $ g ⊢ h ~ i $ > $ g ⊢ f ~ i $;
+
+--| @normalize hyp0 conc
+axiom comp_right (g: ctx) (f h i: mor):
+  $ g ⊢ f ~ h $ > $ g ⊢ f ∘ i ~ h ∘ i $;
+
+--| @normalize hyp0 conc
+axiom comp_left (g: ctx) (f h i: mor):
+  $ g ⊢ f ~ h $ > $ g ⊢ i ∘ f ~ i ∘ h $;
+
+axiom pb_med_unique (g0: ctx) (f g h k a b u: mor):
+  $ g0 ⊢ f ∘ a ~ g ∘ b $ >
+  $ g0 ⊢ h ∘ u ~ a $ >
+  $ g0 ⊢ k ∘ u ~ b $ >
+  $ g0 ⊢ u ~ pb_med f g h k a b $;
+
+--| @congr
+axiom pb_med_congr_full (f1 f2 g1 g2 h1 h2 k1 k2 a1 a2 b1 b2: mor):
+  $ f1 ~ f2 $ >
+  $ g1 ~ g2 $ >
+  $ h1 ~ h2 $ >
+  $ k1 ~ k2 $ >
+  $ a1 ~ a2 $ >
+  $ b1 ~ b2 $ >
+  $ pb_med f1 g1 h1 k1 a1 b1 ~ pb_med f2 g2 h2 k2 a2 b2 $;
+
+axiom pb_med_congr (g0: ctx) (f g h k a1 b1 a2 b2: mor):
+  $ g0 ⊢ a1 ~ b1 $ >
+  $ g0 ⊢ a2 ~ b2 $ >
+  $ g0 ⊢ pb_med f g h k a1 a2 ~ pb_med f g h k b1 b2 $;
+
+def mono {.a .b: mor} (f: mor): wff =
+  $ ∀ a ∀ b ((f ∘ a ~ f ∘ b) → (a ~ b)) $;
+
+--| @abbrev
+def pullback {.a .b .u: mor} (f g h k: mor): wff =
+  $ (f ∘ h ~ g ∘ k) ∧
+    ∀ a ∀ b ∀ u
+      ((f ∘ a ~ g ∘ b) →
+        ((h ∘ u ~ a) →
+          ((k ∘ u ~ b) →
+            (u ~ pb_med f g h k a b)))) $;
+
+--| @normalize hyp0 conc
+axiom pullback_eq (g0: ctx) (f g h k: mor):
+  $ g0 ⊢ pullback f g h k $ > $ g0 ⊢ f ∘ h ~ g ∘ k $;
+
+
+--| @dummy x
+--| @dummy y
+--| @dummy z
+theorem pb_preserves_mono_step {alpha beta x y z: mor} (f g h k: mor):
+  $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ alpha ~ beta $;
+
+theorem pb_preserves_mono {alpha beta: mor} (f g h k: mor):
+  $ mono f , pullback f g h k ⊢ mono k $;
