@@ -240,10 +240,7 @@ pub const TheoremContext = struct {
         try self.theorem_dummies.append(self.allocator, .{
             .sort_name = sort_name,
             .sort_id = sort_id,
-            .deps = if (self.next_dummy_dep < 55)
-                @as(u55, 1) << @intCast(self.next_dummy_dep)
-            else
-                0,
+            .deps = @as(u55, 1) << @intCast(self.next_dummy_dep),
         });
         self.next_dummy_dep = try std.math.add(u32, self.next_dummy_dep, 1);
         return try self.interner.internVar(.{ .dummy_var = dummy_id });
