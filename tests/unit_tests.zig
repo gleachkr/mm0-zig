@@ -2215,6 +2215,10 @@ const proof_cases = [_]ProofCase{
         .stem = "fail_dummy_sort_restriction",
         .outcome = .{ .fail = error.DummyFreeSort },
     },
+    .{
+        .stem = "fail_var_conclusion_mismatch",
+        .outcome = .{ .fail = error.ConclusionMismatch },
+    },
 };
 
 fn readProofCaseFile(
