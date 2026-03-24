@@ -1028,7 +1028,6 @@ pub const Solver = struct {
             self.allocator,
             self.theorem,
             self.env,
-            .all_defs,
         );
         defer def_ops.deinit();
         return try def_ops.exprMatchesByDefOpening(lhs, rhs);
@@ -1052,7 +1051,6 @@ pub const Solver = struct {
             self.allocator,
             self.theorem,
             self.env,
-            .all_defs,
         );
         defer def_ops.deinit();
         if (!try def_ops.matchTemplateWithDefOpening(

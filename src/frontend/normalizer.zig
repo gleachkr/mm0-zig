@@ -11,12 +11,10 @@ const RewriteRule = @import("./rewrite_registry.zig").RewriteRule;
 const ResolvedStructuralCombiner =
     @import("./rewrite_registry.zig").ResolvedStructuralCombiner;
 const compareExprIds = @import("./canonicalizer.zig").compareExprIds;
-const DefOps = @import("./def_ops.zig");
 
 const CheckedRef = @import("./compiler.zig").CheckedRef;
 const CheckedLine = @import("./compiler.zig").CheckedLine;
 const appendRuleLine = @import("./compiler.zig").appendRuleLine;
-const appendTransportLine = @import("./compiler.zig").appendTransportLine;
 
 pub const NormalizeResult = struct {
     result_expr: ExprId,
@@ -142,7 +140,6 @@ pub const Normalizer = struct {
             }
         }
 
-        var changed = false;
         while (true) {
             const cur_node = self.theorem.interner.node(current);
             const head_id = switch (cur_node.*) {
@@ -176,36 +173,11 @@ pub const Normalizer = struct {
                         rhs_proof,
                     );
                     current = rhs_norm.result_expr;
-                    changed = true;
                     applied = true;
                     break;
                 }
             }
             if (!applied) break;
-        }
-
-        if (!changed and self.step_count < self.step_limit) {
-            if (try self.openAbbrevStep(current, relation)) |opened| {
-                self.step_count += 1;
-                const normalized = try self.normalize(opened.result_expr);
-                const opened_proof = try self.composeTransitivity(
-                    relation,
-                    current,
-                    opened.result_expr,
-                    normalized.result_expr,
-                    opened.conv_line_idx,
-                    normalized.conv_line_idx,
-                );
-                current_proof = try self.composeTransitivity(
-                    relation,
-                    expr_id,
-                    current,
-                    normalized.result_expr,
-                    current_proof,
-                    opened_proof,
-                );
-                current = normalized.result_expr;
-            }
         }
 
         return .{
@@ -669,38 +641,6 @@ pub const Normalizer = struct {
 
         return .{
             .result_expr = rhs_expr,
-            .conv_line_idx = line_idx,
-        };
-    }
-
-    fn openAbbrevStep(
-        self: *Normalizer,
-        expr_id: ExprId,
-        relation: ResolvedRelation,
-    ) Error!?NormalizeResult {
-        var def_ops = DefOps.Context.init(
-            self.allocator,
-            self.theorem,
-            self.env,
-            .abbrev_only,
-        );
-        defer def_ops.deinit();
-
-        const opened = try def_ops.openConcreteDef(expr_id) orelse return null;
-        if (opened == expr_id) return null;
-
-        const opened_refl = try self.buildRelExpr(relation, opened, opened);
-        const opened_refl_idx = try self.emitRefl(relation, opened);
-        const target = try self.buildRelExpr(relation, expr_id, opened);
-        const line_idx = try appendTransportLine(
-            self.lines,
-            self.allocator,
-            target,
-            opened_refl,
-            .{ .line = opened_refl_idx },
-        );
-        return .{
-            .result_expr = opened,
             .conv_line_idx = line_idx,
         };
     }

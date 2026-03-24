@@ -15,7 +15,6 @@ pub const TermDecl = struct {
     dummy_args: []const ArgInfo,
     ret_sort_name: []const u8,
     is_def: bool,
-    is_abbrev: bool,
     body: ?TemplateExpr,
 };
 
@@ -85,7 +84,6 @@ pub const GlobalEnv = struct {
             .dummy_args = stmt.dummy_args,
             .ret_sort_name = stmt.ret_sort_name,
             .is_def = stmt.is_def,
-            .is_abbrev = false,
             .body = body,
         });
         try self.term_names.put(stmt.name, term_id);

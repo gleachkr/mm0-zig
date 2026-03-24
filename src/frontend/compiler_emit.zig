@@ -279,7 +279,6 @@ pub const TheoremProofEmitter = struct {
             self.allocator,
             @constCast(self.theorem),
             self.env,
-            .all_defs,
         );
         defer def_ops.deinit();
         const plan = try def_ops.planConversionByDefOpening(

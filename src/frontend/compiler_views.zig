@@ -154,7 +154,6 @@ pub fn applyViewBindings(
         allocator,
         theorem,
         env,
-        .all_defs,
     );
     defer def_ops.deinit();
 

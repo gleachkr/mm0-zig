@@ -100,7 +100,6 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.DummyRequiresBoundBinder => "@dummy target must be a bound rule binder",
         error.DummyStrictSort => "@dummy cannot target a binder in a strict sort",
         error.DummyFreeSort => "@dummy cannot target a binder in a free sort",
-        error.AbbrevOnNonDef => "@abbrev may only be attached to defs",
         else => @errorName(err),
     };
 }

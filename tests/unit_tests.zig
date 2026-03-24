@@ -1277,7 +1277,7 @@ test "compiler env retains def dummy metadata" {
     try std.testing.expectEqualStrings("obj", term.dummy_args[1].sort_name);
 }
 
-test "compiler env records @abbrev on defs" {
+test "compiler ignores @abbrev annotations on defs" {
     const src =
         \\sort nat;
         \\term plus (a b: nat): nat;
@@ -1303,8 +1303,8 @@ test "compiler env records @abbrev on defs" {
     }
 
     try std.testing.expectEqual(@as(usize, 2), env.terms.items.len);
-    try std.testing.expect(!env.terms.items[0].is_abbrev);
-    try std.testing.expect(env.terms.items[1].is_abbrev);
+    try std.testing.expect(env.terms.items[1].is_def);
+    try std.testing.expect(env.terms.items[1].body != null);
 }
 
 fn expectExprMatchesByDefOpening(
@@ -1349,7 +1349,6 @@ fn expectExprMatchesByDefOpening(
         arena.allocator(),
         &theorem,
         &env,
-        .all_defs,
     );
     defer def_ops.deinit();
 
@@ -1455,7 +1454,6 @@ test "def conversion plan unfolds to an exact target" {
         arena.allocator(),
         &theorem,
         &env,
-        .all_defs,
     );
     defer def_ops.deinit();
 
@@ -1470,7 +1468,7 @@ test "def conversion plan unfolds to an exact target" {
     }
 }
 
-test "compiler rejects @abbrev on non-def terms" {
+test "compiler ignores @abbrev on non-def terms" {
     const mm0_src =
         \\sort nat;
         \\--| @abbrev
@@ -1478,7 +1476,7 @@ test "compiler rejects @abbrev on non-def terms" {
     ;
 
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
-    try std.testing.expectError(error.AbbrevOnNonDef, compiler.check());
+    try compiler.check();
 }
 
 test "compiler env converts rules into binder-indexed templates" {
@@ -1860,14 +1858,6 @@ const known_proof_case_failures = [_]KnownProofCaseFailure{
         .reason = "category def opening still hits exact hypothesis mismatches",
     },
     .{
-        .stem = "pass_abbrev_hidden_dummy_explicit",
-        .reason = "abbrev hidden-dummy context still needs exact fixups",
-    },
-    .{
-        .stem = "pass_abbrev_hidden_dummy_infer",
-        .reason = "abbrev hidden-dummy inference still needs exact fixups",
-    },
-    .{
         .stem = "pass_abbrev_hidden_dummy_and_elim",
         .reason = "abbrev and_elim path still mismatches after alpha cleanup",
     },
@@ -1898,10 +1888,6 @@ const known_proof_case_failures = [_]KnownProofCaseFailure{
     .{
         .stem = "demo_category_pullback_abbrev_both",
         .reason = "pullback abbrev combo demo still needs exact fixups",
-    },
-    .{
-        .stem = "fail_abbrev_hidden_dummy_ax",
-        .reason = "negative hidden-dummy abbrev case moved with the same bug cluster",
     },
 };
 
@@ -1939,14 +1925,23 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_all_elim_free_param", .outcome = .known_fail },
     .{ .stem = "pass_category_defs_direct", .outcome = .known_fail },
     .{ .stem = "pass_infer_normalized_conclusion", .outcome = .pass },
-    .{ .stem = "pass_abbrev_hidden_dummy_explicit", .outcome = .known_fail },
-    .{ .stem = "pass_abbrev_hidden_dummy_infer", .outcome = .known_fail },
+    .{ .stem = "pass_abbrev_hidden_dummy_explicit", .outcome = .pass },
+    .{ .stem = "pass_abbrev_hidden_dummy_infer", .outcome = .pass },
     .{ .stem = "pass_abbrev_hidden_dummy_and_elim", .outcome = .known_fail },
     .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx", .outcome = .known_fail },
     .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx_reorder", .outcome = .known_fail },
-    .{ .stem = "pass_abbrev_assoc", .outcome = .pass },
-    .{ .stem = "pass_abbrev_rewrite", .outcome = .pass },
-    .{ .stem = "pass_abbrev_nested", .outcome = .pass },
+    .{
+        .stem = "pass_abbrev_assoc",
+        .outcome = .{ .fail = error.ConclusionMismatch },
+    },
+    .{
+        .stem = "pass_abbrev_rewrite",
+        .outcome = .{ .fail = error.ConclusionMismatch },
+    },
+    .{
+        .stem = "pass_abbrev_nested",
+        .outcome = .{ .fail = error.ConclusionMismatch },
+    },
     .{ .stem = "pass_abbrev_dummy", .outcome = .known_fail },
     .{ .stem = "pass_normalize", .outcome = .pass },
     .{ .stem = "pass_normalize_nested", .outcome = .pass },
@@ -2003,11 +1998,8 @@ const proof_cases = [_]ProofCase{
         .stem = "fail_def_infer_ambiguous",
         .outcome = .{ .fail = error.AmbiguousAcuiMatch },
     },
-    .{ .stem = "fail_abbrev_hidden_dummy_ax", .outcome = .known_fail },
-    .{
-        .stem = "fail_abbrev_on_nondef",
-        .outcome = .{ .fail = error.AbbrevOnNonDef },
-    },
+    .{ .stem = "fail_abbrev_hidden_dummy_ax", .outcome = .pass },
+    .{ .stem = "fail_abbrev_on_nondef", .outcome = .pass },
     .{
         .stem = "fail_infer_mismatch",
         .outcome = .{ .fail = error.UnifyMismatch },

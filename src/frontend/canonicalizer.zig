@@ -7,7 +7,6 @@ const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const RewriteRule = @import("./rewrite_registry.zig").RewriteRule;
 const ResolvedStructuralCombiner =
     @import("./rewrite_registry.zig").ResolvedStructuralCombiner;
-const DefOps = @import("./def_ops.zig");
 
 pub const Canonicalizer = struct {
     pub const Error = error{
@@ -75,40 +74,15 @@ pub const Canonicalizer = struct {
                 else
                     expr_id;
 
-                const direct = if (self.registry.resolveStructuralCombiner(
+                break :blk if (self.registry.resolveStructuralCombiner(
                     self.env,
                     app.term_id,
                 )) |acui|
                     try self.canonicalizeAcui(current, acui)
                 else
                     try self.canonicalizeRewrite(current);
-                if (direct != current) {
-                    break :blk direct;
-                }
-                break :blk try self.canonicalizeByAbbrevOpening(current);
             },
         };
-    }
-
-    fn canonicalizeByAbbrevOpening(
-        self: *Canonicalizer,
-        expr_id: ExprId,
-    ) Error!ExprId {
-        if (self.step_count >= self.step_limit) return expr_id;
-
-        var def_ops = DefOps.Context.init(
-            self.allocator,
-            self.theorem,
-            self.env,
-            .abbrev_only,
-        );
-        defer def_ops.deinit();
-
-        const opened = try def_ops.openConcreteDef(expr_id) orelse return expr_id;
-        if (opened == expr_id) return expr_id;
-
-        self.step_count += 1;
-        return try self.canonicalize(opened);
     }
 
     fn canonicalizeRewrite(

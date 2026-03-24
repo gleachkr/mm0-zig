@@ -5,11 +5,6 @@ const ExprId = @import("./compiler_expr.zig").ExprId;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 
-pub const OpenPolicy = enum {
-    all_defs,
-    abbrev_only,
-};
-
 pub const ConversionPlan = union(enum) {
     refl,
     unfold_lhs: struct {
@@ -54,7 +49,6 @@ pub const Context = struct {
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     env: *const GlobalEnv,
-    policy: OpenPolicy,
     open_cache: std.AutoHashMap(ExprId, ExprId),
     pattern_dummy_infos: std.ArrayListUnmanaged(PatternDummyInfo) = .{},
 
@@ -62,13 +56,11 @@ pub const Context = struct {
         allocator: std.mem.Allocator,
         theorem: *TheoremContext,
         env: *const GlobalEnv,
-        policy: OpenPolicy,
     ) Context {
         return .{
             .allocator = allocator,
             .theorem = theorem,
             .env = env,
-            .policy = policy,
             .open_cache = std.AutoHashMap(ExprId, ExprId).init(allocator),
         };
     }
@@ -449,10 +441,7 @@ pub const Context = struct {
         if (term_id >= self.env.terms.items.len) return null;
         const term = &self.env.terms.items[term_id];
         if (!term.is_def or term.body == null) return null;
-        return switch (self.policy) {
-            .all_defs => term,
-            .abbrev_only => if (term.is_abbrev) term else null,
-        };
+        return term;
     }
 
     fn allocPattern(self: *Context, pattern: PatternExpr) !*const PatternExpr {

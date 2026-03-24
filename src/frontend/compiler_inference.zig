@@ -105,7 +105,6 @@ pub const InferenceContext = struct {
                 self.allocator,
                 @constCast(self.theorem),
                 self.env,
-                .all_defs,
             );
             defer def_ops.deinit();
             current = try def_ops.openConcreteDef(current) orelse {
@@ -139,7 +138,6 @@ pub fn canConvertByDefOpening(
         allocator,
         theorem,
         env,
-        .all_defs,
     );
     defer def_ops.deinit();
     return (try def_ops.planConversionByDefOpening(
@@ -162,7 +160,6 @@ pub fn inferBindingsByDefOpening(
         allocator,
         theorem,
         env,
-        .all_defs,
     );
     defer def_ops.deinit();
 
@@ -371,7 +368,6 @@ pub fn inferBindingsByNormalizedConclusion(
         allocator,
         theorem,
         env,
-        .all_defs,
     );
     defer def_ops.deinit();
     for (rule.hyps, ref_exprs) |hyp, ref_expr| {
