@@ -125,8 +125,7 @@ one with the expected shape before applying `use_id`.
 
 ### Definitions with dummy binders
 
-Transparent unfolding is alpha-aware, so defs with hidden dummy binders also
-work as expected.
+Defs with hidden dummy binders also work as expected.
 
 ```
 def exists_preimage (f y: obj) {.x: obj}: wff
@@ -143,8 +142,8 @@ Proof:
 l1: $ A. x (((g f x) = y) -> (x = x)) $ by ax_pre []
 ```
 
-Each unfolding allocates fresh theorem-local dummy variables, and the compiler
-compares the result modulo alpha-renaming of those bound dummies.
+Each unfolding automatically fills in variables for the bound dummies, based on 
+the term that the defined term needs to match.
 
 ---
 

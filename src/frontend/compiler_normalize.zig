@@ -196,20 +196,15 @@ pub fn buildDefAwareNormalizedConclusionLine(
         checked,
     );
     const normalized_line = try line_normalizer.normalize(line_expr);
-    const alpha_only = try Inference.canMatchAlphaOnly(
-        allocator,
-        theorem,
-        env,
-        normalized_line.result_expr,
-        normalization.normalized_expr,
-    );
-    if (!alpha_only and !try Inference.canConvertByDefOpening(
-        allocator,
-        theorem,
-        env,
-        line_expr,
-        normalization.normalized_expr,
-    )) {
+    if (normalized_line.result_expr != normalization.normalized_expr and
+        !try Inference.canConvertByDefOpening(
+            allocator,
+            theorem,
+            env,
+            line_expr,
+            normalization.normalized_expr,
+        ))
+    {
         return null;
     }
 
@@ -232,7 +227,7 @@ pub fn buildDefAwareNormalizedConclusionLine(
     else
         raw_idx;
 
-    if (line_expr == normalization.normalized_expr or alpha_only) {
+    if (line_expr == normalization.normalized_expr) {
         return normalized_idx;
     }
     return try appendTransportLine(

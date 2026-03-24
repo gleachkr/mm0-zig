@@ -1409,6 +1409,67 @@ test "def matcher opens nested user-side defs through repeated heads" {
     );
 }
 
+test "def conversion plan unfolds to an exact target" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def double (a: wff): wff = $ a -> a $;
+        \\theorem demo (a: wff): $ a -> a $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const lhs_expr = try parser.parseFormulaText(" double a ", &theorem_vars);
+    const rhs_expr = try parser.parseFormulaText(" a -> a ", &theorem_vars);
+    const lhs = try theorem.internParsedExpr(lhs_expr);
+    const rhs = try theorem.internParsedExpr(rhs_expr);
+
+    var def_ops = DefOps.Context.init(
+        arena.allocator(),
+        &theorem,
+        &env,
+        .all_defs,
+    );
+    defer def_ops.deinit();
+
+    const plan = try def_ops.planConversionByDefOpening(lhs, rhs);
+    const step = plan orelse return error.ExpectedConversionPlan;
+    switch (step.*) {
+        .unfold_lhs => |unfold| {
+            try std.testing.expectEqual(rhs, unfold.witness);
+            try std.testing.expect(unfold.next.* == .refl);
+        },
+        else => return error.UnexpectedConversionPlan,
+    }
+}
+
 test "compiler rejects @abbrev on non-def terms" {
     const mm0_src =
         \\sort nat;
@@ -1581,6 +1642,55 @@ test "compiler records inference diagnostics for omitted arguments" {
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("ax_keep", diag.rule_name.?);
     try std.testing.expect(diag.span != null);
+}
+
+test "compiler rejects alpha-only theorem lines" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "fail_alpha_only_line",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "fail_alpha_only_line",
+        "proof",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    try std.testing.expectError(
+        error.ConclusionMismatch,
+        compiler.compileMmb(allocator),
+    );
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.ConclusionMismatch, diag.err);
+    try std.testing.expectEqualStrings("alpha_only_line", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("all_refl", diag.rule_name.?);
+}
+
+test "compiler normalizes conclusions then transports through defs" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_normalize_def_transport_concl",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_normalize_def_transport_concl",
+        "proof",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+
+    try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
 test "theorem context preserves theorem var identity" {
@@ -1765,6 +1875,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_normalize_hyp", .outcome = .pass },
     .{ .stem = "pass_normalize_repeat_ref", .outcome = .pass },
     .{ .stem = "pass_normalize_noop", .outcome = .pass },
+    .{ .stem = "pass_normalize_def_transport_concl", .outcome = .pass },
     .{ .stem = "hilbert", .outcome = .pass },
     .{ .stem = "hilbert_quant", .outcome = .pass },
     .{ .stem = "hilbert_russell", .outcome = .pass },
@@ -1844,6 +1955,10 @@ const proof_cases = [_]ProofCase{
     },
     .{
         .stem = "fail_normalize_mismatch",
+        .outcome = .{ .fail = error.ConclusionMismatch },
+    },
+    .{
+        .stem = "fail_alpha_only_line",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
     .{

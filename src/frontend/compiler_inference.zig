@@ -128,23 +128,6 @@ pub const InferenceContext = struct {
     }
 };
 
-pub fn canMatchAlphaOnly(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    env: *const GlobalEnv,
-    lhs: ExprId,
-    rhs: ExprId,
-) !bool {
-    var def_ops = DefOps.Context.init(
-        allocator,
-        theorem,
-        env,
-        .all_defs,
-    );
-    defer def_ops.deinit();
-    return try def_ops.exprMatchesAlphaOnly(lhs, rhs);
-}
-
 pub fn canConvertByDefOpening(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,

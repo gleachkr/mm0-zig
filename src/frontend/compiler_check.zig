@@ -312,41 +312,6 @@ pub fn checkTheoremBlock(
         );
 
         if (line_expr != expected_line) {
-            if (try Inference.canMatchAlphaOnly(
-                allocator,
-                theorem,
-                env,
-                line_expr,
-                expected_line,
-            )) {
-                const line_idx = try appendRuleLine(
-                    &checked,
-                    allocator,
-                    expected_line,
-                    rule_id,
-                    bindings,
-                    refs,
-                );
-
-                const gop = try labels.getOrPut(line.label);
-                if (gop.found_existing) {
-                    self.setDiagnostic(.{
-                        .kind = .duplicate_label,
-                        .err = error.DuplicateLabel,
-                        .theorem_name = assertion.name,
-                        .line_label = line.label,
-                        .name = line.label,
-                        .span = line.span,
-                    });
-                    return error.DuplicateLabel;
-                }
-                gop.value_ptr.* = line_idx;
-                last_line = expected_line;
-                last_line_idx = line_idx;
-                last_label = line.label;
-                last_span = line.assertion.span;
-                continue;
-            }
             if (try Inference.canConvertByDefOpening(
                 allocator,
                 theorem,

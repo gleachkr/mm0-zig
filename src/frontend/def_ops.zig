@@ -25,11 +25,6 @@ pub const ConversionPlan = union(enum) {
     },
 };
 
-const BoundPair = struct {
-    lhs: ExprId,
-    rhs: ExprId,
-};
-
 const DummyBinding = struct {
     slot: usize,
     actual: ExprId,
@@ -123,19 +118,7 @@ pub const Context = struct {
         lhs: ExprId,
         rhs: ExprId,
     ) !bool {
-        var pairs = std.ArrayListUnmanaged(BoundPair){};
-        defer pairs.deinit(self.allocator);
-        return try self.exprMatchesRec(lhs, rhs, &pairs);
-    }
-
-    pub fn exprMatchesAlphaOnly(
-        self: *Context,
-        lhs: ExprId,
-        rhs: ExprId,
-    ) !bool {
-        var pairs = std.ArrayListUnmanaged(BoundPair){};
-        defer pairs.deinit(self.allocator);
-        return try self.exprMatchesAlphaRec(lhs, rhs, &pairs);
+        return try self.exprMatchesRec(lhs, rhs);
     }
 
     pub fn matchTemplateWithDefOpening(
@@ -173,12 +156,6 @@ pub const Context = struct {
         }
 
         if (try self.openConcreteDef(lhs)) |opened_lhs| {
-            if (try self.exprMatchesAlphaOnly(opened_lhs, rhs)) {
-                return try self.allocPlan(.{ .unfold_lhs = .{
-                    .witness = rhs,
-                    .next = try self.allocPlan(.refl),
-                } });
-            }
             if (try self.planConversionRec(opened_lhs, rhs)) |next| {
                 return try self.allocPlan(.{ .unfold_lhs = .{
                     .witness = opened_lhs,
@@ -188,12 +165,6 @@ pub const Context = struct {
         }
 
         if (try self.openConcreteDef(rhs)) |opened_rhs| {
-            if (try self.exprMatchesAlphaOnly(lhs, opened_rhs)) {
-                return try self.allocPlan(.{ .unfold_rhs = .{
-                    .witness = lhs,
-                    .next = try self.allocPlan(.refl),
-                } });
-            }
             if (try self.planConversionRec(lhs, opened_rhs)) |next| {
                 return try self.allocPlan(.{ .unfold_rhs = .{
                     .witness = opened_rhs,
@@ -234,13 +205,8 @@ pub const Context = struct {
         self: *Context,
         lhs: ExprId,
         rhs: ExprId,
-        pairs: *std.ArrayListUnmanaged(BoundPair),
     ) !bool {
-        const checkpoint = pairs.items.len;
-        if (try self.exprMatchesAlphaRec(lhs, rhs, pairs)) {
-            return true;
-        }
-        pairs.shrinkRetainingCapacity(checkpoint);
+        if (lhs == rhs) return true;
 
         const lhs_node = self.theorem.interner.node(lhs);
         const rhs_node = self.theorem.interner.node(rhs);
@@ -250,90 +216,28 @@ pub const Context = struct {
             if (lhs_app.term_id == rhs_app.term_id and
                 lhs_app.args.len == rhs_app.args.len)
             {
-                const child_checkpoint = pairs.items.len;
                 for (lhs_app.args, rhs_app.args) |lhs_arg, rhs_arg| {
-                    if (!try self.exprMatchesRec(lhs_arg, rhs_arg, pairs)) {
-                        pairs.shrinkRetainingCapacity(child_checkpoint);
+                    if (!try self.exprMatchesRec(lhs_arg, rhs_arg)) {
                         break;
                     }
                 } else {
                     return true;
                 }
-                pairs.shrinkRetainingCapacity(checkpoint);
             }
         }
 
         if (try self.openConcreteDef(lhs)) |opened_lhs| {
-            if (try self.exprMatchesRec(opened_lhs, rhs, pairs)) {
+            if (try self.exprMatchesRec(opened_lhs, rhs)) {
                 return true;
             }
-            pairs.shrinkRetainingCapacity(checkpoint);
         }
 
         if (try self.openConcreteDef(rhs)) |opened_rhs| {
-            if (try self.exprMatchesRec(lhs, opened_rhs, pairs)) {
+            if (try self.exprMatchesRec(lhs, opened_rhs)) {
                 return true;
             }
-            pairs.shrinkRetainingCapacity(checkpoint);
         }
         return false;
-    }
-
-    fn exprMatchesAlphaRec(
-        self: *Context,
-        lhs: ExprId,
-        rhs: ExprId,
-        pairs: *std.ArrayListUnmanaged(BoundPair),
-    ) !bool {
-        if (lhs == rhs) return true;
-
-        const lhs_node = self.theorem.interner.node(lhs);
-        const rhs_node = self.theorem.interner.node(rhs);
-        switch (lhs_node.*) {
-            .variable => switch (rhs_node.*) {
-                .variable => return try self.matchConcreteBoundVar(lhs, rhs, pairs),
-                .app => return false,
-            },
-            .app => |lhs_app| switch (rhs_node.*) {
-                .variable => return false,
-                .app => |rhs_app| {
-                    if (lhs_app.term_id != rhs_app.term_id or
-                        lhs_app.args.len != rhs_app.args.len)
-                    {
-                        return false;
-                    }
-                    const checkpoint = pairs.items.len;
-                    for (lhs_app.args, rhs_app.args) |lhs_arg, rhs_arg| {
-                        if (!try self.exprMatchesAlphaRec(lhs_arg, rhs_arg, pairs)) {
-                            pairs.shrinkRetainingCapacity(checkpoint);
-                            return false;
-                        }
-                    }
-                    return true;
-                },
-            },
-        }
-    }
-
-    fn matchConcreteBoundVar(
-        self: *Context,
-        lhs: ExprId,
-        rhs: ExprId,
-        pairs: *std.ArrayListUnmanaged(BoundPair),
-    ) !bool {
-        const lhs_info = try self.getConcreteVarInfo(lhs);
-        const rhs_info = try self.getConcreteVarInfo(rhs);
-        if (!lhs_info.bound or !rhs_info.bound) return false;
-        if (!std.mem.eql(u8, lhs_info.sort_name, rhs_info.sort_name)) {
-            return false;
-        }
-
-        for (pairs.items) |pair| {
-            if (pair.lhs == lhs) return pair.rhs == rhs;
-            if (pair.rhs == rhs) return pair.lhs == lhs;
-        }
-        try pairs.append(self.allocator, .{ .lhs = lhs, .rhs = rhs });
-        return true;
     }
 
     fn getConcreteVarInfo(self: *Context, expr_id: ExprId) !ConcreteVarInfo {
