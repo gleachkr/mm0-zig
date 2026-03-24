@@ -1642,6 +1642,68 @@ test "compiler records inference diagnostics for omitted arguments" {
     try std.testing.expect(diag.span != null);
 }
 
+test "strict replay still infers exact omitted binders" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\axiom ax_keep (a b: wff): $ a $ > $ a -> b -> a $;
+        \\theorem keep_exact (a b: wff): $ a $ > $ a -> b -> a $;
+    ;
+    const proof_src =
+        \\keep_exact
+        \\----------
+        \\l1: $ a -> b -> a $ by ax_keep [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "strict replay does not open defs during omitted inference" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def id (a: wff): wff = $ a -> a $;
+        \\axiom ax_id (a: wff): $ id a $;
+        \\theorem strict_infer_expected (a: wff): $ a -> a $;
+    ;
+    const proof_src =
+        \\strict_infer_expected
+        \\---------------------
+        \\l1: $ a -> a $ by ax_id []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.TermMismatch, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.TermMismatch, diag.err);
+    try std.testing.expectEqualStrings(
+        "could not infer omitted rule arguments from the line and refs",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    try std.testing.expectEqualStrings(
+        "strict_infer_expected",
+        diag.theorem_name.?,
+    );
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("ax_id", diag.rule_name.?);
+}
+
 test "compiler rejects alpha-only theorem lines" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
@@ -1906,7 +1968,10 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def", .outcome = .pass },
     .{ .stem = "pass_def_dummy", .outcome = .pass },
     .{ .stem = "pass_def_transport", .outcome = .pass },
-    .{ .stem = "pass_def_unfold_line", .outcome = .pass },
+    .{
+        .stem = "pass_def_unfold_line",
+        .outcome = .{ .fail = error.TermMismatch },
+    },
     .{ .stem = "pass_def_unfold_ref", .outcome = .pass },
     .{ .stem = "pass_def_unfold_final", .outcome = .pass },
     .{ .stem = "pass_def_unfold_final_reverse", .outcome = .pass },
@@ -1915,12 +1980,29 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_view_basic", .outcome = .pass },
     .{ .stem = "pass_def_rewrite_concl", .outcome = .pass },
     .{ .stem = "pass_def_rewrite_hyp", .outcome = .pass },
-    .{ .stem = "pass_def_infer_expected", .outcome = .pass },
-    .{ .stem = "pass_def_infer_actual", .outcome = .pass },
-    .{ .stem = "pass_def_infer_hyp", .outcome = .pass },
+    // Stage 2: strict replay no longer opens defs while inferring
+    // omitted binders from ordinary theorem applications.
+    .{
+        .stem = "pass_def_infer_expected",
+        .outcome = .{ .fail = error.TermMismatch },
+    },
+    .{
+        .stem = "pass_def_infer_actual",
+        .outcome = .{ .fail = error.TermMismatch },
+    },
+    .{
+        .stem = "pass_def_infer_hyp",
+        .outcome = .{ .fail = error.TermMismatch },
+    },
     .{ .stem = "pass_def_infer_dummy", .outcome = .known_fail },
-    .{ .stem = "pass_def_infer_user_side", .outcome = .pass },
-    .{ .stem = "pass_def_infer_user_side_hyp", .outcome = .pass },
+    .{
+        .stem = "pass_def_infer_user_side",
+        .outcome = .{ .fail = error.UnifyMismatch },
+    },
+    .{
+        .stem = "pass_def_infer_user_side_hyp",
+        .outcome = .{ .fail = error.TermMismatch },
+    },
     .{ .stem = "pass_def_infer_user_side_final", .outcome = .pass },
     .{ .stem = "pass_def_all_elim_free_param", .outcome = .known_fail },
     .{ .stem = "pass_category_defs_direct", .outcome = .known_fail },

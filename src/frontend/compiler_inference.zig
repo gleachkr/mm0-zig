@@ -30,7 +30,6 @@ const ExprInfo = struct {
 pub const InferenceContext = struct {
     allocator: std.mem.Allocator,
     theorem: *const TheoremContext,
-    env: *const GlobalEnv,
     // Heap prefix `0..rule.args.len` stores inferred theorem arguments.
     // These slots start as either an explicit binding or `null` if omitted.
     // Any entries appended later by `UTermSave` are concrete by construction.
@@ -42,7 +41,6 @@ pub const InferenceContext = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         theorem: *const TheoremContext,
-        env: *const GlobalEnv,
         partial_bindings: []const ?ExprId,
         hyps: []const ExprId,
         line_expr: ExprId,
@@ -50,7 +48,6 @@ pub const InferenceContext = struct {
         var ctx = InferenceContext{
             .allocator = allocator,
             .theorem = theorem,
-            .env = env,
             .hyps = hyps,
             .next_hyp = hyps.len,
         };
@@ -77,6 +74,8 @@ pub const InferenceContext = struct {
         }
     }
 
+    // Stage 2: unify replay is exact replay. Def-aware inference lives in
+    // higher-level solver paths rather than in the opcode interpreter.
     pub fn uopTerm(
         self: *InferenceContext,
         term_id: u32,
@@ -84,32 +83,17 @@ pub const InferenceContext = struct {
     ) !void {
         if (self.ustack.items.len == 0) return error.UStackUnderflow;
         const expr_id = self.ustack.pop().?;
-        var current = expr_id;
-        while (true) {
-            const node = self.theorem.interner.node(current);
-            const app = switch (node.*) {
-                .app => |value| value,
-                .variable => return error.ExpectedTermApp,
-            };
-            if (app.term_id == term_id) {
-                if (save) try self.uheap.append(self.allocator, current);
-                var i = app.args.len;
-                while (i > 0) {
-                    i -= 1;
-                    try self.ustack.append(self.allocator, app.args[i]);
-                }
-                return;
-            }
-
-            var def_ops = DefOps.Context.init(
-                self.allocator,
-                @constCast(self.theorem),
-                self.env,
-            );
-            defer def_ops.deinit();
-            current = try def_ops.openConcreteDef(current) orelse {
-                return error.TermMismatch;
-            };
+        const node = self.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |value| value,
+            .variable => return error.ExpectedTermApp,
+        };
+        if (app.term_id != term_id) return error.TermMismatch;
+        if (save) try self.uheap.append(self.allocator, expr_id);
+        var i = app.args.len;
+        while (i > 0) {
+            i -= 1;
+            try self.ustack.append(self.allocator, app.args[i]);
         }
     }
 
@@ -144,42 +128,6 @@ pub fn canConvertByDefOpening(
         target_expr,
         source_expr,
     )) != null;
-}
-
-pub fn inferBindingsByDefOpening(
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    theorem: *TheoremContext,
-    rule: *const RuleDecl,
-    partial_bindings: []const ?ExprId,
-    ref_exprs: []const ExprId,
-    line_expr: ExprId,
-) ![]const ExprId {
-    const bindings = try allocator.dupe(?ExprId, partial_bindings);
-    var def_ops = DefOps.Context.init(
-        allocator,
-        theorem,
-        env,
-    );
-    defer def_ops.deinit();
-
-    if (!try def_ops.matchTemplateWithDefOpening(
-        rule.concl,
-        line_expr,
-        bindings,
-    )) {
-        return error.UnifyMismatch;
-    }
-    for (rule.hyps, ref_exprs) |hyp, ref_expr| {
-        if (!try def_ops.matchTemplateWithDefOpening(
-            hyp,
-            ref_expr,
-            bindings,
-        )) {
-            return error.UnifyMismatch;
-        }
-    }
-    return try requireConcreteBindings(allocator, bindings);
 }
 
 const MirroredTheoremContext = struct {
@@ -566,27 +514,6 @@ pub fn inferBindings(
         ref_exprs,
         line_expr,
     ) catch |err| {
-        const fallback = inferBindingsByDefOpening(
-            allocator,
-            env,
-            theorem,
-            rule,
-            partial_bindings,
-            ref_exprs,
-            line_expr,
-        ) catch null;
-        if (fallback) |bindings| {
-            try validateResolvedBindings(
-                self,
-                env,
-                theorem,
-                assertion,
-                line,
-                rule,
-                bindings,
-            );
-            return bindings;
-        }
         self.setDiagnostic(.{
             .kind = .inference_failed,
             .err = err,
@@ -619,7 +546,6 @@ pub fn strictInferBindings(
     var inference = try InferenceContext.init(
         allocator,
         theorem,
-        env,
         partial_bindings,
         ref_exprs,
         line_expr,

@@ -14,8 +14,8 @@ usual way. There is no new trusted equality notion.
 There are really two related features here:
 
 1. **Transparent def unfolding** for theorem application checking,
-   omitted-binder inference, `@view` matching, and final theorem checking.
-   This applies to **all** defs.
+   `@view` matching, final theorem checking, and higher-level inference
+   helpers outside strict replay. This applies to **all** defs.
 2. **`@abbrev`** for source-level normalization and canonicalization.
    This is an **opt-in** annotation on defs.
 
@@ -59,12 +59,13 @@ previously compared expressions directly during theorem application:
 - the proof line's asserted conclusion against the cited rule's instantiated
   conclusion
 - each cited reference against the cited rule's instantiated hypotheses
-- omitted-binder inference from the line assertion and cited references
 - `@view` matching
 - final theorem checking, where the last line is compared with the theorem's
   declared conclusion
 - normalization-aware omitted-binder inference when the frontend solver needs
   a def-aware equality test
+- strict unify replay for ordinary omitted-binder inference is a separate,
+  exact path and does not open defs
 
 This applies to **all** defs, not only `@abbrev` defs.
 
@@ -147,12 +148,15 @@ the term that the defined term needs to match.
 
 ---
 
-## Omitted-binder inference through defs
+## Omitted-binder inference
 
-Transparent def unfolding is also used when explicit binder assignments are
-omitted.
+Strict omitted-binder replay is now exact.
 
-### Expected side is defined
+When the compiler replays the cited rule's unify stream against the line
+assertion and cited references, it requires the same concrete heads that the
+rule expects. Replay does not open defs in order to recover omitted binders.
+
+### Defined and expanded forms no longer infer through replay
 
 ```
 def id (a: wff): wff = $ a -> a $;
@@ -160,15 +164,16 @@ axiom ax_id (a: wff): $ id a $;
 theorem def_infer_expected (a: wff): $ a -> a $;
 ```
 
-Proof:
+This proof is now rejected:
+
 ```
 l1: $ a -> a $ by ax_id []
 ```
 
-The omitted binder `a` is recovered even though the cited rule conclusion is
-`id a` and the proof line assertion is `a -> a`.
+Strict replay sees the rule conclusion headed by `id` and the proof line headed
+by `->`, so inference stops at that mismatch.
 
-### Actual side is defined
+The opposite direction is rejected for the same reason:
 
 ```
 def id (a: wff): wff = $ a -> a $;
@@ -176,19 +181,11 @@ axiom ax_expanded (a: wff): $ a -> a $;
 theorem def_infer_actual (a: wff): $ id a $;
 ```
 
-Proof:
 ```
 l1: $ id a $ by ax_expanded []
 ```
 
-This is the opposite direction: the rule is expanded, the proof line uses the
-def, and omitted-binder inference still succeeds.
-
-### Nested user-side defs
-
-Inference is not limited to top-level defs. If the user writes a nested def,
-the compiler may unfold under matching heads in order to recover omitted
-binders.
+### Nested defs also need explicit binders here
 
 For example, with:
 
@@ -197,23 +194,35 @@ def double (a: wff): wff = $ a -> a $;
 axiom use_nested (a b: wff): $ (a -> b) $ > $ ((a -> b) -> a) $;
 ```
 
-this proof is accepted:
+this omitted-binder proof is rejected:
 
 ```
 l1: $ (double a) -> a $ by use_nested [#1]
 ```
 
-because `double a` unfolds to `a -> a`, allowing the hypothesis match to
-recover the omitted binders.
+because replay reaches the concrete `double` head where the rule expects `->`.
+
+If the binders are given explicitly, ordinary theorem-application checking may
+still bridge the def boundary afterwards.
+
+### Higher-level solver paths are separate
+
+This only changes strict replay.
+
+Higher-level solver paths such as `@view`-guided matching,
+normalization-aware inference, and ACUI-aware inference may still use
+separate def-aware logic when they are solving a different kind of
+comparison problem.
 
 ### Ambiguity is still an error
 
-Transparent unfolding does **not** mean the compiler guesses when several
-solutions remain possible.
+Def-aware higher-level inference still does **not** mean the compiler guesses
+when several solutions remain possible.
 
-In particular, when def unfolding combines with ACUI context matching, two or
-more omitted-binder assignments may survive all constraints. In that case the
-compiler rejects the line as ambiguous rather than picking one arbitrarily.
+In particular, when def-aware matching combines with ACUI context matching,
+two or more omitted-binder assignments may survive all constraints. In that
+case the compiler rejects the line as ambiguous rather than picking one
+arbitrarily.
 
 ---
 
