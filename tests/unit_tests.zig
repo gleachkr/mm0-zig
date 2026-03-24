@@ -13,6 +13,7 @@ const Heap = mm0.Heap;
 const MM0Parser = mm0.MM0Parser;
 const Mmb = mm0.Mmb;
 const DefOps = mm0.DefOps;
+const CompilerInference = mm0.CompilerInference;
 const CrossChecker = mm0.CrossChecker;
 const Proof = mm0.Proof;
 const ProofScript = mm0.ProofScript;
@@ -1713,21 +1714,81 @@ test "strict replay does not open defs during omitted inference" {
         mm0_src,
         proof_src,
     );
-    try std.testing.expectError(error.TermMismatch, compiler.compileMmb(
-        std.testing.allocator,
-    ));
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
-    try std.testing.expectEqual(error.TermMismatch, diag.err);
-    try std.testing.expectEqualStrings(
-        "could not infer omitted rule arguments from the line and refs",
-        mm0.compilerDiagnosticSummary(diag),
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(mm0_src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(
+        arena.allocator(),
     );
-    try std.testing.expectEqualStrings(
-        "strict_infer_expected",
-        diag.theorem_name.?,
+    defer theorem_vars.deinit();
+
+    const assertion = blk: {
+        while (try parser.next()) |stmt| {
+            try env.addStmt(stmt);
+            switch (stmt) {
+                .assertion => |value| {
+                    if (value.kind != .theorem) continue;
+                    if (!std.mem.eql(
+                        u8,
+                        value.name,
+                        "strict_infer_expected",
+                    )) continue;
+                    break :blk value;
+                },
+                else => {},
+            }
+        }
+        return error.MissingAssertion;
+    };
+    const rule_id = env.getRuleId("ax_id") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+
+    try theorem.seedAssertion(assertion);
+    for (assertion.arg_names, assertion.arg_exprs) |name, expr| {
+        if (name) |actual_name| {
+            try theorem_vars.put(actual_name, expr);
+        }
+    }
+
+    const parsed_line = try parser.parseFormulaText(" a -> a ", &theorem_vars);
+    const line_expr = try theorem.internParsedExpr(parsed_line);
+    const partial_bindings = [_]?CompilerExpr.ExprId{null};
+    const ref_exprs = [_]CompilerExpr.ExprId{};
+    const line = ProofScript.ProofLine{
+        .label = "l1",
+        .assertion = .{
+            .text = " a -> a ",
+            .span = .{ .start = 0, .end = 0 },
+        },
+        .rule_name = "ax_id",
+        .arg_bindings = &.{},
+        .refs = &.{},
+        .span = .{ .start = 0, .end = 0 },
+    };
+
+    try std.testing.expectError(
+        error.TermMismatch,
+        CompilerInference.strictInferBindings(
+            {},
+            arena.allocator(),
+            &env,
+            &theorem,
+            assertion,
+            rule,
+            line,
+            &partial_bindings,
+            &ref_exprs,
+            line_expr,
+        ),
     );
-    try std.testing.expectEqualStrings("l1", diag.line_label.?);
-    try std.testing.expectEqualStrings("ax_id", diag.rule_name.?);
 }
 
 test "compiler rejects alpha-only theorem lines" {
@@ -1930,10 +1991,6 @@ const KnownProofCaseFailure = struct {
 
 const known_proof_case_failures = [_]KnownProofCaseFailure{
     .{
-        .stem = "pass_def_infer_dummy",
-        .reason = "dummy inference still relies on alpha-style matching",
-    },
-    .{
         .stem = "pass_def_all_elim_free_param",
         .reason = "def-opened all_elim hypotheses still mismatch exactly",
     },
@@ -1990,10 +2047,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def", .outcome = .pass },
     .{ .stem = "pass_def_dummy", .outcome = .pass },
     .{ .stem = "pass_def_transport", .outcome = .pass },
-    .{
-        .stem = "pass_def_unfold_line",
-        .outcome = .{ .fail = error.TermMismatch },
-    },
+    .{ .stem = "pass_def_unfold_line", .outcome = .pass },
     .{ .stem = "pass_def_unfold_ref", .outcome = .pass },
     .{ .stem = "pass_def_unfold_final", .outcome = .pass },
     .{ .stem = "pass_def_unfold_final_reverse", .outcome = .pass },
@@ -2002,29 +2056,14 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_view_basic", .outcome = .pass },
     .{ .stem = "pass_def_rewrite_concl", .outcome = .pass },
     .{ .stem = "pass_def_rewrite_hyp", .outcome = .pass },
-    // Stage 2: strict replay no longer opens defs while inferring
-    // omitted binders from ordinary theorem applications.
-    .{
-        .stem = "pass_def_infer_expected",
-        .outcome = .{ .fail = error.TermMismatch },
-    },
-    .{
-        .stem = "pass_def_infer_actual",
-        .outcome = .{ .fail = error.TermMismatch },
-    },
-    .{
-        .stem = "pass_def_infer_hyp",
-        .outcome = .{ .fail = error.TermMismatch },
-    },
-    .{ .stem = "pass_def_infer_dummy", .outcome = .known_fail },
-    .{
-        .stem = "pass_def_infer_user_side",
-        .outcome = .{ .fail = error.UnifyMismatch },
-    },
-    .{
-        .stem = "pass_def_infer_user_side_hyp",
-        .outcome = .{ .fail = error.TermMismatch },
-    },
+    // Stage 4: strict replay stays exact, but omitted binders now fall
+    // back to shared targeted transparency when needed.
+    .{ .stem = "pass_def_infer_expected", .outcome = .pass },
+    .{ .stem = "pass_def_infer_actual", .outcome = .pass },
+    .{ .stem = "pass_def_infer_hyp", .outcome = .pass },
+    .{ .stem = "pass_def_infer_dummy", .outcome = .pass },
+    .{ .stem = "pass_def_infer_user_side", .outcome = .pass },
+    .{ .stem = "pass_def_infer_user_side_hyp", .outcome = .pass },
     .{ .stem = "pass_def_infer_user_side_final", .outcome = .pass },
     .{ .stem = "pass_def_all_elim_free_param", .outcome = .known_fail },
     .{ .stem = "pass_category_defs_direct", .outcome = .known_fail },

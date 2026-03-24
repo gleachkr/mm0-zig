@@ -9,6 +9,7 @@ pub const compilerDiagnosticSummary =
 pub const CompilerEnv = @import("./frontend/compiler_env.zig");
 pub const CompilerExpr = @import("./frontend/compiler_expr.zig");
 pub const CompilerRules = @import("./frontend/compiler_rules.zig");
+pub const CompilerInference = @import("./frontend/compiler_inference.zig");
 pub const DefOps = @import("./frontend/def_ops.zig");
 pub const TermAnnotations = @import("./frontend/term_annotations.zig");
 pub const Normalizer = @import("./frontend/normalizer.zig");

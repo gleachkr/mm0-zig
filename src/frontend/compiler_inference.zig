@@ -130,6 +130,42 @@ pub fn canConvertByDefOpening(
     )) != null;
 }
 
+pub fn inferBindingsTransparent(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *TheoremContext,
+    rule: *const RuleDecl,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ![]const ExprId {
+    const bindings = try allocator.dupe(?ExprId, partial_bindings);
+    var def_ops = DefOps.Context.init(
+        allocator,
+        @constCast(theorem),
+        env,
+    );
+    defer def_ops.deinit();
+
+    for (rule.hyps, ref_exprs) |hyp, ref_expr| {
+        if (!try def_ops.matchTemplateTransparent(
+            hyp,
+            ref_expr,
+            bindings,
+        )) {
+            return error.UnifyMismatch;
+        }
+    }
+    if (!try def_ops.matchTemplateTransparent(
+        rule.concl,
+        line_expr,
+        bindings,
+    )) {
+        return error.UnifyMismatch;
+    }
+    return try requireConcreteBindings(allocator, bindings);
+}
+
 const MirroredTheoremContext = struct {
     theorem: TheoremContext,
     source_dummy_map: []const ExprId,
@@ -514,6 +550,29 @@ pub fn inferBindings(
         ref_exprs,
         line_expr,
     ) catch |err| {
+        if (maybe_view == null) {
+            const transparent = inferBindingsTransparent(
+                allocator,
+                env,
+                theorem,
+                rule,
+                partial_bindings,
+                ref_exprs,
+                line_expr,
+            ) catch null;
+            if (transparent) |bindings| {
+                try validateResolvedBindings(
+                    self,
+                    env,
+                    theorem,
+                    assertion,
+                    line,
+                    rule,
+                    bindings,
+                );
+                return bindings;
+            }
+        }
         self.setDiagnostic(.{
             .kind = .inference_failed,
             .err = err,

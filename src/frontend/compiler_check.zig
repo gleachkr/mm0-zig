@@ -11,6 +11,7 @@ const ProofLine = @import("./proof_script.zig").ProofLine;
 const Span = @import("./proof_script.zig").Span;
 const TheoremBlock = @import("./proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
+const NormalizeSpec = @import("./rewrite_registry.zig").NormalizeSpec;
 const CompilerViews = @import("./compiler_views.zig");
 const CompilerDummies = @import("./compiler_dummies.zig");
 const ViewDecl = CompilerViews.ViewDecl;
@@ -27,6 +28,226 @@ const Emit = @import("./compiler_emit.zig");
 
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
+
+fn tryMatchHypothesis(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    norm_spec: ?NormalizeSpec,
+    hyp_idx: usize,
+    actual_ref: CheckedRef,
+    actual: ExprId,
+    expected: ExprId,
+) !?CheckedRef {
+    if (actual == expected) return actual_ref;
+
+    if (try Inference.canConvertByDefOpening(
+        allocator,
+        theorem,
+        env,
+        expected,
+        actual,
+    )) {
+        return .{ .line = try appendTransportLine(
+            checked,
+            allocator,
+            expected,
+            actual,
+            actual_ref,
+        ) };
+    }
+
+    if (norm_spec) |spec| {
+        if (Normalize.isHypMarkedForNormalize(spec, hyp_idx)) {
+            if (try Normalize.buildNormalizedConversion(
+                allocator,
+                theorem,
+                registry,
+                env,
+                checked,
+                actual,
+                expected,
+            )) |conversion| {
+                var conversion_mut = conversion;
+                if (conversion_mut.conv_line_idx) |conv_line_idx| {
+                    return .{ .line =
+                        try conversion_mut.normalizer.emitTransport(
+                            conversion_mut.relation,
+                            expected,
+                            actual,
+                            conv_line_idx,
+                            actual_ref,
+                        ) };
+                }
+                return actual_ref;
+            }
+            return try Normalize.buildDefAwareNormalizedHypRef(
+                allocator,
+                theorem,
+                registry,
+                env,
+                checked,
+                actual_ref,
+                actual,
+                expected,
+            );
+        }
+    }
+
+    return null;
+}
+
+fn tryBuildConclusionLine(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    norm_spec: ?NormalizeSpec,
+    line_expr: ExprId,
+    expected_line: ExprId,
+    rule_id: u32,
+    bindings: []const ExprId,
+    refs: []const CheckedRef,
+) !?usize {
+    if (line_expr == expected_line) {
+        return try appendRuleLine(
+            checked,
+            allocator,
+            line_expr,
+            rule_id,
+            bindings,
+            refs,
+        );
+    }
+
+    if (try Inference.canConvertByDefOpening(
+        allocator,
+        theorem,
+        env,
+        line_expr,
+        expected_line,
+    )) {
+        const raw_idx = try appendRuleLine(
+            checked,
+            allocator,
+            expected_line,
+            rule_id,
+            bindings,
+            refs,
+        );
+        return try appendTransportLine(
+            checked,
+            allocator,
+            line_expr,
+            expected_line,
+            .{ .line = raw_idx },
+        );
+    }
+
+    if (norm_spec) |spec| {
+        if (spec.concl) {
+            if (try Normalize.buildNormalizedConversion(
+                allocator,
+                theorem,
+                registry,
+                env,
+                checked,
+                expected_line,
+                line_expr,
+            )) |conversion| {
+                var conversion_mut = conversion;
+                const raw_idx = try appendRuleLine(
+                    checked,
+                    allocator,
+                    expected_line,
+                    rule_id,
+                    bindings,
+                    refs,
+                );
+
+                return if (conversion_mut.conv_line_idx) |conv_idx|
+                    try conversion_mut.normalizer.emitTransport(
+                        conversion_mut.relation,
+                        line_expr,
+                        expected_line,
+                        conv_idx,
+                        .{ .line = raw_idx },
+                    )
+                else
+                    raw_idx;
+            }
+            return try Normalize.buildDefAwareNormalizedConclusionLine(
+                allocator,
+                theorem,
+                registry,
+                env,
+                checked,
+                line_expr,
+                expected_line,
+                rule_id,
+                bindings,
+                refs,
+            );
+        }
+    }
+
+    return null;
+}
+
+fn tryMatchFinalLine(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    theorem_concl: ExprId,
+    final_line: ExprId,
+    line_idx: usize,
+) !bool {
+    if (try Inference.canConvertByDefOpening(
+        allocator,
+        theorem,
+        env,
+        theorem_concl,
+        final_line,
+    )) {
+        _ = try appendTransportLine(
+            checked,
+            allocator,
+            theorem_concl,
+            final_line,
+            .{ .line = line_idx },
+        );
+        return true;
+    }
+
+    if (try Normalize.buildNormalizedConversion(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        final_line,
+        theorem_concl,
+    )) |conversion| {
+        var conversion_mut = conversion;
+        if (conversion_mut.conv_line_idx) |conv_idx| {
+            _ = try conversion_mut.normalizer.emitTransport(
+                conversion_mut.relation,
+                theorem_concl,
+                final_line,
+                conv_idx,
+                .{ .line = line_idx },
+            );
+            return true;
+        }
+    }
+
+    return false;
+}
 
 pub fn checkTheoremBlock(
     self: anytype,
@@ -225,85 +446,40 @@ pub fn checkTheoremBlock(
                 rule.hyps[idx],
                 bindings,
             );
-            if (actual != expected) {
-                if (try Inference.canConvertByDefOpening(
-                    allocator,
-                    theorem,
-                    env,
-                    expected,
-                    actual,
-                )) {
-                    const transport_idx = try appendTransportLine(
-                        &checked,
-                        allocator,
-                        expected,
-                        actual,
-                        refs[idx],
-                    );
-                    refs[idx] = .{ .line = transport_idx };
-                    continue;
-                }
-                if (norm_spec) |spec| {
-                    if (Normalize.isHypMarkedForNormalize(spec, idx)) {
-                        if (try Normalize.buildNormalizedConversion(
-                            allocator,
-                            theorem,
-                            registry,
-                            env,
-                            &checked,
-                            actual,
-                            expected,
-                        )) |conversion| {
-                            var conversion_mut = conversion;
-                            const actual_ref = refs[idx];
-                            if (conversion_mut.conv_line_idx) |conv_line_idx| {
-                                const transport_idx =
-                                    try conversion_mut.normalizer.emitTransport(
-                                        conversion_mut.relation,
-                                        expected,
-                                        actual,
-                                        conv_line_idx,
-                                        actual_ref,
-                                    );
-                                refs[idx] = .{ .line = transport_idx };
-                            }
-                            continue;
-                        }
-                        if (try Normalize.buildDefAwareNormalizedHypRef(
-                            allocator,
-                            theorem,
-                            registry,
-                            env,
-                            &checked,
-                            refs[idx],
-                            actual,
-                            expected,
-                        )) |transport_ref| {
-                            refs[idx] = transport_ref;
-                            continue;
-                        }
-                        return error.HypothesisMismatch;
-                    }
-                }
-                const name = switch (ref) {
-                    .hyp => |hyp| try Emit.hypText(allocator, hyp.index),
-                    .line => |label| label.label,
-                };
-                const span = switch (ref) {
-                    .hyp => |hyp| hyp.span,
-                    .line => |label| label.span,
-                };
-                self.setDiagnostic(.{
-                    .kind = .hypothesis_mismatch,
-                    .err = error.HypothesisMismatch,
-                    .theorem_name = assertion.name,
-                    .line_label = line.label,
-                    .rule_name = line.rule_name,
-                    .name = name,
-                    .span = span,
-                });
-                return error.HypothesisMismatch;
+            if (try tryMatchHypothesis(
+                allocator,
+                theorem,
+                registry,
+                env,
+                &checked,
+                norm_spec,
+                idx,
+                refs[idx],
+                actual,
+                expected,
+            )) |matched_ref| {
+                refs[idx] = matched_ref;
+                continue;
             }
+
+            const name = switch (ref) {
+                .hyp => |hyp| try Emit.hypText(allocator, hyp.index),
+                .line => |label| label.label,
+            };
+            const span = switch (ref) {
+                .hyp => |hyp| hyp.span,
+                .line => |label| label.span,
+            };
+            self.setDiagnostic(.{
+                .kind = .hypothesis_mismatch,
+                .err = error.HypothesisMismatch,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = name,
+                .span = span,
+            });
+            return error.HypothesisMismatch;
         }
 
         const expected_line = try theorem.instantiateTemplate(
@@ -311,135 +487,19 @@ pub fn checkTheoremBlock(
             bindings,
         );
 
-        if (line_expr != expected_line) {
-            if (try Inference.canConvertByDefOpening(
-                allocator,
-                theorem,
-                env,
-                line_expr,
-                expected_line,
-            )) {
-                const raw_idx = try appendRuleLine(
-                    &checked,
-                    allocator,
-                    expected_line,
-                    rule_id,
-                    bindings,
-                    refs,
-                );
-                const line_idx = try appendTransportLine(
-                    &checked,
-                    allocator,
-                    line_expr,
-                    expected_line,
-                    .{ .line = raw_idx },
-                );
-
-                const gop = try labels.getOrPut(line.label);
-                if (gop.found_existing) {
-                    self.setDiagnostic(.{
-                        .kind = .duplicate_label,
-                        .err = error.DuplicateLabel,
-                        .theorem_name = assertion.name,
-                        .line_label = line.label,
-                        .name = line.label,
-                        .span = line.span,
-                    });
-                    return error.DuplicateLabel;
-                }
-                gop.value_ptr.* = line_idx;
-                last_line = line_expr;
-                last_line_idx = line_idx;
-                last_label = line.label;
-                last_span = line.assertion.span;
-                continue;
-            }
-            if (norm_spec) |spec| {
-                if (spec.concl) {
-                    if (try Normalize.buildNormalizedConversion(
-                        allocator,
-                        theorem,
-                        registry,
-                        env,
-                        &checked,
-                        expected_line,
-                        line_expr,
-                    )) |conversion| {
-                        var conversion_mut = conversion;
-                        const raw_idx = try appendRuleLine(
-                            &checked,
-                            allocator,
-                            expected_line,
-                            rule_id,
-                            bindings,
-                            refs,
-                        );
-
-                        const line_idx =
-                            if (conversion_mut.conv_line_idx) |conv_idx|
-                                try conversion_mut.normalizer.emitTransport(
-                                    conversion_mut.relation,
-                                    line_expr,
-                                    expected_line,
-                                    conv_idx,
-                                    .{ .line = raw_idx },
-                                )
-                            else
-                                raw_idx;
-
-                        const gop = try labels.getOrPut(line.label);
-                        if (gop.found_existing) {
-                            self.setDiagnostic(.{
-                                .kind = .duplicate_label,
-                                .err = error.DuplicateLabel,
-                                .theorem_name = assertion.name,
-                                .line_label = line.label,
-                                .name = line.label,
-                                .span = line.span,
-                            });
-                            return error.DuplicateLabel;
-                        }
-                        gop.value_ptr.* = line_idx;
-                        last_line = checked.items[line_idx].expr;
-                        last_line_idx = line_idx;
-                        last_label = line.label;
-                        last_span = line.assertion.span;
-                        continue;
-                    }
-                    if (try Normalize.buildDefAwareNormalizedConclusionLine(
-                        allocator,
-                        theorem,
-                        registry,
-                        env,
-                        &checked,
-                        line_expr,
-                        expected_line,
-                        rule_id,
-                        bindings,
-                        refs,
-                    )) |line_idx| {
-                        const gop = try labels.getOrPut(line.label);
-                        if (gop.found_existing) {
-                            self.setDiagnostic(.{
-                                .kind = .duplicate_label,
-                                .err = error.DuplicateLabel,
-                                .theorem_name = assertion.name,
-                                .line_label = line.label,
-                                .name = line.label,
-                                .span = line.span,
-                            });
-                            return error.DuplicateLabel;
-                        }
-                        gop.value_ptr.* = line_idx;
-                        last_line = checked.items[line_idx].expr;
-                        last_line_idx = line_idx;
-                        last_label = line.label;
-                        last_span = line.assertion.span;
-                        continue;
-                    }
-                }
-            }
-
+        const line_idx = try tryBuildConclusionLine(
+            allocator,
+            theorem,
+            registry,
+            env,
+            &checked,
+            norm_spec,
+            line_expr,
+            expected_line,
+            rule_id,
+            bindings,
+            refs,
+        ) orelse {
             self.setDiagnostic(.{
                 .kind = .conclusion_mismatch,
                 .err = error.ConclusionMismatch,
@@ -449,7 +509,7 @@ pub fn checkTheoremBlock(
                 .span = line.assertion.span,
             });
             return error.ConclusionMismatch;
-        }
+        };
 
         const gop = try labels.getOrPut(line.label);
         if (gop.found_existing) {
@@ -463,16 +523,8 @@ pub fn checkTheoremBlock(
             });
             return error.DuplicateLabel;
         }
-        const line_idx = try appendRuleLine(
-            &checked,
-            allocator,
-            line_expr,
-            rule_id,
-            bindings,
-            refs,
-        );
         gop.value_ptr.* = line_idx;
-        last_line = line_expr;
+        last_line = checked.items[line_idx].expr;
         last_line_idx = line_idx;
         last_label = line.label;
         last_span = line.assertion.span;
@@ -490,20 +542,16 @@ pub fn checkTheoremBlock(
     };
     if (final_line != theorem_concl) {
         if (last_line_idx) |line_idx| {
-            if (try Inference.canConvertByDefOpening(
+            if (try tryMatchFinalLine(
                 allocator,
                 theorem,
+                registry,
                 env,
+                &checked,
                 theorem_concl,
                 final_line,
+                line_idx,
             )) {
-                _ = try appendTransportLine(
-                    &checked,
-                    allocator,
-                    theorem_concl,
-                    final_line,
-                    .{ .line = line_idx },
-                );
                 return try checked.toOwnedSlice(allocator);
             }
         }
