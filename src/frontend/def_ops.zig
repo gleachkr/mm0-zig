@@ -2,6 +2,7 @@ const std = @import("std");
 const TermDecl = @import("./compiler_env.zig").TermDecl;
 const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
 const ExprId = @import("./compiler_expr.zig").ExprId;
+const ExprApp = @import("./compiler_expr.zig").ExprNode.App;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 
@@ -25,18 +26,19 @@ const DummyBinding = struct {
     actual: ExprId,
 };
 
-const PatternDummyInfo = struct {
+const SymbolicDummyInfo = struct {
     sort_name: []const u8,
 };
 
-const PatternExpr = union(enum) {
+const SymbolicExpr = union(enum) {
     binder: usize,
+    fixed: ExprId,
     dummy: usize,
     app: App,
 
     const App = struct {
         term_id: u32,
-        args: []const *const PatternExpr,
+        args: []const *const SymbolicExpr,
     };
 };
 
@@ -49,8 +51,7 @@ pub const Context = struct {
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     env: *const GlobalEnv,
-    open_cache: std.AutoHashMap(ExprId, ExprId),
-    pattern_dummy_infos: std.ArrayListUnmanaged(PatternDummyInfo) = .{},
+    symbolic_dummy_infos: std.ArrayListUnmanaged(SymbolicDummyInfo) = .{},
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -61,144 +62,61 @@ pub const Context = struct {
             .allocator = allocator,
             .theorem = theorem,
             .env = env,
-            .open_cache = std.AutoHashMap(ExprId, ExprId).init(allocator),
         };
     }
 
     pub fn deinit(self: *Context) void {
-        self.open_cache.deinit();
-        self.pattern_dummy_infos.deinit(self.allocator);
+        self.symbolic_dummy_infos.deinit(self.allocator);
     }
 
-    pub fn openConcreteDef(self: *Context, expr_id: ExprId) !?ExprId {
-        if (self.open_cache.get(expr_id)) |cached| {
-            return cached;
-        }
+    pub fn defCoversItem(
+        self: *Context,
+        def_expr: ExprId,
+        item_expr: ExprId,
+    ) anyerror!bool {
+        return (try self.planDefCoversItem(def_expr, item_expr)) != null;
+    }
 
-        const node = self.theorem.interner.node(expr_id);
-        const app = switch (node.*) {
-            .app => |value| value,
-            .variable => return null,
+    pub fn planDefCoversItem(
+        self: *Context,
+        def_expr: ExprId,
+        item_expr: ExprId,
+    ) anyerror!?*const ConversionPlan {
+        return try self.planDefToTarget(def_expr, item_expr, .lhs);
+    }
+
+    pub fn planDefToTarget(
+        self: *Context,
+        def_expr: ExprId,
+        target_expr: ExprId,
+        side: enum { lhs, rhs },
+    ) anyerror!?*const ConversionPlan {
+        const witness = try self.instantiateDefTowardExpr(def_expr, target_expr) orelse {
+            return null;
         };
-        const term = self.getOpenableTerm(app.term_id) orelse return null;
-        const body = term.body orelse return null;
-
-        const binders = try self.allocator.alloc(
-            ExprId,
-            term.args.len + term.dummy_args.len,
-        );
-        @memcpy(binders[0..term.args.len], app.args);
-        for (term.dummy_args, 0..) |dummy_arg, idx| {
-            const sort_id = self.env.sort_names.get(dummy_arg.sort_name) orelse {
-                return error.UnknownSort;
-            };
-            binders[term.args.len + idx] = try self.theorem.addDummyVarResolved(
-                dummy_arg.sort_name,
-                sort_id,
-            );
-        }
-
-        const opened = try self.theorem.instantiateTemplate(body, binders);
-        if (term.dummy_args.len == 0) {
-            try self.open_cache.put(expr_id, opened);
-        }
-        return opened;
+        const next = try self.compareTransparent(witness, target_expr) orelse {
+            return null;
+        };
+        return switch (side) {
+            .lhs => try self.allocPlan(.{ .unfold_lhs = .{
+                .witness = witness,
+                .next = next,
+            } }),
+            .rhs => try self.allocPlan(.{ .unfold_rhs = .{
+                .witness = witness,
+                .next = next,
+            } }),
+        };
     }
 
-    pub fn exprMatchesByDefOpening(
+    pub fn compareTransparent(
         self: *Context,
         lhs: ExprId,
         rhs: ExprId,
-    ) !bool {
-        return try self.exprMatchesRec(lhs, rhs);
-    }
-
-    pub fn matchTemplateWithDefOpening(
-        self: *Context,
-        template: TemplateExpr,
-        actual: ExprId,
-        bindings: []?ExprId,
-    ) !bool {
-        const pattern = try self.patternFromTemplate(template);
-        var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
-        defer dummy_bindings.deinit(self.allocator);
-        return try self.matchPattern(
-            pattern,
-            actual,
-            bindings,
-            &dummy_bindings,
-        );
-    }
-
-    pub fn planConversionByDefOpening(
-        self: *Context,
-        lhs: ExprId,
-        rhs: ExprId,
-    ) !?*const ConversionPlan {
-        return try self.planConversionRec(lhs, rhs);
-    }
-
-    fn planConversionRec(
-        self: *Context,
-        lhs: ExprId,
-        rhs: ExprId,
-    ) !?*const ConversionPlan {
+    ) anyerror!?*const ConversionPlan {
         if (lhs == rhs) {
             return try self.allocPlan(.refl);
         }
-
-        if (try self.openConcreteDef(lhs)) |opened_lhs| {
-            if (try self.planConversionRec(opened_lhs, rhs)) |next| {
-                return try self.allocPlan(.{ .unfold_lhs = .{
-                    .witness = opened_lhs,
-                    .next = next,
-                } });
-            }
-        }
-
-        if (try self.openConcreteDef(rhs)) |opened_rhs| {
-            if (try self.planConversionRec(lhs, opened_rhs)) |next| {
-                return try self.allocPlan(.{ .unfold_rhs = .{
-                    .witness = opened_rhs,
-                    .next = next,
-                } });
-            }
-        }
-
-        const lhs_node = self.theorem.interner.node(lhs);
-        const rhs_node = self.theorem.interner.node(rhs);
-        const lhs_app = switch (lhs_node.*) {
-            .app => |value| value,
-            .variable => return null,
-        };
-        const rhs_app = switch (rhs_node.*) {
-            .app => |value| value,
-            .variable => return null,
-        };
-        if (lhs_app.term_id != rhs_app.term_id or
-            lhs_app.args.len != rhs_app.args.len)
-        {
-            return null;
-        }
-
-        const children = try self.allocator.alloc(
-            *const ConversionPlan,
-            lhs_app.args.len,
-        );
-        for (lhs_app.args, rhs_app.args, 0..) |lhs_arg, rhs_arg, idx| {
-            children[idx] = try self.planConversionRec(lhs_arg, rhs_arg) orelse {
-                return null;
-            };
-        }
-        return try self.allocPlan(.{ .cong = .{ .children = children } });
-    }
-
-    fn exprMatchesRec(
-        self: *Context,
-        lhs: ExprId,
-        rhs: ExprId,
-    ) !bool {
-        if (lhs == rhs) return true;
 
         const lhs_node = self.theorem.interner.node(lhs);
         const rhs_node = self.theorem.interner.node(rhs);
@@ -208,28 +126,472 @@ pub const Context = struct {
             if (lhs_app.term_id == rhs_app.term_id and
                 lhs_app.args.len == rhs_app.args.len)
             {
-                for (lhs_app.args, rhs_app.args) |lhs_arg, rhs_arg| {
-                    if (!try self.exprMatchesRec(lhs_arg, rhs_arg)) {
-                        break;
-                    }
-                } else {
-                    return true;
+                const children = try self.allocator.alloc(
+                    *const ConversionPlan,
+                    lhs_app.args.len,
+                );
+                for (lhs_app.args, rhs_app.args, 0..) |lhs_arg, rhs_arg, idx| {
+                    children[idx] = try self.compareTransparent(
+                        lhs_arg,
+                        rhs_arg,
+                    ) orelse {
+                        return null;
+                    };
                 }
+                return try self.allocPlan(.{ .cong = .{ .children = children } });
             }
         }
 
-        if (try self.openConcreteDef(lhs)) |opened_lhs| {
-            if (try self.exprMatchesRec(opened_lhs, rhs)) {
-                return true;
-            }
+        if (try self.planDefToTarget(lhs, rhs, .lhs)) |plan| {
+            return plan;
+        }
+        if (try self.planDefToTarget(rhs, lhs, .rhs)) |plan| {
+            return plan;
+        }
+        return null;
+    }
+
+    pub fn matchTemplateTransparent(
+        self: *Context,
+        template: TemplateExpr,
+        actual: ExprId,
+        bindings: []?ExprId,
+    ) anyerror!bool {
+        return try self.matchTemplateRec(template, actual, bindings);
+    }
+
+    // Compatibility wrappers for current callers while the rest of the
+    // frontend is migrated to the new names.
+    pub fn exprMatchesByDefOpening(
+        self: *Context,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) anyerror!bool {
+        return (try self.compareTransparent(lhs, rhs)) != null;
+    }
+
+    pub fn matchTemplateWithDefOpening(
+        self: *Context,
+        template: TemplateExpr,
+        actual: ExprId,
+        bindings: []?ExprId,
+    ) anyerror!bool {
+        return try self.matchTemplateTransparent(template, actual, bindings);
+    }
+
+    pub fn planConversionByDefOpening(
+        self: *Context,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) anyerror!?*const ConversionPlan {
+        return try self.compareTransparent(lhs, rhs);
+    }
+
+    fn instantiateDefTowardExpr(
+        self: *Context,
+        def_expr: ExprId,
+        target_expr: ExprId,
+    ) anyerror!?ExprId {
+        const def = self.getConcreteDef(def_expr) orelse return null;
+        const symbolic = try self.expandConcreteDef(def_expr) orelse return null;
+
+        var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
+        defer dummy_bindings.deinit(self.allocator);
+
+        if (!try self.matchSymbolicToExpr(
+            symbolic,
+            target_expr,
+            &[_]?ExprId{},
+            &dummy_bindings,
+        )) {
+            return null;
+        }
+        if (dummy_bindings.items.len != def.term.dummy_args.len) return null;
+
+        const binders = try self.allocator.alloc(
+            ExprId,
+            def.term.args.len + def.term.dummy_args.len,
+        );
+        @memcpy(binders[0..def.term.args.len], def.app.args);
+        for (def.term.dummy_args, 0..) |_, idx| {
+            const actual = findDummyBinding(dummy_bindings.items, idx) orelse {
+                return null;
+            };
+            binders[def.term.args.len + idx] = actual;
+        }
+        return try self.theorem.instantiateTemplate(def.body, binders);
+    }
+
+    fn matchTemplateRec(
+        self: *Context,
+        template: TemplateExpr,
+        actual: ExprId,
+        bindings: []?ExprId,
+    ) anyerror!bool {
+        return switch (template) {
+            .binder => |idx| blk: {
+                if (idx >= bindings.len) break :blk false;
+                if (bindings[idx]) |existing| {
+                    break :blk (try self.compareTransparent(
+                        existing,
+                        actual,
+                    )) != null;
+                }
+                bindings[idx] = actual;
+                break :blk true;
+            },
+            .app => |app| blk: {
+                if (try self.matchTemplateAppDirect(app, actual, bindings)) {
+                    break :blk true;
+                }
+
+                if (try self.matchExpandedTemplateApp(app, actual, bindings)) {
+                    break :blk true;
+                }
+
+                if (try self.matchActualDefToTemplate(template, actual, bindings)) {
+                    break :blk true;
+                }
+
+                break :blk false;
+            },
+        };
+    }
+
+    fn matchTemplateAppDirect(
+        self: *Context,
+        app: TemplateExpr.App,
+        actual: ExprId,
+        bindings: []?ExprId,
+    ) anyerror!bool {
+        const actual_node = self.theorem.interner.node(actual);
+        const actual_app = switch (actual_node.*) {
+            .app => |value| value,
+            .variable => return false,
+        };
+        if (actual_app.term_id != app.term_id or
+            actual_app.args.len != app.args.len)
+        {
+            return false;
         }
 
-        if (try self.openConcreteDef(rhs)) |opened_rhs| {
-            if (try self.exprMatchesRec(lhs, opened_rhs)) {
-                return true;
+        const saved_bindings = try self.allocator.dupe(?ExprId, bindings);
+        defer self.allocator.free(saved_bindings);
+        for (app.args, actual_app.args) |tmpl_arg, actual_arg| {
+            if (!try self.matchTemplateRec(tmpl_arg, actual_arg, bindings)) {
+                @memcpy(bindings, saved_bindings);
+                return false;
             }
         }
+        return true;
+    }
+
+    fn matchExpandedTemplateApp(
+        self: *Context,
+        app: TemplateExpr.App,
+        actual: ExprId,
+        bindings: []?ExprId,
+    ) anyerror!bool {
+        const saved_bindings = try self.allocator.dupe(?ExprId, bindings);
+        defer self.allocator.free(saved_bindings);
+
+        var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
+        defer dummy_bindings.deinit(self.allocator);
+        const checkpoint = self.symbolic_dummy_infos.items.len;
+        defer self.symbolic_dummy_infos.shrinkRetainingCapacity(checkpoint);
+
+        const symbolic = try self.expandTemplateApp(app) orelse return false;
+        if (try self.matchSymbolicToExpr(
+            symbolic,
+            actual,
+            bindings,
+            &dummy_bindings,
+        )) {
+            return true;
+        }
+
+        @memcpy(bindings, saved_bindings);
         return false;
+    }
+
+    fn matchActualDefToTemplate(
+        self: *Context,
+        template: TemplateExpr,
+        actual: ExprId,
+        bindings: []?ExprId,
+    ) anyerror!bool {
+        _ = self.getConcreteDef(actual) orelse return false;
+
+        const saved_bindings = try self.allocator.dupe(?ExprId, bindings);
+        defer self.allocator.free(saved_bindings);
+
+        var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
+        defer dummy_bindings.deinit(self.allocator);
+        const checkpoint = self.symbolic_dummy_infos.items.len;
+        defer self.symbolic_dummy_infos.shrinkRetainingCapacity(checkpoint);
+
+        const symbolic = try self.symbolicFromTemplate(template);
+        if (try self.matchSymbolicToExpr(
+            symbolic,
+            actual,
+            bindings,
+            &dummy_bindings,
+        )) {
+            return true;
+        }
+
+        @memcpy(bindings, saved_bindings);
+        return false;
+    }
+
+    fn matchSymbolicToExpr(
+        self: *Context,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        bindings: []?ExprId,
+        dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
+    ) anyerror!bool {
+        switch (symbolic.*) {
+            .binder => |idx| {
+                if (idx >= bindings.len) return false;
+                if (bindings[idx]) |existing| {
+                    return (try self.compareTransparent(existing, actual)) != null;
+                }
+                bindings[idx] = actual;
+                return true;
+            },
+            .fixed => |expr_id| {
+                return (try self.compareTransparent(expr_id, actual)) != null;
+            },
+            .dummy => |slot| {
+                const info = self.symbolic_dummy_infos.items[slot];
+                return try self.matchSymbolicDummy(
+                    slot,
+                    info,
+                    actual,
+                    dummy_bindings,
+                );
+            },
+            .app => |app| {
+                const saved_bindings = try self.allocator.dupe(
+                    ?ExprId,
+                    bindings,
+                );
+                defer self.allocator.free(saved_bindings);
+                const dummy_checkpoint = dummy_bindings.items.len;
+
+                const actual_node = self.theorem.interner.node(actual);
+                if (actual_node.* == .app) {
+                    const actual_app = actual_node.app;
+                    if (actual_app.term_id == app.term_id and
+                        actual_app.args.len == app.args.len)
+                    {
+                        for (app.args, actual_app.args) |sym_arg, actual_arg| {
+                            if (!try self.matchSymbolicToExpr(
+                                sym_arg,
+                                actual_arg,
+                                bindings,
+                                dummy_bindings,
+                            )) {
+                                @memcpy(bindings, saved_bindings);
+                                dummy_bindings.shrinkRetainingCapacity(
+                                    dummy_checkpoint,
+                                );
+                                break;
+                            }
+                        } else {
+                            return true;
+                        }
+                    }
+                }
+
+                @memcpy(bindings, saved_bindings);
+                dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
+
+                if (try self.expandSymbolicApp(app)) |expanded| {
+                    if (try self.matchSymbolicToExpr(
+                        expanded,
+                        actual,
+                        bindings,
+                        dummy_bindings,
+                    )) {
+                        return true;
+                    }
+                    @memcpy(bindings, saved_bindings);
+                    dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
+                }
+
+                if (try self.expandConcreteDef(actual)) |expanded_actual| {
+                    if (try self.matchSymbolicToSymbolic(
+                        symbolic,
+                        expanded_actual,
+                        bindings,
+                        dummy_bindings,
+                    )) {
+                        return true;
+                    }
+                    @memcpy(bindings, saved_bindings);
+                    dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
+                }
+                return false;
+            },
+        }
+    }
+
+    fn matchSymbolicToSymbolic(
+        self: *Context,
+        lhs: *const SymbolicExpr,
+        rhs: *const SymbolicExpr,
+        bindings: []?ExprId,
+        dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
+    ) anyerror!bool {
+        switch (lhs.*) {
+            .binder => |idx| {
+                if (idx >= bindings.len) return false;
+                const rhs_expr = try self.materializeSymbolic(
+                    rhs,
+                    dummy_bindings.items,
+                ) orelse return false;
+                if (bindings[idx]) |existing| {
+                    return (try self.compareTransparent(existing, rhs_expr)) != null;
+                }
+                bindings[idx] = rhs_expr;
+                return true;
+            },
+            .fixed => |expr_id| {
+                const rhs_expr = try self.materializeSymbolic(
+                    rhs,
+                    dummy_bindings.items,
+                ) orelse return false;
+                return (try self.compareTransparent(expr_id, rhs_expr)) != null;
+            },
+            .dummy => |slot| {
+                const rhs_expr = try self.materializeSymbolic(
+                    rhs,
+                    dummy_bindings.items,
+                ) orelse return false;
+                const info = self.symbolic_dummy_infos.items[slot];
+                return try self.matchSymbolicDummy(
+                    slot,
+                    info,
+                    rhs_expr,
+                    dummy_bindings,
+                );
+            },
+            .app => |lhs_app| {
+                const saved_bindings = try self.allocator.dupe(
+                    ?ExprId,
+                    bindings,
+                );
+                defer self.allocator.free(saved_bindings);
+                const dummy_checkpoint = dummy_bindings.items.len;
+
+                if (rhs.* == .app) {
+                    const rhs_app = rhs.app;
+                    if (lhs_app.term_id == rhs_app.term_id and
+                        lhs_app.args.len == rhs_app.args.len)
+                    {
+                        for (lhs_app.args, rhs_app.args) |lhs_arg, rhs_arg| {
+                            if (!try self.matchSymbolicToSymbolic(
+                                lhs_arg,
+                                rhs_arg,
+                                bindings,
+                                dummy_bindings,
+                            )) {
+                                @memcpy(bindings, saved_bindings);
+                                dummy_bindings.shrinkRetainingCapacity(
+                                    dummy_checkpoint,
+                                );
+                                break;
+                            }
+                        } else {
+                            return true;
+                        }
+                    }
+                }
+
+                @memcpy(bindings, saved_bindings);
+                dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
+
+                if (try self.expandSymbolicApp(lhs_app)) |expanded_lhs| {
+                    if (try self.matchSymbolicToSymbolic(
+                        expanded_lhs,
+                        rhs,
+                        bindings,
+                        dummy_bindings,
+                    )) {
+                        return true;
+                    }
+                    @memcpy(bindings, saved_bindings);
+                    dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
+                }
+                if (rhs.* == .app) {
+                    if (try self.expandSymbolicApp(rhs.app)) |expanded_rhs| {
+                        if (try self.matchSymbolicToSymbolic(
+                            lhs,
+                            expanded_rhs,
+                            bindings,
+                            dummy_bindings,
+                        )) {
+                            return true;
+                        }
+                        @memcpy(bindings, saved_bindings);
+                        dummy_bindings.shrinkRetainingCapacity(
+                            dummy_checkpoint,
+                        );
+                    }
+                }
+                return false;
+            },
+        }
+    }
+
+    fn matchSymbolicDummy(
+        self: *Context,
+        slot: usize,
+        info: SymbolicDummyInfo,
+        actual: ExprId,
+        dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
+    ) anyerror!bool {
+        const actual_info = try self.getConcreteVarInfo(actual);
+        if (!actual_info.bound) return false;
+        if (!std.mem.eql(u8, info.sort_name, actual_info.sort_name)) {
+            return false;
+        }
+
+        for (dummy_bindings.items) |binding| {
+            if (binding.slot == slot) return binding.actual == actual;
+        }
+        try dummy_bindings.append(self.allocator, .{
+            .slot = slot,
+            .actual = actual,
+        });
+        return true;
+    }
+
+    fn materializeSymbolic(
+        self: *Context,
+        symbolic: *const SymbolicExpr,
+        dummy_bindings: []const DummyBinding,
+    ) anyerror!?ExprId {
+        return switch (symbolic.*) {
+            .binder => null,
+            .fixed => |expr_id| expr_id,
+            .dummy => |slot| findDummyBinding(dummy_bindings, slot),
+            .app => |app| blk: {
+                const args = try self.allocator.alloc(ExprId, app.args.len);
+                for (app.args, 0..) |arg, idx| {
+                    args[idx] = try self.materializeSymbolic(
+                        arg,
+                        dummy_bindings,
+                    ) orelse break :blk null;
+                }
+                break :blk try self.theorem.interner.internAppOwned(
+                    app.term_id,
+                    args,
+                );
+            },
+        };
     }
 
     fn getConcreteVarInfo(self: *Context, expr_id: ExprId) !ConcreteVarInfo {
@@ -262,150 +624,110 @@ pub const Context = struct {
         };
     }
 
-    fn matchPattern(
+    fn expandTemplateApp(
         self: *Context,
-        pattern: *const PatternExpr,
-        actual: ExprId,
-        bindings: []?ExprId,
-        dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
-    ) !bool {
-        switch (pattern.*) {
-            .binder => |idx| {
-                if (idx >= bindings.len) return false;
-                if (bindings[idx]) |existing| {
-                    return try self.exprMatchesByDefOpening(existing, actual);
-                }
-                bindings[idx] = actual;
-                return true;
-            },
-            .dummy => |slot| {
-                const info = self.pattern_dummy_infos.items[slot];
-                return try self.matchPatternDummy(
-                    slot,
-                    info,
-                    actual,
-                    dummy_bindings,
-                );
-            },
-            .app => |app| {
-                const actual_node = self.theorem.interner.node(actual);
-                if (actual_node.* == .app) {
-                    const actual_app = actual_node.app;
-                    if (actual_app.term_id == app.term_id and
-                        actual_app.args.len == app.args.len)
-                    {
-                        const saved_bindings = try self.allocator.dupe(
-                            ?ExprId,
-                            bindings,
-                        );
-                        defer self.allocator.free(saved_bindings);
-                        const dummy_checkpoint = dummy_bindings.items.len;
-                        for (app.args, actual_app.args) |pat_arg, actual_arg| {
-                            if (!try self.matchPattern(
-                                pat_arg,
-                                actual_arg,
-                                bindings,
-                                dummy_bindings,
-                            )) {
-                                @memcpy(bindings, saved_bindings);
-                                dummy_bindings.shrinkRetainingCapacity(
-                                    dummy_checkpoint,
-                                );
-                                return false;
-                            }
-                        }
-                        return true;
-                    }
-                }
+        app: TemplateExpr.App,
+    ) anyerror!?*const SymbolicExpr {
+        const term = self.getOpenableTerm(app.term_id) orelse return null;
+        const body = term.body orelse return null;
 
-                const saved_bindings = try self.allocator.dupe(
-                    ?ExprId,
-                    bindings,
-                );
-                defer self.allocator.free(saved_bindings);
-                const dummy_checkpoint = dummy_bindings.items.len;
-                if (try self.openConcreteDef(actual)) |opened_actual| {
-                    if (try self.matchPattern(
-                        pattern,
-                        opened_actual,
-                        bindings,
-                        dummy_bindings,
-                    )) {
-                        return true;
-                    }
-                    @memcpy(bindings, saved_bindings);
-                    dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
-                }
-
-                if (try self.openPatternApp(app)) |opened_pattern| {
-                    if (try self.matchPattern(
-                        opened_pattern,
-                        actual,
-                        bindings,
-                        dummy_bindings,
-                    )) {
-                        return true;
-                    }
-                    @memcpy(bindings, saved_bindings);
-                    dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
-                }
-                return false;
-            },
+        const subst = try self.allocator.alloc(
+            *const SymbolicExpr,
+            term.args.len + term.dummy_args.len,
+        );
+        for (app.args, 0..) |arg, idx| {
+            subst[idx] = try self.symbolicFromTemplate(arg);
         }
+        for (term.dummy_args, 0..) |dummy_arg, idx| {
+            const slot = self.symbolic_dummy_infos.items.len;
+            try self.symbolic_dummy_infos.append(self.allocator, .{
+                .sort_name = dummy_arg.sort_name,
+            });
+            subst[term.args.len + idx] = try self.allocSymbolic(
+                .{ .dummy = slot },
+            );
+        }
+        return try self.symbolicFromTemplateSubst(body, subst);
     }
 
-    fn matchPatternDummy(
+    fn expandConcreteDef(
         self: *Context,
-        slot: usize,
-        info: PatternDummyInfo,
-        actual: ExprId,
-        dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
-    ) !bool {
-        const actual_info = try self.getConcreteVarInfo(actual);
-        if (!actual_info.bound) return false;
-        if (!std.mem.eql(u8, info.sort_name, actual_info.sort_name)) {
-            return false;
-        }
+        expr_id: ExprId,
+    ) anyerror!?*const SymbolicExpr {
+        const def = self.getConcreteDef(expr_id) orelse return null;
 
-        for (dummy_bindings.items) |binding| {
-            if (binding.slot == slot) return binding.actual == actual;
+        const subst = try self.allocator.alloc(
+            *const SymbolicExpr,
+            def.term.args.len + def.term.dummy_args.len,
+        );
+        for (def.app.args, 0..) |arg, idx| {
+            subst[idx] = try self.allocSymbolic(.{ .fixed = arg });
         }
-        try dummy_bindings.append(self.allocator, .{
-            .slot = slot,
-            .actual = actual,
-        });
-        return true;
+        for (def.term.dummy_args, 0..) |dummy_arg, idx| {
+            const slot = self.symbolic_dummy_infos.items.len;
+            try self.symbolic_dummy_infos.append(self.allocator, .{
+                .sort_name = dummy_arg.sort_name,
+            });
+            subst[def.term.args.len + idx] = try self.allocSymbolic(
+                .{ .dummy = slot },
+            );
+        }
+        return try self.symbolicFromTemplateSubst(def.body, subst);
     }
 
-    fn patternFromTemplate(
+    fn expandSymbolicApp(
+        self: *Context,
+        app: SymbolicExpr.App,
+    ) anyerror!?*const SymbolicExpr {
+        const term = self.getOpenableTerm(app.term_id) orelse return null;
+        const body = term.body orelse return null;
+
+        const subst = try self.allocator.alloc(
+            *const SymbolicExpr,
+            term.args.len + term.dummy_args.len,
+        );
+        @memcpy(subst[0..term.args.len], app.args);
+        for (term.dummy_args, 0..) |dummy_arg, idx| {
+            const slot = self.symbolic_dummy_infos.items.len;
+            try self.symbolic_dummy_infos.append(self.allocator, .{
+                .sort_name = dummy_arg.sort_name,
+            });
+            subst[term.args.len + idx] = try self.allocSymbolic(
+                .{ .dummy = slot },
+            );
+        }
+        return try self.symbolicFromTemplateSubst(body, subst);
+    }
+
+    fn symbolicFromTemplate(
         self: *Context,
         template: TemplateExpr,
-    ) !*const PatternExpr {
-        return try self.patternFromTemplateSubst(template, null);
+    ) anyerror!*const SymbolicExpr {
+        return try self.symbolicFromTemplateSubst(template, null);
     }
 
-    fn patternFromTemplateSubst(
+    fn symbolicFromTemplateSubst(
         self: *Context,
         template: TemplateExpr,
-        subst: ?[]const *const PatternExpr,
-    ) !*const PatternExpr {
+        subst: ?[]const *const SymbolicExpr,
+    ) anyerror!*const SymbolicExpr {
         switch (template) {
             .binder => |idx| {
                 if (subst) |args| {
                     if (idx >= args.len) return error.TemplateBinderOutOfRange;
                     return args[idx];
                 }
-                return try self.allocPattern(.{ .binder = idx });
+                return try self.allocSymbolic(.{ .binder = idx });
             },
             .app => |app| {
                 const args = try self.allocator.alloc(
-                    *const PatternExpr,
+                    *const SymbolicExpr,
                     app.args.len,
                 );
                 for (app.args, 0..) |arg, idx| {
-                    args[idx] = try self.patternFromTemplateSubst(arg, subst);
+                    args[idx] = try self.symbolicFromTemplateSubst(arg, subst);
                 }
-                return try self.allocPattern(.{ .app = .{
+                return try self.allocSymbolic(.{ .app = .{
                     .term_id = app.term_id,
                     .args = args,
                 } });
@@ -413,28 +735,23 @@ pub const Context = struct {
         }
     }
 
-    fn openPatternApp(
-        self: *Context,
-        app: PatternExpr.App,
-    ) !?*const PatternExpr {
+    fn getConcreteDef(self: *const Context, expr_id: ExprId) ?struct {
+        app: ExprApp,
+        term: *const TermDecl,
+        body: TemplateExpr,
+    } {
+        const node = self.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |value| value,
+            .variable => return null,
+        };
         const term = self.getOpenableTerm(app.term_id) orelse return null;
         const body = term.body orelse return null;
-
-        const subst = try self.allocator.alloc(
-            *const PatternExpr,
-            term.args.len + term.dummy_args.len,
-        );
-        @memcpy(subst[0..term.args.len], app.args);
-        for (term.dummy_args, 0..) |dummy_arg, idx| {
-            const slot = self.pattern_dummy_infos.items.len;
-            try self.pattern_dummy_infos.append(self.allocator, .{
-                .sort_name = dummy_arg.sort_name,
-            });
-            subst[term.args.len + idx] = try self.allocPattern(
-                .{ .dummy = slot },
-            );
-        }
-        return try self.patternFromTemplateSubst(body, subst);
+        return .{
+            .app = app,
+            .term = term,
+            .body = body,
+        };
     }
 
     fn getOpenableTerm(self: *const Context, term_id: u32) ?*const TermDecl {
@@ -444,18 +761,28 @@ pub const Context = struct {
         return term;
     }
 
-    fn allocPattern(self: *Context, pattern: PatternExpr) !*const PatternExpr {
-        const node = try self.allocator.create(PatternExpr);
-        node.* = pattern;
+    fn allocSymbolic(
+        self: *Context,
+        symbolic: SymbolicExpr,
+    ) anyerror!*const SymbolicExpr {
+        const node = try self.allocator.create(SymbolicExpr);
+        node.* = symbolic;
         return node;
     }
 
     fn allocPlan(
         self: *Context,
         plan: ConversionPlan,
-    ) !*const ConversionPlan {
+    ) anyerror!*const ConversionPlan {
         const node = try self.allocator.create(ConversionPlan);
         node.* = plan;
         return node;
     }
 };
+
+fn findDummyBinding(bindings: []const DummyBinding, slot: usize) ?ExprId {
+    for (bindings) |binding| {
+        if (binding.slot == slot) return binding.actual;
+    }
+    return null;
+}

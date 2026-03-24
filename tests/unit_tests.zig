@@ -1307,7 +1307,7 @@ test "compiler ignores @abbrev annotations on defs" {
     try std.testing.expect(env.terms.items[1].body != null);
 }
 
-fn expectExprMatchesByDefOpening(
+fn expectCompareTransparent(
     src: []const u8,
     lhs_text: []const u8,
     rhs_text: []const u8,
@@ -1352,8 +1352,12 @@ fn expectExprMatchesByDefOpening(
     );
     defer def_ops.deinit();
 
-    try std.testing.expect(try def_ops.exprMatchesByDefOpening(lhs, rhs));
-    try std.testing.expect(try def_ops.exprMatchesByDefOpening(rhs, lhs));
+    try std.testing.expect((try def_ops.compareTransparent(lhs, rhs)) != null);
+    try std.testing.expect((try def_ops.compareTransparent(rhs, lhs)) != null);
+}
+
+test "targeted def module has no standalone opening API" {
+    try std.testing.expect(!@hasDecl(DefOps.Context, "openConcreteDef"));
 }
 
 test "def matcher opens nested user-side defs under matching heads" {
@@ -1365,7 +1369,7 @@ test "def matcher opens nested user-side defs under matching heads" {
         \\theorem demo (a: wff): $ (a -> a) -> (a -> a) $;
     ;
 
-    try expectExprMatchesByDefOpening(
+    try expectCompareTransparent(
         src,
         " (a -> double a) -> (a -> a) ",
         " (a -> (a -> a)) -> (a -> a) ",
@@ -1383,7 +1387,7 @@ test "def matcher opens nested user-side defs on both sides" {
         \\theorem demo (a: wff): $ (a -> a) -> (a -> a) $;
     ;
 
-    try expectExprMatchesByDefOpening(
+    try expectCompareTransparent(
         src,
         " (a -> alias a) -> (a -> a) ",
         " (a -> wrap a) -> (a -> a) ",
@@ -1401,7 +1405,7 @@ test "def matcher opens nested user-side defs through repeated heads" {
         \\theorem demo (a: wff): $ ((a -> a) -> (a -> a)) -> (a -> a) $;
     ;
 
-    try expectExprMatchesByDefOpening(
+    try expectCompareTransparent(
         src,
         " ((a -> alias a) -> (a -> a)) -> (a -> a) ",
         " ((a -> wrap a) -> (a -> a)) -> (a -> a) ",
@@ -1457,7 +1461,7 @@ test "def conversion plan unfolds to an exact target" {
     );
     defer def_ops.deinit();
 
-    const plan = try def_ops.planConversionByDefOpening(lhs, rhs);
+    const plan = try def_ops.compareTransparent(lhs, rhs);
     const step = plan orelse return error.ExpectedConversionPlan;
     switch (step.*) {
         .unfold_lhs => |unfold| {
@@ -1466,6 +1470,28 @@ test "def conversion plan unfolds to an exact target" {
         },
         else => return error.UnexpectedConversionPlan,
     }
+}
+
+test "compiler emits a valid hidden-dummy targeted unfold proof" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_def_unfold_dummy",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_def_unfold_dummy",
+        "proof",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+
+    try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
 test "compiler ignores @abbrev on non-def terms" {
@@ -1904,10 +1930,6 @@ const KnownProofCaseFailure = struct {
 
 const known_proof_case_failures = [_]KnownProofCaseFailure{
     .{
-        .stem = "pass_def_unfold_dummy",
-        .reason = "hidden-dummy def opening still depends on alpha repair",
-    },
-    .{
         .stem = "pass_def_infer_dummy",
         .reason = "dummy inference still relies on alpha-style matching",
     },
@@ -1976,7 +1998,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_unfold_final", .outcome = .pass },
     .{ .stem = "pass_def_unfold_final_reverse", .outcome = .pass },
     // Known-broken cases around hidden dummies / exact identity.
-    .{ .stem = "pass_def_unfold_dummy", .outcome = .known_fail },
+    .{ .stem = "pass_def_unfold_dummy", .outcome = .pass },
     .{ .stem = "pass_def_view_basic", .outcome = .pass },
     .{ .stem = "pass_def_rewrite_concl", .outcome = .pass },
     .{ .stem = "pass_def_rewrite_hyp", .outcome = .pass },
