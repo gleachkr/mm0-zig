@@ -1,0 +1,4 @@
+normalize_def_transport_concl
+----------------------------
+
+l1: $ assoc_norm f g h $ by assoc_refl (f := $ f $, g := $ g $, h := $ h $) []
