@@ -2119,6 +2119,8 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_acui_repeated_explicit_item", .outcome = .pass },
     .{ .stem = "pass_acui_duplicate_binders_same_item", .outcome = .pass },
     .{ .stem = "pass_acui_principal_remainder", .outcome = .pass },
+    .{ .stem = "pass_acui_same_side_absorb", .outcome = .pass },
+    .{ .stem = "pass_acui_same_side_absorb_infer", .outcome = .pass },
     .{ .stem = "pass_au_category", .outcome = .pass },
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
     .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
@@ -2140,6 +2142,10 @@ const proof_cases = [_]ProofCase{
     .{
         .stem = "fail_def_infer_ambiguous",
         .outcome = .{ .fail = error.AmbiguousAcuiMatch },
+    },
+    .{
+        .stem = "fail_acui_same_side_uncovered",
+        .outcome = .{ .fail = error.ConclusionMismatch },
     },
     .{ .stem = "fail_abbrev_hidden_dummy_ax", .outcome = .pass },
     .{ .stem = "fail_abbrev_on_nondef", .outcome = .pass },

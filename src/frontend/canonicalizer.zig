@@ -7,15 +7,16 @@ const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const RewriteRule = @import("./rewrite_registry.zig").RewriteRule;
 const ResolvedStructuralCombiner =
     @import("./rewrite_registry.zig").ResolvedStructuralCombiner;
+const DefOps = @import("./def_ops.zig");
+
+const AcuiLeaf = struct {
+    old_expr: ExprId,
+    new_expr: ExprId,
+    is_def: bool,
+};
 
 pub const Canonicalizer = struct {
-    pub const Error = error{
-        OutOfMemory,
-        TemplateBinderOutOfRange,
-        TooManyTheoremExprs,
-        UnknownSort,
-        Overflow,
-    };
+    pub const Error = anyerror;
 
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
@@ -145,10 +146,123 @@ pub const Canonicalizer = struct {
         if (app.term_id != acui.head_term_id or app.args.len != 2) {
             return expr_id;
         }
-        return try self.mergeCanonical(app.args[0], app.args[1], acui);
+
+        var leaves = std.ArrayListUnmanaged(AcuiLeaf){};
+        defer leaves.deinit(self.allocator);
+        try self.collectAcuiLeaves(expr_id, acui.head_term_id, &leaves);
+
+        const unit_expr = try self.unitExpr(acui);
+        try self.applySameSideAbsorption(leaves.items, unit_expr);
+
+        const replaced = try self.rebuildAcuiFromLeaves(
+            leaves.items,
+            acui.head_term_id,
+            acui.unit_term_id,
+        );
+        return try self.canonicalizeAcuiExact(replaced, acui);
     }
 
-    fn mergeCanonical(
+    fn collectAcuiLeaves(
+        self: *Canonicalizer,
+        expr_id: ExprId,
+        head_term_id: u32,
+        out: *std.ArrayListUnmanaged(AcuiLeaf),
+    ) Error!void {
+        const node = self.theorem.interner.node(expr_id);
+        switch (node.*) {
+            .app => |app| {
+                if (app.term_id == head_term_id and app.args.len == 2) {
+                    try self.collectAcuiLeaves(app.args[0], head_term_id, out);
+                    try self.collectAcuiLeaves(app.args[1], head_term_id, out);
+                    return;
+                }
+            },
+            .variable => {},
+        }
+        try out.append(self.allocator, .{
+            .old_expr = expr_id,
+            .new_expr = expr_id,
+            .is_def = self.isDefItem(expr_id),
+        });
+    }
+
+    fn applySameSideAbsorption(
+        self: *Canonicalizer,
+        leaves: []AcuiLeaf,
+        unit_expr: ExprId,
+    ) Error!void {
+        var def_ops = DefOps.Context.init(
+            self.allocator,
+            self.theorem,
+            self.env,
+        );
+        defer def_ops.deinit();
+
+        for (leaves, 0..) |*leaf, idx| {
+            _ = idx;
+            if (leaf.old_expr == unit_expr or leaf.is_def) continue;
+
+            for (leaves) |owner| {
+                if (!owner.is_def) continue;
+                if (try def_ops.defCoversItem(owner.old_expr, leaf.old_expr)) {
+                    leaf.new_expr = owner.old_expr;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn rebuildAcuiFromLeaves(
+        self: *Canonicalizer,
+        leaves: []const AcuiLeaf,
+        head_term_id: u32,
+        unit_term_id: u32,
+    ) Error!ExprId {
+        if (leaves.len == 0) {
+            return try self.theorem.interner.internApp(unit_term_id, &.{});
+        }
+        if (leaves.len == 1) return leaves[0].new_expr;
+
+        var current = leaves[leaves.len - 1].new_expr;
+        var idx = leaves.len - 1;
+        while (idx > 0) {
+            idx -= 1;
+            current = try self.theorem.interner.internApp(
+                head_term_id,
+                &[_]ExprId{ leaves[idx].new_expr, current },
+            );
+        }
+        return current;
+    }
+
+    fn isDefItem(self: *const Canonicalizer, expr_id: ExprId) bool {
+        const node = self.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |value| value,
+            .variable => return false,
+        };
+        if (app.term_id >= self.env.terms.items.len) return false;
+        const term = &self.env.terms.items[app.term_id];
+        return term.is_def and term.body != null;
+    }
+
+    fn canonicalizeAcuiExact(
+        self: *Canonicalizer,
+        expr_id: ExprId,
+        acui: ResolvedStructuralCombiner,
+    ) Error!ExprId {
+        const node = self.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |value| value,
+            else => return expr_id,
+        };
+        if (app.term_id != acui.head_term_id or app.args.len != 2) {
+            return expr_id;
+        }
+        return try self.mergeCanonicalExact(app.args[0], app.args[1], acui);
+    }
+
+    fn mergeCanonicalExact(
         self: *Canonicalizer,
         left: ExprId,
         right: ExprId,
@@ -161,22 +275,22 @@ pub const Canonicalizer = struct {
             .app => |left_app| if (left_app.term_id == acui.head_term_id and
                 left_app.args.len == 2)
             blk: {
-                const merged_tail = try self.mergeCanonical(
+                const merged_tail = try self.mergeCanonicalExact(
                     left_app.args[1],
                     right,
                     acui,
                 );
-                break :blk try self.insertItem(
+                break :blk try self.insertItemExact(
                     left_app.args[0],
                     merged_tail,
                     acui,
                 );
-            } else try self.insertItem(left, right, acui),
-            .variable => try self.insertItem(left, right, acui),
+            } else try self.insertItemExact(left, right, acui),
+            .variable => try self.insertItemExact(left, right, acui),
         };
     }
 
-    fn insertItem(
+    fn insertItemExact(
         self: *Canonicalizer,
         item: ExprId,
         canon: ExprId,
@@ -230,7 +344,7 @@ pub const Canonicalizer = struct {
                         &[_]ExprId{ item, canon },
                     );
                 }
-                const inserted = try self.insertItem(item, rest, acui);
+                const inserted = try self.insertItemExact(item, rest, acui);
                 break :blk try self.theorem.interner.internApp(
                     acui.head_term_id,
                     &[_]ExprId{ head, inserted },

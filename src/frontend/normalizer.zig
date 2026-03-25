@@ -11,16 +11,24 @@ const RewriteRule = @import("./rewrite_registry.zig").RewriteRule;
 const ResolvedStructuralCombiner =
     @import("./rewrite_registry.zig").ResolvedStructuralCombiner;
 const compareExprIds = @import("./canonicalizer.zig").compareExprIds;
+const DefOps = @import("./def_ops.zig");
 
 const CheckedRef = @import("./compiler.zig").CheckedRef;
 const CheckedLine = @import("./compiler.zig").CheckedLine;
 const appendRuleLine = @import("./compiler.zig").appendRuleLine;
+const appendTransportLine = @import("./compiler.zig").appendTransportLine;
 
 pub const NormalizeResult = struct {
     result_expr: ExprId,
     /// Index into the lines array of the conversion proof line,
     /// or null if the expression is unchanged (refl).
     conv_line_idx: ?usize,
+};
+
+const AcuiLeaf = struct {
+    old_expr: ExprId,
+    new_expr: ExprId,
+    is_def: bool,
 };
 
 pub const Normalizer = struct {
@@ -50,16 +58,7 @@ pub const Normalizer = struct {
         };
     }
 
-    pub const Error = error{
-        MissingCongruenceRule,
-        MissingStructuralMetadata,
-        MissingTransport,
-        OutOfMemory,
-        TemplateBinderOutOfRange,
-        TooManyTheoremExprs,
-        UnknownSort,
-        Overflow,
-    };
+    pub const Error = anyerror;
 
     pub fn normalize(self: *Normalizer, expr_id: ExprId) Error!NormalizeResult {
         if (self.cache.get(expr_id)) |cached| {
@@ -238,6 +237,55 @@ pub const Normalizer = struct {
         if (app.term_id != acui.head_term_id or app.args.len != 2) {
             return .{ .result_expr = expr_id, .conv_line_idx = null };
         }
+
+        var leaves = std.ArrayListUnmanaged(AcuiLeaf){};
+        defer leaves.deinit(self.allocator);
+        try self.collectAcuiLeaves(expr_id, acui.head_term_id, &leaves);
+
+        const unit_expr = try self.unitExpr(acui);
+        try self.applySameSideAbsorption(leaves.items, unit_expr);
+
+        var next_leaf: usize = 0;
+        const replaced = try self.rewriteAcuiLeaves(
+            expr_id,
+            relation,
+            acui,
+            leaves.items,
+            &next_leaf,
+        );
+        const exact = try self.normalizeStructuralExact(
+            replaced.result_expr,
+            relation,
+            acui,
+        );
+        const proof = try self.composeTransitivity(
+            relation,
+            expr_id,
+            replaced.result_expr,
+            exact.result_expr,
+            replaced.conv_line_idx,
+            exact.conv_line_idx,
+        );
+        return .{
+            .result_expr = exact.result_expr,
+            .conv_line_idx = proof,
+        };
+    }
+
+    fn normalizeStructuralExact(
+        self: *Normalizer,
+        expr_id: ExprId,
+        relation: ResolvedRelation,
+        acui: ResolvedStructuralCombiner,
+    ) Error!NormalizeResult {
+        const node = self.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |value| value,
+            else => return .{ .result_expr = expr_id, .conv_line_idx = null },
+        };
+        if (app.term_id != acui.head_term_id or app.args.len != 2) {
+            return .{ .result_expr = expr_id, .conv_line_idx = null };
+        }
         return try self.mergeCanonical(
             expr_id,
             app.args[0],
@@ -245,6 +293,162 @@ pub const Normalizer = struct {
             relation,
             acui,
         );
+    }
+
+    fn collectAcuiLeaves(
+        self: *Normalizer,
+        expr_id: ExprId,
+        head_term_id: u32,
+        out: *std.ArrayListUnmanaged(AcuiLeaf),
+    ) Error!void {
+        const node = self.theorem.interner.node(expr_id);
+        switch (node.*) {
+            .app => |app| {
+                if (app.term_id == head_term_id and app.args.len == 2) {
+                    try self.collectAcuiLeaves(app.args[0], head_term_id, out);
+                    try self.collectAcuiLeaves(app.args[1], head_term_id, out);
+                    return;
+                }
+            },
+            .variable => {},
+        }
+        try out.append(self.allocator, .{
+            .old_expr = expr_id,
+            .new_expr = expr_id,
+            .is_def = self.isDefItem(expr_id),
+        });
+    }
+
+    fn applySameSideAbsorption(
+        self: *Normalizer,
+        leaves: []AcuiLeaf,
+        unit_expr: ExprId,
+    ) Error!void {
+        var def_ops = DefOps.Context.init(
+            self.allocator,
+            self.theorem,
+            self.env,
+        );
+        defer def_ops.deinit();
+
+        for (leaves) |*leaf| {
+            if (leaf.old_expr == unit_expr or leaf.is_def) continue;
+            for (leaves) |owner| {
+                if (!owner.is_def) continue;
+                if (try def_ops.defCoversItem(owner.old_expr, leaf.old_expr)) {
+                    leaf.new_expr = owner.old_expr;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn rewriteAcuiLeaves(
+        self: *Normalizer,
+        expr_id: ExprId,
+        relation: ResolvedRelation,
+        acui: ResolvedStructuralCombiner,
+        leaves: []const AcuiLeaf,
+        next_leaf: *usize,
+    ) Error!NormalizeResult {
+        const node = self.theorem.interner.node(expr_id);
+        switch (node.*) {
+            .app => |app| {
+                if (app.term_id == acui.head_term_id and app.args.len == 2) {
+                    const left = try self.rewriteAcuiLeaves(
+                        app.args[0],
+                        relation,
+                        acui,
+                        leaves,
+                        next_leaf,
+                    );
+                    const right = try self.rewriteAcuiLeaves(
+                        app.args[1],
+                        relation,
+                        acui,
+                        leaves,
+                        next_leaf,
+                    );
+                    const new_args = [_]ExprId{
+                        left.result_expr,
+                        right.result_expr,
+                    };
+                    const old_args = [_]ExprId{ app.args[0], app.args[1] };
+                    const new_expr = if (left.result_expr == app.args[0] and
+                        right.result_expr == app.args[1])
+                        expr_id
+                    else
+                        try self.theorem.interner.internApp(
+                            acui.head_term_id,
+                            &new_args,
+                        );
+                    return .{
+                        .result_expr = new_expr,
+                        .conv_line_idx = try self.emitCongruenceLine(
+                            acui.head_term_id,
+                            &old_args,
+                            &new_args,
+                            &[_]?usize{
+                                left.conv_line_idx,
+                                right.conv_line_idx,
+                            },
+                        ),
+                    };
+                }
+            },
+            .variable => {},
+        }
+
+        if (next_leaf.* >= leaves.len) return error.MissingStructuralMetadata;
+        const leaf = leaves[next_leaf.*];
+        next_leaf.* += 1;
+        if (leaf.old_expr != expr_id) return error.MissingStructuralMetadata;
+        return .{
+            .result_expr = leaf.new_expr,
+            .conv_line_idx = try self.emitTransparentRelationProof(
+                relation,
+                leaf.old_expr,
+                leaf.new_expr,
+            ),
+        };
+    }
+
+    fn emitTransparentRelationProof(
+        self: *Normalizer,
+        relation: ResolvedRelation,
+        source_expr: ExprId,
+        target_expr: ExprId,
+    ) Error!?usize {
+        if (source_expr == target_expr) return null;
+        const source_rel = try self.buildRelExpr(
+            relation,
+            source_expr,
+            source_expr,
+        );
+        const target_rel = try self.buildRelExpr(
+            relation,
+            source_expr,
+            target_expr,
+        );
+        const refl_idx = try self.emitRefl(relation, source_expr);
+        return try appendTransportLine(
+            self.lines,
+            self.allocator,
+            target_rel,
+            source_rel,
+            .{ .line = refl_idx },
+        );
+    }
+
+    fn isDefItem(self: *const Normalizer, expr_id: ExprId) bool {
+        const node = self.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |value| value,
+            .variable => return false,
+        };
+        if (app.term_id >= self.env.terms.items.len) return false;
+        const term = &self.env.terms.items[app.term_id];
+        return term.is_def and term.body != null;
     }
 
     fn mergeCanonical(

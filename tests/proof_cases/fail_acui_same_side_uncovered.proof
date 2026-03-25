@@ -1,0 +1,3 @@
+acui_same_side_uncovered
+------------------------
+l1: $ emp , dbl a , b ⇒ a $ by keep_dbl (g := $ a $, a := $ a $) []
