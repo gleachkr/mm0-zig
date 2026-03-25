@@ -25,10 +25,17 @@ pub const NormalizeResult = struct {
     conv_line_idx: ?usize,
 };
 
+pub const CommonTargetResult = struct {
+    target_expr: ExprId,
+    lhs_conv_line_idx: ?usize,
+    rhs_conv_line_idx: ?usize,
+};
+
 const AcuiLeaf = struct {
     old_expr: ExprId,
     new_expr: ExprId,
     is_def: bool,
+    conv_line_idx: ?usize = null,
 };
 
 pub const Normalizer = struct {
@@ -77,7 +84,16 @@ pub const Normalizer = struct {
                 self.env.terms.items[app.term_id].ret_sort_name
             else
                 null,
-            .variable => null,
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => |idx| if (idx < self.theorem.arg_infos.len)
+                    self.theorem.arg_infos[idx].sort_name
+                else
+                    null,
+                .dummy_var => |idx| if (idx < self.theorem.theorem_dummies.items.len)
+                    self.theorem.theorem_dummies.items[idx].sort_name
+                else
+                    null,
+            },
         };
     }
 
@@ -87,6 +103,521 @@ pub const Normalizer = struct {
     ) ?ResolvedRelation {
         const sort = self.getExprSort(expr_id) orelse return null;
         return self.registry.resolveRelation(self.env, sort);
+    }
+
+    pub fn buildCommonTarget(
+        self: *Normalizer,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) Error!?CommonTargetResult {
+        if (lhs == rhs) {
+            return .{
+                .target_expr = lhs,
+                .lhs_conv_line_idx = null,
+                .rhs_conv_line_idx = null,
+            };
+        }
+
+        if (try self.buildDirectTransparentCommonTarget(lhs, rhs)) |direct| {
+            return direct;
+        }
+        if (try self.buildAcuiCommonTarget(lhs, rhs)) |acui| {
+            return acui;
+        }
+
+        const lhs_node = self.theorem.interner.node(lhs);
+        const rhs_node = self.theorem.interner.node(rhs);
+        const lhs_app = switch (lhs_node.*) {
+            .app => |value| value,
+            .variable => return null,
+        };
+        const rhs_app = switch (rhs_node.*) {
+            .app => |value| value,
+            .variable => return null,
+        };
+        if (lhs_app.term_id != rhs_app.term_id or
+            lhs_app.args.len != rhs_app.args.len)
+        {
+            return null;
+        }
+
+        const target_args = try self.allocator.alloc(ExprId, lhs_app.args.len);
+        const lhs_child_proofs = try self.allocator.alloc(?usize, lhs_app.args.len);
+        const rhs_child_proofs = try self.allocator.alloc(?usize, lhs_app.args.len);
+        var any_changed = false;
+        for (lhs_app.args, rhs_app.args, 0..) |lhs_arg, rhs_arg, idx| {
+            if (lhs_arg == rhs_arg) {
+                target_args[idx] = lhs_arg;
+                lhs_child_proofs[idx] = null;
+                rhs_child_proofs[idx] = null;
+                continue;
+            }
+            const child = try self.buildCommonTarget(lhs_arg, rhs_arg) orelse {
+                return null;
+            };
+            target_args[idx] = child.target_expr;
+            lhs_child_proofs[idx] = child.lhs_conv_line_idx;
+            rhs_child_proofs[idx] = child.rhs_conv_line_idx;
+            any_changed = true;
+        }
+        if (!any_changed) {
+            return null;
+        }
+
+        const target_expr = try self.theorem.interner.internApp(
+            lhs_app.term_id,
+            target_args,
+        );
+        return .{
+            .target_expr = target_expr,
+            .lhs_conv_line_idx = try self.emitCongruenceLine(
+                lhs_app.term_id,
+                lhs_app.args,
+                target_args,
+                lhs_child_proofs,
+            ),
+            .rhs_conv_line_idx = try self.emitCongruenceLine(
+                rhs_app.term_id,
+                rhs_app.args,
+                target_args,
+                rhs_child_proofs,
+            ),
+        };
+    }
+
+    fn buildDirectTransparentCommonTarget(
+        self: *Normalizer,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) Error!?CommonTargetResult {
+        const relation = self.resolveRelationForExpr(lhs) orelse return null;
+
+        var def_ops = DefOps.Context.init(
+            self.allocator,
+            self.theorem,
+            self.env,
+        );
+        defer def_ops.deinit();
+
+        if ((try def_ops.planConversionByDefOpening(lhs, rhs)) != null) {
+            return .{
+                .target_expr = rhs,
+                .lhs_conv_line_idx = try self.emitTransparentRelationProof(
+                    relation,
+                    lhs,
+                    rhs,
+                ),
+                .rhs_conv_line_idx = null,
+            };
+        }
+        if ((try def_ops.planConversionByDefOpening(rhs, lhs)) != null) {
+            return .{
+                .target_expr = lhs,
+                .lhs_conv_line_idx = null,
+                .rhs_conv_line_idx = try self.emitTransparentRelationProof(
+                    relation,
+                    rhs,
+                    lhs,
+                ),
+            };
+        }
+        return null;
+    }
+
+    fn buildAcuiCommonTarget(
+        self: *Normalizer,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) Error!?CommonTargetResult {
+        const relation = self.resolveRelationForExpr(lhs) orelse return null;
+        const acui = self.sharedStructuralCombiner(lhs, rhs) orelse return null;
+
+        var lhs_leaves = std.ArrayListUnmanaged(AcuiLeaf){};
+        defer lhs_leaves.deinit(self.allocator);
+        var rhs_leaves = std.ArrayListUnmanaged(AcuiLeaf){};
+        defer rhs_leaves.deinit(self.allocator);
+        try self.collectAcuiLeaves(lhs, acui.head_term_id, &lhs_leaves);
+        try self.collectAcuiLeaves(rhs, acui.head_term_id, &rhs_leaves);
+
+        const lhs_exact = try self.allocator.alloc(bool, lhs_leaves.items.len);
+        const rhs_exact = try self.allocator.alloc(bool, rhs_leaves.items.len);
+        const lhs_claimed = try self.allocator.alloc(bool, lhs_leaves.items.len);
+        const rhs_claimed = try self.allocator.alloc(bool, rhs_leaves.items.len);
+        @memset(lhs_exact, false);
+        @memset(rhs_exact, false);
+        @memset(lhs_claimed, false);
+        @memset(rhs_claimed, false);
+
+        var common_items = std.ArrayListUnmanaged(ExprId){};
+        defer common_items.deinit(self.allocator);
+        try self.cancelExactAcuiItems(
+            lhs_leaves.items,
+            rhs_leaves.items,
+            lhs_exact,
+            rhs_exact,
+            &common_items,
+        );
+
+        try self.claimOppositeConcreteLeaves(
+            lhs_leaves.items,
+            lhs_exact,
+            lhs_claimed,
+            rhs_leaves.items,
+            rhs_exact,
+            relation,
+            acui,
+        );
+        try self.claimOppositeConcreteLeaves(
+            rhs_leaves.items,
+            rhs_exact,
+            rhs_claimed,
+            lhs_leaves.items,
+            lhs_exact,
+            relation,
+            acui,
+        );
+
+        var target_items = std.ArrayListUnmanaged(ExprId){};
+        defer target_items.deinit(self.allocator);
+        try target_items.appendSlice(self.allocator, common_items.items);
+
+        for (lhs_leaves.items, 0..) |leaf, idx| {
+            if (lhs_exact[idx]) continue;
+            if (leaf.is_def) {
+                if (!lhs_claimed[idx]) {
+                    return null;
+                }
+                try target_items.append(self.allocator, leaf.old_expr);
+                continue;
+            }
+            if (leaf.new_expr == leaf.old_expr) {
+                return null;
+            }
+        }
+        for (rhs_leaves.items, 0..) |leaf, idx| {
+            if (rhs_exact[idx]) continue;
+            if (leaf.is_def) {
+                if (!rhs_claimed[idx]) {
+                    return null;
+                }
+                try target_items.append(self.allocator, leaf.old_expr);
+                continue;
+            }
+            if (leaf.new_expr == leaf.old_expr) {
+                return null;
+            }
+        }
+
+        const target_expr = try self.buildCanonicalAcuiFromItems(
+            target_items.items,
+            acui,
+        );
+
+        const lhs_result = try self.buildAcuiRewriteConversion(
+            lhs,
+            relation,
+            acui,
+            lhs_leaves.items,
+        );
+        const rhs_result = try self.buildAcuiRewriteConversion(
+            rhs,
+            relation,
+            acui,
+            rhs_leaves.items,
+        );
+        if (lhs_result.result_expr != target_expr or
+            rhs_result.result_expr != target_expr)
+        {
+            return null;
+        }
+
+        return .{
+            .target_expr = target_expr,
+            .lhs_conv_line_idx = lhs_result.conv_line_idx,
+            .rhs_conv_line_idx = rhs_result.conv_line_idx,
+        };
+    }
+
+    fn claimOppositeConcreteLeaves(
+        self: *Normalizer,
+        owners: []AcuiLeaf,
+        owner_exact: []const bool,
+        owner_claimed: []bool,
+        concretes: []AcuiLeaf,
+        concrete_exact: []const bool,
+        relation: ResolvedRelation,
+        acui: ResolvedStructuralCombiner,
+    ) Error!void {
+        for (owners, 0..) |owner, owner_idx| {
+            if (owner_exact[owner_idx] or !owner.is_def) continue;
+            for (concretes, 0..) |*concrete, concrete_idx| {
+                if (concrete_exact[concrete_idx] or concrete.is_def) continue;
+                if (concrete.new_expr != concrete.old_expr) continue;
+                const proof = try self.buildConcreteToDefCoverProof(
+                    concrete.old_expr,
+                    owner.old_expr,
+                    relation,
+                    acui,
+                ) orelse continue;
+                concrete.new_expr = owner.old_expr;
+                concrete.conv_line_idx = proof;
+                owner_claimed[owner_idx] = true;
+            }
+        }
+    }
+
+    fn buildConcreteToDefCoverProof(
+        self: *Normalizer,
+        concrete_expr: ExprId,
+        def_expr: ExprId,
+        relation: ResolvedRelation,
+        acui: ResolvedStructuralCombiner,
+    ) Error!?usize {
+        var def_ops = DefOps.Context.init(
+            self.allocator,
+            self.theorem,
+            self.env,
+        );
+        defer def_ops.deinit();
+
+        const witness = try def_ops.instantiateDefTowardAcuiItem(
+            def_expr,
+            concrete_expr,
+            acui.head_term_id,
+        ) orelse return null;
+        const def_to_witness = try self.emitTransparentRelationProof(
+            relation,
+            def_expr,
+            witness,
+        );
+        if (witness == concrete_expr) {
+            return try self.emitSymm(
+                relation,
+                def_expr,
+                concrete_expr,
+                def_to_witness orelse return null,
+            );
+        }
+
+        const witness_to_concrete = if (self.isAcuiExpr(
+            witness,
+            acui.head_term_id,
+        )) blk: {
+            const exact = try self.normalizeStructuralExact(
+                witness,
+                relation,
+                acui,
+            );
+            if (exact.result_expr != concrete_expr) return null;
+            break :blk exact.conv_line_idx;
+        } else return null;
+
+        const def_to_concrete = try self.composeTransitivity(
+            relation,
+            def_expr,
+            witness,
+            concrete_expr,
+            def_to_witness,
+            witness_to_concrete,
+        ) orelse return null;
+        return try self.emitSymm(
+            relation,
+            def_expr,
+            concrete_expr,
+            def_to_concrete,
+        );
+    }
+
+    fn isAcuiExpr(
+        self: *Normalizer,
+        expr_id: ExprId,
+        head_term_id: u32,
+    ) bool {
+        const node = self.theorem.interner.node(expr_id);
+        return switch (node.*) {
+            .app => |app| app.term_id == head_term_id and app.args.len == 2,
+            .variable => false,
+        };
+    }
+
+    fn sharedStructuralCombiner(
+        self: *Normalizer,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) ?ResolvedStructuralCombiner {
+        const lhs_node = self.theorem.interner.node(lhs);
+        switch (lhs_node.*) {
+            .app => |app| if (self.registry.resolveStructuralCombiner(
+                self.env,
+                app.term_id,
+            )) |acui| {
+                if (self.exprMatchesCombinerSort(rhs, acui)) return acui;
+            },
+            .variable => {},
+        }
+        const rhs_node = self.theorem.interner.node(rhs);
+        switch (rhs_node.*) {
+            .app => |app| if (self.registry.resolveStructuralCombiner(
+                self.env,
+                app.term_id,
+            )) |acui| {
+                if (self.exprMatchesCombinerSort(lhs, acui)) return acui;
+            },
+            .variable => {},
+        }
+        const lhs_sort = self.getExprSort(lhs) orelse return null;
+        const rhs_sort = self.getExprSort(rhs) orelse return null;
+        if (!std.mem.eql(u8, lhs_sort, rhs_sort)) return null;
+        return self.registry.resolveStructuralCombinerForSort(
+            self.env,
+            lhs_sort,
+        );
+    }
+
+    fn exprMatchesCombinerSort(
+        self: *Normalizer,
+        expr_id: ExprId,
+        acui: ResolvedStructuralCombiner,
+    ) bool {
+        const sort_name = self.getExprSort(expr_id) orelse return false;
+        if (acui.head_term_id >= self.env.terms.items.len) return false;
+        return std.mem.eql(
+            u8,
+            sort_name,
+            self.env.terms.items[acui.head_term_id].ret_sort_name,
+        );
+    }
+
+    fn cancelExactAcuiItems(
+        self: *Normalizer,
+        lhs: []const AcuiLeaf,
+        rhs: []const AcuiLeaf,
+        lhs_exact: []bool,
+        rhs_exact: []bool,
+        common_items: *std.ArrayListUnmanaged(ExprId),
+    ) Error!void {
+        var lhs_idx: usize = 0;
+        var rhs_idx: usize = 0;
+        while (lhs_idx < lhs.len and rhs_idx < rhs.len) {
+            switch (compareExprIds(
+                self.theorem,
+                lhs[lhs_idx].old_expr,
+                rhs[rhs_idx].old_expr,
+            )) {
+                .lt => lhs_idx += 1,
+                .gt => rhs_idx += 1,
+                .eq => {
+                    lhs_exact[lhs_idx] = true;
+                    rhs_exact[rhs_idx] = true;
+                    try common_items.append(
+                        self.allocator,
+                        lhs[lhs_idx].old_expr,
+                    );
+                    lhs_idx += 1;
+                    rhs_idx += 1;
+                },
+            }
+        }
+    }
+
+    fn buildCanonicalAcuiFromItems(
+        self: *Normalizer,
+        items: []const ExprId,
+        acui: ResolvedStructuralCombiner,
+    ) Error!ExprId {
+        const sorted = try self.allocator.dupe(ExprId, items);
+        defer self.allocator.free(sorted);
+
+        var idx: usize = 1;
+        while (idx < sorted.len) : (idx += 1) {
+            const item = sorted[idx];
+            var pos = idx;
+            while (pos > 0 and compareExprIds(
+                self.theorem,
+                sorted[pos - 1],
+                item,
+            ) == .gt) : (pos -= 1) {
+                sorted[pos] = sorted[pos - 1];
+            }
+            sorted[pos] = item;
+        }
+
+        var unique = std.ArrayListUnmanaged(ExprId){};
+        defer unique.deinit(self.allocator);
+        for (sorted) |item| {
+            if (unique.items.len != 0 and
+                compareExprIds(
+                    self.theorem,
+                    unique.items[unique.items.len - 1],
+                    item,
+                ) == .eq and acui.idem_id != null)
+            {
+                continue;
+            }
+            try unique.append(self.allocator, item);
+        }
+        return try self.rebuildAcuiTree(
+            unique.items,
+            acui.head_term_id,
+            acui.unit_term_id,
+        );
+    }
+
+    fn buildAcuiRewriteConversion(
+        self: *Normalizer,
+        expr_id: ExprId,
+        relation: ResolvedRelation,
+        acui: ResolvedStructuralCombiner,
+        leaves: []const AcuiLeaf,
+    ) Error!NormalizeResult {
+        var next_leaf: usize = 0;
+        const replaced = try self.rewriteAcuiLeaves(
+            expr_id,
+            relation,
+            acui,
+            leaves,
+            &next_leaf,
+        );
+        const exact = try self.normalizeStructuralExact(
+            replaced.result_expr,
+            relation,
+            acui,
+        );
+        const proof = try self.composeTransitivity(
+            relation,
+            expr_id,
+            replaced.result_expr,
+            exact.result_expr,
+            replaced.conv_line_idx,
+            exact.conv_line_idx,
+        );
+        return .{
+            .result_expr = exact.result_expr,
+            .conv_line_idx = proof,
+        };
+    }
+
+    fn rebuildAcuiTree(
+        self: *Normalizer,
+        items: []const ExprId,
+        head_term_id: u32,
+        unit_term_id: u32,
+    ) Error!ExprId {
+        if (items.len == 0) {
+            return try self.theorem.interner.internApp(unit_term_id, &.{});
+        }
+        if (items.len == 1) return items[0];
+
+        var current = items[items.len - 1];
+        var idx = items.len - 1;
+        while (idx > 0) {
+            idx -= 1;
+            current = try self.theorem.interner.internApp(
+                head_term_id,
+                &[_]ExprId{ items[idx], current },
+            );
+        }
+        return current;
     }
 
     fn normalizeUncached(self: *Normalizer, expr_id: ExprId) Error!NormalizeResult {
@@ -243,7 +774,12 @@ pub const Normalizer = struct {
         try self.collectAcuiLeaves(expr_id, acui.head_term_id, &leaves);
 
         const unit_expr = try self.unitExpr(acui);
-        try self.applySameSideAbsorption(leaves.items, unit_expr);
+        try self.applySameSideAbsorption(
+            leaves.items,
+            unit_expr,
+            relation,
+            acui,
+        );
 
         var next_leaf: usize = 0;
         const replaced = try self.rewriteAcuiLeaves(
@@ -316,6 +852,7 @@ pub const Normalizer = struct {
             .old_expr = expr_id,
             .new_expr = expr_id,
             .is_def = self.isDefItem(expr_id),
+            .conv_line_idx = null,
         });
     }
 
@@ -323,22 +860,22 @@ pub const Normalizer = struct {
         self: *Normalizer,
         leaves: []AcuiLeaf,
         unit_expr: ExprId,
+        relation: ResolvedRelation,
+        acui: ResolvedStructuralCombiner,
     ) Error!void {
-        var def_ops = DefOps.Context.init(
-            self.allocator,
-            self.theorem,
-            self.env,
-        );
-        defer def_ops.deinit();
-
         for (leaves) |*leaf| {
             if (leaf.old_expr == unit_expr or leaf.is_def) continue;
             for (leaves) |owner| {
                 if (!owner.is_def) continue;
-                if (try def_ops.defCoversItem(owner.old_expr, leaf.old_expr)) {
-                    leaf.new_expr = owner.old_expr;
-                    break;
-                }
+                const proof = try self.buildConcreteToDefCoverProof(
+                    leaf.old_expr,
+                    owner.old_expr,
+                    relation,
+                    acui,
+                ) orelse continue;
+                leaf.new_expr = owner.old_expr;
+                leaf.conv_line_idx = proof;
+                break;
             }
         }
     }
@@ -405,11 +942,14 @@ pub const Normalizer = struct {
         if (leaf.old_expr != expr_id) return error.MissingStructuralMetadata;
         return .{
             .result_expr = leaf.new_expr,
-            .conv_line_idx = try self.emitTransparentRelationProof(
-                relation,
-                leaf.old_expr,
-                leaf.new_expr,
-            ),
+            .conv_line_idx = if (leaf.conv_line_idx) |idx|
+                idx
+            else
+                try self.emitTransparentRelationProof(
+                    relation,
+                    leaf.old_expr,
+                    leaf.new_expr,
+                ),
         };
     }
 

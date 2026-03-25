@@ -1,0 +1,3 @@
+acui_cross_side_cancel
+----------------------
+l1: $ dbl a , b ⇒ a $ by dup_ax (g := $ b $, a := $ a $) []

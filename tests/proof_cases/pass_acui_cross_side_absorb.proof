@@ -1,0 +1,3 @@
+acui_cross_side_absorb
+----------------------
+l1: $ dbl a ⇒ a $ by dup_ax (g := $ emp $, a := $ a $) []

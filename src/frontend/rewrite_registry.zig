@@ -355,6 +355,30 @@ pub const RewriteRegistry = struct {
         return self.acui_by_head.contains(head_term_id);
     }
 
+    pub fn resolveStructuralCombinerForSort(
+        self: *RewriteRegistry,
+        env: *const GlobalEnv,
+        sort_name: []const u8,
+    ) ?ResolvedStructuralCombiner {
+        var found_head: ?u32 = null;
+        var it = self.acui_by_head.iterator();
+        while (it.next()) |entry| {
+            const head_term_id = entry.key_ptr.*;
+            if (head_term_id >= env.terms.items.len) continue;
+            const term = &env.terms.items[head_term_id];
+            if (!std.mem.eql(u8, term.ret_sort_name, sort_name)) continue;
+            if (found_head) |existing| {
+                if (existing != head_term_id) return null;
+                continue;
+            }
+            found_head = head_term_id;
+        }
+        return if (found_head) |head_term_id|
+            self.resolveStructuralCombiner(env, head_term_id)
+        else
+            null;
+    }
+
     pub fn resolveStructuralCombiner(
         self: *RewriteRegistry,
         env: *const GlobalEnv,

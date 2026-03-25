@@ -85,6 +85,30 @@ pub const Context = struct {
         return try self.planDefToTarget(def_expr, item_expr, .lhs);
     }
 
+    pub fn instantiateDefTowardAcuiItem(
+        self: *Context,
+        def_expr: ExprId,
+        item_expr: ExprId,
+        head_term_id: u32,
+    ) anyerror!?ExprId {
+        const def = self.getConcreteDef(def_expr) orelse return null;
+        const symbolic = try self.expandConcreteDef(def_expr) orelse return null;
+
+        var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
+        defer dummy_bindings.deinit(self.allocator);
+
+        if (!try self.matchSymbolicAcuiLeafToExpr(
+            symbolic,
+            item_expr,
+            head_term_id,
+            &dummy_bindings,
+        )) {
+            return null;
+        }
+        if (dummy_bindings.items.len != def.term.dummy_args.len) return null;
+        return try self.materializeSymbolic(symbolic, dummy_bindings.items);
+    }
+
     pub fn planDefToTarget(
         self: *Context,
         def_expr: ExprId,
@@ -544,6 +568,54 @@ pub const Context = struct {
                 return false;
             },
         }
+    }
+
+    fn matchSymbolicAcuiLeafToExpr(
+        self: *Context,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        head_term_id: u32,
+        dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
+    ) anyerror!bool {
+        switch (symbolic.*) {
+            .app => |app| {
+                if (app.term_id == head_term_id and app.args.len == 2) {
+                    const checkpoint = dummy_bindings.items.len;
+                    if (try self.matchSymbolicAcuiLeafToExpr(
+                        app.args[0],
+                        actual,
+                        head_term_id,
+                        dummy_bindings,
+                    )) {
+                        return true;
+                    }
+                    dummy_bindings.shrinkRetainingCapacity(checkpoint);
+                    if (try self.matchSymbolicAcuiLeafToExpr(
+                        app.args[1],
+                        actual,
+                        head_term_id,
+                        dummy_bindings,
+                    )) {
+                        return true;
+                    }
+                    dummy_bindings.shrinkRetainingCapacity(checkpoint);
+                    return false;
+                }
+            },
+            else => {},
+        }
+
+        const checkpoint = dummy_bindings.items.len;
+        if (try self.matchSymbolicToExpr(
+            symbolic,
+            actual,
+            &[_]?ExprId{},
+            dummy_bindings,
+        )) {
+            return true;
+        }
+        dummy_bindings.shrinkRetainingCapacity(checkpoint);
+        return false;
     }
 
     fn matchSymbolicDummy(

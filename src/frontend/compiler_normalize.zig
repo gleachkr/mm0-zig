@@ -6,6 +6,7 @@ const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const ResolvedRelation = @import("./rewrite_registry.zig").ResolvedRelation;
 const NormalizeSpec = @import("./rewrite_registry.zig").NormalizeSpec;
 const Normalizer = @import("./normalizer.zig").Normalizer;
+const CommonTargetResult = @import("./normalizer.zig").CommonTargetResult;
 const CheckedLine = @import("./compiler.zig").CheckedLine;
 const CheckedRef = @import("./compiler.zig").CheckedRef;
 const appendTransportLine = @import("./compiler.zig").appendTransportLine;
@@ -44,30 +45,59 @@ pub fn buildNormalizedConversion(
     const relation = normalizer.resolveRelationForExpr(actual) orelse return null;
     const norm_actual = try normalizer.normalize(actual);
     const norm_expected = try normalizer.normalize(expected);
-    if (norm_actual.result_expr != norm_expected.result_expr) return null;
 
-    const conv_line_idx = if (norm_actual.conv_line_idx) |actual_idx|
-        if (norm_expected.conv_line_idx) |expected_idx|
+    const common_target: CommonTargetResult = if (norm_actual.result_expr ==
+        norm_expected.result_expr)
+        .{
+            .target_expr = norm_actual.result_expr,
+            .lhs_conv_line_idx = null,
+            .rhs_conv_line_idx = null,
+        }
+    else
+        (try normalizer.buildCommonTarget(
+            norm_actual.result_expr,
+            norm_expected.result_expr,
+        ) orelse return null);
+
+    const actual_to_common = try normalizer.composeTransitivity(
+        relation,
+        actual,
+        norm_actual.result_expr,
+        common_target.target_expr,
+        norm_actual.conv_line_idx,
+        common_target.lhs_conv_line_idx,
+    );
+    const expected_to_common = try normalizer.composeTransitivity(
+        relation,
+        expected,
+        norm_expected.result_expr,
+        common_target.target_expr,
+        norm_expected.conv_line_idx,
+        common_target.rhs_conv_line_idx,
+    );
+
+    const conv_line_idx = if (actual_to_common) |actual_idx|
+        if (expected_to_common) |expected_idx|
             try normalizer.composeTransitivity(
                 relation,
                 actual,
-                norm_actual.result_expr,
+                common_target.target_expr,
                 expected,
                 actual_idx,
                 try normalizer.emitSymm(
                     relation,
                     expected,
-                    norm_expected.result_expr,
+                    common_target.target_expr,
                     expected_idx,
                 ),
             )
         else
             actual_idx
-    else if (norm_expected.conv_line_idx) |expected_idx|
+    else if (expected_to_common) |expected_idx|
         try normalizer.emitSymm(
             relation,
             expected,
-            norm_expected.result_expr,
+            common_target.target_expr,
             expected_idx,
         )
     else

@@ -2073,10 +2073,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_abbrev_hidden_dummy_and_elim", .outcome = .known_fail },
     .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx", .outcome = .known_fail },
     .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx_reorder", .outcome = .known_fail },
-    .{
-        .stem = "pass_abbrev_assoc",
-        .outcome = .{ .fail = error.ConclusionMismatch },
-    },
+    .{ .stem = "pass_abbrev_assoc", .outcome = .pass },
     .{
         .stem = "pass_abbrev_rewrite",
         .outcome = .{ .fail = error.ConclusionMismatch },
@@ -2121,6 +2118,8 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_acui_principal_remainder", .outcome = .pass },
     .{ .stem = "pass_acui_same_side_absorb", .outcome = .pass },
     .{ .stem = "pass_acui_same_side_absorb_infer", .outcome = .pass },
+    .{ .stem = "pass_acui_cross_side_absorb", .outcome = .pass },
+    .{ .stem = "pass_acui_cross_side_cancel", .outcome = .pass },
     .{ .stem = "pass_au_category", .outcome = .pass },
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
     .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
@@ -2145,6 +2144,10 @@ const proof_cases = [_]ProofCase{
     },
     .{
         .stem = "fail_acui_same_side_uncovered",
+        .outcome = .{ .fail = error.ConclusionMismatch },
+    },
+    .{
+        .stem = "fail_acui_cross_side_uncovered",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
     .{ .stem = "fail_abbrev_hidden_dummy_ax", .outcome = .pass },
