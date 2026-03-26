@@ -12,6 +12,7 @@ const ProofLine = @import("./proof_script.zig").ProofLine;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const NormalizeSpec = @import("./rewrite_registry.zig").NormalizeSpec;
 const Normalizer = @import("./normalizer.zig").Normalizer;
+const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
 const InferenceSolver = @import("./inference_solver.zig").Solver;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 const CompilerViews = @import("./compiler_views.zig");
@@ -131,6 +132,44 @@ pub fn canConvertByDefOpening(
     )) != null;
 }
 
+fn exactBindingSeeds(
+    allocator: std.mem.Allocator,
+    partial_bindings: []const ?ExprId,
+) ![]DefOps.BindingSeed {
+    const seeds = try allocator.alloc(
+        DefOps.BindingSeed,
+        partial_bindings.len,
+    );
+    for (partial_bindings, 0..) |binding, idx| {
+        seeds[idx] = if (binding) |expr_id|
+            .{ .exact = expr_id }
+        else
+            .none;
+    }
+    return seeds;
+}
+
+fn bindingSeedsWithSemanticOverrides(
+    allocator: std.mem.Allocator,
+    exact_bindings: []const ?ExprId,
+    semantic_bindings: []const ?ExprId,
+    mode: DefOps.BindingMode,
+) ![]DefOps.BindingSeed {
+    const seeds = try allocator.alloc(
+        DefOps.BindingSeed,
+        exact_bindings.len,
+    );
+    for (exact_bindings, semantic_bindings, 0..) |exact, semantic, idx| {
+        seeds[idx] = if (exact) |expr_id|
+            .{ .exact = expr_id }
+        else if (semantic) |expr_id|
+            .{ .semantic = .{ .expr_id = expr_id, .mode = mode } }
+        else
+            .none;
+    }
+    return seeds;
+}
+
 pub fn inferBindingsTransparent(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
@@ -140,7 +179,6 @@ pub fn inferBindingsTransparent(
     ref_exprs: []const ExprId,
     line_expr: ExprId,
 ) ![]const ExprId {
-    const bindings = try allocator.dupe(?ExprId, partial_bindings);
     var def_ops = DefOps.Context.init(
         allocator,
         @constCast(theorem),
@@ -148,194 +186,21 @@ pub fn inferBindingsTransparent(
     );
     defer def_ops.deinit();
 
+    const seeds = try exactBindingSeeds(allocator, partial_bindings);
+    defer allocator.free(seeds);
+
+    var session = try def_ops.beginRuleMatch(rule.args, seeds);
+    defer session.deinit();
+
     for (rule.hyps, ref_exprs) |hyp, ref_expr| {
-        if (!try def_ops.matchTemplateTransparent(
-            hyp,
-            ref_expr,
-            bindings,
-        )) {
+        if (!try session.matchTransparent(hyp, ref_expr)) {
             return error.UnifyMismatch;
         }
     }
-    if (!try def_ops.matchTemplateTransparent(
-        rule.concl,
-        line_expr,
-        bindings,
-    )) {
+    if (!try session.matchTransparent(rule.concl, line_expr)) {
         return error.UnifyMismatch;
     }
-    return try requireConcreteBindings(allocator, bindings);
-}
-
-const MirroredTheoremContext = struct {
-    theorem: TheoremContext,
-    source_dummy_map: []const ExprId,
-    mirror_dummy_map: []const ExprId,
-
-    fn init(
-        allocator: std.mem.Allocator,
-        source: *const TheoremContext,
-    ) !MirroredTheoremContext {
-        var theorem = TheoremContext.init(allocator);
-        theorem.arg_infos = source.arg_infos;
-        try theorem.seedBinderCount(source.theorem_vars.items.len);
-        theorem.next_dummy_dep = countBoundArgs(source.arg_infos);
-
-        const source_dummy_map = try allocator.alloc(
-            ExprId,
-            source.theorem_dummies.items.len,
-        );
-        const mirror_dummy_map = try allocator.alloc(
-            ExprId,
-            source.theorem_dummies.items.len,
-        );
-        for (source.theorem_dummies.items, 0..) |dummy, idx| {
-            const mirror_dummy = try theorem.addDummyVarResolved(
-                dummy.sort_name,
-                dummy.sort_id,
-            );
-            source_dummy_map[idx] = mirror_dummy;
-            mirror_dummy_map[idx] = try originalDummyExprId(source, idx);
-        }
-
-        return .{
-            .theorem = theorem,
-            .source_dummy_map = source_dummy_map,
-            .mirror_dummy_map = mirror_dummy_map,
-        };
-    }
-
-    fn deinit(
-        self: *MirroredTheoremContext,
-        allocator: std.mem.Allocator,
-    ) void {
-        allocator.free(self.source_dummy_map);
-        allocator.free(self.mirror_dummy_map);
-        self.theorem.deinit();
-    }
-};
-
-pub fn countBoundArgs(args: []const ArgInfo) u32 {
-    var count: u32 = 0;
-    for (args) |arg| {
-        if (arg.bound) count += 1;
-    }
-    return count;
-}
-
-pub fn originalDummyExprId(
-    theorem: *const TheoremContext,
-    idx: usize,
-) !ExprId {
-    return try @constCast(&theorem.interner).internVar(.{
-        .dummy_var = @intCast(idx),
-    });
-}
-
-pub fn copyExprBetweenTheorems(
-    allocator: std.mem.Allocator,
-    source: *const TheoremContext,
-    target: *TheoremContext,
-    source_expr: ExprId,
-    source_dummy_map: []const ExprId,
-    cache: *std.AutoHashMapUnmanaged(ExprId, ExprId),
-) !ExprId {
-    if (cache.get(source_expr)) |existing| return existing;
-
-    const copied = switch (source.interner.node(source_expr).*) {
-        .variable => |var_id| switch (var_id) {
-            .theorem_var => |idx| blk: {
-                if (idx >= target.theorem_vars.items.len) {
-                    return error.UnknownTheoremVariable;
-                }
-                break :blk target.theorem_vars.items[idx];
-            },
-            .dummy_var => |idx| blk: {
-                if (idx >= source_dummy_map.len) {
-                    return error.UnknownDummyVar;
-                }
-                break :blk source_dummy_map[idx];
-            },
-        },
-        .app => |app| blk: {
-            const args = try allocator.alloc(ExprId, app.args.len);
-            errdefer allocator.free(args);
-            for (app.args, 0..) |arg, idx| {
-                args[idx] = try copyExprBetweenTheorems(
-                    allocator,
-                    source,
-                    target,
-                    arg,
-                    source_dummy_map,
-                    cache,
-                );
-            }
-            break :blk try target.interner.internAppOwned(app.term_id, args);
-        },
-    };
-
-    try cache.put(allocator, source_expr, copied);
-    return copied;
-}
-
-fn matchNormalizedPattern(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    mirror: *const MirroredTheoremContext,
-    pattern_expr: ExprId,
-    actual_expr: ExprId,
-    placeholders: *const std.AutoHashMapUnmanaged(ExprId, usize),
-    bindings: []?ExprId,
-    reverse_cache: *std.AutoHashMapUnmanaged(ExprId, ExprId),
-) !bool {
-    if (placeholders.get(pattern_expr)) |idx| {
-        const actual = try copyExprBetweenTheorems(
-            allocator,
-            &mirror.theorem,
-            theorem,
-            actual_expr,
-            mirror.mirror_dummy_map,
-            reverse_cache,
-        );
-        if (bindings[idx]) |existing| {
-            return existing == actual;
-        }
-        bindings[idx] = actual;
-        return true;
-    }
-
-    const pattern_node = mirror.theorem.interner.node(pattern_expr);
-    const actual_node = mirror.theorem.interner.node(actual_expr);
-    return switch (pattern_node.*) {
-        .variable => switch (actual_node.*) {
-            .variable => pattern_expr == actual_expr,
-            .app => false,
-        },
-        .app => |pattern_app| switch (actual_node.*) {
-            .variable => false,
-            .app => |actual_app| blk: {
-                if (pattern_app.term_id != actual_app.term_id) break :blk false;
-                if (pattern_app.args.len != actual_app.args.len) {
-                    break :blk false;
-                }
-                for (pattern_app.args, actual_app.args) |pattern_arg, actual_arg| {
-                    if (!try matchNormalizedPattern(
-                        allocator,
-                        theorem,
-                        mirror,
-                        pattern_arg,
-                        actual_arg,
-                        placeholders,
-                        bindings,
-                        reverse_cache,
-                    )) {
-                        break :blk false;
-                    }
-                }
-                break :blk true;
-            },
-        },
-    };
+    return try session.finalizeConcreteBindings();
 }
 
 fn hypMarkedForNormalize(norm_spec: ?NormalizeSpec, hyp_idx: usize) bool {
@@ -346,160 +211,156 @@ fn hypMarkedForNormalize(norm_spec: ?NormalizeSpec, hyp_idx: usize) bool {
     return false;
 }
 
-pub fn inferBindingsByNormalizedConclusion(
+fn matchRulePartNormalized(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
-    theorem: *TheoremContext,
-    rule_id: u32,
-    rule: *const RuleDecl,
-    partial_bindings: []const ?ExprId,
-    ref_exprs: []const ExprId,
-    line_expr: ExprId,
-) ![]const ExprId {
-    const bindings = try allocator.dupe(?ExprId, partial_bindings);
-    const norm_spec = registry.getNormalizeSpec(rule_id);
-    const pending_normalized = try allocator.alloc(bool, rule.hyps.len);
-    defer allocator.free(pending_normalized);
-    @memset(pending_normalized, false);
-
-    var def_ops = DefOps.Context.init(
-        allocator,
-        theorem,
-        env,
-    );
-    defer def_ops.deinit();
-    for (rule.hyps, ref_exprs, 0..) |hyp, ref_expr, hyp_idx| {
-        if (try def_ops.matchTemplateWithDefOpening(
-            hyp,
-            ref_expr,
-            bindings,
-        )) {
-            continue;
-        }
-        if (hypMarkedForNormalize(norm_spec, hyp_idx)) {
-            pending_normalized[hyp_idx] = true;
-            continue;
-        }
-        return error.UnifyMismatch;
-    }
-    if (!hasOmittedBindings(bindings)) {
-        var any_pending = false;
-        for (pending_normalized) |pending| {
-            any_pending = any_pending or pending;
-        }
-        if (!any_pending) {
-            return try requireConcreteBindings(allocator, bindings);
-        }
-    }
-
-    var mirror = try MirroredTheoremContext.init(allocator, theorem);
-    defer mirror.deinit(allocator);
-
-    var to_mirror = std.AutoHashMapUnmanaged(ExprId, ExprId){};
-    defer to_mirror.deinit(allocator);
-
-    const mirror_line = try copyExprBetweenTheorems(
-        allocator,
-        theorem,
-        &mirror.theorem,
-        line_expr,
-        mirror.source_dummy_map,
-        &to_mirror,
-    );
-
-    const mirror_binders = try allocator.alloc(ExprId, rule.args.len);
-    defer allocator.free(mirror_binders);
-    var placeholders = std.AutoHashMapUnmanaged(ExprId, usize){};
-    defer placeholders.deinit(allocator);
-
-    for (bindings, 0..) |binding, idx| {
-        if (binding) |expr_id| {
-            mirror_binders[idx] = try copyExprBetweenTheorems(
-                allocator,
-                theorem,
-                &mirror.theorem,
-                expr_id,
-                mirror.source_dummy_map,
-                &to_mirror,
-            );
-            continue;
-        }
-        const sort_id = env.sort_names.get(rule.args[idx].sort_name) orelse {
-            return error.UnknownSort;
-        };
-        const placeholder = try mirror.theorem.addDummyVarResolved(
-            rule.args[idx].sort_name,
-            sort_id,
-        );
-        mirror_binders[idx] = placeholder;
-        try placeholders.put(allocator, placeholder, idx);
-    }
+    session: *DefOps.RuleMatchSession,
+    template: TemplateExpr,
+    actual: ExprId,
+) !bool {
+    var comparison = try session.beginNormalizedComparison(template, actual);
+    defer comparison.deinit();
 
     var checked = std.ArrayListUnmanaged(CheckedLine){};
     defer checked.deinit(allocator);
 
     var normalizer = Normalizer.init(
         allocator,
-        &mirror.theorem,
+        comparison.mirrorTheorem(),
         registry,
         env,
         &checked,
     );
+    const normalized_expected =
+        try normalizer.normalize(comparison.expected_expr);
+    const normalized_actual =
+        try normalizer.normalize(comparison.actual_expr);
 
-    var reverse_cache = std.AutoHashMapUnmanaged(ExprId, ExprId){};
-    defer reverse_cache.deinit(allocator);
-
-    for (rule.hyps, ref_exprs, 0..) |hyp, ref_expr, hyp_idx| {
-        if (!pending_normalized[hyp_idx]) continue;
-        const mirror_hyp = try mirror.theorem.instantiateTemplate(
-            hyp,
-            mirror_binders,
-        );
-        const mirror_ref = try copyExprBetweenTheorems(
-            allocator,
-            theorem,
-            &mirror.theorem,
-            ref_expr,
-            mirror.source_dummy_map,
-            &to_mirror,
-        );
-        const normalized_hyp = try normalizer.normalize(mirror_hyp);
-        const normalized_ref = try normalizer.normalize(mirror_ref);
-        if (!try matchNormalizedPattern(
-            allocator,
-            theorem,
-            &mirror,
-            normalized_hyp.result_expr,
-            normalized_ref.result_expr,
-            &placeholders,
-            bindings,
-            &reverse_cache,
-        )) {
-            return error.UnifyMismatch;
-        }
-    }
-
-    const mirror_concl = try mirror.theorem.instantiateTemplate(
-        rule.concl,
-        mirror_binders,
+    var canonicalizer = Canonicalizer.init(
+        allocator,
+        comparison.mirrorTheorem(),
+        registry,
+        env,
     );
-    const normalized_expected = try normalizer.normalize(mirror_concl);
-    const normalized_actual = try normalizer.normalize(mirror_line);
-    if (!try matchNormalizedPattern(
+    const canonical_expected = try canonicalizer.canonicalize(
+        normalized_expected.result_expr,
+    );
+    const canonical_actual = try canonicalizer.canonicalize(
+        normalized_actual.result_expr,
+    );
+    return try comparison.finish(
+        canonical_expected,
+        canonical_actual,
+    );
+}
+
+fn inferBindingsByRuleMatchSession(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    theorem: *TheoremContext,
+    rule_id: u32,
+    rule: *const RuleDecl,
+    seeds: []const DefOps.BindingSeed,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ![]const ExprId {
+    var def_ops = DefOps.Context.initWithRegistry(
         allocator,
         theorem,
-        &mirror,
-        normalized_expected.result_expr,
-        normalized_actual.result_expr,
-        &placeholders,
-        bindings,
-        &reverse_cache,
-    )) {
+        env,
+        registry,
+    );
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(rule.args, seeds);
+    defer session.deinit();
+
+    const norm_spec = registry.getNormalizeSpec(rule_id);
+
+    for (rule.hyps, ref_exprs, 0..) |hyp, ref_expr, hyp_idx| {
+        if (try session.matchTransparent(hyp, ref_expr)) continue;
+        if (hypMarkedForNormalize(norm_spec, hyp_idx) and
+            try matchRulePartNormalized(
+                allocator,
+                env,
+                registry,
+                &session,
+                hyp,
+                ref_expr,
+            ))
+        {
+            continue;
+        }
         return error.UnifyMismatch;
     }
 
-    return try requireConcreteBindings(allocator, bindings);
+    if (norm_spec != null and norm_spec.?.concl) {
+        if (!try matchRulePartNormalized(
+            allocator,
+            env,
+            registry,
+            &session,
+            rule.concl,
+            line_expr,
+        )) {
+            return error.UnifyMismatch;
+        }
+    } else if (!try session.matchTransparent(rule.concl, line_expr)) {
+        return error.UnifyMismatch;
+    }
+
+    return try session.finalizeConcreteBindings();
+}
+
+fn tryRuleMatchFallbackBindings(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    theorem: *TheoremContext,
+    rule_id: u32,
+    rule: *const RuleDecl,
+    seeds: []const DefOps.BindingSeed,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ?[]const ExprId {
+    return inferBindingsByRuleMatchSession(
+        allocator,
+        env,
+        registry,
+        theorem,
+        rule_id,
+        rule,
+        seeds,
+        ref_exprs,
+        line_expr,
+    ) catch {
+        return null;
+    };
+}
+
+fn validateInferredBindings(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *TheoremContext,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    rule: *const RuleDecl,
+    bindings: []const ExprId,
+) ![]const ExprId {
+    errdefer allocator.free(bindings);
+    try validateResolvedBindings(
+        self,
+        env,
+        theorem,
+        assertion,
+        line,
+        rule,
+        bindings,
+    );
+    return bindings;
 }
 
 pub fn shouldUseAdvancedInference(
@@ -527,6 +388,69 @@ pub fn inferBindings(
     use_advanced_inference: bool,
 ) ![]const ExprId {
     if (use_advanced_inference) {
+        const rule_id = env.getRuleId(line.rule_name) orelse {
+            self.setDiagnostic(.{
+                .kind = .unknown_rule,
+                .err = error.UnknownRule,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .span = line.span,
+            });
+            return error.UnknownRule;
+        };
+        var seeded_bindings_storage: ?[]?ExprId = null;
+        defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
+        const session_seeds = if (maybe_view) |view| blk: {
+            const seeded = try allocator.dupe(?ExprId, partial_bindings);
+            CompilerViews.applyViewBindings(
+                allocator,
+                theorem,
+                env,
+                &view,
+                line_expr,
+                ref_exprs,
+                seeded,
+            ) catch {
+                allocator.free(seeded);
+                break :blk try exactBindingSeeds(
+                    allocator,
+                    partial_bindings,
+                );
+            };
+            seeded_bindings_storage = seeded;
+            break :blk try bindingSeedsWithSemanticOverrides(
+                allocator,
+                partial_bindings,
+                seeded,
+                .transparent,
+            );
+        } else try exactBindingSeeds(allocator, partial_bindings);
+        defer allocator.free(session_seeds);
+
+        if (tryRuleMatchFallbackBindings(
+            allocator,
+            env,
+            registry,
+            theorem,
+            rule_id,
+            rule,
+            session_seeds,
+            ref_exprs,
+            line_expr,
+        )) |bindings| {
+            return try validateInferredBindings(
+                self,
+                allocator,
+                env,
+                theorem,
+                assertion,
+                line,
+                rule,
+                bindings,
+            );
+        }
+
         var solver = InferenceSolver.init(
             allocator,
             env,
@@ -540,31 +464,6 @@ pub fn inferBindings(
             ref_exprs,
             line_expr,
         ) catch |err| {
-            if (maybe_view == null) {
-                const fallback = inferBindingsByNormalizedConclusion(
-                    allocator,
-                    env,
-                    registry,
-                    theorem,
-                    env.getRuleId(line.rule_name) orelse return err,
-                    rule,
-                    partial_bindings,
-                    ref_exprs,
-                    line_expr,
-                ) catch null;
-                if (fallback) |bindings| {
-                    try validateResolvedBindings(
-                        self,
-                        env,
-                        theorem,
-                        assertion,
-                        line,
-                        rule,
-                        bindings,
-                    );
-                    return bindings;
-                }
-            }
             self.setDiagnostic(.{
                 .kind = .inference_failed,
                 .err = err,
@@ -575,8 +474,10 @@ pub fn inferBindings(
             });
             return err;
         };
-        try validateResolvedBindings(
+
+        return try validateInferredBindings(
             self,
+            allocator,
             env,
             theorem,
             assertion,
@@ -584,7 +485,6 @@ pub fn inferBindings(
             rule,
             bindings,
         );
-        return bindings;
     }
 
     return strictInferBindings(
@@ -610,8 +510,9 @@ pub fn inferBindings(
                 line_expr,
             ) catch null;
             if (transparent) |bindings| {
-                try validateResolvedBindings(
+                return try validateInferredBindings(
                     self,
+                    allocator,
                     env,
                     theorem,
                     assertion,
@@ -619,7 +520,6 @@ pub fn inferBindings(
                     rule,
                     bindings,
                 );
-                return bindings;
             }
         }
         self.setDiagnostic(.{
@@ -682,6 +582,16 @@ pub fn strictInferBindings(
         );
         bindings[idx] = binding;
     }
+    if (!try bindingsRespectRuleDeps(
+        env,
+        theorem,
+        assertion.args,
+        rule.args,
+        bindings,
+    )) {
+        allocator.free(bindings);
+        return error.DepViolation;
+    }
     return bindings;
 }
 
@@ -714,6 +624,50 @@ pub fn validateResolvedBindings(
             return err;
         };
     }
+    if (!try bindingsRespectRuleDeps(
+        env,
+        theorem,
+        assertion.args,
+        rule.args,
+        bindings,
+    )) {
+        self.setDiagnostic(.{
+            .kind = .generic,
+            .err = error.DepViolation,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.span,
+        });
+        return error.DepViolation;
+    }
+}
+
+pub fn bindingsRespectRuleDeps(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    theorem_args: []const ArgInfo,
+    rule_args: []const ArgInfo,
+    bindings: []const ExprId,
+) !bool {
+    var deps_buf: [56]u55 = undefined;
+    var deps_len: usize = 0;
+    for (bindings, rule_args) |binding, expected| {
+        const info = try exprInfo(env, theorem, theorem_args, binding);
+        if (expected.bound) {
+            for (0..deps_len) |k| {
+                if (deps_buf[k] & info.deps != 0) return false;
+            }
+            deps_buf[deps_len] = info.deps;
+            deps_len += 1;
+            continue;
+        }
+        for (0..deps_len) |k| {
+            if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0) continue;
+            if (deps_buf[k] & info.deps != 0) return false;
+        }
+    }
+    return true;
 }
 
 // Inference only solves equalities. We still need the same sort, boundness,

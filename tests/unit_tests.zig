@@ -2182,6 +2182,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "demo_category_pullback_unfold", .outcome = .pass },
     .{ .stem = "demo_category_pullback_unfold_2", .outcome = .pass },
     .{ .stem = "demo_category_pullback_unfold_3", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_unfold_4", .outcome = .pass },
     .{ .stem = "pass_acui_remainder_overlap", .outcome = .pass },
     .{ .stem = "pass_acui_order_independent_overlap", .outcome = .pass },
     .{ .stem = "pass_acui_repeated_explicit_item", .outcome = .pass },

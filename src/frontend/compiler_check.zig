@@ -58,43 +58,41 @@ fn tryMatchHypothesis(
         ) };
     }
 
-    if (norm_spec) |spec| {
-        if (Normalize.isHypMarkedForNormalize(spec, hyp_idx)) {
-            if (try Normalize.buildNormalizedConversion(
-                allocator,
-                theorem,
-                registry,
-                env,
-                checked,
-                actual,
+    _ = norm_spec;
+    _ = hyp_idx;
+
+    if (try Normalize.buildNormalizedConversion(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        actual,
+        expected,
+    )) |conversion| {
+        var conversion_mut = conversion;
+        if (conversion_mut.conv_line_idx) |conv_line_idx| {
+            return .{ .line = try conversion_mut.normalizer.emitTransport(
+                conversion_mut.relation,
                 expected,
-            )) |conversion| {
-                var conversion_mut = conversion;
-                if (conversion_mut.conv_line_idx) |conv_line_idx| {
-                    return .{ .line = try conversion_mut.normalizer.emitTransport(
-                        conversion_mut.relation,
-                        expected,
-                        actual,
-                        conv_line_idx,
-                        actual_ref,
-                    ) };
-                }
-                return actual_ref;
-            }
-            return try Normalize.buildDefAwareNormalizedHypRef(
-                allocator,
-                theorem,
-                registry,
-                env,
-                checked,
+                actual,
+                conv_line_idx,
                 actual_ref,
-                actual,
-                expected,
-            );
+            ) };
         }
+        return actual_ref;
     }
 
-    return null;
+    return try Normalize.buildDefAwareNormalizedHypRef(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        actual_ref,
+        actual,
+        expected,
+    );
 }
 
 fn tryBuildConclusionLine(

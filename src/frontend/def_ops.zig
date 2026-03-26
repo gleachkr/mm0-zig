@@ -5,6 +5,13 @@ const ExprId = @import("./compiler_expr.zig").ExprId;
 const ExprApp = @import("./compiler_expr.zig").ExprNode.App;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
+const RewriteRegistry =
+    @import("./rewrite_registry.zig").RewriteRegistry;
+const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
+const MirrorSupport = @import("./def_ops/mirror_support.zig");
+const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
+const MirroredTheoremContext = MirrorSupport.MirroredTheoremContext;
+const copyExprBetweenTheorems = MirrorSupport.copyExprBetweenTheorems;
 
 pub const ConversionPlan = union(enum) {
     refl,
@@ -42,21 +49,48 @@ const SymbolicExpr = union(enum) {
     };
 };
 
+pub const BindingMode = enum {
+    exact,
+    transparent,
+    normalized,
+};
+
+pub const BindingSeed = union(enum) {
+    none,
+    exact: ExprId,
+    semantic: struct {
+        expr_id: ExprId,
+        mode: BindingMode,
+    },
+};
+
+const ConcreteBinding = struct {
+    raw: ExprId,
+    repr: ExprId,
+    mode: BindingMode,
+};
+
+const SymbolicBinding = struct {
+    expr: *const SymbolicExpr,
+    mode: BindingMode,
+};
+
 const BoundValue = union(enum) {
-    concrete: ExprId,
-    symbolic: *const SymbolicExpr,
+    concrete: ConcreteBinding,
+    symbolic: SymbolicBinding,
 };
 
 const WitnessMap = std.AutoHashMapUnmanaged(usize, ExprId);
+const ProvisionalWitnessInfoMap = std.AutoHashMapUnmanaged(
+    ExprId,
+    SymbolicDummyInfo,
+);
 
 const MatchSession = struct {
     bindings: []?BoundValue,
     witnesses: WitnessMap = .{},
     symbolic_dummy_infos: std.ArrayListUnmanaged(SymbolicDummyInfo) = .{},
-    provisional_witness_infos: std.AutoHashMapUnmanaged(
-        ExprId,
-        SymbolicDummyInfo,
-    ) = .empty,
+    provisional_witness_infos: ProvisionalWitnessInfoMap = .empty,
 
     fn init(
         allocator: std.mem.Allocator,
@@ -81,6 +115,7 @@ const MatchSession = struct {
 const MatchSnapshot = struct {
     bindings: []?BoundValue,
     witnesses: WitnessMap,
+    provisional_witness_infos: ProvisionalWitnessInfoMap,
     dummy_info_len: usize,
 };
 
@@ -93,6 +128,7 @@ pub const Context = struct {
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     env: *const GlobalEnv,
+    registry: ?*RewriteRegistry,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -103,11 +139,38 @@ pub const Context = struct {
             .allocator = allocator,
             .theorem = theorem,
             .env = env,
+            .registry = null,
+        };
+    }
+
+    pub fn initWithRegistry(
+        allocator: std.mem.Allocator,
+        theorem: *TheoremContext,
+        env: *const GlobalEnv,
+        registry: *RewriteRegistry,
+    ) Context {
+        return .{
+            .allocator = allocator,
+            .theorem = theorem,
+            .env = env,
+            .registry = registry,
         };
     }
 
     pub fn deinit(self: *Context) void {
         _ = self;
+    }
+
+    pub fn beginRuleMatch(
+        self: *Context,
+        rule_args: []const ArgInfo,
+        seeds: []const BindingSeed,
+    ) anyerror!RuleMatchSession {
+        return try RuleMatchSession.init(
+            self,
+            rule_args,
+            seeds,
+        );
     }
 
     pub fn defCoversItem(
@@ -243,6 +306,7 @@ pub const Context = struct {
                     expr_id,
                     &state,
                     &witness_slots,
+                    .exact,
                 )
             else
                 null;
@@ -304,6 +368,7 @@ pub const Context = struct {
             &session,
             &[_]?ExprId{},
             &dummy_bindings,
+            .transparent,
         )) {
             return null;
         }
@@ -331,16 +396,12 @@ pub const Context = struct {
     ) anyerror!bool {
         return switch (template) {
             .binder => |idx| blk: {
-                if (idx >= state.bindings.len) break :blk false;
-                if (state.bindings[idx]) |existing| {
-                    break :blk try self.boundValueMatchesExpr(
-                        existing,
-                        actual,
-                        state,
-                    );
-                }
-                state.bindings[idx] = .{ .concrete = actual };
-                break :blk true;
+                break :blk try self.assignBinderFromExpr(
+                    idx,
+                    actual,
+                    state,
+                    .transparent,
+                );
             },
             .app => |app| blk: {
                 if (try self.matchTemplateAppDirectState(app, actual, state)) {
@@ -446,16 +507,12 @@ pub const Context = struct {
     ) anyerror!bool {
         return switch (symbolic.*) {
             .binder => |idx| blk: {
-                if (idx >= state.bindings.len) break :blk false;
-                if (state.bindings[idx]) |existing| {
-                    break :blk try self.boundValueMatchesExpr(
-                        existing,
-                        actual,
-                        state,
-                    );
-                }
-                state.bindings[idx] = .{ .concrete = actual };
-                break :blk true;
+                break :blk try self.assignBinderFromExpr(
+                    idx,
+                    actual,
+                    state,
+                    .transparent,
+                );
             },
             .fixed => |expr_id| {
                 return (try self.compareTransparent(expr_id, actual)) != null;
@@ -530,19 +587,16 @@ pub const Context = struct {
         actual: ExprId,
         symbolic: *const SymbolicExpr,
         state: *MatchSession,
+        assign_mode: BindingMode,
     ) anyerror!bool {
         return switch (symbolic.*) {
             .binder => |idx| blk: {
-                if (idx >= state.bindings.len) break :blk false;
-                if (state.bindings[idx]) |existing| {
-                    break :blk try self.boundValueMatchesExpr(
-                        existing,
-                        actual,
-                        state,
-                    );
-                }
-                state.bindings[idx] = .{ .concrete = actual };
-                break :blk true;
+                break :blk try self.assignBinderFromExpr(
+                    idx,
+                    actual,
+                    state,
+                    assign_mode,
+                );
             },
             .fixed => |expr_id| {
                 return (try self.compareTransparent(actual, expr_id)) != null;
@@ -571,6 +625,7 @@ pub const Context = struct {
                                 actual_arg,
                                 sym_arg,
                                 state,
+                                assign_mode,
                             )) {
                                 try self.restoreMatchSnapshot(
                                     &snapshot,
@@ -602,6 +657,7 @@ pub const Context = struct {
                         actual,
                         expanded,
                         state,
+                        assign_mode,
                     )) {
                         return true;
                     }
@@ -620,19 +676,20 @@ pub const Context = struct {
     ) anyerror!bool {
         return switch (lhs.*) {
             .binder => |idx| blk: {
-                if (idx >= state.bindings.len) break :blk false;
-                if (state.bindings[idx]) |existing| {
-                    break :blk try self.boundValueMatchesSymbolic(
-                        existing,
-                        rhs,
-                        state,
-                    );
-                }
-                state.bindings[idx] = .{ .symbolic = rhs };
-                break :blk true;
+                break :blk try self.assignBinderFromSymbolic(
+                    idx,
+                    rhs,
+                    state,
+                    .transparent,
+                );
             },
             .fixed => |expr_id| {
-                return try self.matchExprToSymbolic(expr_id, rhs, state);
+                return try self.matchExprToSymbolic(
+                    expr_id,
+                    rhs,
+                    state,
+                    .transparent,
+                );
             },
             .dummy => |slot| {
                 return try self.matchDummyToSymbolic(slot, rhs, state);
@@ -703,6 +760,7 @@ pub const Context = struct {
         state: *MatchSession,
         bindings: []?ExprId,
         dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
+        assign_mode: BindingMode,
     ) anyerror!bool {
         switch (symbolic.*) {
             .binder => |idx| {
@@ -746,6 +804,7 @@ pub const Context = struct {
                                 state,
                                 bindings,
                                 dummy_bindings,
+                                assign_mode,
                             )) {
                                 @memcpy(bindings, saved_bindings);
                                 dummy_bindings.shrinkRetainingCapacity(
@@ -769,6 +828,7 @@ pub const Context = struct {
                         state,
                         bindings,
                         dummy_bindings,
+                        assign_mode,
                     )) {
                         return true;
                     }
@@ -954,6 +1014,7 @@ pub const Context = struct {
             state,
             &[_]?ExprId{},
             dummy_bindings,
+            .transparent,
         )) {
             return true;
         }
@@ -1016,11 +1077,265 @@ pub const Context = struct {
         expr_id: ExprId,
         state: *MatchSession,
         witness_slots: *std.AutoHashMapUnmanaged(ExprId, usize),
+        mode: BindingMode,
     ) anyerror!BoundValue {
         if (try self.resymbolizeBinding(expr_id, state, witness_slots)) |symbolic| {
-            return .{ .symbolic = symbolic };
+            return self.makeSymbolicBoundValue(symbolic, mode);
         }
-        return .{ .concrete = expr_id };
+        return try self.makeConcreteBoundValue(expr_id, mode);
+    }
+
+    fn rebuildBoundValueFromState(
+        self: *Context,
+        expr_id: ExprId,
+        state: *MatchSession,
+        mode: BindingMode,
+    ) anyerror!BoundValue {
+        var witness_slots: std.AutoHashMapUnmanaged(ExprId, usize) = .empty;
+        defer witness_slots.deinit(self.allocator);
+
+        var it = state.witnesses.iterator();
+        while (it.next()) |entry| {
+            try witness_slots.put(
+                self.allocator,
+                entry.value_ptr.*,
+                entry.key_ptr.*,
+            );
+        }
+        return try self.rebuildBoundValue(
+            expr_id,
+            state,
+            &witness_slots,
+            mode,
+        );
+    }
+
+    fn makeConcreteBoundValue(
+        self: *Context,
+        expr_id: ExprId,
+        mode: BindingMode,
+    ) anyerror!BoundValue {
+        return .{ .concrete = .{
+            .raw = expr_id,
+            .repr = try self.chooseRepresentative(expr_id, mode),
+            .mode = mode,
+        } };
+    }
+
+    fn makeSymbolicBoundValue(
+        self: *Context,
+        symbolic: *const SymbolicExpr,
+        mode: BindingMode,
+    ) BoundValue {
+        _ = self;
+        return .{ .symbolic = .{
+            .expr = symbolic,
+            .mode = mode,
+        } };
+    }
+
+    fn assignBinderFromExpr(
+        self: *Context,
+        idx: usize,
+        actual: ExprId,
+        state: *MatchSession,
+        mode: BindingMode,
+    ) anyerror!bool {
+        if (idx >= state.bindings.len) return false;
+        if (state.bindings[idx]) |existing| {
+            return try self.boundValueMatchesExpr(existing, actual, state);
+        }
+        state.bindings[idx] = try self.rebuildBoundValueFromState(
+            actual,
+            state,
+            mode,
+        );
+        return true;
+    }
+
+    fn assignBinderFromSymbolic(
+        self: *Context,
+        idx: usize,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+        mode: BindingMode,
+    ) anyerror!bool {
+        if (idx >= state.bindings.len) return false;
+        if (state.bindings[idx]) |existing| {
+            return try self.boundValueMatchesSymbolic(
+                existing,
+                symbolic,
+                state,
+            );
+        }
+        state.bindings[idx] = self.makeSymbolicBoundValue(symbolic, mode);
+        return true;
+    }
+
+    fn assignBinderValue(
+        self: *Context,
+        idx: usize,
+        value: BoundValue,
+        state: *MatchSession,
+    ) anyerror!bool {
+        if (idx >= state.bindings.len) return false;
+        if (state.bindings[idx]) |existing| {
+            return switch (value) {
+                .concrete => |concrete| try self.boundValueMatchesExpr(
+                    existing,
+                    self.concreteBindingMatchExpr(concrete),
+                    state,
+                ),
+                .symbolic => |symbolic| try self.boundValueMatchesSymbolic(
+                    existing,
+                    symbolic.expr,
+                    state,
+                ),
+            };
+        }
+        state.bindings[idx] = value;
+        return true;
+    }
+
+    fn boundValueFromSeed(
+        self: *Context,
+        seed: BindingSeed,
+        state: *MatchSession,
+        witness_slots: *std.AutoHashMapUnmanaged(ExprId, usize),
+    ) anyerror!?BoundValue {
+        return switch (seed) {
+            .none => null,
+            .exact => |expr_id| try self.rebuildBoundValue(
+                expr_id,
+                state,
+                witness_slots,
+                .exact,
+            ),
+            .semantic => |semantic| try self.rebuildBoundValue(
+                semantic.expr_id,
+                state,
+                witness_slots,
+                semantic.mode,
+            ),
+        };
+    }
+
+    fn chooseRepresentative(
+        self: *Context,
+        expr_id: ExprId,
+        mode: BindingMode,
+    ) anyerror!ExprId {
+        if (mode == .exact) return expr_id;
+
+        var current = try self.rebuildExprRepresentative(expr_id, mode);
+        if (self.registry) |registry| {
+            var canonicalizer = Canonicalizer.init(
+                self.allocator,
+                self.theorem,
+                registry,
+                self.env,
+            );
+            current = try canonicalizer.canonicalize(current);
+        }
+        while (try self.compressExprToDef(current)) |compressed| {
+            if (compressed == current) break;
+            current = compressed;
+        }
+        return current;
+    }
+
+    fn rebuildExprRepresentative(
+        self: *Context,
+        expr_id: ExprId,
+        mode: BindingMode,
+    ) anyerror!ExprId {
+        const node = self.theorem.interner.node(expr_id);
+        return switch (node.*) {
+            .variable => expr_id,
+            .app => |app| blk: {
+                const args = try self.allocator.alloc(ExprId, app.args.len);
+                errdefer self.allocator.free(args);
+
+                var changed = false;
+                for (app.args, 0..) |arg, idx| {
+                    args[idx] = try self.chooseRepresentative(arg, mode);
+                    changed = changed or args[idx] != arg;
+                }
+                if (!changed) {
+                    self.allocator.free(args);
+                    break :blk expr_id;
+                }
+                break :blk try self.theorem.interner.internAppOwned(
+                    app.term_id,
+                    args,
+                );
+            },
+        };
+    }
+
+    fn compressExprToDef(
+        self: *Context,
+        expr_id: ExprId,
+    ) anyerror!?ExprId {
+        const sort_name = self.exprSortName(expr_id) orelse return null;
+        for (self.env.terms.items, 0..) |term, term_id| {
+            if (!term.is_def or term.body == null) continue;
+            if (!std.mem.eql(u8, term.ret_sort_name, sort_name)) continue;
+
+            const binding_len = term.args.len + term.dummy_args.len;
+            const bindings = try self.allocator.alloc(?ExprId, binding_len);
+            defer self.allocator.free(bindings);
+            @memset(bindings, null);
+
+            if (!try self.matchTemplateTransparent(
+                term.body.?,
+                expr_id,
+                bindings,
+            )) {
+                continue;
+            }
+
+            const args = try self.allocator.alloc(ExprId, term.args.len);
+            errdefer self.allocator.free(args);
+            for (0..term.args.len) |idx| {
+                const arg = bindings[idx] orelse {
+                    self.allocator.free(args);
+                    continue;
+                };
+                args[idx] = try self.chooseRepresentative(
+                    arg,
+                    .transparent,
+                );
+            }
+            return try self.theorem.interner.internAppOwned(
+                @intCast(term_id),
+                args,
+            );
+        }
+        return null;
+    }
+
+    fn exprSortName(
+        self: *Context,
+        expr_id: ExprId,
+    ) ?[]const u8 {
+        const node = self.theorem.interner.node(expr_id);
+        return switch (node.*) {
+            .app => |app| if (app.term_id < self.env.terms.items.len)
+                self.env.terms.items[app.term_id].ret_sort_name
+            else
+                null,
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => |idx| if (idx < self.theorem.arg_infos.len)
+                    self.theorem.arg_infos[idx].sort_name
+                else
+                    null,
+                .dummy_var => |idx| if (idx < self.theorem.theorem_dummies.items.len)
+                    self.theorem.theorem_dummies.items[idx].sort_name
+                else
+                    null,
+            },
+        };
     }
 
     fn resymbolizeBinding(
@@ -1101,6 +1416,9 @@ pub const Context = struct {
         return .{
             .bindings = try self.allocator.dupe(?BoundValue, state.bindings),
             .witnesses = try self.cloneWitnessMap(state.witnesses),
+            .provisional_witness_infos = try self.cloneProvisionalWitnessInfoMap(
+                state.provisional_witness_infos,
+            ),
             .dummy_info_len = state.symbolic_dummy_infos.items.len,
         };
     }
@@ -1113,6 +1431,11 @@ pub const Context = struct {
         @memcpy(state.bindings, snapshot.bindings);
         state.witnesses.deinit(self.allocator);
         state.witnesses = try self.cloneWitnessMap(snapshot.witnesses);
+        state.provisional_witness_infos.deinit(self.allocator);
+        state.provisional_witness_infos =
+            try self.cloneProvisionalWitnessInfoMap(
+                snapshot.provisional_witness_infos,
+            );
         state.symbolic_dummy_infos.shrinkRetainingCapacity(
             snapshot.dummy_info_len,
         );
@@ -1124,10 +1447,27 @@ pub const Context = struct {
     ) void {
         self.allocator.free(snapshot.bindings);
         snapshot.witnesses.deinit(self.allocator);
+        snapshot.provisional_witness_infos.deinit(self.allocator);
     }
 
     fn cloneWitnessMap(self: *Context, map: WitnessMap) anyerror!WitnessMap {
         var clone: WitnessMap = .{};
+        var it = map.iterator();
+        while (it.next()) |entry| {
+            try clone.put(
+                self.allocator,
+                entry.key_ptr.*,
+                entry.value_ptr.*,
+            );
+        }
+        return clone;
+    }
+
+    fn cloneProvisionalWitnessInfoMap(
+        self: *Context,
+        map: ProvisionalWitnessInfoMap,
+    ) anyerror!ProvisionalWitnessInfoMap {
+        var clone: ProvisionalWitnessInfoMap = .{};
         var it = map.iterator();
         while (it.next()) |entry| {
             try clone.put(
@@ -1146,17 +1486,36 @@ pub const Context = struct {
         state: *MatchSession,
     ) anyerror!bool {
         return switch (bound) {
-            .concrete => |expr_id| {
-                return (try self.compareTransparent(expr_id, actual)) != null;
+            .concrete => |concrete| {
+                return try self.concreteBindingMatchesExpr(
+                    concrete,
+                    actual,
+                );
             },
             .symbolic => |symbolic| {
                 return try self.matchSymbolicToExprState(
-                    symbolic,
+                    symbolic.expr,
                     actual,
                     state,
                 );
             },
         };
+    }
+
+    fn concreteBindingMatchesExpr(
+        self: *Context,
+        concrete: ConcreteBinding,
+        actual: ExprId,
+    ) anyerror!bool {
+        if (concrete.mode == .exact) {
+            return concrete.raw == actual;
+        }
+        const actual_repr = try self.chooseRepresentative(
+            actual,
+            concrete.mode,
+        );
+        return actual_repr == concrete.repr or
+            (try self.compareTransparent(concrete.repr, actual_repr)) != null;
     }
 
     fn boundValueMatchesSymbolic(
@@ -1166,17 +1525,30 @@ pub const Context = struct {
         state: *MatchSession,
     ) anyerror!bool {
         return switch (bound) {
-            .concrete => |expr_id| {
-                return try self.matchExprToSymbolic(expr_id, actual, state);
+            .concrete => |concrete| {
+                return try self.matchExprToSymbolic(
+                    self.concreteBindingMatchExpr(concrete),
+                    actual,
+                    state,
+                    concrete.mode,
+                );
             },
             .symbolic => |symbolic| {
                 return try self.matchSymbolicToSymbolicState(
-                    symbolic,
+                    symbolic.expr,
                     actual,
                     state,
                 );
             },
         };
+    }
+
+    fn concreteBindingMatchExpr(
+        self: *Context,
+        concrete: ConcreteBinding,
+    ) ExprId {
+        _ = self;
+        return if (concrete.mode == .exact) concrete.raw else concrete.repr;
     }
 
     fn matchSymbolicDummyState(
@@ -1212,17 +1584,13 @@ pub const Context = struct {
     ) anyerror!bool {
         return switch (rhs.*) {
             .binder => |idx| blk: {
-                if (idx >= state.bindings.len) break :blk false;
                 const symbolic = try self.allocSymbolic(.{ .dummy = slot });
-                if (state.bindings[idx]) |existing| {
-                    break :blk try self.boundValueMatchesSymbolic(
-                        existing,
-                        symbolic,
-                        state,
-                    );
-                }
-                state.bindings[idx] = .{ .symbolic = symbolic };
-                break :blk true;
+                break :blk try self.assignBinderFromSymbolic(
+                    idx,
+                    symbolic,
+                    state,
+                    .transparent,
+                );
             },
             .fixed => |expr_id| {
                 const info = state.symbolic_dummy_infos.items[slot];
@@ -1265,6 +1633,7 @@ pub const Context = struct {
                 const rhs_expr = try self.materializeAssignedSymbolic(
                     rhs,
                     state,
+                    .transparent,
                 ) orelse return false;
                 const info = state.symbolic_dummy_infos.items[slot];
                 return try self.matchSymbolicDummyState(
@@ -1296,11 +1665,23 @@ pub const Context = struct {
         state: *MatchSession,
     ) anyerror!ExprId {
         return switch (bound) {
-            .concrete => |expr_id| expr_id,
+            .concrete => |concrete| self.finalConcreteExpr(concrete),
             .symbolic => |symbolic| {
-                return try self.materializeTemplateSymbolic(symbolic, state);
+                const expr_id = try self.materializeTemplateSymbolic(
+                    symbolic.expr,
+                    state,
+                );
+                return try self.chooseRepresentative(expr_id, symbolic.mode);
             },
         };
+    }
+
+    fn finalConcreteExpr(
+        self: *Context,
+        concrete: ConcreteBinding,
+    ) ExprId {
+        _ = self;
+        return if (concrete.mode == .exact) concrete.raw else concrete.repr;
     }
 
     fn materializeAssignedBoundValue(
@@ -1309,9 +1690,13 @@ pub const Context = struct {
         state: *MatchSession,
     ) anyerror!?ExprId {
         return switch (bound) {
-            .concrete => |expr_id| expr_id,
+            .concrete => |concrete| self.concreteBindingMatchExpr(concrete),
             .symbolic => |symbolic| {
-                return try self.materializeAssignedSymbolic(symbolic, state);
+                return try self.materializeAssignedSymbolic(
+                    symbolic.expr,
+                    state,
+                    symbolic.mode,
+                );
             },
         };
     }
@@ -1320,30 +1705,33 @@ pub const Context = struct {
         self: *Context,
         symbolic: *const SymbolicExpr,
         state: *MatchSession,
+        mode: BindingMode,
     ) anyerror!?ExprId {
-        return switch (symbolic.*) {
+        const expr_id = switch (symbolic.*) {
             .binder => |idx| blk: {
                 if (idx >= state.bindings.len) break :blk null;
                 const bound = state.bindings[idx] orelse break :blk null;
                 break :blk try self.materializeAssignedBoundValue(bound, state);
             },
-            .fixed => |expr_id| expr_id,
+            .fixed => |expr| expr,
             .dummy => |slot| state.witnesses.get(slot),
             .app => |app| blk: {
                 const args = try self.allocator.alloc(ExprId, app.args.len);
                 errdefer self.allocator.free(args);
                 for (app.args, 0..) |arg, idx| {
-                    args[idx] = try self.materializeAssignedSymbolic(
+                    args[idx] = (try self.materializeAssignedSymbolic(
                         arg,
                         state,
-                    ) orelse break :blk null;
+                        mode,
+                    )) orelse break :blk null;
                 }
                 break :blk try self.theorem.interner.internAppOwned(
                     app.term_id,
                     args,
                 );
             },
-        };
+        } orelse return null;
+        return try self.chooseRepresentative(expr_id, mode);
     }
 
     fn materializeTemplateSymbolic(
@@ -1609,6 +1997,598 @@ pub const Context = struct {
         return node;
     }
 };
+
+const NormalizedPlaceholderTarget = union(enum) {
+    binder: usize,
+    dummy: usize,
+};
+
+const NormalizedView = struct {
+    mirror: MirroredTheoremContext,
+    to_mirror: std.AutoHashMapUnmanaged(ExprId, ExprId) = .empty,
+    placeholder_targets: std.AutoHashMapUnmanaged(
+        ExprId,
+        NormalizedPlaceholderTarget,
+    ) = .empty,
+    mirror_binders: []ExprId,
+    binder_status: []u8,
+    dummy_values: []?ExprId,
+
+    fn init(session: *RuleMatchSession) !NormalizedView {
+        var mirror = try MirroredTheoremContext.init(
+            session.ctx.allocator,
+            session.ctx.theorem,
+        );
+        errdefer mirror.deinit(session.ctx.allocator);
+
+        const mirror_binders = try session.ctx.allocator.alloc(
+            ExprId,
+            session.state.bindings.len,
+        );
+        errdefer session.ctx.allocator.free(mirror_binders);
+        const binder_status = try session.ctx.allocator.alloc(
+            u8,
+            session.state.bindings.len,
+        );
+        errdefer session.ctx.allocator.free(binder_status);
+        const dummy_values = try session.ctx.allocator.alloc(
+            ?ExprId,
+            session.state.symbolic_dummy_infos.items.len,
+        );
+        errdefer session.ctx.allocator.free(dummy_values);
+
+        @memset(binder_status, 0);
+        @memset(dummy_values, null);
+
+        var view = NormalizedView{
+            .mirror = mirror,
+            .mirror_binders = mirror_binders,
+            .binder_status = binder_status,
+            .dummy_values = dummy_values,
+        };
+        errdefer view.deinit(session.ctx.allocator);
+
+        for (0..session.state.bindings.len) |idx| {
+            _ = try view.ensureMirrorBinder(session, idx);
+        }
+        return view;
+    }
+
+    fn deinit(
+        self: *NormalizedView,
+        allocator: std.mem.Allocator,
+    ) void {
+        self.to_mirror.deinit(allocator);
+        self.placeholder_targets.deinit(allocator);
+        allocator.free(self.mirror_binders);
+        allocator.free(self.binder_status);
+        allocator.free(self.dummy_values);
+        self.mirror.deinit(allocator);
+    }
+
+    fn ensureMirrorBinder(
+        self: *NormalizedView,
+        session: *RuleMatchSession,
+        idx: usize,
+    ) anyerror!ExprId {
+        if (idx >= self.mirror_binders.len or idx >= session.rule_args.len) {
+            return error.TemplateBinderOutOfRange;
+        }
+        switch (self.binder_status[idx]) {
+            2 => return self.mirror_binders[idx],
+            1 => return error.CyclicSymbolicBinding,
+            else => {},
+        }
+
+        self.binder_status[idx] = 1;
+        errdefer self.binder_status[idx] = 0;
+
+        const value = if (session.state.bindings[idx]) |bound| blk: {
+            break :blk try session.boundValueToMirror(bound, self);
+        } else blk: {
+            const sort_id = session.ctx.env.sort_names.get(
+                session.rule_args[idx].sort_name,
+            ) orelse return error.UnknownSort;
+            const placeholder = try self.mirror.theorem.addDummyVarResolved(
+                session.rule_args[idx].sort_name,
+                sort_id,
+            );
+            try self.placeholder_targets.put(
+                session.ctx.allocator,
+                placeholder,
+                .{ .binder = idx },
+            );
+            break :blk placeholder;
+        };
+        self.mirror_binders[idx] = value;
+        self.binder_status[idx] = 2;
+        return value;
+    }
+
+    fn ensureMirrorDummy(
+        self: *NormalizedView,
+        session: *RuleMatchSession,
+        slot: usize,
+    ) anyerror!ExprId {
+        if (slot >= self.dummy_values.len) return error.UnknownDummyVar;
+        if (self.dummy_values[slot]) |existing| return existing;
+
+        if (session.state.witnesses.get(slot)) |witness| {
+            if (!session.state.provisional_witness_infos.contains(witness)) {
+                const copied = try copyExprBetweenTheorems(
+                    session.ctx.allocator,
+                    session.ctx.theorem,
+                    &self.mirror.theorem,
+                    witness,
+                    self.mirror.source_dummy_map,
+                    &self.to_mirror,
+                );
+                self.dummy_values[slot] = copied;
+                return copied;
+            }
+        }
+
+        const info = session.state.symbolic_dummy_infos.items[slot];
+        const sort_id = session.ctx.env.sort_names.get(info.sort_name) orelse {
+            return error.UnknownSort;
+        };
+        const placeholder = try self.mirror.theorem.addDummyVarResolved(
+            info.sort_name,
+            sort_id,
+        );
+        try self.placeholder_targets.put(
+            session.ctx.allocator,
+            placeholder,
+            .{ .dummy = slot },
+        );
+        self.dummy_values[slot] = placeholder;
+        return placeholder;
+    }
+};
+
+pub const RuleMatchSession = struct {
+    ctx: *Context,
+    rule_args: []const ArgInfo,
+    state: MatchSession,
+
+    fn init(
+        ctx: *Context,
+        rule_args: []const ArgInfo,
+        seeds: []const BindingSeed,
+    ) anyerror!RuleMatchSession {
+        var state = try MatchSession.init(
+            ctx.allocator,
+            seeds.len,
+        );
+        errdefer state.deinit(ctx.allocator);
+
+        var witness_slots: std.AutoHashMapUnmanaged(ExprId, usize) = .empty;
+        defer witness_slots.deinit(ctx.allocator);
+        for (seeds, 0..) |seed, idx| {
+            state.bindings[idx] = try ctx.boundValueFromSeed(
+                seed,
+                &state,
+                &witness_slots,
+            );
+        }
+
+        return .{
+            .ctx = ctx,
+            .rule_args = rule_args,
+            .state = state,
+        };
+    }
+
+    pub fn deinit(self: *RuleMatchSession) void {
+        self.state.deinit(self.ctx.allocator);
+    }
+
+    pub fn matchTransparent(
+        self: *RuleMatchSession,
+        template: TemplateExpr,
+        actual: ExprId,
+    ) anyerror!bool {
+        return try self.ctx.matchTemplateRecState(
+            template,
+            actual,
+            &self.state,
+        );
+    }
+
+    pub fn beginNormalizedComparison(
+        self: *RuleMatchSession,
+        template: TemplateExpr,
+        actual: ExprId,
+    ) anyerror!NormalizedComparison {
+        var view = try NormalizedView.init(self);
+        errdefer view.deinit(self.ctx.allocator);
+
+        const expected_expr = try view.mirror.theorem.instantiateTemplate(
+            template,
+            view.mirror_binders,
+        );
+        const actual_expr = try copyExprBetweenTheorems(
+            self.ctx.allocator,
+            self.ctx.theorem,
+            &view.mirror.theorem,
+            actual,
+            view.mirror.source_dummy_map,
+            &view.to_mirror,
+        );
+        return .{
+            .session = self,
+            .view = view,
+            .expected_expr = expected_expr,
+            .actual_expr = actual_expr,
+        };
+    }
+
+    pub fn finalizeConcreteBindings(self: *RuleMatchSession) ![]const ExprId {
+        const bindings = try self.ctx.allocator.alloc(
+            ExprId,
+            self.state.bindings.len,
+        );
+        for (self.state.bindings, 0..) |binding, idx| {
+            const bound = binding orelse return error.MissingBinderAssignment;
+            bindings[idx] = try self.ctx.finalizeBoundValue(
+                bound,
+                &self.state,
+            );
+        }
+        return bindings;
+    }
+
+    fn boundValueToMirror(
+        self: *RuleMatchSession,
+        bound: BoundValue,
+        view: *NormalizedView,
+    ) anyerror!ExprId {
+        return switch (bound) {
+            .concrete => |concrete| try copyExprBetweenTheorems(
+                self.ctx.allocator,
+                self.ctx.theorem,
+                &view.mirror.theorem,
+                self.ctx.concreteBindingMatchExpr(concrete),
+                view.mirror.source_dummy_map,
+                &view.to_mirror,
+            ),
+            .symbolic => |symbolic| try self.symbolicToMirror(
+                symbolic.expr,
+                view,
+            ),
+        };
+    }
+
+    fn symbolicToMirror(
+        self: *RuleMatchSession,
+        symbolic: *const SymbolicExpr,
+        view: *NormalizedView,
+    ) anyerror!ExprId {
+        return switch (symbolic.*) {
+            .binder => |idx| try view.ensureMirrorBinder(self, idx),
+            .fixed => |expr_id| try copyExprBetweenTheorems(
+                self.ctx.allocator,
+                self.ctx.theorem,
+                &view.mirror.theorem,
+                expr_id,
+                view.mirror.source_dummy_map,
+                &view.to_mirror,
+            ),
+            .dummy => |slot| try view.ensureMirrorDummy(self, slot),
+            .app => |app| blk: {
+                const args = try self.ctx.allocator.alloc(
+                    ExprId,
+                    app.args.len,
+                );
+                errdefer self.ctx.allocator.free(args);
+                for (app.args, 0..) |arg, idx| {
+                    args[idx] = try self.symbolicToMirror(arg, view);
+                }
+                break :blk try view.mirror.theorem.interner.internAppOwned(
+                    app.term_id,
+                    args,
+                );
+            },
+        };
+    }
+
+    fn matchNormalizedPattern(
+        self: *RuleMatchSession,
+        view: *const NormalizedView,
+        pattern_expr: ExprId,
+        actual_expr: ExprId,
+    ) anyerror!bool {
+        if (view.placeholder_targets.get(pattern_expr)) |target| {
+            return try self.assignNormalizedTarget(target, actual_expr, view);
+        }
+
+        if (!view.placeholder_targets.contains(actual_expr)) {
+            const pattern_concrete =
+                try self.mirrorExprToConcrete(pattern_expr, view);
+            const actual_concrete =
+                try self.mirrorExprToConcrete(actual_expr, view);
+            if (pattern_concrete != null and actual_concrete != null) {
+                const pattern_repr = try self.ctx.chooseRepresentative(
+                    pattern_concrete.?,
+                    .normalized,
+                );
+                const actual_repr = try self.ctx.chooseRepresentative(
+                    actual_concrete.?,
+                    .normalized,
+                );
+                if (pattern_repr == actual_repr or
+                    (try self.ctx.compareTransparent(
+                        pattern_repr,
+                        actual_repr,
+                    )) != null)
+                {
+                    return true;
+                }
+            }
+        }
+
+        const pattern_node = view.mirror.theorem.interner.node(pattern_expr);
+        const actual_node = view.mirror.theorem.interner.node(actual_expr);
+        return switch (pattern_node.*) {
+            .variable => switch (actual_node.*) {
+                .variable => pattern_expr == actual_expr,
+                .app => false,
+            },
+            .app => |pattern_app| switch (actual_node.*) {
+                .variable => false,
+                .app => |actual_app| blk: {
+                    if (pattern_app.term_id != actual_app.term_id) {
+                        break :blk false;
+                    }
+                    if (pattern_app.args.len != actual_app.args.len) {
+                        break :blk false;
+                    }
+                    for (pattern_app.args, actual_app.args) |pattern_arg, actual_arg| {
+                        if (!try self.matchNormalizedPattern(
+                            view,
+                            pattern_arg,
+                            actual_arg,
+                        )) {
+                            break :blk false;
+                        }
+                    }
+                    break :blk true;
+                },
+            },
+        };
+    }
+
+    fn assignNormalizedTarget(
+        self: *RuleMatchSession,
+        target: NormalizedPlaceholderTarget,
+        actual_expr: ExprId,
+        view: *const NormalizedView,
+    ) anyerror!bool {
+        if (view.placeholder_targets.get(actual_expr)) |actual_target| {
+            if (samePlaceholderTarget(target, actual_target)) return true;
+        }
+
+        const translated = try self.mirrorExprToBoundValue(actual_expr, view);
+        return switch (target) {
+            .binder => |idx| blk: {
+                if (translated == .symbolic and
+                    self.symbolicContainsBinder(translated.symbolic.expr, idx))
+                {
+                    break :blk false;
+                }
+                break :blk try self.ctx.assignBinderValue(
+                    idx,
+                    translated,
+                    &self.state,
+                );
+            },
+            .dummy => |slot| blk: {
+                if (translated == .symbolic and
+                    self.symbolicContainsDummy(translated.symbolic.expr, slot))
+                {
+                    break :blk false;
+                }
+                const info = self.state.symbolic_dummy_infos.items[slot];
+                break :blk switch (translated) {
+                    .concrete => |concrete| try self.ctx.matchSymbolicDummyState(
+                        slot,
+                        info,
+                        self.ctx.concreteBindingMatchExpr(concrete),
+                        &self.state,
+                    ),
+                    .symbolic => |symbolic| try self.ctx.matchDummyToSymbolic(
+                        slot,
+                        symbolic.expr,
+                        &self.state,
+                    ),
+                };
+            },
+        };
+    }
+
+    fn mirrorExprToBoundValue(
+        self: *RuleMatchSession,
+        expr_id: ExprId,
+        view: *const NormalizedView,
+    ) anyerror!BoundValue {
+        if (try self.mirrorExprToConcrete(expr_id, view)) |concrete| {
+            return try self.ctx.makeConcreteBoundValue(
+                concrete,
+                .normalized,
+            );
+        }
+        return self.ctx.makeSymbolicBoundValue(
+            try self.mirrorExprToSymbolic(expr_id, view),
+            .normalized,
+        );
+    }
+
+    fn mirrorExprToConcrete(
+        self: *RuleMatchSession,
+        expr_id: ExprId,
+        view: *const NormalizedView,
+    ) anyerror!?ExprId {
+        if (view.placeholder_targets.contains(expr_id)) return null;
+
+        return switch (view.mirror.theorem.interner.node(expr_id).*) {
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => |idx| blk: {
+                    if (idx >= self.ctx.theorem.theorem_vars.items.len) {
+                        return error.UnknownTheoremVariable;
+                    }
+                    break :blk self.ctx.theorem.theorem_vars.items[idx];
+                },
+                .dummy_var => |idx| blk: {
+                    if (idx >= view.mirror.mirror_dummy_map.len) {
+                        return error.UnknownDummyVar;
+                    }
+                    break :blk view.mirror.mirror_dummy_map[idx];
+                },
+            },
+            .app => |app| blk: {
+                const args = try self.ctx.allocator.alloc(ExprId, app.args.len);
+                errdefer self.ctx.allocator.free(args);
+                for (app.args, 0..) |arg, idx| {
+                    args[idx] = (try self.mirrorExprToConcrete(arg, view)) orelse {
+                        self.ctx.allocator.free(args);
+                        break :blk null;
+                    };
+                }
+                break :blk try self.ctx.theorem.interner.internAppOwned(
+                    app.term_id,
+                    args,
+                );
+            },
+        };
+    }
+
+    fn mirrorExprToSymbolic(
+        self: *RuleMatchSession,
+        expr_id: ExprId,
+        view: *const NormalizedView,
+    ) anyerror!*const SymbolicExpr {
+        if (view.placeholder_targets.get(expr_id)) |target| {
+            return switch (target) {
+                .binder => |idx| try self.ctx.allocSymbolic(.{ .binder = idx }),
+                .dummy => |slot| try self.ctx.allocSymbolic(.{ .dummy = slot }),
+            };
+        }
+
+        return switch (view.mirror.theorem.interner.node(expr_id).*) {
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => |idx| blk: {
+                    if (idx >= self.ctx.theorem.theorem_vars.items.len) {
+                        return error.UnknownTheoremVariable;
+                    }
+                    break :blk try self.ctx.allocSymbolic(.{ .fixed = self.ctx.theorem.theorem_vars.items[idx] });
+                },
+                .dummy_var => |idx| blk: {
+                    if (idx >= view.mirror.mirror_dummy_map.len) {
+                        return error.UnknownDummyVar;
+                    }
+                    break :blk try self.ctx.allocSymbolic(.{ .fixed = view.mirror.mirror_dummy_map[idx] });
+                },
+            },
+            .app => |app| blk: {
+                const args = try self.ctx.allocator.alloc(
+                    *const SymbolicExpr,
+                    app.args.len,
+                );
+                errdefer self.ctx.allocator.free(args);
+                for (app.args, 0..) |arg, idx| {
+                    args[idx] = try self.mirrorExprToSymbolic(arg, view);
+                }
+                break :blk try self.ctx.allocSymbolic(.{ .app = .{
+                    .term_id = app.term_id,
+                    .args = args,
+                } });
+            },
+        };
+    }
+
+    fn symbolicContainsBinder(
+        self: *RuleMatchSession,
+        symbolic: *const SymbolicExpr,
+        target: usize,
+    ) bool {
+        return switch (symbolic.*) {
+            .binder => |idx| idx == target,
+            .fixed => false,
+            .dummy => false,
+            .app => |app| blk: {
+                for (app.args) |arg| {
+                    if (self.symbolicContainsBinder(arg, target)) {
+                        break :blk true;
+                    }
+                }
+                break :blk false;
+            },
+        };
+    }
+
+    fn symbolicContainsDummy(
+        self: *RuleMatchSession,
+        symbolic: *const SymbolicExpr,
+        target: usize,
+    ) bool {
+        return switch (symbolic.*) {
+            .binder => false,
+            .fixed => false,
+            .dummy => |slot| slot == target,
+            .app => |app| blk: {
+                for (app.args) |arg| {
+                    if (self.symbolicContainsDummy(arg, target)) {
+                        break :blk true;
+                    }
+                }
+                break :blk false;
+            },
+        };
+    }
+};
+
+pub const NormalizedComparison = struct {
+    session: *RuleMatchSession,
+    view: NormalizedView,
+    expected_expr: ExprId,
+    actual_expr: ExprId,
+
+    pub fn deinit(self: *NormalizedComparison) void {
+        self.view.deinit(self.session.ctx.allocator);
+    }
+
+    pub fn mirrorTheorem(self: *NormalizedComparison) *TheoremContext {
+        return &self.view.mirror.theorem;
+    }
+
+    pub fn finish(
+        self: *NormalizedComparison,
+        normalized_expected: ExprId,
+        normalized_actual: ExprId,
+    ) anyerror!bool {
+        return try self.session.matchNormalizedPattern(
+            &self.view,
+            normalized_expected,
+            normalized_actual,
+        );
+    }
+};
+
+fn samePlaceholderTarget(
+    lhs: NormalizedPlaceholderTarget,
+    rhs: NormalizedPlaceholderTarget,
+) bool {
+    return switch (lhs) {
+        .binder => |idx| switch (rhs) {
+            .binder => |rhs_idx| idx == rhs_idx,
+            .dummy => false,
+        },
+        .dummy => |idx| switch (rhs) {
+            .binder => false,
+            .dummy => |rhs_idx| idx == rhs_idx,
+        },
+    };
+}
 
 fn findDummyBinding(bindings: []const DummyBinding, slot: usize) ?ExprId {
     for (bindings) |binding| {
