@@ -10,6 +10,7 @@ const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
 const UnifyReplay = @import("../trusted/unify_replay.zig");
 const ProofLine = @import("./proof_script.zig").ProofLine;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
+const NormalizeSpec = @import("./rewrite_registry.zig").NormalizeSpec;
 const Normalizer = @import("./normalizer.zig").Normalizer;
 const InferenceSolver = @import("./inference_solver.zig").Solver;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
@@ -337,34 +338,59 @@ fn matchNormalizedPattern(
     };
 }
 
+fn hypMarkedForNormalize(norm_spec: ?NormalizeSpec, hyp_idx: usize) bool {
+    const spec = norm_spec orelse return false;
+    for (spec.hyp_indices) |marked| {
+        if (marked == hyp_idx) return true;
+    }
+    return false;
+}
+
 pub fn inferBindingsByNormalizedConclusion(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
     theorem: *TheoremContext,
+    rule_id: u32,
     rule: *const RuleDecl,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
 ) ![]const ExprId {
     const bindings = try allocator.dupe(?ExprId, partial_bindings);
+    const norm_spec = registry.getNormalizeSpec(rule_id);
+    const pending_normalized = try allocator.alloc(bool, rule.hyps.len);
+    defer allocator.free(pending_normalized);
+    @memset(pending_normalized, false);
+
     var def_ops = DefOps.Context.init(
         allocator,
         theorem,
         env,
     );
     defer def_ops.deinit();
-    for (rule.hyps, ref_exprs) |hyp, ref_expr| {
-        if (!try def_ops.matchTemplateWithDefOpening(
+    for (rule.hyps, ref_exprs, 0..) |hyp, ref_expr, hyp_idx| {
+        if (try def_ops.matchTemplateWithDefOpening(
             hyp,
             ref_expr,
             bindings,
         )) {
-            return error.UnifyMismatch;
+            continue;
         }
+        if (hypMarkedForNormalize(norm_spec, hyp_idx)) {
+            pending_normalized[hyp_idx] = true;
+            continue;
+        }
+        return error.UnifyMismatch;
     }
     if (!hasOmittedBindings(bindings)) {
-        return try requireConcreteBindings(allocator, bindings);
+        var any_pending = false;
+        for (pending_normalized) |pending| {
+            any_pending = any_pending or pending;
+        }
+        if (!any_pending) {
+            return try requireConcreteBindings(allocator, bindings);
+        }
     }
 
     var mirror = try MirroredTheoremContext.init(allocator, theorem);
@@ -410,34 +436,56 @@ pub fn inferBindingsByNormalizedConclusion(
         try placeholders.put(allocator, placeholder, idx);
     }
 
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer checked.deinit(allocator);
+
+    var normalizer = Normalizer.init(
+        allocator,
+        &mirror.theorem,
+        registry,
+        env,
+        &checked,
+    );
+
+    var reverse_cache = std.AutoHashMapUnmanaged(ExprId, ExprId){};
+    defer reverse_cache.deinit(allocator);
+
+    for (rule.hyps, ref_exprs, 0..) |hyp, ref_expr, hyp_idx| {
+        if (!pending_normalized[hyp_idx]) continue;
+        const mirror_hyp = try mirror.theorem.instantiateTemplate(
+            hyp,
+            mirror_binders,
+        );
+        const mirror_ref = try copyExprBetweenTheorems(
+            allocator,
+            theorem,
+            &mirror.theorem,
+            ref_expr,
+            mirror.source_dummy_map,
+            &to_mirror,
+        );
+        const normalized_hyp = try normalizer.normalize(mirror_hyp);
+        const normalized_ref = try normalizer.normalize(mirror_ref);
+        if (!try matchNormalizedPattern(
+            allocator,
+            theorem,
+            &mirror,
+            normalized_hyp.result_expr,
+            normalized_ref.result_expr,
+            &placeholders,
+            bindings,
+            &reverse_cache,
+        )) {
+            return error.UnifyMismatch;
+        }
+    }
+
     const mirror_concl = try mirror.theorem.instantiateTemplate(
         rule.concl,
         mirror_binders,
     );
-
-    var checked = std.ArrayListUnmanaged(CheckedLine){};
-    defer checked.deinit(allocator);
-
-    var expected_normalizer = Normalizer.init(
-        allocator,
-        &mirror.theorem,
-        registry,
-        env,
-        &checked,
-    );
-    const normalized_expected = try expected_normalizer.normalize(mirror_concl);
-
-    var actual_normalizer = Normalizer.init(
-        allocator,
-        &mirror.theorem,
-        registry,
-        env,
-        &checked,
-    );
-    const normalized_actual = try actual_normalizer.normalize(mirror_line);
-
-    var reverse_cache = std.AutoHashMapUnmanaged(ExprId, ExprId){};
-    defer reverse_cache.deinit(allocator);
+    const normalized_expected = try normalizer.normalize(mirror_concl);
+    const normalized_actual = try normalizer.normalize(mirror_line);
     if (!try matchNormalizedPattern(
         allocator,
         theorem,
@@ -498,6 +546,7 @@ pub fn inferBindings(
                     env,
                     registry,
                     theorem,
+                    env.getRuleId(line.rule_name) orelse return err,
                     rule,
                     partial_bindings,
                     ref_exprs,

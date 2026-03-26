@@ -1361,6 +1361,110 @@ test "targeted def module has no standalone opening API" {
     try std.testing.expect(!@hasDecl(DefOps.Context, "openConcreteDef"));
 }
 
+fn exprContainsExprId(
+    theorem: *const CompilerExpr.TheoremContext,
+    root: CompilerExpr.ExprId,
+    needle: CompilerExpr.ExprId,
+) bool {
+    if (root == needle) return true;
+    return switch (theorem.interner.node(root).*) {
+        .variable => false,
+        .app => |app| blk: {
+            for (app.args) |arg| {
+                if (exprContainsExprId(theorem, arg, needle)) {
+                    break :blk true;
+                }
+            }
+            break :blk false;
+        },
+    };
+}
+
+test "def matcher binds quantified templates through hidden dummies" {
+    const allocator = std.testing.allocator;
+    const src = try readProofCaseFile(
+        allocator,
+        "pass_def_all_elim_free_param",
+        "mm0",
+    );
+    defer allocator.free(src);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const rule_id = env.getRuleId("all_elim") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+
+    const parsed_actual = try parser.parseFormulaText(" mono f ", &theorem_vars);
+    const actual = try theorem.internParsedExpr(parsed_actual);
+
+    const bindings = try allocator.alloc(?CompilerExpr.ExprId, rule.args.len);
+    defer allocator.free(bindings);
+    @memset(bindings, null);
+
+    var def_ops = DefOps.Context.init(
+        arena.allocator(),
+        &theorem,
+        &env,
+    );
+    defer def_ops.deinit();
+
+    try std.testing.expect(try def_ops.matchTemplateTransparent(
+        rule.hyps[0],
+        actual,
+        bindings,
+    ));
+    try std.testing.expect(bindings[0] != null);
+    try std.testing.expect(bindings[1] == null);
+    try std.testing.expect(bindings[2] != null);
+    try std.testing.expectEqual(@as(usize, 2), theorem.theorem_dummies.items.len);
+
+    const x = bindings[0].?;
+    switch (theorem.interner.node(x).*) {
+        .variable => |var_id| switch (var_id) {
+            .dummy_var => {},
+            .theorem_var => return error.ExpectedDummyVariable,
+        },
+        .app => return error.ExpectedVariable,
+    }
+
+    const all_id = env.term_names.get("all") orelse return error.MissingTerm;
+    const p = bindings[2].?;
+    switch (theorem.interner.node(p).*) {
+        .variable => return error.ExpectedTermApp,
+        .app => |app| {
+            try std.testing.expectEqual(all_id, app.term_id);
+            try std.testing.expect(exprContainsExprId(&theorem, app.args[1], x));
+        },
+    }
+}
+
 test "def matcher opens nested user-side defs under matching heads" {
     const src =
         \\delimiter $ ( ) $;
@@ -1991,44 +2095,8 @@ const KnownProofCaseFailure = struct {
 
 const known_proof_case_failures = [_]KnownProofCaseFailure{
     .{
-        .stem = "pass_def_all_elim_free_param",
-        .reason = "def-opened all_elim hypotheses still mismatch exactly",
-    },
-    .{
-        .stem = "pass_category_defs_direct",
-        .reason = "category def opening still hits exact hypothesis mismatches",
-    },
-    .{
-        .stem = "pass_abbrev_hidden_dummy_and_elim",
-        .reason = "abbrev and_elim path still mismatches after alpha cleanup",
-    },
-    .{
-        .stem = "pass_abbrev_hidden_dummy_all_elim_ctx",
-        .reason = "abbrev all_elim context path still depends on alpha repair",
-    },
-    .{
-        .stem = "pass_abbrev_hidden_dummy_all_elim_ctx_reorder",
-        .reason = "reordered abbrev all_elim context still needs exact fixups",
-    },
-    .{
         .stem = "pass_abbrev_dummy",
         .reason = "abbrev dummy transport still lacks an exact conversion plan",
-    },
-    .{
-        .stem = "demo_category_pullback",
-        .reason = "pullback demo still trips exact hidden-dummy hypothesis checks",
-    },
-    .{
-        .stem = "demo_category_pullback_abbrev_mono",
-        .reason = "pullback abbrev mono demo still needs exact hidden-dummy work",
-    },
-    .{
-        .stem = "demo_category_pullback_abbrev_pullback",
-        .reason = "pullback abbrev pullback demo still needs exact fixups",
-    },
-    .{
-        .stem = "demo_category_pullback_abbrev_both",
-        .reason = "pullback abbrev combo demo still needs exact fixups",
     },
 };
 
@@ -2065,14 +2133,14 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_infer_user_side", .outcome = .pass },
     .{ .stem = "pass_def_infer_user_side_hyp", .outcome = .pass },
     .{ .stem = "pass_def_infer_user_side_final", .outcome = .pass },
-    .{ .stem = "pass_def_all_elim_free_param", .outcome = .known_fail },
-    .{ .stem = "pass_category_defs_direct", .outcome = .known_fail },
+    .{ .stem = "pass_def_all_elim_free_param", .outcome = .pass },
+    .{ .stem = "pass_category_defs_direct", .outcome = .pass },
     .{ .stem = "pass_infer_normalized_conclusion", .outcome = .pass },
     .{ .stem = "pass_abbrev_hidden_dummy_explicit", .outcome = .pass },
     .{ .stem = "pass_abbrev_hidden_dummy_infer", .outcome = .pass },
-    .{ .stem = "pass_abbrev_hidden_dummy_and_elim", .outcome = .known_fail },
-    .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx", .outcome = .known_fail },
-    .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx_reorder", .outcome = .known_fail },
+    .{ .stem = "pass_abbrev_hidden_dummy_and_elim", .outcome = .pass },
+    .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx", .outcome = .pass },
+    .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx_reorder", .outcome = .pass },
     .{ .stem = "pass_abbrev_assoc", .outcome = .pass },
     .{
         .stem = "pass_abbrev_rewrite",
@@ -2107,10 +2175,13 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "demo_prop_cnf", .outcome = .pass },
     .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
     .{ .stem = "demo_seq_peirce", .outcome = .pass },
-    .{ .stem = "demo_category_pullback", .outcome = .known_fail },
-    .{ .stem = "demo_category_pullback_abbrev_mono", .outcome = .known_fail },
-    .{ .stem = "demo_category_pullback_abbrev_pullback", .outcome = .known_fail },
-    .{ .stem = "demo_category_pullback_abbrev_both", .outcome = .known_fail },
+    .{ .stem = "demo_category_pullback", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_abbrev_mono", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_abbrev_pullback", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_abbrev_both", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_unfold", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_unfold_2", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_unfold_3", .outcome = .pass },
     .{ .stem = "pass_acui_remainder_overlap", .outcome = .pass },
     .{ .stem = "pass_acui_order_independent_overlap", .outcome = .pass },
     .{ .stem = "pass_acui_repeated_explicit_item", .outcome = .pass },

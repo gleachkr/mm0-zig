@@ -124,7 +124,14 @@ pub const Normalizer = struct {
         if (try self.buildAcuiCommonTarget(lhs, rhs)) |acui| {
             return acui;
         }
+        return try self.buildNonAcuiCommonTarget(lhs, rhs);
+    }
 
+    fn buildNonAcuiCommonTarget(
+        self: *Normalizer,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) Error!?CommonTargetResult {
         const lhs_node = self.theorem.interner.node(lhs);
         const rhs_node = self.theorem.interner.node(rhs);
         const lhs_app = switch (lhs_node.*) {
@@ -257,6 +264,13 @@ pub const Normalizer = struct {
             rhs_exact,
             &common_items,
         );
+        try self.pairCommonAcuiLeaves(
+            lhs_leaves.items,
+            rhs_leaves.items,
+            lhs_exact,
+            rhs_exact,
+            &common_items,
+        );
 
         try self.claimOppositeConcreteLeaves(
             lhs_leaves.items,
@@ -338,6 +352,37 @@ pub const Normalizer = struct {
         };
     }
 
+    fn pairCommonAcuiLeaves(
+        self: *Normalizer,
+        lhs: []AcuiLeaf,
+        rhs: []AcuiLeaf,
+        lhs_exact: []bool,
+        rhs_exact: []bool,
+        common_items: *std.ArrayListUnmanaged(ExprId),
+    ) Error!void {
+        for (lhs, 0..) |*lhs_leaf, lhs_idx| {
+            if (lhs_exact[lhs_idx]) continue;
+            for (rhs, 0..) |*rhs_leaf, rhs_idx| {
+                if (rhs_exact[rhs_idx]) continue;
+                const common = try self.buildNonAcuiCommonTarget(
+                    lhs_leaf.old_expr,
+                    rhs_leaf.old_expr,
+                ) orelse continue;
+                lhs_exact[lhs_idx] = true;
+                rhs_exact[rhs_idx] = true;
+                lhs_leaf.new_expr = common.target_expr;
+                lhs_leaf.conv_line_idx = common.lhs_conv_line_idx;
+                rhs_leaf.new_expr = common.target_expr;
+                rhs_leaf.conv_line_idx = common.rhs_conv_line_idx;
+                try common_items.append(
+                    self.allocator,
+                    common.target_expr,
+                );
+                break;
+            }
+        }
+    }
+
     fn claimOppositeConcreteLeaves(
         self: *Normalizer,
         owners: []AcuiLeaf,
@@ -373,6 +418,39 @@ pub const Normalizer = struct {
         relation: ResolvedRelation,
         acui: ResolvedStructuralCombiner,
     ) Error!?usize {
+        if (try self.buildNonAcuiCommonTarget(def_expr, concrete_expr)) |common| {
+            if (common.target_expr == def_expr) {
+                return common.rhs_conv_line_idx;
+            }
+            if (common.target_expr == concrete_expr) {
+                const def_to_concrete = common.lhs_conv_line_idx orelse return null;
+                return try self.emitSymm(
+                    relation,
+                    def_expr,
+                    concrete_expr,
+                    def_to_concrete,
+                );
+            }
+            const concrete_to_target = common.rhs_conv_line_idx orelse {
+                return null;
+            };
+            const def_to_target = common.lhs_conv_line_idx orelse return null;
+            const target_to_def = try self.emitSymm(
+                relation,
+                def_expr,
+                common.target_expr,
+                def_to_target,
+            );
+            return try self.composeTransitivity(
+                relation,
+                concrete_expr,
+                common.target_expr,
+                def_expr,
+                concrete_to_target,
+                target_to_def,
+            );
+        }
+
         var def_ops = DefOps.Context.init(
             self.allocator,
             self.theorem,
@@ -578,17 +656,35 @@ pub const Normalizer = struct {
             leaves,
             &next_leaf,
         );
+        const rewritten = switch (self.theorem.interner.node(replaced.result_expr).*) {
+            .app => |rewritten_app| try self.normalizeChildren(
+                replaced.result_expr,
+                rewritten_app,
+            ),
+            .variable => NormalizeResult{
+                .result_expr = replaced.result_expr,
+                .conv_line_idx = null,
+            },
+        };
         const exact = try self.normalizeStructuralExact(
-            replaced.result_expr,
+            rewritten.result_expr,
             relation,
             acui,
+        );
+        const replaced_to_rewritten = try self.composeTransitivity(
+            relation,
+            expr_id,
+            replaced.result_expr,
+            rewritten.result_expr,
+            replaced.conv_line_idx,
+            rewritten.conv_line_idx,
         );
         const proof = try self.composeTransitivity(
             relation,
             expr_id,
-            replaced.result_expr,
+            rewritten.result_expr,
             exact.result_expr,
-            replaced.conv_line_idx,
+            replaced_to_rewritten,
             exact.conv_line_idx,
         );
         return .{
@@ -638,36 +734,33 @@ pub const Normalizer = struct {
         var current = child_result.result_expr;
         var current_proof = child_result.conv_line_idx;
 
-        const current_node = self.theorem.interner.node(current);
-        if (current_node.* == .app) {
+        while (true) {
+            const current_node = self.theorem.interner.node(current);
+            if (current_node.* != .app) break;
             const app = current_node.app;
-            if (self.registry.resolveStructuralCombiner(
+            const acui = self.registry.resolveStructuralCombiner(
                 self.env,
                 app.term_id,
-            )) |acui| {
-                const structural = try self.normalizeStructural(
-                    current,
-                    relation,
-                    acui,
-                );
-                if (structural.result_expr != current or
-                    structural.conv_line_idx != null)
-                {
-                    current_proof = try self.composeTransitivity(
-                        relation,
-                        expr_id,
-                        current,
-                        structural.result_expr,
-                        current_proof,
-                        structural.conv_line_idx,
-                    );
-                    current = structural.result_expr;
-                    return .{
-                        .result_expr = current,
-                        .conv_line_idx = current_proof,
-                    };
-                }
+            ) orelse break;
+            const structural = try self.normalizeStructural(
+                current,
+                relation,
+                acui,
+            );
+            if (structural.result_expr == current and
+                structural.conv_line_idx == null)
+            {
+                break;
             }
+            current_proof = try self.composeTransitivity(
+                relation,
+                expr_id,
+                current,
+                structural.result_expr,
+                current_proof,
+                structural.conv_line_idx,
+            );
+            current = structural.result_expr;
         }
 
         while (true) {
@@ -789,17 +882,35 @@ pub const Normalizer = struct {
             leaves.items,
             &next_leaf,
         );
+        const rewritten = switch (self.theorem.interner.node(replaced.result_expr).*) {
+            .app => |rewritten_app| try self.normalizeChildren(
+                replaced.result_expr,
+                rewritten_app,
+            ),
+            .variable => NormalizeResult{
+                .result_expr = replaced.result_expr,
+                .conv_line_idx = null,
+            },
+        };
         const exact = try self.normalizeStructuralExact(
-            replaced.result_expr,
+            rewritten.result_expr,
             relation,
             acui,
+        );
+        const replaced_to_rewritten = try self.composeTransitivity(
+            relation,
+            expr_id,
+            replaced.result_expr,
+            rewritten.result_expr,
+            replaced.conv_line_idx,
+            rewritten.conv_line_idx,
         );
         const proof = try self.composeTransitivity(
             relation,
             expr_id,
-            replaced.result_expr,
+            rewritten.result_expr,
             exact.result_expr,
-            replaced.conv_line_idx,
+            replaced_to_rewritten,
             exact.conv_line_idx,
         );
         return .{
@@ -988,7 +1099,11 @@ pub const Normalizer = struct {
         };
         if (app.term_id >= self.env.terms.items.len) return false;
         const term = &self.env.terms.items[app.term_id];
-        return term.is_def and term.body != null;
+        if (term.is_def and term.body != null) return true;
+        for (app.args) |arg| {
+            if (self.isDefItem(arg)) return true;
+        }
+        return false;
     }
 
     fn mergeCanonical(

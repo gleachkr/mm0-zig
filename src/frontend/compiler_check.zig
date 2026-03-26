@@ -3,7 +3,6 @@ const ExprId = @import("./compiler_expr.zig").ExprId;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
 const RuleDecl = @import("./compiler_env.zig").RuleDecl;
-const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
 const Expr = @import("../trusted/expressions.zig").Expr;
@@ -72,14 +71,13 @@ fn tryMatchHypothesis(
             )) |conversion| {
                 var conversion_mut = conversion;
                 if (conversion_mut.conv_line_idx) |conv_line_idx| {
-                    return .{ .line =
-                        try conversion_mut.normalizer.emitTransport(
-                            conversion_mut.relation,
-                            expected,
-                            actual,
-                            conv_line_idx,
-                            actual_ref,
-                        ) };
+                    return .{ .line = try conversion_mut.normalizer.emitTransport(
+                        conversion_mut.relation,
+                        expected,
+                        actual,
+                        conv_line_idx,
+                        actual_ref,
+                    ) };
                 }
                 return actual_ref;
             }

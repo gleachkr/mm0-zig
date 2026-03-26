@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const Arg = @import("./trusted/args.zig").Arg;
 pub const Compiler = @import("./frontend/compiler.zig").Compiler;
+pub const CheckedLine = @import("./frontend/compiler.zig").CheckedLine;
 pub const DebugConfig = @import("./frontend/debug.zig").DebugConfig;
 pub const CompilerDiagnostic = @import("./frontend/compiler.zig").Diagnostic;
 pub const compilerDiagnosticSummary =
@@ -10,6 +11,8 @@ pub const CompilerEnv = @import("./frontend/compiler_env.zig");
 pub const CompilerExpr = @import("./frontend/compiler_expr.zig");
 pub const CompilerRules = @import("./frontend/compiler_rules.zig");
 pub const CompilerInference = @import("./frontend/compiler_inference.zig");
+pub const CompilerViews = @import("./frontend/compiler_views.zig");
+pub const CompilerNormalize = @import("./frontend/compiler_normalize.zig");
 pub const DefOps = @import("./frontend/def_ops.zig");
 pub const TermAnnotations = @import("./frontend/term_annotations.zig");
 pub const Normalizer = @import("./frontend/normalizer.zig");
