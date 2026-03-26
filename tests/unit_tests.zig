@@ -1577,6 +1577,158 @@ test "def conversion plan unfolds to an exact target" {
     }
 }
 
+test "semantic seeds finalize to representatives while exact seeds stay raw" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def double (a: wff): wff = $ a -> a $;
+        \\axiom keep (p: wff): $ p $;
+        \\theorem host (a: wff): $ double a $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(
+        arena.allocator(),
+    );
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const rule_id = env.getRuleId("keep") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+    const raw_expr = try parser.parseFormulaText(" a -> a ", &theorem_vars);
+    const raw = try theorem.internParsedExpr(raw_expr);
+    const folded_expr = try parser.parseFormulaText(" double a ", &theorem_vars);
+    const folded = try theorem.internParsedExpr(folded_expr);
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var semantic_session = try def_ops.beginRuleMatch(
+        rule.args,
+        &.{DefOps.BindingSeed{ .semantic = .{
+            .expr_id = raw,
+            .mode = .transparent,
+        } }},
+    );
+    defer semantic_session.deinit();
+    const semantic_bindings = try semantic_session.finalizeConcreteBindings();
+    try std.testing.expectEqual(@as(usize, 1), semantic_bindings.len);
+    try std.testing.expectEqual(folded, semantic_bindings[0]);
+
+    var exact_session = try def_ops.beginRuleMatch(
+        rule.args,
+        &.{DefOps.BindingSeed{ .exact = raw }},
+    );
+    defer exact_session.deinit();
+    const exact_bindings = try exact_session.finalizeConcreteBindings();
+    try std.testing.expectEqual(@as(usize, 1), exact_bindings.len);
+    try std.testing.expectEqual(raw, exact_bindings[0]);
+}
+
+test "semantic seeds reuse representative-aware matches" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\def double (a: wff): wff = $ a -> a $;
+        \\axiom dup (p: wff): $ p -> p $;
+        \\theorem host (a: wff): $ double a -> double a $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(
+        arena.allocator(),
+    );
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const rule_id = env.getRuleId("dup") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+    const raw_expr = try parser.parseFormulaText(" a -> a ", &theorem_vars);
+    const raw = try theorem.internParsedExpr(raw_expr);
+    const folded_expr = try parser.parseFormulaText(" double a ", &theorem_vars);
+    const folded = try theorem.internParsedExpr(folded_expr);
+    const actual_expr =
+        try parser.parseFormulaText(" double a -> double a ", &theorem_vars);
+    const actual = try theorem.internParsedExpr(actual_expr);
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var semantic_session = try def_ops.beginRuleMatch(
+        rule.args,
+        &.{DefOps.BindingSeed{ .semantic = .{
+            .expr_id = raw,
+            .mode = .transparent,
+        } }},
+    );
+    defer semantic_session.deinit();
+    try std.testing.expect(
+        try semantic_session.matchTransparent(rule.concl, actual),
+    );
+    const semantic_bindings = try semantic_session.finalizeConcreteBindings();
+    try std.testing.expectEqual(@as(usize, 1), semantic_bindings.len);
+    try std.testing.expectEqual(folded, semantic_bindings[0]);
+
+    var exact_session = try def_ops.beginRuleMatch(
+        rule.args,
+        &.{DefOps.BindingSeed{ .exact = raw }},
+    );
+    defer exact_session.deinit();
+    try std.testing.expect(
+        !(try exact_session.matchTransparent(rule.concl, actual)),
+    );
+}
+
 test "compiler emits a valid hidden-dummy targeted unfold proof" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
@@ -2098,6 +2250,10 @@ const known_proof_case_failures = [_]KnownProofCaseFailure{
         .stem = "pass_abbrev_dummy",
         .reason = "abbrev dummy transport still lacks an exact conversion plan",
     },
+    .{
+        .stem = "pass_def_hidden_dummy_all_elim_ctx_fold",
+        .reason = "reverse-direction hidden-dummy ctx folding still fails omitted inference",
+    },
 };
 
 fn knownFailReason(stem: []const u8) ?[]const u8 {
@@ -2141,6 +2297,13 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_abbrev_hidden_dummy_and_elim", .outcome = .pass },
     .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx", .outcome = .pass },
     .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx_reorder", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_unfold", .outcome = .pass },
+    .{
+        .stem = "pass_def_hidden_dummy_all_elim_ctx_fold",
+        .outcome = .known_fail,
+    },
+    .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_twostep", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_imp_elim_ctx_mixed", .outcome = .pass },
     .{ .stem = "pass_abbrev_assoc", .outcome = .pass },
     .{
         .stem = "pass_abbrev_rewrite",
@@ -2189,9 +2352,13 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_acui_duplicate_binders_same_item", .outcome = .pass },
     .{ .stem = "pass_acui_principal_remainder", .outcome = .pass },
     .{ .stem = "pass_acui_same_side_absorb", .outcome = .pass },
+    .{ .stem = "pass_acui_same_side_absorb_commuted", .outcome = .pass },
+    .{ .stem = "pass_acui_same_side_duplicate_def", .outcome = .pass },
     .{ .stem = "pass_acui_same_side_absorb_infer", .outcome = .pass },
     .{ .stem = "pass_acui_cross_side_absorb", .outcome = .pass },
     .{ .stem = "pass_acui_cross_side_cancel", .outcome = .pass },
+    .{ .stem = "pass_acui_cross_side_cancel_then_absorb", .outcome = .pass },
+    .{ .stem = "pass_acui_cross_side_structural_def_leftover", .outcome = .pass },
     .{ .stem = "pass_au_category", .outcome = .pass },
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
     .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
@@ -2215,11 +2382,23 @@ const proof_cases = [_]ProofCase{
         .outcome = .{ .fail = error.AmbiguousAcuiMatch },
     },
     .{
+        .stem = "fail_def_hidden_dummy_all_elim_ctx_uncovered",
+        .outcome = .{ .fail = error.UnifyMismatch },
+    },
+    .{
         .stem = "fail_acui_same_side_uncovered",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
     .{
+        .stem = "fail_acui_same_side_leftover_def",
+        .outcome = .{ .fail = error.ConclusionMismatch },
+    },
+    .{
         .stem = "fail_acui_cross_side_uncovered",
+        .outcome = .{ .fail = error.ConclusionMismatch },
+    },
+    .{
+        .stem = "fail_acui_cross_side_leftover_def",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
     .{ .stem = "fail_abbrev_hidden_dummy_ax", .outcome = .pass },

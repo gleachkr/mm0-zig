@@ -1,0 +1,3 @@
+acui_cross_side_leftover_def
+------------------------------
+l1: $ dbl a , trpl b ⇒ a $ by dup_ax (g := $ dbl b $, a := $ a $) []

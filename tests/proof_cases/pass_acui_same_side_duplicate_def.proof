@@ -1,0 +1,3 @@
+acui_same_side_duplicate_def
+------------------------------
+l1: $ dbl a , dbl a ⇒ a $ by keep_dbl (g := $ emp $, a := $ a $) []

@@ -1,0 +1,127 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort ctx;
+sort obj;
+
+term imp (a b: wff): wff;
+infixr imp: $->$ prec 25;
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 35;
+term pair (a b: obj): obj;
+
+term sb_t {x: obj} (t: obj x) (a: obj x): obj;
+notation sb_t {x: obj} (t: obj x) (a: obj x): obj =
+  ($subst$:41) x ($/$:0) t a;
+term sb_f {x: obj} (t: obj x) (p: wff x): wff;
+notation sb_f {x: obj} (t: obj x) (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $|- $ prec 0;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @relation obj eq eq_refl eq_trans eq_sym _
+axiom eq_refl (a: obj): $ a = a $;
+axiom eq_trans (a b c: obj): $ a = b $ > $ b = c $ > $ a = c $;
+axiom eq_sym (a b: obj): $ a = b $ > $ b = a $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq (join (join g h) i) (join g (join h i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (join g h) (join h g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (join g g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (join emp g) g $;
+
+--| @congr
+axiom pair_congr (a b c d: obj):
+  $ a = b $ > $ c = d $ > $ pair a c = pair b d $;
+
+--| @congr
+axiom eq_congr (a b c d: obj):
+  $ a = b $ > $ c = d $ > $ (a = c) <-> (b = d) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+
+--| @congr
+axiom all_congr {x: obj} (p q: wff x):
+  $ p <-> q $ > $ A. x p <-> A. x q $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (join g1 h1) (join g2 h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a <-> b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a <-> b $ > $ nd g a <-> nd h b $;
+
+--| @rewrite
+axiom sb_t_var {x: obj} (t: obj x): $ subst x / t x = t $;
+
+--| @rewrite
+axiom sb_t_pair {x: obj} (t: obj x) (a b: obj x):
+  $ subst x / t (pair a b) = pair (subst x / t a) (subst x / t b) $;
+
+--| @rewrite
+axiom sb_t_other {x y: obj} (t: obj x): $ subst x / t y = y $;
+
+--| @rewrite
+axiom sb_t_irrel {x: obj} (t: obj x) (a: obj): $ subst x / t a = a $;
+
+--| @rewrite
+axiom sb_f_eq {x: obj} (t: obj x) (a b: obj x):
+  $ [x/t] (a = b) <-> (subst x / t a = subst x / t b) $;
+
+--| @rewrite
+axiom sb_f_imp {x: obj} (t: obj x) (p q: wff x):
+  $ [x/t] (p -> q) <-> ([x/t] p -> [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_all {x y: obj} (t: obj x) (p: wff x y):
+  $ [x/t] (A. y p) <-> A. y ([x/t] p) $;
+
+--| @normalize conc
+axiom ax (g: ctx) (a: wff): $ g , a |- a $;
+
+--| @normalize hyp0 hyp1 conc
+axiom imp_elim (g h: ctx) (a b: wff):
+  $ g |- a -> b $ > $ h |- a $ > $ g , h |- b $;
+
+--| @view (g: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ nd g (A. x p) $ > $ nd g q $
+--| @recover t q p x
+--| @normalize conc
+axiom all_elim (g: ctx) {x: obj} (t: obj x) (p: wff x):
+  $ g |- A. x p $ > $ g |- [x/t] p $;
+
+def mono {.a .b: obj} (f: obj): wff =
+  $ A. a A. b ((pair f a = pair f b) -> (a = b)) $;
+
+theorem def_hidden_dummy_all_elim_ctx_fold {u v a b: obj} (f: obj):
+  $ nd (join (hyp (mono f)) (hyp (pair f u = pair f u))) (A. v ((pair f u = pair f v) -> (u = v))) $;

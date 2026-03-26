@@ -1,0 +1,5 @@
+def_hidden_dummy_all_elim_ctx_fold
+-----------------------------------
+
+l1: $ nd (join (hyp (A. a A. b ((pair f a = pair f b) -> (a = b)))) (hyp (pair f u = pair f u))) (A. a A. b ((pair f a = pair f b) -> (a = b))) $ by ax
+l2: $ nd (join (hyp (mono f)) (hyp (pair f u = pair f u))) (A. v ((pair f u = pair f v) -> (u = v))) $ by all_elim [l1]

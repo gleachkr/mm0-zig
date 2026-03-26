@@ -1,0 +1,8 @@
+def_hidden_dummy_imp_elim_ctx_mixed
+------------------------------------
+
+l1: $ nd (join (hyp (A. a A. b ((pair f a = pair f b) -> (a = b)))) (hyp (pair f u = pair f v))) (A. a A. b ((pair f a = pair f b) -> (a = b))) $ by ax
+l2: $ nd (join (hyp (A. a A. b ((pair f a = pair f b) -> (a = b)))) (hyp (pair f u = pair f v))) (A. b ((pair f u = pair f b) -> (u = b))) $ by all_elim [l1]
+l3: $ nd (join (hyp (A. a A. b ((pair f a = pair f b) -> (a = b)))) (hyp (pair f u = pair f v))) ((pair f u = pair f v) -> (u = v)) $ by all_elim [l2]
+l4: $ nd (join (hyp (A. a A. b ((pair f a = pair f b) -> (a = b)))) (hyp (pair f u = pair f v))) (pair f u = pair f v) $ by ax
+l5: $ nd (join (hyp (mono f)) (hyp (pair f u = pair f v))) (u = v) $ by imp_elim [l3, l4]
