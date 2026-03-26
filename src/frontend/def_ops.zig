@@ -49,12 +49,36 @@ const BoundValue = union(enum) {
 
 const WitnessMap = std.AutoHashMapUnmanaged(usize, ExprId);
 
-const TemplateMatchState = struct {
+const MatchSession = struct {
     bindings: []?BoundValue,
     witnesses: WitnessMap = .{},
+    symbolic_dummy_infos: std.ArrayListUnmanaged(SymbolicDummyInfo) = .{},
+    provisional_witness_infos: std.AutoHashMapUnmanaged(
+        ExprId,
+        SymbolicDummyInfo,
+    ) = .empty,
+
+    fn init(
+        allocator: std.mem.Allocator,
+        binding_len: usize,
+    ) !MatchSession {
+        return .{
+            .bindings = try allocator.alloc(?BoundValue, binding_len),
+        };
+    }
+
+    fn deinit(
+        self: *MatchSession,
+        allocator: std.mem.Allocator,
+    ) void {
+        allocator.free(self.bindings);
+        self.witnesses.deinit(allocator);
+        self.symbolic_dummy_infos.deinit(allocator);
+        self.provisional_witness_infos.deinit(allocator);
+    }
 };
 
-const TemplateMatchSnapshot = struct {
+const MatchSnapshot = struct {
     bindings: []?BoundValue,
     witnesses: WitnessMap,
     dummy_info_len: usize,
@@ -69,11 +93,6 @@ pub const Context = struct {
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     env: *const GlobalEnv,
-    symbolic_dummy_infos: std.ArrayListUnmanaged(SymbolicDummyInfo) = .{},
-    template_witness_infos: std.AutoHashMapUnmanaged(
-        ExprId,
-        SymbolicDummyInfo,
-    ) = .empty,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -88,8 +107,7 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
-        self.symbolic_dummy_infos.deinit(self.allocator);
-        self.template_witness_infos.deinit(self.allocator);
+        _ = self;
     }
 
     pub fn defCoversItem(
@@ -115,7 +133,12 @@ pub const Context = struct {
         head_term_id: u32,
     ) anyerror!?ExprId {
         const def = self.getConcreteDef(def_expr) orelse return null;
-        const symbolic = try self.expandConcreteDef(def_expr) orelse return null;
+        var session = try MatchSession.init(self.allocator, 0);
+        defer session.deinit(self.allocator);
+        const symbolic = try self.expandConcreteDef(
+            def_expr,
+            &session,
+        ) orelse return null;
 
         var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
         defer dummy_bindings.deinit(self.allocator);
@@ -124,12 +147,17 @@ pub const Context = struct {
             symbolic,
             item_expr,
             head_term_id,
+            &session,
             &dummy_bindings,
         )) {
             return null;
         }
         if (dummy_bindings.items.len != def.term.dummy_args.len) return null;
-        return try self.materializeSymbolic(symbolic, dummy_bindings.items);
+        return try self.materializeSymbolic(
+            symbolic,
+            &session,
+            dummy_bindings.items,
+        );
     }
 
     pub fn planDefToTarget(
@@ -204,22 +232,13 @@ pub const Context = struct {
         actual: ExprId,
         bindings: []?ExprId,
     ) anyerror!bool {
-        const checkpoint = self.symbolic_dummy_infos.items.len;
-        defer self.symbolic_dummy_infos.shrinkRetainingCapacity(checkpoint);
+        var state = try MatchSession.init(self.allocator, bindings.len);
+        defer state.deinit(self.allocator);
 
-        const state_bindings = try self.allocator.alloc(
-            ?BoundValue,
-            bindings.len,
-        );
-        defer self.allocator.free(state_bindings);
-
-        var state = TemplateMatchState{
-            .bindings = state_bindings,
-        };
         var witness_slots: std.AutoHashMapUnmanaged(ExprId, usize) = .empty;
         defer witness_slots.deinit(self.allocator);
         for (bindings, 0..) |binding, idx| {
-            state_bindings[idx] = if (binding) |expr_id|
+            state.bindings[idx] = if (binding) |expr_id|
                 try self.rebuildBoundValue(
                     expr_id,
                     &state,
@@ -228,7 +247,6 @@ pub const Context = struct {
             else
                 null;
         }
-        defer state.witnesses.deinit(self.allocator);
 
         if (!try self.matchTemplateRecState(template, actual, &state)) {
             return false;
@@ -270,7 +288,12 @@ pub const Context = struct {
         target_expr: ExprId,
     ) anyerror!?ExprId {
         const def = self.getConcreteDef(def_expr) orelse return null;
-        const symbolic = try self.expandConcreteDef(def_expr) orelse return null;
+        var session = try MatchSession.init(self.allocator, 0);
+        defer session.deinit(self.allocator);
+        const symbolic = try self.expandConcreteDef(
+            def_expr,
+            &session,
+        ) orelse return null;
 
         var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
         defer dummy_bindings.deinit(self.allocator);
@@ -278,6 +301,7 @@ pub const Context = struct {
         if (!try self.matchSymbolicToExpr(
             symbolic,
             target_expr,
+            &session,
             &[_]?ExprId{},
             &dummy_bindings,
         )) {
@@ -303,7 +327,7 @@ pub const Context = struct {
         self: *Context,
         template: TemplateExpr,
         actual: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         return switch (template) {
             .binder => |idx| blk: {
@@ -344,7 +368,7 @@ pub const Context = struct {
         self: *Context,
         app: TemplateExpr.App,
         actual: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         const actual_node = self.theorem.interner.node(actual);
         const actual_app = switch (actual_node.*) {
@@ -357,12 +381,12 @@ pub const Context = struct {
             return false;
         }
 
-        var snapshot = try self.saveTemplateMatchSnapshot(state);
-        defer self.deinitTemplateMatchSnapshot(&snapshot);
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
 
         for (app.args, actual_app.args) |tmpl_arg, actual_arg| {
             if (!try self.matchTemplateRecState(tmpl_arg, actual_arg, state)) {
-                try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                try self.restoreMatchSnapshot(&snapshot, state);
                 return false;
             }
         }
@@ -373,17 +397,17 @@ pub const Context = struct {
         self: *Context,
         app: TemplateExpr.App,
         actual: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
-        var snapshot = try self.saveTemplateMatchSnapshot(state);
-        defer self.deinitTemplateMatchSnapshot(&snapshot);
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
 
-        const symbolic = try self.expandTemplateApp(app) orelse return false;
+        const symbolic = try self.expandTemplateApp(app, state) orelse return false;
         if (try self.matchSymbolicToExprState(symbolic, actual, state)) {
             return true;
         }
 
-        try self.restoreTemplateMatchSnapshot(&snapshot, state);
+        try self.restoreMatchSnapshot(&snapshot, state);
         return false;
     }
 
@@ -391,15 +415,15 @@ pub const Context = struct {
         self: *Context,
         template: TemplateExpr,
         actual: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         _ = self.getConcreteDef(actual) orelse return false;
 
-        var snapshot = try self.saveTemplateMatchSnapshot(state);
-        defer self.deinitTemplateMatchSnapshot(&snapshot);
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
 
         const symbolic_template = try self.symbolicFromTemplate(template);
-        const symbolic_actual = try self.expandConcreteDef(actual) orelse {
+        const symbolic_actual = try self.expandConcreteDef(actual, state) orelse {
             return false;
         };
         if (try self.matchSymbolicToSymbolicState(
@@ -410,7 +434,7 @@ pub const Context = struct {
             return true;
         }
 
-        try self.restoreTemplateMatchSnapshot(&snapshot, state);
+        try self.restoreMatchSnapshot(&snapshot, state);
         return false;
     }
 
@@ -418,7 +442,7 @@ pub const Context = struct {
         self: *Context,
         symbolic: *const SymbolicExpr,
         actual: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         return switch (symbolic.*) {
             .binder => |idx| blk: {
@@ -437,7 +461,7 @@ pub const Context = struct {
                 return (try self.compareTransparent(expr_id, actual)) != null;
             },
             .dummy => |slot| {
-                const info = self.symbolic_dummy_infos.items[slot];
+                const info = state.symbolic_dummy_infos.items[slot];
                 return try self.matchSymbolicDummyState(
                     slot,
                     info,
@@ -446,8 +470,8 @@ pub const Context = struct {
                 );
             },
             .app => |app| {
-                var snapshot = try self.saveTemplateMatchSnapshot(state);
-                defer self.deinitTemplateMatchSnapshot(&snapshot);
+                var snapshot = try self.saveMatchSnapshot(state);
+                defer self.deinitMatchSnapshot(&snapshot);
 
                 const actual_node = self.theorem.interner.node(actual);
                 if (actual_node.* == .app) {
@@ -461,7 +485,7 @@ pub const Context = struct {
                                 actual_arg,
                                 state,
                             )) {
-                                try self.restoreTemplateMatchSnapshot(
+                                try self.restoreMatchSnapshot(
                                     &snapshot,
                                     state,
                                 );
@@ -473,9 +497,9 @@ pub const Context = struct {
                     }
                 }
 
-                try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                try self.restoreMatchSnapshot(&snapshot, state);
 
-                if (try self.expandSymbolicApp(app)) |expanded| {
+                if (try self.expandSymbolicApp(app, state)) |expanded| {
                     if (try self.matchSymbolicToExprState(
                         expanded,
                         actual,
@@ -483,10 +507,10 @@ pub const Context = struct {
                     )) {
                         return true;
                     }
-                    try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                    try self.restoreMatchSnapshot(&snapshot, state);
                 }
 
-                if (try self.expandConcreteDef(actual)) |expanded_actual| {
+                if (try self.expandConcreteDef(actual, state)) |expanded_actual| {
                     if (try self.matchSymbolicToSymbolicState(
                         symbolic,
                         expanded_actual,
@@ -494,7 +518,7 @@ pub const Context = struct {
                     )) {
                         return true;
                     }
-                    try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                    try self.restoreMatchSnapshot(&snapshot, state);
                 }
                 return false;
             },
@@ -505,7 +529,7 @@ pub const Context = struct {
         self: *Context,
         actual: ExprId,
         symbolic: *const SymbolicExpr,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         return switch (symbolic.*) {
             .binder => |idx| blk: {
@@ -524,7 +548,7 @@ pub const Context = struct {
                 return (try self.compareTransparent(actual, expr_id)) != null;
             },
             .dummy => |slot| {
-                const info = self.symbolic_dummy_infos.items[slot];
+                const info = state.symbolic_dummy_infos.items[slot];
                 return try self.matchSymbolicDummyState(
                     slot,
                     info,
@@ -533,8 +557,8 @@ pub const Context = struct {
                 );
             },
             .app => |app| {
-                var snapshot = try self.saveTemplateMatchSnapshot(state);
-                defer self.deinitTemplateMatchSnapshot(&snapshot);
+                var snapshot = try self.saveMatchSnapshot(state);
+                defer self.deinitMatchSnapshot(&snapshot);
 
                 const actual_node = self.theorem.interner.node(actual);
                 if (actual_node.* == .app) {
@@ -548,7 +572,7 @@ pub const Context = struct {
                                 sym_arg,
                                 state,
                             )) {
-                                try self.restoreTemplateMatchSnapshot(
+                                try self.restoreMatchSnapshot(
                                     &snapshot,
                                     state,
                                 );
@@ -560,9 +584,9 @@ pub const Context = struct {
                     }
                 }
 
-                try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                try self.restoreMatchSnapshot(&snapshot, state);
 
-                if (try self.expandConcreteDef(actual)) |expanded_actual| {
+                if (try self.expandConcreteDef(actual, state)) |expanded_actual| {
                     if (try self.matchSymbolicToSymbolicState(
                         expanded_actual,
                         symbolic,
@@ -570,10 +594,10 @@ pub const Context = struct {
                     )) {
                         return true;
                     }
-                    try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                    try self.restoreMatchSnapshot(&snapshot, state);
                 }
 
-                if (try self.expandSymbolicApp(app)) |expanded| {
+                if (try self.expandSymbolicApp(app, state)) |expanded| {
                     if (try self.matchExprToSymbolic(
                         actual,
                         expanded,
@@ -581,7 +605,7 @@ pub const Context = struct {
                     )) {
                         return true;
                     }
-                    try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                    try self.restoreMatchSnapshot(&snapshot, state);
                 }
                 return false;
             },
@@ -592,7 +616,7 @@ pub const Context = struct {
         self: *Context,
         lhs: *const SymbolicExpr,
         rhs: *const SymbolicExpr,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         return switch (lhs.*) {
             .binder => |idx| blk: {
@@ -614,8 +638,8 @@ pub const Context = struct {
                 return try self.matchDummyToSymbolic(slot, rhs, state);
             },
             .app => |lhs_app| {
-                var snapshot = try self.saveTemplateMatchSnapshot(state);
-                defer self.deinitTemplateMatchSnapshot(&snapshot);
+                var snapshot = try self.saveMatchSnapshot(state);
+                defer self.deinitMatchSnapshot(&snapshot);
 
                 if (rhs.* == .app) {
                     const rhs_app = rhs.app;
@@ -628,7 +652,7 @@ pub const Context = struct {
                                 rhs_arg,
                                 state,
                             )) {
-                                try self.restoreTemplateMatchSnapshot(
+                                try self.restoreMatchSnapshot(
                                     &snapshot,
                                     state,
                                 );
@@ -640,9 +664,9 @@ pub const Context = struct {
                     }
                 }
 
-                try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                try self.restoreMatchSnapshot(&snapshot, state);
 
-                if (try self.expandSymbolicApp(lhs_app)) |expanded_lhs| {
+                if (try self.expandSymbolicApp(lhs_app, state)) |expanded_lhs| {
                     if (try self.matchSymbolicToSymbolicState(
                         expanded_lhs,
                         rhs,
@@ -650,10 +674,10 @@ pub const Context = struct {
                     )) {
                         return true;
                     }
-                    try self.restoreTemplateMatchSnapshot(&snapshot, state);
+                    try self.restoreMatchSnapshot(&snapshot, state);
                 }
                 if (rhs.* == .app) {
-                    if (try self.expandSymbolicApp(rhs.app)) |expanded_rhs| {
+                    if (try self.expandSymbolicApp(rhs.app, state)) |expanded_rhs| {
                         if (try self.matchSymbolicToSymbolicState(
                             lhs,
                             expanded_rhs,
@@ -661,7 +685,7 @@ pub const Context = struct {
                         )) {
                             return true;
                         }
-                        try self.restoreTemplateMatchSnapshot(
+                        try self.restoreMatchSnapshot(
                             &snapshot,
                             state,
                         );
@@ -676,6 +700,7 @@ pub const Context = struct {
         self: *Context,
         symbolic: *const SymbolicExpr,
         actual: ExprId,
+        state: *MatchSession,
         bindings: []?ExprId,
         dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
     ) anyerror!bool {
@@ -692,7 +717,7 @@ pub const Context = struct {
                 return (try self.compareTransparent(expr_id, actual)) != null;
             },
             .dummy => |slot| {
-                const info = self.symbolic_dummy_infos.items[slot];
+                const info = state.symbolic_dummy_infos.items[slot];
                 return try self.matchSymbolicDummy(
                     slot,
                     info,
@@ -718,6 +743,7 @@ pub const Context = struct {
                             if (!try self.matchSymbolicToExpr(
                                 sym_arg,
                                 actual_arg,
+                                state,
                                 bindings,
                                 dummy_bindings,
                             )) {
@@ -736,10 +762,11 @@ pub const Context = struct {
                 @memcpy(bindings, saved_bindings);
                 dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
 
-                if (try self.expandSymbolicApp(app)) |expanded| {
+                if (try self.expandSymbolicApp(app, state)) |expanded| {
                     if (try self.matchSymbolicToExpr(
                         expanded,
                         actual,
+                        state,
                         bindings,
                         dummy_bindings,
                     )) {
@@ -749,10 +776,11 @@ pub const Context = struct {
                     dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
                 }
 
-                if (try self.expandConcreteDef(actual)) |expanded_actual| {
+                if (try self.expandConcreteDef(actual, state)) |expanded_actual| {
                     if (try self.matchSymbolicToSymbolic(
                         symbolic,
                         expanded_actual,
+                        state,
                         bindings,
                         dummy_bindings,
                     )) {
@@ -770,6 +798,7 @@ pub const Context = struct {
         self: *Context,
         lhs: *const SymbolicExpr,
         rhs: *const SymbolicExpr,
+        state: *MatchSession,
         bindings: []?ExprId,
         dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
     ) anyerror!bool {
@@ -778,6 +807,7 @@ pub const Context = struct {
                 if (idx >= bindings.len) return false;
                 const rhs_expr = try self.materializeSymbolic(
                     rhs,
+                    state,
                     dummy_bindings.items,
                 ) orelse return false;
                 if (bindings[idx]) |existing| {
@@ -789,6 +819,7 @@ pub const Context = struct {
             .fixed => |expr_id| {
                 const rhs_expr = try self.materializeSymbolic(
                     rhs,
+                    state,
                     dummy_bindings.items,
                 ) orelse return false;
                 return (try self.compareTransparent(expr_id, rhs_expr)) != null;
@@ -796,9 +827,10 @@ pub const Context = struct {
             .dummy => |slot| {
                 const rhs_expr = try self.materializeSymbolic(
                     rhs,
+                    state,
                     dummy_bindings.items,
                 ) orelse return false;
-                const info = self.symbolic_dummy_infos.items[slot];
+                const info = state.symbolic_dummy_infos.items[slot];
                 return try self.matchSymbolicDummy(
                     slot,
                     info,
@@ -823,6 +855,7 @@ pub const Context = struct {
                             if (!try self.matchSymbolicToSymbolic(
                                 lhs_arg,
                                 rhs_arg,
+                                state,
                                 bindings,
                                 dummy_bindings,
                             )) {
@@ -841,10 +874,11 @@ pub const Context = struct {
                 @memcpy(bindings, saved_bindings);
                 dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
 
-                if (try self.expandSymbolicApp(lhs_app)) |expanded_lhs| {
+                if (try self.expandSymbolicApp(lhs_app, state)) |expanded_lhs| {
                     if (try self.matchSymbolicToSymbolic(
                         expanded_lhs,
                         rhs,
+                        state,
                         bindings,
                         dummy_bindings,
                     )) {
@@ -854,10 +888,11 @@ pub const Context = struct {
                     dummy_bindings.shrinkRetainingCapacity(dummy_checkpoint);
                 }
                 if (rhs.* == .app) {
-                    if (try self.expandSymbolicApp(rhs.app)) |expanded_rhs| {
+                    if (try self.expandSymbolicApp(rhs.app, state)) |expanded_rhs| {
                         if (try self.matchSymbolicToSymbolic(
                             lhs,
                             expanded_rhs,
+                            state,
                             bindings,
                             dummy_bindings,
                         )) {
@@ -879,6 +914,7 @@ pub const Context = struct {
         symbolic: *const SymbolicExpr,
         actual: ExprId,
         head_term_id: u32,
+        state: *MatchSession,
         dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
     ) anyerror!bool {
         switch (symbolic.*) {
@@ -889,6 +925,7 @@ pub const Context = struct {
                         app.args[0],
                         actual,
                         head_term_id,
+                        state,
                         dummy_bindings,
                     )) {
                         return true;
@@ -898,6 +935,7 @@ pub const Context = struct {
                         app.args[1],
                         actual,
                         head_term_id,
+                        state,
                         dummy_bindings,
                     )) {
                         return true;
@@ -913,6 +951,7 @@ pub const Context = struct {
         if (try self.matchSymbolicToExpr(
             symbolic,
             actual,
+            state,
             &[_]?ExprId{},
             dummy_bindings,
         )) {
@@ -948,6 +987,7 @@ pub const Context = struct {
     fn materializeSymbolic(
         self: *Context,
         symbolic: *const SymbolicExpr,
+        state: *MatchSession,
         dummy_bindings: []const DummyBinding,
     ) anyerror!?ExprId {
         return switch (symbolic.*) {
@@ -959,6 +999,7 @@ pub const Context = struct {
                 for (app.args, 0..) |arg, idx| {
                     args[idx] = try self.materializeSymbolic(
                         arg,
+                        state,
                         dummy_bindings,
                     ) orelse break :blk null;
                 }
@@ -973,7 +1014,7 @@ pub const Context = struct {
     fn rebuildBoundValue(
         self: *Context,
         expr_id: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
         witness_slots: *std.AutoHashMapUnmanaged(ExprId, usize),
     ) anyerror!BoundValue {
         if (try self.resymbolizeBinding(expr_id, state, witness_slots)) |symbolic| {
@@ -985,11 +1026,11 @@ pub const Context = struct {
     fn resymbolizeBinding(
         self: *Context,
         expr_id: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
         witness_slots: *std.AutoHashMapUnmanaged(ExprId, usize),
     ) anyerror!?*const SymbolicExpr {
-        if (self.template_witness_infos.get(expr_id)) |info| {
-            const slot = try self.slotForTemplateWitness(
+        if (try self.getResymbolizableWitnessInfo(expr_id)) |info| {
+            const slot = try self.slotForWitness(
                 expr_id,
                 info,
                 state,
@@ -1032,49 +1073,54 @@ pub const Context = struct {
         };
     }
 
-    fn slotForTemplateWitness(
+    fn slotForWitness(
         self: *Context,
         witness: ExprId,
         info: SymbolicDummyInfo,
-        state: *TemplateMatchState,
+        state: *MatchSession,
         witness_slots: *std.AutoHashMapUnmanaged(ExprId, usize),
     ) anyerror!usize {
         if (witness_slots.get(witness)) |slot| return slot;
 
-        const slot = self.symbolic_dummy_infos.items.len;
-        try self.symbolic_dummy_infos.append(self.allocator, info);
+        const slot = state.symbolic_dummy_infos.items.len;
+        try state.symbolic_dummy_infos.append(self.allocator, info);
         try witness_slots.put(self.allocator, witness, slot);
         try state.witnesses.put(self.allocator, slot, witness);
+        try state.provisional_witness_infos.put(
+            self.allocator,
+            witness,
+            info,
+        );
         return slot;
     }
 
-    fn saveTemplateMatchSnapshot(
+    fn saveMatchSnapshot(
         self: *Context,
-        state: *const TemplateMatchState,
-    ) anyerror!TemplateMatchSnapshot {
+        state: *const MatchSession,
+    ) anyerror!MatchSnapshot {
         return .{
             .bindings = try self.allocator.dupe(?BoundValue, state.bindings),
             .witnesses = try self.cloneWitnessMap(state.witnesses),
-            .dummy_info_len = self.symbolic_dummy_infos.items.len,
+            .dummy_info_len = state.symbolic_dummy_infos.items.len,
         };
     }
 
-    fn restoreTemplateMatchSnapshot(
+    fn restoreMatchSnapshot(
         self: *Context,
-        snapshot: *const TemplateMatchSnapshot,
-        state: *TemplateMatchState,
+        snapshot: *const MatchSnapshot,
+        state: *MatchSession,
     ) anyerror!void {
         @memcpy(state.bindings, snapshot.bindings);
         state.witnesses.deinit(self.allocator);
         state.witnesses = try self.cloneWitnessMap(snapshot.witnesses);
-        self.symbolic_dummy_infos.shrinkRetainingCapacity(
+        state.symbolic_dummy_infos.shrinkRetainingCapacity(
             snapshot.dummy_info_len,
         );
     }
 
-    fn deinitTemplateMatchSnapshot(
+    fn deinitMatchSnapshot(
         self: *Context,
-        snapshot: *TemplateMatchSnapshot,
+        snapshot: *MatchSnapshot,
     ) void {
         self.allocator.free(snapshot.bindings);
         snapshot.witnesses.deinit(self.allocator);
@@ -1097,7 +1143,7 @@ pub const Context = struct {
         self: *Context,
         bound: BoundValue,
         actual: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         return switch (bound) {
             .concrete => |expr_id| {
@@ -1117,7 +1163,7 @@ pub const Context = struct {
         self: *Context,
         bound: BoundValue,
         actual: *const SymbolicExpr,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         return switch (bound) {
             .concrete => |expr_id| {
@@ -1138,7 +1184,7 @@ pub const Context = struct {
         slot: usize,
         info: SymbolicDummyInfo,
         actual: ExprId,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         const actual_info = try self.getConcreteVarInfo(actual);
         if (!actual_info.bound) return false;
@@ -1148,7 +1194,7 @@ pub const Context = struct {
 
         if (state.witnesses.get(slot)) |existing| {
             if (existing == actual) return true;
-            if (self.template_witness_infos.contains(existing)) {
+            if (state.provisional_witness_infos.contains(existing)) {
                 try state.witnesses.put(self.allocator, slot, actual);
                 return true;
             }
@@ -1162,7 +1208,7 @@ pub const Context = struct {
         self: *Context,
         slot: usize,
         rhs: *const SymbolicExpr,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!bool {
         return switch (rhs.*) {
             .binder => |idx| blk: {
@@ -1179,7 +1225,7 @@ pub const Context = struct {
                 break :blk true;
             },
             .fixed => |expr_id| {
-                const info = self.symbolic_dummy_infos.items[slot];
+                const info = state.symbolic_dummy_infos.items[slot];
                 return try self.matchSymbolicDummyState(
                     slot,
                     info,
@@ -1188,8 +1234,8 @@ pub const Context = struct {
                 );
             },
             .dummy => |rhs_slot| {
-                const lhs_info = self.symbolic_dummy_infos.items[slot];
-                const rhs_info = self.symbolic_dummy_infos.items[rhs_slot];
+                const lhs_info = state.symbolic_dummy_infos.items[slot];
+                const rhs_info = state.symbolic_dummy_infos.items[rhs_slot];
                 if (!std.mem.eql(u8, lhs_info.sort_name, rhs_info.sort_name)) {
                     return false;
                 }
@@ -1220,7 +1266,7 @@ pub const Context = struct {
                     rhs,
                     state,
                 ) orelse return false;
-                const info = self.symbolic_dummy_infos.items[slot];
+                const info = state.symbolic_dummy_infos.items[slot];
                 return try self.matchSymbolicDummyState(
                     slot,
                     info,
@@ -1233,7 +1279,7 @@ pub const Context = struct {
 
     fn finalizeBindings(
         self: *Context,
-        state: *TemplateMatchState,
+        state: *MatchSession,
         bindings: []?ExprId,
     ) anyerror!void {
         for (state.bindings, 0..) |binding, idx| {
@@ -1247,7 +1293,7 @@ pub const Context = struct {
     fn finalizeBoundValue(
         self: *Context,
         bound: BoundValue,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!ExprId {
         return switch (bound) {
             .concrete => |expr_id| expr_id,
@@ -1260,7 +1306,7 @@ pub const Context = struct {
     fn materializeAssignedBoundValue(
         self: *Context,
         bound: BoundValue,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!?ExprId {
         return switch (bound) {
             .concrete => |expr_id| expr_id,
@@ -1273,7 +1319,7 @@ pub const Context = struct {
     fn materializeAssignedSymbolic(
         self: *Context,
         symbolic: *const SymbolicExpr,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!?ExprId {
         return switch (symbolic.*) {
             .binder => |idx| blk: {
@@ -1303,7 +1349,7 @@ pub const Context = struct {
     fn materializeTemplateSymbolic(
         self: *Context,
         symbolic: *const SymbolicExpr,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!ExprId {
         return switch (symbolic.*) {
             .binder => |idx| blk: {
@@ -1337,13 +1383,13 @@ pub const Context = struct {
     fn witnessForDummySlot(
         self: *Context,
         slot: usize,
-        state: *TemplateMatchState,
+        state: *MatchSession,
     ) anyerror!ExprId {
         if (state.witnesses.get(slot)) |existing| return existing;
-        if (slot >= self.symbolic_dummy_infos.items.len) {
+        if (slot >= state.symbolic_dummy_infos.items.len) {
             return error.UnknownDummyVar;
         }
-        const info = self.symbolic_dummy_infos.items[slot];
+        const info = state.symbolic_dummy_infos.items[slot];
         const sort_id = self.env.sort_names.get(info.sort_name) orelse {
             return error.UnknownSort;
         };
@@ -1352,8 +1398,27 @@ pub const Context = struct {
             sort_id,
         );
         try state.witnesses.put(self.allocator, slot, witness);
-        try self.template_witness_infos.put(self.allocator, witness, info);
         return witness;
+    }
+
+    fn getResymbolizableWitnessInfo(
+        self: *Context,
+        expr_id: ExprId,
+    ) !?SymbolicDummyInfo {
+        const node = self.theorem.interner.node(expr_id);
+        return switch (node.*) {
+            .app => null,
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => null,
+                .dummy_var => |idx| blk: {
+                    if (idx >= self.theorem.theorem_dummies.items.len) {
+                        return error.UnknownDummyVar;
+                    }
+                    const dummy = self.theorem.theorem_dummies.items[idx];
+                    break :blk .{ .sort_name = dummy.sort_name };
+                },
+            },
+        };
     }
 
     fn getConcreteVarInfo(self: *Context, expr_id: ExprId) !ConcreteVarInfo {
@@ -1389,6 +1454,7 @@ pub const Context = struct {
     fn expandTemplateApp(
         self: *Context,
         app: TemplateExpr.App,
+        state: *MatchSession,
     ) anyerror!?*const SymbolicExpr {
         const term = self.getOpenableTerm(app.term_id) orelse return null;
         const body = term.body orelse return null;
@@ -1401,8 +1467,8 @@ pub const Context = struct {
             subst[idx] = try self.symbolicFromTemplate(arg);
         }
         for (term.dummy_args, 0..) |dummy_arg, idx| {
-            const slot = self.symbolic_dummy_infos.items.len;
-            try self.symbolic_dummy_infos.append(self.allocator, .{
+            const slot = state.symbolic_dummy_infos.items.len;
+            try state.symbolic_dummy_infos.append(self.allocator, .{
                 .sort_name = dummy_arg.sort_name,
             });
             subst[term.args.len + idx] = try self.allocSymbolic(
@@ -1415,6 +1481,7 @@ pub const Context = struct {
     fn expandConcreteDef(
         self: *Context,
         expr_id: ExprId,
+        state: *MatchSession,
     ) anyerror!?*const SymbolicExpr {
         const def = self.getConcreteDef(expr_id) orelse return null;
 
@@ -1426,8 +1493,8 @@ pub const Context = struct {
             subst[idx] = try self.allocSymbolic(.{ .fixed = arg });
         }
         for (def.term.dummy_args, 0..) |dummy_arg, idx| {
-            const slot = self.symbolic_dummy_infos.items.len;
-            try self.symbolic_dummy_infos.append(self.allocator, .{
+            const slot = state.symbolic_dummy_infos.items.len;
+            try state.symbolic_dummy_infos.append(self.allocator, .{
                 .sort_name = dummy_arg.sort_name,
             });
             subst[def.term.args.len + idx] = try self.allocSymbolic(
@@ -1440,6 +1507,7 @@ pub const Context = struct {
     fn expandSymbolicApp(
         self: *Context,
         app: SymbolicExpr.App,
+        state: *MatchSession,
     ) anyerror!?*const SymbolicExpr {
         const term = self.getOpenableTerm(app.term_id) orelse return null;
         const body = term.body orelse return null;
@@ -1450,8 +1518,8 @@ pub const Context = struct {
         );
         @memcpy(subst[0..term.args.len], app.args);
         for (term.dummy_args, 0..) |dummy_arg, idx| {
-            const slot = self.symbolic_dummy_infos.items.len;
-            try self.symbolic_dummy_infos.append(self.allocator, .{
+            const slot = state.symbolic_dummy_infos.items.len;
+            try state.symbolic_dummy_infos.append(self.allocator, .{
                 .sort_name = dummy_arg.sort_name,
             });
             subst[term.args.len + idx] = try self.allocSymbolic(

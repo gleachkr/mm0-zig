@@ -9,8 +9,8 @@ const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const ViewDecl = @import("./compiler_views.zig").ViewDecl;
 const DerivedBinding = @import("./compiler_views.zig").DerivedBinding;
 const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
-const compareExprIds =
-    @import("./canonicalizer.zig").compareExprIds;
+const AcuiSupport = @import("./acui_support.zig");
+const compareExprIds = AcuiSupport.compareExprIds;
 const DerivedBindings = @import("./derived_bindings.zig");
 const DefOps = @import("./def_ops.zig");
 

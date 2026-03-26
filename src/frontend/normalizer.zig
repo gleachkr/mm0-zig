@@ -10,7 +10,8 @@ const ResolvedRelation = @import("./rewrite_registry.zig").ResolvedRelation;
 const RewriteRule = @import("./rewrite_registry.zig").RewriteRule;
 const ResolvedStructuralCombiner =
     @import("./rewrite_registry.zig").ResolvedStructuralCombiner;
-const compareExprIds = @import("./canonicalizer.zig").compareExprIds;
+const AcuiSupport = @import("./acui_support.zig");
+const compareExprIds = AcuiSupport.compareExprIds;
 const DefOps = @import("./def_ops.zig");
 
 const CheckedRef = @import("./compiler.zig").CheckedRef;
@@ -66,6 +67,15 @@ pub const Normalizer = struct {
     }
 
     pub const Error = anyerror;
+
+    fn acuiSupport(self: *Normalizer) AcuiSupport.Context {
+        return AcuiSupport.Context.init(
+            self.allocator,
+            self.theorem,
+            self.env,
+            self.registry,
+        );
+    }
 
     pub fn normalize(self: *Normalizer, expr_id: ExprId) Error!NormalizeResult {
         if (self.cache.get(expr_id)) |cached| {
@@ -523,47 +533,8 @@ pub const Normalizer = struct {
         lhs: ExprId,
         rhs: ExprId,
     ) ?ResolvedStructuralCombiner {
-        const lhs_node = self.theorem.interner.node(lhs);
-        switch (lhs_node.*) {
-            .app => |app| if (self.registry.resolveStructuralCombiner(
-                self.env,
-                app.term_id,
-            )) |acui| {
-                if (self.exprMatchesCombinerSort(rhs, acui)) return acui;
-            },
-            .variable => {},
-        }
-        const rhs_node = self.theorem.interner.node(rhs);
-        switch (rhs_node.*) {
-            .app => |app| if (self.registry.resolveStructuralCombiner(
-                self.env,
-                app.term_id,
-            )) |acui| {
-                if (self.exprMatchesCombinerSort(lhs, acui)) return acui;
-            },
-            .variable => {},
-        }
-        const lhs_sort = self.getExprSort(lhs) orelse return null;
-        const rhs_sort = self.getExprSort(rhs) orelse return null;
-        if (!std.mem.eql(u8, lhs_sort, rhs_sort)) return null;
-        return self.registry.resolveStructuralCombinerForSort(
-            self.env,
-            lhs_sort,
-        );
-    }
-
-    fn exprMatchesCombinerSort(
-        self: *Normalizer,
-        expr_id: ExprId,
-        acui: ResolvedStructuralCombiner,
-    ) bool {
-        const sort_name = self.getExprSort(expr_id) orelse return false;
-        if (acui.head_term_id >= self.env.terms.items.len) return false;
-        return std.mem.eql(
-            u8,
-            sort_name,
-            self.env.terms.items[acui.head_term_id].ret_sort_name,
-        );
+        var support = self.acuiSupport();
+        return support.sharedStructuralCombiner(lhs, rhs);
     }
 
     fn cancelExactAcuiItems(
@@ -603,42 +574,8 @@ pub const Normalizer = struct {
         items: []const ExprId,
         acui: ResolvedStructuralCombiner,
     ) Error!ExprId {
-        const sorted = try self.allocator.dupe(ExprId, items);
-        defer self.allocator.free(sorted);
-
-        var idx: usize = 1;
-        while (idx < sorted.len) : (idx += 1) {
-            const item = sorted[idx];
-            var pos = idx;
-            while (pos > 0 and compareExprIds(
-                self.theorem,
-                sorted[pos - 1],
-                item,
-            ) == .gt) : (pos -= 1) {
-                sorted[pos] = sorted[pos - 1];
-            }
-            sorted[pos] = item;
-        }
-
-        var unique = std.ArrayListUnmanaged(ExprId){};
-        defer unique.deinit(self.allocator);
-        for (sorted) |item| {
-            if (unique.items.len != 0 and
-                compareExprIds(
-                    self.theorem,
-                    unique.items[unique.items.len - 1],
-                    item,
-                ) == .eq and acui.idem_id != null)
-            {
-                continue;
-            }
-            try unique.append(self.allocator, item);
-        }
-        return try self.rebuildAcuiTree(
-            unique.items,
-            acui.head_term_id,
-            acui.unit_term_id,
-        );
+        var support = self.acuiSupport();
+        return try support.buildCanonicalAcuiFromItems(items, acui);
     }
 
     fn buildAcuiRewriteConversion(
@@ -699,21 +636,8 @@ pub const Normalizer = struct {
         head_term_id: u32,
         unit_term_id: u32,
     ) Error!ExprId {
-        if (items.len == 0) {
-            return try self.theorem.interner.internApp(unit_term_id, &.{});
-        }
-        if (items.len == 1) return items[0];
-
-        var current = items[items.len - 1];
-        var idx = items.len - 1;
-        while (idx > 0) {
-            idx -= 1;
-            current = try self.theorem.interner.internApp(
-                head_term_id,
-                &[_]ExprId{ items[idx], current },
-            );
-        }
-        return current;
+        var support = self.acuiSupport();
+        return try support.rebuildAcuiTree(items, head_term_id, unit_term_id);
     }
 
     fn normalizeUncached(self: *Normalizer, expr_id: ExprId) Error!NormalizeResult {
@@ -948,23 +872,19 @@ pub const Normalizer = struct {
         head_term_id: u32,
         out: *std.ArrayListUnmanaged(AcuiLeaf),
     ) Error!void {
-        const node = self.theorem.interner.node(expr_id);
-        switch (node.*) {
-            .app => |app| {
-                if (app.term_id == head_term_id and app.args.len == 2) {
-                    try self.collectAcuiLeaves(app.args[0], head_term_id, out);
-                    try self.collectAcuiLeaves(app.args[1], head_term_id, out);
-                    return;
-                }
-            },
-            .variable => {},
+        var support = self.acuiSupport();
+        var infos = std.ArrayListUnmanaged(AcuiSupport.LeafInfo){};
+        defer infos.deinit(self.allocator);
+        try support.collectLeafInfos(expr_id, head_term_id, &infos);
+        try out.ensureUnusedCapacity(self.allocator, infos.items.len);
+        for (infos.items) |info| {
+            out.appendAssumeCapacity(.{
+                .old_expr = info.expr_id,
+                .new_expr = info.expr_id,
+                .is_def = info.is_def,
+                .conv_line_idx = null,
+            });
         }
-        try out.append(self.allocator, .{
-            .old_expr = expr_id,
-            .new_expr = expr_id,
-            .is_def = self.isDefItem(expr_id),
-            .conv_line_idx = null,
-        });
     }
 
     fn applySameSideAbsorption(
@@ -974,20 +894,33 @@ pub const Normalizer = struct {
         relation: ResolvedRelation,
         acui: ResolvedStructuralCombiner,
     ) Error!void {
-        for (leaves) |*leaf| {
-            if (leaf.old_expr == unit_expr or leaf.is_def) continue;
-            for (leaves) |owner| {
-                if (!owner.is_def) continue;
-                const proof = try self.buildConcreteToDefCoverProof(
-                    leaf.old_expr,
-                    owner.old_expr,
-                    relation,
-                    acui,
-                ) orelse continue;
-                leaf.new_expr = owner.old_expr;
-                leaf.conv_line_idx = proof;
-                break;
-            }
+        const infos = try self.allocator.alloc(AcuiSupport.LeafInfo, leaves.len);
+        defer self.allocator.free(infos);
+        for (leaves, 0..) |leaf, idx| {
+            infos[idx] = .{
+                .expr_id = leaf.old_expr,
+                .is_def = leaf.is_def,
+            };
+        }
+
+        var support = self.acuiSupport();
+        const targets = try support.computeSameSideTargets(
+            infos,
+            unit_expr,
+            acui,
+        );
+        defer self.allocator.free(targets);
+
+        for (leaves, targets) |*leaf, target| {
+            if (target == leaf.old_expr) continue;
+            const proof = try self.buildConcreteToDefCoverProof(
+                leaf.old_expr,
+                target,
+                relation,
+                acui,
+            ) orelse return error.MissingStructuralMetadata;
+            leaf.new_expr = target;
+            leaf.conv_line_idx = proof;
         }
     }
 
@@ -1089,21 +1022,6 @@ pub const Normalizer = struct {
             source_rel,
             .{ .line = refl_idx },
         );
-    }
-
-    fn isDefItem(self: *const Normalizer, expr_id: ExprId) bool {
-        const node = self.theorem.interner.node(expr_id);
-        const app = switch (node.*) {
-            .app => |value| value,
-            .variable => return false,
-        };
-        if (app.term_id >= self.env.terms.items.len) return false;
-        const term = &self.env.terms.items[app.term_id];
-        if (term.is_def and term.body != null) return true;
-        for (app.args) |arg| {
-            if (self.isDefItem(arg)) return true;
-        }
-        return false;
     }
 
     fn mergeCanonical(
