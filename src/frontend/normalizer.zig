@@ -14,10 +14,11 @@ const AcuiSupport = @import("./acui_support.zig");
 const compareExprIds = AcuiSupport.compareExprIds;
 const DefOps = @import("./def_ops.zig");
 
-const CheckedRef = @import("./compiler.zig").CheckedRef;
-const CheckedLine = @import("./compiler.zig").CheckedLine;
-const appendRuleLine = @import("./compiler.zig").appendRuleLine;
-const appendTransportLine = @import("./compiler.zig").appendTransportLine;
+const CheckedIr = @import("./compiler/checked_ir.zig");
+const CheckedRef = CheckedIr.CheckedRef;
+const CheckedLine = CheckedIr.CheckedLine;
+const appendRuleLine = CheckedIr.appendRuleLine;
+const appendTransportLine = CheckedIr.appendTransportLine;
 
 pub const NormalizeResult = struct {
     result_expr: ExprId,
@@ -216,7 +217,7 @@ pub const Normalizer = struct {
         );
         defer def_ops.deinit();
 
-        if ((try def_ops.planConversionByDefOpening(lhs, rhs)) != null) {
+        if ((try def_ops.compareTransparent(lhs, rhs)) != null) {
             return .{
                 .target_expr = rhs,
                 .lhs_conv_line_idx = try self.emitTransparentRelationProof(
@@ -227,7 +228,7 @@ pub const Normalizer = struct {
                 .rhs_conv_line_idx = null,
             };
         }
-        if ((try def_ops.planConversionByDefOpening(rhs, lhs)) != null) {
+        if ((try def_ops.compareTransparent(rhs, lhs)) != null) {
             return .{
                 .target_expr = lhs,
                 .lhs_conv_line_idx = null,

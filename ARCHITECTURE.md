@@ -75,7 +75,10 @@ phase.
 Orchestration and theorem checking:
 
 - `compiler.zig`
+- `compiler/checked_ir.zig`
+- `compiler/metadata.zig`
 - `compiler_check.zig`
+- `compiler_check/matching.zig`
 - `compiler_inference.zig`
 - `compiler_normalize.zig`
 - `compiler_emit.zig`

@@ -1,0 +1,55 @@
+const std = @import("std");
+const GlobalEnv = @import("../compiler_env.zig").GlobalEnv;
+const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
+const CompilerDummies = @import("../compiler_dummies.zig");
+const CompilerViews = @import("../compiler_views.zig");
+const TermAnnotations = @import("../term_annotations.zig");
+const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
+const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const TermStmt = @import("../../trusted/parse.zig").TermStmt;
+
+pub const ViewDecl = CompilerViews.ViewDecl;
+pub const DummyDecl = CompilerDummies.DummyDecl;
+
+pub fn processTermMetadata(
+    env: *GlobalEnv,
+    registry: *RewriteRegistry,
+    term_stmt: TermStmt,
+    annotations: []const []const u8,
+) !void {
+    try TermAnnotations.processTermAnnotations(
+        env,
+        term_stmt,
+        annotations,
+    );
+    try registry.processAnnotations(env, term_stmt.name, annotations);
+}
+
+pub fn processAssertionMetadata(
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *GlobalEnv,
+    registry: *RewriteRegistry,
+    dummies: *std.AutoHashMap(u32, []const DummyDecl),
+    views: *std.AutoHashMap(u32, ViewDecl),
+    assertion: AssertionStmt,
+    annotations: []const []const u8,
+) !void {
+    try registry.processAnnotations(env, assertion.name, annotations);
+    try CompilerDummies.processDummyAnnotations(
+        allocator,
+        parser,
+        env,
+        assertion,
+        annotations,
+        dummies,
+    );
+    try CompilerViews.processViewAnnotations(
+        allocator,
+        parser,
+        env,
+        assertion,
+        annotations,
+        views,
+    );
+}

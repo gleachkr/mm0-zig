@@ -7,10 +7,11 @@ const ResolvedRelation = @import("./rewrite_registry.zig").ResolvedRelation;
 const NormalizeSpec = @import("./rewrite_registry.zig").NormalizeSpec;
 const Normalizer = @import("./normalizer.zig").Normalizer;
 const CommonTargetResult = @import("./normalizer.zig").CommonTargetResult;
-const CheckedLine = @import("./compiler.zig").CheckedLine;
-const CheckedRef = @import("./compiler.zig").CheckedRef;
-const appendTransportLine = @import("./compiler.zig").appendTransportLine;
-const appendRuleLine = @import("./compiler.zig").appendRuleLine;
+const CheckedIr = @import("./compiler/checked_ir.zig");
+const CheckedLine = CheckedIr.CheckedLine;
+const CheckedRef = CheckedIr.CheckedRef;
+const appendTransportLine = CheckedIr.appendTransportLine;
+const appendRuleLine = CheckedIr.appendRuleLine;
 const Inference = @import("./compiler_inference.zig");
 
 pub const NormalizedConversion = struct {
@@ -140,7 +141,7 @@ pub fn buildExpectedNormalization(
     };
 }
 
-pub fn buildDefAwareNormalizedHypRef(
+pub fn buildTransparentNormalizedHypRef(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     registry: *RewriteRegistry,
@@ -158,7 +159,7 @@ pub fn buildDefAwareNormalizedHypRef(
         checked,
         expected,
     ) orelse return null;
-    if (!try Inference.canConvertByDefOpening(
+    if (!try Inference.canConvertTransparent(
         allocator,
         theorem,
         env,
@@ -197,7 +198,7 @@ pub fn buildDefAwareNormalizedHypRef(
     return normalized_ref;
 }
 
-pub fn buildDefAwareNormalizedConclusionLine(
+pub fn buildTransparentNormalizedConclusionLine(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     registry: *RewriteRegistry,
@@ -227,7 +228,7 @@ pub fn buildDefAwareNormalizedConclusionLine(
     );
     const normalized_line = try line_normalizer.normalize(line_expr);
     if (normalized_line.result_expr != normalization.normalized_expr and
-        !try Inference.canConvertByDefOpening(
+        !try Inference.canConvertTransparent(
             allocator,
             theorem,
             env,

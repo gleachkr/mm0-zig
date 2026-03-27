@@ -17,233 +17,15 @@ const ViewDecl = CompilerViews.ViewDecl;
 const DummyDecl = CompilerDummies.DummyDecl;
 const CompilerDiag = @import("./compiler_diag.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
-const CheckedLine = @import("./compiler.zig").CheckedLine;
-const CheckedRef = @import("./compiler.zig").CheckedRef;
-const appendRuleLine = @import("./compiler.zig").appendRuleLine;
-const appendTransportLine = @import("./compiler.zig").appendTransportLine;
+const CheckedIr = @import("./compiler/checked_ir.zig");
+const CheckedLine = CheckedIr.CheckedLine;
+const CheckedRef = CheckedIr.CheckedRef;
 const Inference = @import("./compiler_inference.zig");
-const Normalize = @import("./compiler_normalize.zig");
+const Matching = @import("./compiler_check/matching.zig");
 const Emit = @import("./compiler_emit.zig");
 
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
-
-fn tryMatchHypothesis(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    norm_spec: ?NormalizeSpec,
-    hyp_idx: usize,
-    actual_ref: CheckedRef,
-    actual: ExprId,
-    expected: ExprId,
-) !?CheckedRef {
-    if (actual == expected) return actual_ref;
-
-    if (try Inference.canConvertByDefOpening(
-        allocator,
-        theorem,
-        env,
-        expected,
-        actual,
-    )) {
-        return .{ .line = try appendTransportLine(
-            checked,
-            allocator,
-            expected,
-            actual,
-            actual_ref,
-        ) };
-    }
-
-    _ = norm_spec;
-    _ = hyp_idx;
-
-    if (try Normalize.buildNormalizedConversion(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        actual,
-        expected,
-    )) |conversion| {
-        var conversion_mut = conversion;
-        if (conversion_mut.conv_line_idx) |conv_line_idx| {
-            return .{ .line = try conversion_mut.normalizer.emitTransport(
-                conversion_mut.relation,
-                expected,
-                actual,
-                conv_line_idx,
-                actual_ref,
-            ) };
-        }
-        return actual_ref;
-    }
-
-    return try Normalize.buildDefAwareNormalizedHypRef(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        actual_ref,
-        actual,
-        expected,
-    );
-}
-
-fn tryBuildConclusionLine(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    norm_spec: ?NormalizeSpec,
-    line_expr: ExprId,
-    expected_line: ExprId,
-    rule_id: u32,
-    bindings: []const ExprId,
-    refs: []const CheckedRef,
-) !?usize {
-    if (line_expr == expected_line) {
-        return try appendRuleLine(
-            checked,
-            allocator,
-            line_expr,
-            rule_id,
-            bindings,
-            refs,
-        );
-    }
-
-    if (try Inference.canConvertByDefOpening(
-        allocator,
-        theorem,
-        env,
-        line_expr,
-        expected_line,
-    )) {
-        const raw_idx = try appendRuleLine(
-            checked,
-            allocator,
-            expected_line,
-            rule_id,
-            bindings,
-            refs,
-        );
-        return try appendTransportLine(
-            checked,
-            allocator,
-            line_expr,
-            expected_line,
-            .{ .line = raw_idx },
-        );
-    }
-
-    if (norm_spec) |spec| {
-        if (spec.concl) {
-            if (try Normalize.buildNormalizedConversion(
-                allocator,
-                theorem,
-                registry,
-                env,
-                checked,
-                expected_line,
-                line_expr,
-            )) |conversion| {
-                var conversion_mut = conversion;
-                const raw_idx = try appendRuleLine(
-                    checked,
-                    allocator,
-                    expected_line,
-                    rule_id,
-                    bindings,
-                    refs,
-                );
-
-                return if (conversion_mut.conv_line_idx) |conv_idx|
-                    try conversion_mut.normalizer.emitTransport(
-                        conversion_mut.relation,
-                        line_expr,
-                        expected_line,
-                        conv_idx,
-                        .{ .line = raw_idx },
-                    )
-                else
-                    raw_idx;
-            }
-            return try Normalize.buildDefAwareNormalizedConclusionLine(
-                allocator,
-                theorem,
-                registry,
-                env,
-                checked,
-                line_expr,
-                expected_line,
-                rule_id,
-                bindings,
-                refs,
-            );
-        }
-    }
-
-    return null;
-}
-
-fn tryMatchFinalLine(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    theorem_concl: ExprId,
-    final_line: ExprId,
-    line_idx: usize,
-) !bool {
-    if (try Inference.canConvertByDefOpening(
-        allocator,
-        theorem,
-        env,
-        theorem_concl,
-        final_line,
-    )) {
-        _ = try appendTransportLine(
-            checked,
-            allocator,
-            theorem_concl,
-            final_line,
-            .{ .line = line_idx },
-        );
-        return true;
-    }
-
-    if (try Normalize.buildNormalizedConversion(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        final_line,
-        theorem_concl,
-    )) |conversion| {
-        var conversion_mut = conversion;
-        if (conversion_mut.conv_line_idx) |conv_idx| {
-            _ = try conversion_mut.normalizer.emitTransport(
-                conversion_mut.relation,
-                theorem_concl,
-                final_line,
-                conv_idx,
-                .{ .line = line_idx },
-            );
-            return true;
-        }
-    }
-
-    return false;
-}
 
 pub fn checkTheoremBlock(
     self: anytype,
@@ -442,7 +224,7 @@ pub fn checkTheoremBlock(
                 rule.hyps[idx],
                 bindings,
             );
-            if (try tryMatchHypothesis(
+            if (try Matching.tryMatchHypothesis(
                 allocator,
                 theorem,
                 registry,
@@ -483,7 +265,7 @@ pub fn checkTheoremBlock(
             bindings,
         );
 
-        const line_idx = try tryBuildConclusionLine(
+        const line_idx = try Matching.tryBuildConclusionLine(
             allocator,
             theorem,
             registry,
@@ -538,7 +320,7 @@ pub fn checkTheoremBlock(
     };
     if (final_line != theorem_concl) {
         if (last_line_idx) |line_idx| {
-            if (try tryMatchFinalLine(
+            if (try Matching.tryMatchFinalLine(
                 allocator,
                 theorem,
                 registry,

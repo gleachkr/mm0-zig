@@ -2230,7 +2230,7 @@ test "template instantiation shares repeated substitutions" {
 const ProofCaseOutcome = union(enum) {
     pass,
     fail: anyerror,
-    // Expected-failure bucket for real bugs we still intend to fix.
+    // Expected-failure cases for known frontend bugs.
     known_fail,
     // Explicitly unsupported cases whose semantics need a broader design.
     unsupported,
@@ -2293,13 +2293,12 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_unfold_ref", .outcome = .pass },
     .{ .stem = "pass_def_unfold_final", .outcome = .pass },
     .{ .stem = "pass_def_unfold_final_reverse", .outcome = .pass },
-    // Known-broken cases around hidden dummies / exact identity.
     .{ .stem = "pass_def_unfold_dummy", .outcome = .pass },
     .{ .stem = "pass_def_view_basic", .outcome = .pass },
     .{ .stem = "pass_def_rewrite_concl", .outcome = .pass },
     .{ .stem = "pass_def_rewrite_hyp", .outcome = .pass },
-    // Stage 4: strict replay stays exact, but omitted binders now fall
-    // back to shared targeted transparency when needed.
+    // Strict replay stays exact, but omitted binders can fall back to
+    // shared targeted transparency when needed.
     .{ .stem = "pass_def_infer_expected", .outcome = .pass },
     .{ .stem = "pass_def_infer_actual", .outcome = .pass },
     .{ .stem = "pass_def_infer_hyp", .outcome = .pass },

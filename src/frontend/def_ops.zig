@@ -319,33 +319,6 @@ pub const Context = struct {
         return true;
     }
 
-    // Compatibility wrappers for current callers while the rest of the
-    // frontend is migrated to the new names.
-    pub fn exprMatchesByDefOpening(
-        self: *Context,
-        lhs: ExprId,
-        rhs: ExprId,
-    ) anyerror!bool {
-        return (try self.compareTransparent(lhs, rhs)) != null;
-    }
-
-    pub fn matchTemplateWithDefOpening(
-        self: *Context,
-        template: TemplateExpr,
-        actual: ExprId,
-        bindings: []?ExprId,
-    ) anyerror!bool {
-        return try self.matchTemplateTransparent(template, actual, bindings);
-    }
-
-    pub fn planConversionByDefOpening(
-        self: *Context,
-        lhs: ExprId,
-        rhs: ExprId,
-    ) anyerror!?*const ConversionPlan {
-        return try self.compareTransparent(lhs, rhs);
-    }
-
     fn instantiateDefTowardExpr(
         self: *Context,
         def_expr: ExprId,

@@ -12,8 +12,9 @@ const TermStmt = @import("../trusted/parse.zig").TermStmt;
 const ProofCmd = @import("../trusted/proof.zig").ProofCmd;
 const UnifyCmd = @import("../trusted/proof.zig").UnifyCmd;
 const Arg = @import("../trusted/args.zig").Arg;
-const CheckedLine = @import("./compiler.zig").CheckedLine;
-const CheckedRef = @import("./compiler.zig").CheckedRef;
+const CheckedIr = @import("./compiler/checked_ir.zig");
+const CheckedLine = CheckedIr.CheckedLine;
+const CheckedRef = CheckedIr.CheckedRef;
 
 const ExprSlotMap = std.AutoHashMapUnmanaged(ExprId, u32);
 
@@ -281,7 +282,7 @@ pub const TheoremProofEmitter = struct {
             self.env,
         );
         defer def_ops.deinit();
-        const plan = try def_ops.planConversionByDefOpening(
+        const plan = try def_ops.compareTransparent(
             target_expr,
             source_expr,
         ) orelse return error.MissingConversionPlan;

@@ -157,7 +157,7 @@ pub fn applyViewBindings(
     );
     defer def_ops.deinit();
 
-    if (!try def_ops.matchTemplateWithDefOpening(
+    if (!try def_ops.matchTemplateTransparent(
         view.concl,
         line_expr,
         view_bindings,
@@ -165,7 +165,7 @@ pub fn applyViewBindings(
         return error.ViewConclusionMismatch;
     }
     for (view.hyps, ref_exprs) |hyp_template, ref_expr| {
-        if (!try def_ops.matchTemplateWithDefOpening(
+        if (!try def_ops.matchTemplateTransparent(
             hyp_template,
             ref_expr,
             view_bindings,

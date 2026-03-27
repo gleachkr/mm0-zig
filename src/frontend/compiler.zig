@@ -1,95 +1,31 @@
 const std = @import("std");
 const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
-const RuleDecl = @import("./compiler_env.zig").RuleDecl;
-const ExprId = @import("./compiler_expr.zig").ExprId;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
-const Expr = @import("../trusted/expressions.zig").Expr;
 const MmbWriter = @import("./mmb_writer.zig");
 const TermRecord = MmbWriter.TermRecord;
 const TheoremRecord = MmbWriter.TheoremRecord;
 const Statement = MmbWriter.Statement;
 const CompilerDiag = @import("./compiler_diag.zig");
-const CompilerDummies = @import("./compiler_dummies.zig");
-const CompilerViews = @import("./compiler_views.zig");
-const TermAnnotations = @import("./term_annotations.zig");
+const Metadata = @import("./compiler/metadata.zig");
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
-const TermStmt = @import("../trusted/parse.zig").TermStmt;
 const ProofScriptParser = @import("./proof_script.zig").Parser;
+const TheoremBlock = @import("./proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
+const CheckedIr = @import("./compiler/checked_ir.zig");
 pub const DebugConfig = @import("./debug.zig").DebugConfig;
 
 // Sub-modules
 const Emit = @import("./compiler_emit.zig");
 const Check = @import("./compiler_check.zig");
-const Inference = @import("./compiler_inference.zig");
-const Normalize = @import("./compiler_normalize.zig");
 
-pub const ViewDecl = CompilerViews.ViewDecl;
-pub const DummyDecl = CompilerDummies.DummyDecl;
+pub const ViewDecl = Metadata.ViewDecl;
+pub const DummyDecl = Metadata.DummyDecl;
 pub const Diagnostic = CompilerDiag.Diagnostic;
-
-pub const CheckedRef = union(enum) {
-    hyp: usize,
-    line: usize,
-};
-
-pub const CheckedLine = struct {
-    expr: ExprId,
-    data: union(enum) {
-        rule: RuleLine,
-        transport: TransportLine,
-    },
-
-    pub const RuleLine = struct {
-        rule_id: u32,
-        bindings: []const ExprId,
-        refs: []const CheckedRef,
-    };
-
-    pub const TransportLine = struct {
-        source: CheckedRef,
-        source_expr: ExprId,
-    };
-};
-
-pub fn appendRuleLine(
-    lines: *std.ArrayListUnmanaged(CheckedLine),
-    allocator: std.mem.Allocator,
-    expr: ExprId,
-    rule_id: u32,
-    bindings: []const ExprId,
-    refs: []const CheckedRef,
-) !usize {
-    const idx = lines.items.len;
-    try lines.append(allocator, .{
-        .expr = expr,
-        .data = .{ .rule = .{
-            .rule_id = rule_id,
-            .bindings = bindings,
-            .refs = refs,
-        } },
-    });
-    return idx;
-}
-
-pub fn appendTransportLine(
-    lines: *std.ArrayListUnmanaged(CheckedLine),
-    allocator: std.mem.Allocator,
-    expr: ExprId,
-    source_expr: ExprId,
-    source: CheckedRef,
-) !usize {
-    const idx = lines.items.len;
-    try lines.append(allocator, .{
-        .expr = expr,
-        .data = .{ .transport = .{
-            .source = source,
-            .source_expr = source_expr,
-        } },
-    });
-    return idx;
-}
+pub const CheckedRef = CheckedIr.CheckedRef;
+pub const CheckedLine = CheckedIr.CheckedLine;
+pub const appendRuleLine = CheckedIr.appendRuleLine;
+pub const appendTransportLine = CheckedIr.appendTransportLine;
 
 pub const Compiler = struct {
     allocator: std.mem.Allocator,
@@ -148,7 +84,7 @@ pub const Compiler = struct {
                 .assertion => |assertion| {
                     if (assertion.kind != .theorem) {
                         try env.addStmt(stmt);
-                        try processAssertionMetadata(
+                        try Metadata.processAssertionMetadata(
                             arena.allocator(),
                             &parser,
                             &env,
@@ -170,25 +106,10 @@ pub const Compiler = struct {
                     );
 
                     if (proof_parser) |*proofs| {
-                        const block = try proofs.nextBlock() orelse {
-                            self.setDiagnostic(.{
-                                .kind = .missing_proof_block,
-                                .err = error.MissingProofBlock,
-                                .theorem_name = assertion.name,
-                            });
-                            return error.MissingProofBlock;
-                        };
-                        if (!std.mem.eql(u8, block.name, assertion.name)) {
-                            self.setDiagnostic(.{
-                                .kind = .theorem_name_mismatch,
-                                .err = error.TheoremNameMismatch,
-                                .theorem_name = assertion.name,
-                                .block_name = block.name,
-                                .expected_name = assertion.name,
-                                .span = block.name_span,
-                            });
-                            return error.TheoremNameMismatch;
-                        }
+                        const block = try self.expectProofBlock(
+                            proofs,
+                            assertion.name,
+                        );
                         _ = try Check.checkTheoremBlock(
                             self,
                             arena.allocator(),
@@ -205,7 +126,7 @@ pub const Compiler = struct {
                     }
 
                     try env.addStmt(stmt);
-                    try processAssertionMetadata(
+                    try Metadata.processAssertionMetadata(
                         arena.allocator(),
                         &parser,
                         &env,
@@ -218,7 +139,7 @@ pub const Compiler = struct {
                 },
                 .term => |term_stmt| {
                     try env.addStmt(stmt);
-                    try processTermMetadata(
+                    try Metadata.processTermMetadata(
                         &env,
                         &registry,
                         term_stmt,
@@ -295,7 +216,7 @@ pub const Compiler = struct {
                             &.{},
                     });
                     try env.addStmt(stmt);
-                    try processTermMetadata(
+                    try Metadata.processTermMetadata(
                         &env,
                         &registry,
                         term_stmt,
@@ -343,7 +264,7 @@ pub const Compiler = struct {
                                 .body = body,
                             });
                             try env.addStmt(stmt);
-                            try processAssertionMetadata(
+                            try Metadata.processAssertionMetadata(
                                 allocator,
                                 &parser,
                                 &env,
@@ -355,25 +276,10 @@ pub const Compiler = struct {
                             );
                         },
                         .theorem => {
-                            const block = try proof_parser.nextBlock() orelse {
-                                self.setDiagnostic(.{
-                                    .kind = .missing_proof_block,
-                                    .err = error.MissingProofBlock,
-                                    .theorem_name = assertion.name,
-                                });
-                                return error.MissingProofBlock;
-                            };
-                            if (!std.mem.eql(u8, block.name, assertion.name)) {
-                                self.setDiagnostic(.{
-                                    .kind = .theorem_name_mismatch,
-                                    .err = error.TheoremNameMismatch,
-                                    .theorem_name = assertion.name,
-                                    .block_name = block.name,
-                                    .expected_name = assertion.name,
-                                    .span = block.name_span,
-                                });
-                                return error.TheoremNameMismatch;
-                            }
+                            const block = try self.expectProofBlock(
+                                &proof_parser,
+                                assertion.name,
+                            );
                             const checked = try Check.checkTheoremBlock(
                                 self,
                                 allocator,
@@ -409,7 +315,7 @@ pub const Compiler = struct {
                                 .body = body,
                             });
                             try env.addStmt(stmt);
-                            try processAssertionMetadata(
+                            try Metadata.processAssertionMetadata(
                                 allocator,
                                 &parser,
                                 &env,
@@ -522,6 +428,33 @@ pub const Compiler = struct {
     pub fn setDiagnostic(self: *Compiler, diag: Diagnostic) void {
         self.last_diagnostic = diag;
     }
+
+    fn expectProofBlock(
+        self: *Compiler,
+        proof_parser: *ProofScriptParser,
+        theorem_name: []const u8,
+    ) !TheoremBlock {
+        const block = try proof_parser.nextBlock() orelse {
+            self.setDiagnostic(.{
+                .kind = .missing_proof_block,
+                .err = error.MissingProofBlock,
+                .theorem_name = theorem_name,
+            });
+            return error.MissingProofBlock;
+        };
+        if (!std.mem.eql(u8, block.name, theorem_name)) {
+            self.setDiagnostic(.{
+                .kind = .theorem_name_mismatch,
+                .err = error.TheoremNameMismatch,
+                .theorem_name = theorem_name,
+                .block_name = block.name,
+                .expected_name = theorem_name,
+                .span = block.name_span,
+            });
+            return error.TheoremNameMismatch;
+        }
+        return block;
+    }
 };
 
 pub const diagnosticSummary = CompilerDiag.diagnosticSummary;
@@ -559,47 +492,4 @@ fn lineCol(src: []const u8, pos_raw: usize) LineCol {
         .line_start = line_start,
         .line_end = line_end,
     };
-}
-
-fn processTermMetadata(
-    env: *GlobalEnv,
-    registry: *RewriteRegistry,
-    term_stmt: TermStmt,
-    annotations: []const []const u8,
-) !void {
-    try TermAnnotations.processTermAnnotations(
-        env,
-        term_stmt,
-        annotations,
-    );
-    try registry.processAnnotations(env, term_stmt.name, annotations);
-}
-
-fn processAssertionMetadata(
-    allocator: std.mem.Allocator,
-    parser: *MM0Parser,
-    env: *GlobalEnv,
-    registry: *RewriteRegistry,
-    dummies: *std.AutoHashMap(u32, []const DummyDecl),
-    views: *std.AutoHashMap(u32, ViewDecl),
-    assertion: AssertionStmt,
-    annotations: []const []const u8,
-) !void {
-    try registry.processAnnotations(env, assertion.name, annotations);
-    try CompilerDummies.processDummyAnnotations(
-        allocator,
-        parser,
-        env,
-        assertion,
-        annotations,
-        dummies,
-    );
-    try CompilerViews.processViewAnnotations(
-        allocator,
-        parser,
-        env,
-        assertion,
-        annotations,
-        views,
-    );
 }

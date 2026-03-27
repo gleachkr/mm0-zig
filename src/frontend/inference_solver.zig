@@ -352,7 +352,7 @@ pub const Solver = struct {
                 const actual_app = switch (node.*) {
                     .app => |value| value,
                     .variable => {
-                        break :blk try self.matchExprByDefOpening(
+                        break :blk try self.matchExprTransparent(
                             template,
                             actual,
                             space,
@@ -363,7 +363,7 @@ pub const Solver = struct {
                 if (actual_app.term_id != app.term_id or
                     actual_app.args.len != app.args.len)
                 {
-                    break :blk try self.matchExprByDefOpening(
+                    break :blk try self.matchExprTransparent(
                         template,
                         actual,
                         space,
@@ -1016,10 +1016,10 @@ pub const Solver = struct {
         const lhs_canon = try self.canonicalizer.canonicalize(lhs);
         const rhs_canon = try self.canonicalizer.canonicalize(rhs);
         if (lhs_canon == rhs_canon) return true;
-        return try self.exprMatchesByDefOpening(lhs_canon, rhs_canon);
+        return try self.exprMatchesTransparent(lhs_canon, rhs_canon);
     }
 
-    fn exprMatchesByDefOpening(
+    fn exprMatchesTransparent(
         self: *Solver,
         lhs: ExprId,
         rhs: ExprId,
@@ -1030,10 +1030,10 @@ pub const Solver = struct {
             self.env,
         );
         defer def_ops.deinit();
-        return try def_ops.exprMatchesByDefOpening(lhs, rhs);
+        return (try def_ops.compareTransparent(lhs, rhs)) != null;
     }
 
-    fn matchExprByDefOpening(
+    fn matchExprTransparent(
         self: *Solver,
         template: TemplateExpr,
         actual: ExprId,
@@ -1053,7 +1053,7 @@ pub const Solver = struct {
             self.env,
         );
         defer def_ops.deinit();
-        if (!try def_ops.matchTemplateWithDefOpening(
+        if (!try def_ops.matchTemplateTransparent(
             template,
             actual,
             bindings,

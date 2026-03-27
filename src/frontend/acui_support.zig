@@ -325,10 +325,10 @@ pub const Context = struct {
         );
         defer def_ops.deinit();
 
-        if ((try def_ops.planConversionByDefOpening(lhs, rhs)) != null) {
+        if ((try def_ops.compareTransparent(lhs, rhs)) != null) {
             return rhs;
         }
-        if ((try def_ops.planConversionByDefOpening(rhs, lhs)) != null) {
+        if ((try def_ops.compareTransparent(rhs, lhs)) != null) {
             return lhs;
         }
         return null;

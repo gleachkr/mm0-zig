@@ -19,8 +19,9 @@ const CompilerViews = @import("./compiler_views.zig");
 const ViewDecl = CompilerViews.ViewDecl;
 const CompilerDiag = @import("./compiler_diag.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
-const CheckedLine = @import("./compiler.zig").CheckedLine;
-const CheckedRef = @import("./compiler.zig").CheckedRef;
+const CheckedIr = @import("./compiler/checked_ir.zig");
+const CheckedLine = CheckedIr.CheckedLine;
+const CheckedRef = CheckedIr.CheckedRef;
 const Emit = @import("./compiler_emit.zig");
 
 const ExprInfo = struct {
@@ -76,7 +77,7 @@ pub const InferenceContext = struct {
         }
     }
 
-    // Stage 2: unify replay is exact replay. Def-aware inference lives in
+    // Unify replay is exact replay. Def-aware inference lives in
     // higher-level solver paths rather than in the opcode interpreter.
     pub fn uopTerm(
         self: *InferenceContext,
@@ -113,7 +114,7 @@ pub const InferenceContext = struct {
     }
 };
 
-pub fn canConvertByDefOpening(
+pub fn canConvertTransparent(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     env: *const GlobalEnv,
@@ -126,7 +127,7 @@ pub fn canConvertByDefOpening(
         env,
     );
     defer def_ops.deinit();
-    return (try def_ops.planConversionByDefOpening(
+    return (try def_ops.compareTransparent(
         target_expr,
         source_expr,
     )) != null;
