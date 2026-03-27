@@ -1,4 +1,4 @@
-abbrev_hidden_dummy_and_elim
+pass_def_hidden_dummy_and_elim
 ----------------------------
 
 l1: $ emp ⊢ a $ by and_elim_l [#1]

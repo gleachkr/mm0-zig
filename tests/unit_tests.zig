@@ -1278,7 +1278,7 @@ test "compiler env retains def dummy metadata" {
     try std.testing.expectEqualStrings("obj", term.dummy_args[1].sort_name);
 }
 
-test "compiler ignores @abbrev annotations on defs" {
+test "compiler ignores legacy @abbrev annotations on defs" {
     const src =
         \\sort nat;
         \\term plus (a b: nat): nat;
@@ -1751,7 +1751,7 @@ test "compiler emits a valid hidden-dummy targeted unfold proof" {
     try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
-test "compiler ignores @abbrev on non-def terms" {
+test "compiler ignores legacy @abbrev on non-def terms" {
     const mm0_src =
         \\sort nat;
         \\--| @abbrev
@@ -2230,9 +2230,10 @@ test "template instantiation shares repeated substitutions" {
 const ProofCaseOutcome = union(enum) {
     pass,
     fail: anyerror,
-    // Temporary xfail bucket for proof cases that are currently broken while
-    // the exact-identity cleanup is only partially implemented.
+    // Expected-failure bucket for real bugs we still intend to fix.
     known_fail,
+    // Explicitly unsupported cases whose semantics need a broader design.
+    unsupported,
 };
 
 const ProofCase = struct {
@@ -2240,27 +2241,44 @@ const ProofCase = struct {
     outcome: ProofCaseOutcome,
 };
 
-const KnownProofCaseFailure = struct {
+const ProofCaseMetadata = struct {
     stem: []const u8,
     reason: []const u8,
 };
 
-const known_proof_case_failures = [_]KnownProofCaseFailure{
-    .{
-        .stem = "pass_abbrev_dummy",
-        .reason = "abbrev dummy transport still lacks an exact conversion plan",
-    },
+const known_proof_case_failures = [_]ProofCaseMetadata{
     .{
         .stem = "pass_def_hidden_dummy_all_elim_ctx_fold",
-        .reason = "reverse-direction hidden-dummy ctx folding still fails omitted inference",
+        .reason = "reverse-direction hidden-dummy ctx folding still fails " ++
+            "omitted inference",
     },
 };
 
-fn knownFailReason(stem: []const u8) ?[]const u8 {
-    for (known_proof_case_failures) |entry| {
+const unsupported_proof_cases = [_]ProofCaseMetadata{
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_concl",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "rewriting; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+};
+
+fn lookupProofCaseReason(
+    entries: []const ProofCaseMetadata,
+    stem: []const u8,
+) ?[]const u8 {
+    for (entries) |entry| {
         if (std.mem.eql(u8, entry.stem, stem)) return entry.reason;
     }
     return null;
+}
+
+fn knownFailReason(stem: []const u8) ?[]const u8 {
+    return lookupProofCaseReason(&known_proof_case_failures, stem);
+}
+
+fn unsupportedReason(stem: []const u8) ?[]const u8 {
+    return lookupProofCaseReason(&unsupported_proof_cases, stem);
 }
 
 const proof_cases = [_]ProofCase{
@@ -2292,11 +2310,11 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_all_elim_free_param", .outcome = .pass },
     .{ .stem = "pass_category_defs_direct", .outcome = .pass },
     .{ .stem = "pass_infer_normalized_conclusion", .outcome = .pass },
-    .{ .stem = "pass_abbrev_hidden_dummy_explicit", .outcome = .pass },
-    .{ .stem = "pass_abbrev_hidden_dummy_infer", .outcome = .pass },
-    .{ .stem = "pass_abbrev_hidden_dummy_and_elim", .outcome = .pass },
-    .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx", .outcome = .pass },
-    .{ .stem = "pass_abbrev_hidden_dummy_all_elim_ctx_reorder", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_explicit", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_infer", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_and_elim", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_all_elim_ctx", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_reorder", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_unfold", .outcome = .pass },
     .{
         .stem = "pass_def_hidden_dummy_all_elim_ctx_fold",
@@ -2304,16 +2322,19 @@ const proof_cases = [_]ProofCase{
     },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_twostep", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_imp_elim_ctx_mixed", .outcome = .pass },
-    .{ .stem = "pass_abbrev_assoc", .outcome = .pass },
+    .{ .stem = "pass_def_acui_assoc", .outcome = .pass },
     .{
-        .stem = "pass_abbrev_rewrite",
+        .stem = "fail_def_unfold_then_rewrite",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
     .{
-        .stem = "pass_abbrev_nested",
+        .stem = "fail_nested_def_unfold_then_acui",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
-    .{ .stem = "pass_abbrev_dummy", .outcome = .known_fail },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_concl",
+        .outcome = .unsupported,
+    },
     .{ .stem = "pass_normalize", .outcome = .pass },
     .{ .stem = "pass_normalize_nested", .outcome = .pass },
     .{ .stem = "pass_normalize_identity", .outcome = .pass },
@@ -2339,9 +2360,9 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
     .{ .stem = "demo_seq_peirce", .outcome = .pass },
     .{ .stem = "demo_category_pullback", .outcome = .pass },
-    .{ .stem = "demo_category_pullback_abbrev_mono", .outcome = .pass },
-    .{ .stem = "demo_category_pullback_abbrev_pullback", .outcome = .pass },
-    .{ .stem = "demo_category_pullback_abbrev_both", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_legacy_abbrev_mono", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_legacy_abbrev_pullback", .outcome = .pass },
+    .{ .stem = "demo_category_pullback_legacy_abbrev_both", .outcome = .pass },
     .{ .stem = "demo_category_pullback_unfold", .outcome = .pass },
     .{ .stem = "demo_category_pullback_unfold_2", .outcome = .pass },
     .{ .stem = "demo_category_pullback_unfold_3", .outcome = .pass },
@@ -2401,8 +2422,8 @@ const proof_cases = [_]ProofCase{
         .stem = "fail_acui_cross_side_leftover_def",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
-    .{ .stem = "fail_abbrev_hidden_dummy_ax", .outcome = .pass },
-    .{ .stem = "fail_abbrev_on_nondef", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_ax", .outcome = .pass },
+    .{ .stem = "pass_legacy_abbrev_on_nondef", .outcome = .pass },
     .{
         .stem = "fail_infer_mismatch",
         .outcome = .{ .fail = error.UnifyMismatch },
@@ -2567,17 +2588,25 @@ fn verifyWithMm0c(mm0_src: []const u8, mmb: []const u8, stem: []const u8) !void 
     }
 }
 
-test "known-fail proof case metadata stays in sync" {
+test "non-pass proof case metadata stays in sync" {
     var known_fail_count: usize = 0;
+    var unsupported_count: usize = 0;
 
     for (proof_cases) |case| {
         switch (case.outcome) {
             .known_fail => {
                 known_fail_count += 1;
                 try std.testing.expect(knownFailReason(case.stem) != null);
+                try std.testing.expect(unsupportedReason(case.stem) == null);
+            },
+            .unsupported => {
+                unsupported_count += 1;
+                try std.testing.expect(unsupportedReason(case.stem) != null);
+                try std.testing.expect(knownFailReason(case.stem) == null);
             },
             else => {
                 try std.testing.expect(knownFailReason(case.stem) == null);
+                try std.testing.expect(unsupportedReason(case.stem) == null);
             },
         }
     }
@@ -2586,11 +2615,26 @@ test "known-fail proof case metadata stays in sync" {
         known_proof_case_failures.len,
         known_fail_count,
     );
+    try std.testing.expectEqual(
+        unsupported_proof_cases.len,
+        unsupported_count,
+    );
 
     for (known_proof_case_failures, 0..) |entry, idx| {
         for (known_proof_case_failures[idx + 1 ..]) |other| {
             try std.testing.expect(!std.mem.eql(u8, entry.stem, other.stem));
         }
+    }
+    for (unsupported_proof_cases, 0..) |entry, idx| {
+        for (unsupported_proof_cases[idx + 1 ..]) |other| {
+            try std.testing.expect(!std.mem.eql(u8, entry.stem, other.stem));
+        }
+    }
+    for (known_proof_case_failures) |entry| {
+        try std.testing.expect(unsupportedReason(entry.stem) == null);
+    }
+    for (unsupported_proof_cases) |entry| {
+        try std.testing.expect(knownFailReason(entry.stem) == null);
     }
 }
 
@@ -2655,6 +2699,21 @@ test "compiler proof cases from files" {
                         .{
                             case.stem,
                             knownFailReason(case.stem) orelse "missing reason",
+                        },
+                    );
+                    failed_cases[failure_count] = case.stem;
+                    failure_count += 1;
+                } else |_| {}
+            },
+            .unsupported => {
+                if (compiler.compileMmb(allocator)) |mmb| {
+                    allocator.free(mmb);
+                    std.debug.print(
+                        "XPASS (unsupported) case={s}: {s}\n",
+                        .{
+                            case.stem,
+                            unsupportedReason(case.stem) orelse
+                                "missing reason",
                         },
                     );
                     failed_cases[failure_count] = case.stem;

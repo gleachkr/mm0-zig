@@ -1,4 +1,4 @@
-abbrev_hidden_dummy_infer
+pass_def_hidden_dummy_infer
 -------------------------
 
 l1: $ mono f , (f o h ~ g o k) |- f o h ~ g o k $ by ax

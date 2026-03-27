@@ -1,4 +1,4 @@
-# Transparent def unfolding and `@abbrev`
+# Transparent def unfolding
 
 The compiler now treats definitions as transparent at theorem-application
 boundaries.
@@ -11,17 +11,10 @@ proof.
 This is a frontend feature. The verifier still checks the resulting MMB in the
 usual way. There is no new trusted equality notion.
 
-There are really two related features here:
+Transparent def unfolding is used for theorem application checking,
+`@view` matching, final theorem checking, and higher-level inference
+helpers outside strict replay. This applies to **all** defs.
 
-1. **Transparent def unfolding** for theorem application checking,
-   `@view` matching, final theorem checking, and higher-level inference
-   helpers outside strict replay. This applies to **all** defs.
-2. **`@abbrev`** for source-level normalization and canonicalization.
-   This is an **opt-in** annotation on defs.
-
-The distinction matters. All defs are transparent when the compiler decides
-whether a rule application is valid. But only `@abbrev` defs are opened by the
-frontend normalizer and canonicalizer as part of rewrite / ACUI search.
 
 ---
 
@@ -67,7 +60,7 @@ previously compared expressions directly during theorem application:
 - strict unify replay for ordinary omitted-binder inference is a separate,
   exact path and does not open defs
 
-This applies to **all** defs, not only `@abbrev` defs.
+This applies to **all** defs.
 
 ### Basic conclusion example
 
@@ -143,8 +136,10 @@ Proof:
 l1: $ A. x (((g f x) = y) -> (x = x)) $ by ax_pre []
 ```
 
-Each unfolding automatically fills in variables for the bound dummies, based on 
-the term that the defined term needs to match.
+Each unfolding automatically fills in variables for the bound dummies, based on
+the concrete comparison problem being solved. This is still targeted,
+witness-driven exposure rather than a general-purpose "open this hidden-dummy
+def" operation.
 
 ---
 
@@ -261,7 +256,11 @@ Transparent def unfolding and `@normalize` solve different problems.
 - `@normalize` bridges expressions related by registered rewrite,
   congruence, and ACUI rules
 
-They compose.
+They compose in a limited way. The checker can compare normalized expressions
+and can still bridge a def gap afterwards when ordinary transparent conversion
+is enough. But the normalizer does **not** generally unfold defs first in order
+to discover more rewrites. Rewriting still works on the visible instantiated
+expression.
 
 ### Def-aware normalized conclusion
 
@@ -285,6 +284,10 @@ The compiler first instantiates the raw rule, then uses normalization to reach
 its normalized expected form, and finally uses transparent def conversion if
 needed to bridge between that normalized form and what the user wrote.
 
+What it does **not** do is generally unfold a def first just to expose a new
+rewrite redex. If the required rewrite only becomes visible after def
+exposure, that case is currently outside the ordinary normalization path.
+
 ### Def-aware normalized hypothesis
 
 The same applies to normalized hypotheses:
@@ -304,105 +307,6 @@ l2: $ Q $ by use_sub (a := $ Q $, b := $ P -> P $) [l1]
 The expected hypothesis is normalized, then the cited reference may still be
 bridged by transparent unfolding before it is fed into the theorem
 application.
-
----
-
-## `@abbrev`
-
-### Purpose
-
-`@abbrev` is a separate feature.
-
-All defs are transparent for theorem application checking, but expanding every
-def during rewrite search would be noisy and expensive. Many defs are genuine
-logical definitions, not just user-facing notation. The frontend normalizer and
-canonicalizer therefore open defs only when the def is explicitly marked as an
-abbreviation.
-
-Use `@abbrev` for defs that should behave like notation during source-level
-normalization and canonicalization.
-
-### Syntax
-
-Attach `@abbrev` to a `def`:
-
-```
---| @abbrev
-def dbl (a: wff): ctx = $ a , a $;
-```
-
-Attaching `@abbrev` to a non-def term is an error.
-
-### What `@abbrev` changes
-
-`@abbrev` affects the two frontend components that perform source-level search:
-
-- `canonicalizer.zig`, which computes symbolic canonical forms for omitted-
-  binder inference
-- `normalizer.zig`, which builds proof-producing normalization chains for
-  `@normalize`
-
-In those components, an `@abbrev` def may be opened even if no explicit
-rewrite rule names that def head.
-
-This lets short notation defs participate naturally in rewrite and ACUI-based
-checking.
-
-### ACUI example
-
-```
---| @abbrev
-def dbl (a: wff): ctx = $ a , a $;
-
---| @normalize conc
-axiom dup_ax (g: ctx) (a: wff): $ g , a , a ⇒ a $;
-
-theorem abbrev_assoc (a: wff): $ dbl a , emp ⇒ a $;
-```
-
-Here `dbl a` is opened by the normalizer to `a , a`, after which the ACUI
-normalization on contexts can eliminate `emp`, reassociate, and compare against
-what `dup_ax` expects.
-
-### Rewrite example
-
-```
---| @abbrev
-def pp: wff = $ P -> P $;
-
---| @normalize conc
-axiom all_elim (a b: wff): $ sb a b $;
-
-theorem abbrev_rewrite: $ Q -> Q $;
-```
-
-A proof line can instantiate `all_elim` with `b := $ pp $`. During
-normalization, `pp` is opened to `P -> P`, which then exposes the rewrite redex
-needed by the substitution rules.
-
-### Priority and search order
-
-`@abbrev` opening is intentionally conservative.
-
-The frontend canonicalizer and normalizer first try to make progress using the
-ordinary machinery already attached to the current expression:
-
-- explicit rewrite rules
-- structural ACUI normalization
-- congruence-driven descent into children
-
-Only when that direct machinery cannot make further progress at the current
-head do they try opening an `@abbrev` def.
-
-This keeps explicit rewrite rules in charge of the main normalization strategy,
-while still allowing notation-like defs to expose the redexes that those rules
-need.
-
-### Nested and dummy-argument abbreviations
-
-`@abbrev` defs can be nested inside other `@abbrev` defs, and they can also
-have hidden dummy binders. Each opening allocates fresh dummies exactly as an
-ordinary def unfolding would, so matching remains alpha-aware.
 
 ---
 
@@ -430,8 +334,8 @@ A few boundaries are worth keeping in mind.
 
 - Transparent unfolding is only about defs. It does not replace the rewrite
   system, congruence rules, or ACUI metadata.
-- `@abbrev` only affects frontend normalization and canonicalization. It is not
-  needed for ordinary theorem application transparency.
+- The frontend does not generally rewrite *through* defs in order to expose new
+  rewrite redexes.
 - Omitted-binder inference still requires a unique solution. Def-aware matching
   can fail with ambiguity.
 - The normalizer still has the same step limit and termination caveats as the
@@ -441,5 +345,5 @@ In short:
 
 - use **transparent def unfolding** when you want proof authors to move freely
   between defined and expanded forms at theorem-application boundaries
-- use **`@abbrev`** when you also want a def to behave like notation inside
-  frontend rewrite / ACUI normalization
+- do **not** assume that `@normalize` will unfold defs first in order to
+  discover more rewrites

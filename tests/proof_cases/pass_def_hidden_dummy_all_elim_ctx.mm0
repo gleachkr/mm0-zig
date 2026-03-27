@@ -213,7 +213,6 @@ axiom pb_med_congr (g0: ctx) (f g h k a1 b1 a2 b2: mor):
   $ g0 ⊢ a2 ~ b2 $ >
   $ g0 ⊢ pb_med f g h k a1 a2 ~ pb_med f g h k b1 b2 $;
 
---| @abbrev
 def mono {.a .b: mor} (f: mor): wff =
   $ ∀ a ∀ b ((f ∘ a ~ f ∘ b) → (a ~ b)) $;
 
@@ -230,7 +229,7 @@ axiom pullback_eq (g0: ctx) (f g h k: mor):
   $ g0 ⊢ pullback f g h k $ > $ g0 ⊢ f ∘ h ~ g ∘ k $;
 
 
-theorem pass_abbrev_hidden_dummy_all_elim_ctx {alpha y: mor}
+theorem pass_def_hidden_dummy_all_elim_ctx {alpha y: mor}
     (f g h k: mor):
   $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ alpha) ⊢
     ∀ y ((f ∘ (h ∘ alpha) ~ f ∘ y) → (h ∘ alpha ~ y)) $;

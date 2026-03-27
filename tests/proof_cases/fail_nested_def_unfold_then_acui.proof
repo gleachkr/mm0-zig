@@ -1,3 +1,3 @@
-abbrev_nested
+fail_nested_def_unfold_then_acui
 --------------
 l1: $ quad a , emp ⇒ a $ by dup_ax (g := $ emp $, a := $ a $) []

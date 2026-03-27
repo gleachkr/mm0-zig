@@ -27,10 +27,9 @@ axiom im_congr (a b c d: wff):
 axiom sb_congr (a b c d: wff):
   $ a <-> b $ > $ c <-> d $ > $ sb a c <-> sb b d $;
 
---| @abbrev
 def pp: wff = $ P -> P $;
 
 --| @normalize conc
 axiom all_elim (a b: wff): $ sb a b $;
 
-theorem abbrev_rewrite: $ Q -> Q $;
+theorem fail_def_unfold_then_rewrite: $ Q -> Q $;

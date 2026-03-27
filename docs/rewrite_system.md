@@ -92,11 +92,9 @@ form. The two normalized forms agree, so the line is accepted.
 | `@congr`        | `axiom`             | Marks an axiom as a congruence rule for a term constructor |
 | `@acui`         | `term`              | Marks a binary combiner for structural ACUI normalization |
 | `@normalize`    | `axiom` / `theorem` | Specifies which positions should be auto-normalized |
-| `@abbrev`       | `def`               | Lets the frontend open a def during normalization and canonicalization |
 
-Transparent def unfolding at theorem-application boundaries, and the more
-limited `@abbrev` behavior used by normalization and canonicalization, are
-covered in `docs/transparent_defs.md`.
+Transparent def unfolding at theorem-application boundaries is covered
+in `docs/transparent_defs.md`.
 
 ---
 
@@ -194,6 +192,10 @@ the normalizer recursively normalizes the resulting RHS and then re-checks
 the same expression for more applicable rules from the beginning. This
 continues until no rules apply (fixed-point normalization).
 
+This lookup is driven by the **visible** head of the current expression. The
+normalizer does not generally unfold defs first in order to expose more rewrite
+redexes. Transparent def comparison is a separate mechanism.
+
 There is no backtracking: if the first matching rule leads to a form that
 doesn't match the user's assertion, the compiler does not retry with a
 different rule. See *Rule Selection and Ordering* for guidance on rule
@@ -217,6 +219,10 @@ axiom sb_t_suc {x: nat} (t: nat) (a: nat x):
 
 The normalizer selects the correct relation for each subexpression based on
 its sort, so wff-level and nat-level rules interoperate transparently.
+
+An important limitation is that this still works on visible syntax. If a
+rewrite would become available only after exposing a def, ordinary
+normalization will not discover it automatically.
 
 ---
 
@@ -328,6 +334,12 @@ performs the following steps:
 A proof is emitted for every structural step — associativity rearrangements,
 unit eliminations, commutativity swaps, and idempotence merges — and composed
 via transitivity into a single relation proof `rel(original, canonical)`.
+
+In the current implementation, the ACUI path is also more def-aware than plain
+head-rewrite lookup. It can do exact cancellation of common items, same-side
+absorption by def-bearing items, and non-ACUI common-target search inside
+wrapped leaves. But this still falls short of a general "rewrite through defs"
+engine.
 
 ### Supported subsets
 

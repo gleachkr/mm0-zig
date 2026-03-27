@@ -337,7 +337,8 @@ A rule-match session can:
 
 - match rule templates against concrete theorem expressions
 - look through transparent defs while matching
-- keep hidden-dummy witnesses symbolic until the whole match succeeds
+- keep hidden-dummy witnesses (i.e. witnesses for the "dot variables" that 
+  occur in certain definitions) symbolic until the whole match succeeds
 - compare normalized forms for rule parts that are explicitly marked by
   `@normalize`
 
@@ -345,8 +346,7 @@ This is the current semantic center for binder-aware, def-aware matching.
 
 #### Match-local symbolic state
 
-The important design change from the recent binder-matching work is that
-all symbolic witness state is match-local.
+All symbolic witness state is match-local.
 
 Internally, `def_ops.zig` uses a `MatchSession` with:
 
@@ -421,11 +421,12 @@ predicates, and then requires a unique concrete solution.
 
 `def_ops.zig` is the main implementation point for transparent defs.
 
-The central semantic rule is still the one from the design notes:
+The central design principles here are:
 
 - there is no general frontend API that means "open this def body with no
   target"
-- hidden-dummy defs are only exposed toward a concrete witness problem
+- hidden-dummy defs (i.e. defs with "dot variables") are only exposed toward a 
+  concrete witness problem
 
 In practice, `def_ops.zig` provides three related services:
 
@@ -451,11 +452,7 @@ reusing the verifier's native conversion machinery.
 
 ## Shared ACUI semantics
 
-Stage 6 and the later binder-matching work made ACUI handling more
-explicit.
-
-`acui_support.zig` now owns the non-proof-producing ACUI item semantics
-shared by:
+`acui_support.zig` owns the non-proof-producing ACUI item semantics shared by:
 
 - `canonicalizer.zig`
 - `normalizer.zig`

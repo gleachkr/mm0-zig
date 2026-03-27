@@ -57,12 +57,11 @@ axiom and_congr (a b c d: wff):
 axiom all_congr {x: obj} (p q: wff):
   $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
 
---| @normalize hyp0 conc
-axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
+--| @normalize conc
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 
---| @abbrev
 def packed {.x: obj} (a q: wff): wff =
   $ a ∧ ∀ x q $;
 
-theorem abbrev_hidden_dummy_and_elim (a q: wff):
-  $ emp ⊢ packed a q $ > $ emp ⊢ a $;
+theorem pass_def_hidden_dummy_ax (a q: wff):
+  $ packed a q ⊢ packed a q $;
