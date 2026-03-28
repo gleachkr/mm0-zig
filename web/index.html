@@ -7,6 +7,16 @@
       content="width=device-width, initial-scale=1"
     >
     <title>mm0-zig web demo</title>
+    <script type="importmap">
+    {
+      "imports": {
+        "@codemirror/state": "https://esm.sh/@codemirror/state",
+        "@codemirror/view": "https://esm.sh/@codemirror/view?external=@codemirror/state",
+        "@codemirror/commands": "https://esm.sh/@codemirror/commands?external=@codemirror/state,@codemirror/view",
+        "@codemirror/lint": "https://esm.sh/@codemirror/lint?external=@codemirror/state,@codemirror/view"
+      }
+    }
+    </script>
     <link rel="stylesheet" href="./style.css">
   </head>
   <body>
@@ -105,12 +115,7 @@
           <span id="mm0-meta" class="meta"></span>
         </div>
         <div class="editor-shell">
-          <textarea
-            id="mm0-source"
-            wrap="off"
-            spellcheck="false"
-            aria-label="MM0 source"
-          ></textarea>
+          <div id="mm0-editor"></div>
         </div>
       </article>
 
@@ -119,24 +124,8 @@
           <span>Proof</span>
           <span id="proof-meta" class="meta"></span>
         </div>
-        <div class="editor-shell" id="proof-shell">
-          <textarea
-            id="proof-source"
-            wrap="off"
-            spellcheck="false"
-            aria-label="Proof script"
-          ></textarea>
-          <div class="inline-layer" aria-hidden="true">
-            <div
-              id="proof-inline-highlight"
-              class="inline-highlight"
-              hidden
-            ></div>
-            <div id="proof-inline-bubble" class="inline-bubble" hidden>
-              <p id="proof-inline-message" class="inline-message"></p>
-              <p id="proof-inline-meta" class="inline-meta"></p>
-            </div>
-          </div>
+        <div class="editor-shell">
+          <div id="proof-editor"></div>
         </div>
       </article>
     </main>

@@ -1,8 +1,12 @@
+import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection }
+  from "@codemirror/view";
+import { EditorState } from "@codemirror/state";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { linter, setDiagnostics } from "@codemirror/lint";
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const themeKey = "mm0-zig-theme";
-const measureCanvas = document.createElement("canvas");
-const measureContext = measureCanvas.getContext("2d");
 
 const examples = {
   hilbert: {
@@ -42,9 +46,80 @@ const examples = {
   },
 };
 
+const editorTheme = EditorView.theme({
+  "&": {
+    height: "100%",
+    background: "transparent",
+    color: "var(--text)",
+  },
+  ".cm-scroller": {
+    fontFamily:
+      '"Fira Code", "FiraCode Nerd Font", "Fira Mono", '
+      + '"IBM Plex Mono", ui-monospace, monospace',
+    fontFeatureSettings: '"calt" 1, "liga" 1',
+    lineHeight: "1.65",
+    fontSize: "14px",
+  },
+  ".cm-content": {
+    padding: "1rem 0 6rem",
+    caretColor: "var(--accent)",
+  },
+  ".cm-line": {
+    padding: "0 1.25rem",
+  },
+  ".cm-gutters": {
+    background: "transparent",
+    border: "none",
+    color: "var(--muted)",
+    paddingLeft: "0.5rem",
+  },
+  ".cm-activeLineGutter": {
+    background: "transparent",
+  },
+  ".cm-activeLine": {
+    background: "var(--panel-muted)",
+  },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+    background: "var(--selection) !important",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--accent)",
+  },
+  "&.cm-focused": {
+    outline: "none",
+  },
+  ".cm-lintRange-error": {
+    backgroundImage: "none",
+    textDecoration: "underline wavy var(--err)",
+    textUnderlineOffset: "3px",
+  },
+  ".cm-tooltip": {
+    background: "var(--bubble)",
+    border: "1px solid rgb(255 255 255 / 0.12)",
+    borderRadius: "0.8rem",
+    boxShadow: "0 14px 38px rgb(0 0 0 / 0.22)",
+  },
+  ".cm-tooltip-lint": {
+    padding: "0",
+  },
+  ".cm-diagnostic": {
+    padding: "0.52rem 0.72rem",
+    borderLeft: "none",
+    color: "#fff6f6",
+    whiteSpace: "pre-wrap",
+    fontFamily:
+      '"Fira Code", "FiraCode Nerd Font", "Fira Mono", '
+      + '"IBM Plex Mono", ui-monospace, monospace',
+    fontSize: "13px",
+  },
+  ".cm-diagnostic-error": {
+    borderLeft: "none",
+  },
+});
+
 const ui = {
-  mm0: document.querySelector("#mm0-source"),
-  proof: document.querySelector("#proof-source"),
+  mm0Editor: document.querySelector("#mm0-editor"),
+  proofEditor: document.querySelector("#proof-editor"),
   panes: [...document.querySelectorAll(".pane")],
   tabs: [...document.querySelectorAll("[data-pane-tab]")],
   exampleButtons: [...document.querySelectorAll("[data-example]")],
@@ -59,18 +134,15 @@ const ui = {
   examplesBtn: document.querySelector("#examples-button"),
   exampleModal: document.querySelector("#example-modal"),
   theme: document.querySelector("#theme-toggle"),
-  proofShell: document.querySelector("#proof-shell"),
-  inlineHighlight: document.querySelector("#proof-inline-highlight"),
-  inlineBubble: document.querySelector("#proof-inline-bubble"),
-  inlineMessage: document.querySelector("#proof-inline-message"),
-  inlineMeta: document.querySelector("#proof-inline-meta"),
 };
 
 let compilerModule = null;
 let verifierModule = null;
 let pendingTimer = null;
-let lastDiagnostic = null;
+let lastDiagnosticSpan = null;
 let runToken = 0;
+let mm0View = null;
+let proofView = null;
 
 initTheme();
 initTabs();
@@ -79,10 +151,28 @@ main().catch((error) => {
   renderFatal(error);
 });
 
-document.fonts?.ready.then(() => {
-  updateInlineDiagnosticPosition();
-});
-window.addEventListener("resize", updateInlineDiagnosticPosition);
+function makeExtensions(ariaLabel, withLint) {
+  const exts = [
+    lineNumbers(),
+    highlightActiveLine(),
+    drawSelection(),
+    history(),
+    keymap.of([...defaultKeymap, ...historyKeymap]),
+    EditorView.updateListener.of((update) => {
+      if (update.docChanged) scheduleRun();
+    }),
+    EditorView.contentAttributes.of({
+      "aria-label": ariaLabel,
+      spellcheck: "false",
+    }),
+    editorTheme,
+    EditorState.tabSize.of(2),
+  ];
+  if (withLint) {
+    exts.push(linter(() => [], { delay: 86400000 }));
+  }
+  return exts;
+}
 
 async function main() {
   const [compiler, verifier, mm0Text, proofText] = await Promise.all([
@@ -94,13 +184,25 @@ async function main() {
 
   compilerModule = compiler;
   verifierModule = verifier;
-  ui.mm0.value = mm0Text;
-  ui.proof.value = proofText;
+
+  mm0View = new EditorView({
+    parent: ui.mm0Editor,
+    state: EditorState.create({
+      doc: mm0Text,
+      extensions: makeExtensions("MM0 source", false),
+    }),
+  });
+
+  proofView = new EditorView({
+    parent: ui.proofEditor,
+    state: EditorState.create({
+      doc: proofText,
+      extensions: makeExtensions("Proof script", true),
+    }),
+  });
+
   updateSourceMeta();
 
-  ui.mm0.addEventListener("input", scheduleRun);
-  ui.proof.addEventListener("input", scheduleRun);
-  ui.proof.addEventListener("scroll", updateInlineDiagnosticPosition);
   ui.jump.addEventListener("click", jumpToProofDiagnostic);
   for (const btn of ui.exampleButtons) {
     btn.addEventListener("click", () => loadExample(btn.dataset.example));
@@ -112,7 +214,7 @@ async function main() {
 
 async function loadExample(name) {
   const example = examples[name];
-  if (!example || !compilerModule || !verifierModule) {
+  if (!example || !compilerModule || !verifierModule || !mm0View || !proofView) {
     return;
   }
 
@@ -121,10 +223,10 @@ async function loadExample(name) {
     fetchText(example.proof),
   ]);
 
-  ui.mm0.value = mm0Text;
-  ui.proof.value = proofText;
+  setEditorContent(mm0View, mm0Text);
+  setEditorContent(proofView, proofText);
   updateSourceMeta();
-  clearInlineDiagnostic();
+  clearDiagnostics();
 
   for (const btn of ui.exampleButtons) {
     const active = btn.dataset.example === name;
@@ -135,6 +237,12 @@ async function loadExample(name) {
   ui.exampleModal.close();
 
   await runAnalysis();
+}
+
+function setEditorContent(view, text) {
+  view.dispatch({
+    changes: { from: 0, to: view.state.doc.length, insert: text },
+  });
 }
 
 function initTheme() {
@@ -195,7 +303,6 @@ function toggleTheme() {
     ? "light"
     : "dark";
   applyTheme(current === "dark" ? "light" : "dark");
-  updateInlineDiagnosticPosition();
 }
 
 function setActivePane(name) {
@@ -210,9 +317,12 @@ function setActivePane(name) {
 }
 
 function updateSourceMeta() {
-  ui.mm0Meta.textContent = formatBytes(encoder.encode(ui.mm0.value).length);
+  if (!mm0View || !proofView) return;
+  ui.mm0Meta.textContent = formatBytes(
+    encoder.encode(mm0View.state.doc.toString()).length,
+  );
   ui.proofMeta.textContent = formatBytes(
-    encoder.encode(ui.proof.value).length,
+    encoder.encode(proofView.state.doc.toString()).length,
   );
 }
 
@@ -236,7 +346,7 @@ function warmUpAnalysis(mm0Text, proofText) {
 }
 
 async function runAnalysis() {
-  if (!compilerModule || !verifierModule) {
+  if (!compilerModule || !verifierModule || !mm0View || !proofView) {
     return;
   }
 
@@ -246,9 +356,11 @@ async function runAnalysis() {
   ui.compileTime.textContent = "";
   ui.verifyTime.textContent = "";
   ui.mmbSize.textContent = "";
-  clearInlineDiagnostic();
+  clearDiagnostics();
 
-  const compileResult = callCompiler(ui.mm0.value, ui.proof.value);
+  const mm0Text = mm0View.state.doc.toString();
+  const proofText = proofView.state.doc.toString();
+  const compileResult = callCompiler(mm0Text, proofText);
   if (token !== runToken) {
     return;
   }
@@ -266,7 +378,7 @@ async function runAnalysis() {
     : "";
 
   if (compileMeta?.diagnostic) {
-    renderInlineDiagnostic(buildProofDiagnostic(compileMeta));
+    pushProofDiagnostic(compileMeta);
   }
 
   if (!compileOkay) {
@@ -274,7 +386,7 @@ async function runAnalysis() {
     return;
   }
 
-  const verifyResult = callVerifier(ui.mm0.value, compileResult.mmbBytes);
+  const verifyResult = callVerifier(mm0Text, compileResult.mmbBytes);
   if (token !== runToken) {
     return;
   }
@@ -287,6 +399,69 @@ async function runAnalysis() {
     verifyOkay ? "ok" : "err",
   );
   ui.verifyTime.textContent = formatApproxMs(verifyResult.durationMs);
+}
+
+function pushProofDiagnostic(meta) {
+  const diag = meta.diagnostic;
+  const hasSpan =
+    Number.isInteger(diag.spanStart) && Number.isInteger(diag.spanEnd);
+  if (!hasSpan) return;
+
+  // The compiler returns byte offsets into UTF-8 encoded text, but CodeMirror
+  // uses character offsets. Convert via encode→slice→decode.
+  const text = proofView.state.doc.toString();
+  const bytes = encoder.encode(text);
+  const from = byteToCharPos(bytes, diag.spanStart);
+  const to = Math.max(from + 1, byteToCharPos(bytes, diag.spanEnd));
+
+  lastDiagnosticSpan = { start: from, end: to };
+  ui.jump.hidden = false;
+
+  proofView.dispatch(setDiagnostics(proofView.state, [{
+    from,
+    to,
+    severity: "error",
+    message: buildDiagnosticMessage(meta),
+  }]));
+}
+
+function byteToCharPos(bytes, byteOffset) {
+  const safe = Math.max(0, Math.min(byteOffset, bytes.length));
+  return decoder.decode(bytes.slice(0, safe)).length;
+}
+
+function buildDiagnosticMessage(meta) {
+  const parts = [meta.message];
+  const diag = meta.diagnostic;
+  const extra = [];
+  if (diag.theorem) extra.push(diag.theorem);
+  if (diag.lineLabel) extra.push(diag.lineLabel);
+  if (diag.rule) extra.push(`rule ${diag.rule}`);
+  if (diag.name) extra.push(diag.name);
+  if (diag.expected) extra.push(`expected ${diag.expected}`);
+  if (extra.length) parts.push(extra.join(" \u00b7 "));
+  return parts.join("\n");
+}
+
+function clearDiagnostics() {
+  lastDiagnosticSpan = null;
+  ui.jump.hidden = true;
+  if (proofView) {
+    proofView.dispatch(setDiagnostics(proofView.state, []));
+  }
+}
+
+function jumpToProofDiagnostic() {
+  if (!lastDiagnosticSpan || !proofView) return;
+  setActivePane("proof");
+  proofView.focus();
+  proofView.dispatch({
+    selection: {
+      anchor: lastDiagnosticSpan.start,
+      head: lastDiagnosticSpan.end,
+    },
+    scrollIntoView: true,
+  });
 }
 
 function callCompiler(mm0Text, proofText) {
@@ -399,220 +574,17 @@ function setStatus(node, text, kind) {
   node.className = `status ${kind}`;
 }
 
-function renderInlineDiagnostic(item) {
-  lastDiagnostic = item;
-  ui.jump.hidden = !item?.span;
-  if (!item?.span) {
-    clearInlineDiagnostic();
-    return;
-  }
-
-  ui.inlineMessage.textContent = item.message;
-  ui.inlineMeta.textContent = buildInlineMeta(item);
-  ui.inlineMeta.hidden = ui.inlineMeta.textContent.length === 0;
-  ui.inlineHighlight.hidden = false;
-  ui.inlineBubble.hidden = false;
-  updateInlineDiagnosticPosition();
-}
-
-function clearInlineDiagnostic() {
-  lastDiagnostic = null;
-  ui.jump.hidden = true;
-  ui.inlineHighlight.hidden = true;
-  ui.inlineBubble.hidden = true;
-}
-
-function buildInlineMeta(item) {
-  const fields = [];
-  if (item.line) {
-    fields.push(`L${item.line}:${item.column}`);
-  }
-  if (item.theorem) {
-    fields.push(item.theorem);
-  }
-  if (item.lineLabel) {
-    fields.push(item.lineLabel);
-  }
-  if (item.rule) {
-    fields.push(`rule ${item.rule}`);
-  }
-  if (item.name) {
-    fields.push(item.name);
-  }
-  if (item.expected) {
-    fields.push(`expected ${item.expected}`);
-  }
-  return fields.join(" · ");
-}
-
-function updateInlineDiagnosticPosition() {
-  if (!lastDiagnostic?.span || !lastDiagnostic.line) {
-    return;
-  }
-
-  const metrics = getEditorMetrics(ui.proof);
-  const top =
-    metrics.paddingTop +
-    (lastDiagnostic.line - 1) * metrics.lineHeight -
-    ui.proof.scrollTop;
-
-  if (top + metrics.lineHeight < 0 || top > ui.proof.clientHeight) {
-    ui.inlineHighlight.hidden = true;
-    ui.inlineBubble.hidden = true;
-    return;
-  }
-
-  ui.inlineHighlight.hidden = false;
-  ui.inlineBubble.hidden = false;
-
-  ui.inlineHighlight.style.top = `${Math.round(top)}px`;
-  ui.inlineHighlight.style.height = `${Math.ceil(metrics.lineHeight)}px`;
-
-  const bubbleHeight = ui.inlineBubble.offsetHeight || 0;
-  const bubbleWidth = ui.inlineBubble.offsetWidth || 0;
-  const lineWidth = measureTextWidth(ui.proof, lastDiagnostic.lineText || "");
-  const idealLeft =
-    metrics.paddingLeft + lineWidth + metrics.charWidth * 3 -
-    ui.proof.scrollLeft;
-  const maxLeft = Math.max(12, ui.proof.clientWidth - bubbleWidth - 12);
-  const left = clamp(idealLeft, 12, maxLeft);
-  const maxTop = Math.max(8, ui.proof.clientHeight - bubbleHeight - 8);
-  const bubbleTop = clamp(top - 6, 8, maxTop);
-
-  ui.inlineBubble.style.left = `${Math.round(left)}px`;
-  ui.inlineBubble.style.top = `${Math.round(bubbleTop)}px`;
-}
-
-function getEditorMetrics(textarea) {
-  const style = getComputedStyle(textarea);
-  return {
-    lineHeight: parseFloat(style.lineHeight),
-    paddingTop: parseFloat(style.paddingTop),
-    paddingLeft: parseFloat(style.paddingLeft),
-    charWidth: measureCharWidth(style),
-  };
-}
-
-function measureTextWidth(textarea, text) {
-  const style = getComputedStyle(textarea);
-  const tabSize = Number.parseInt(style.tabSize, 10) || 2;
-  return countColumns(text, tabSize) * measureCharWidth(style);
-}
-
-function measureCharWidth(style) {
-  if (!measureContext) {
-    return 8;
-  }
-  measureContext.font = makeCanvasFont(style);
-  return measureContext.measureText("0").width;
-}
-
-function makeCanvasFont(style) {
-  const parts = [
-    style.fontStyle,
-    style.fontVariant,
-    style.fontWeight,
-    style.fontSize,
-    style.fontFamily,
-  ].filter(Boolean);
-  return parts.join(" ");
-}
-
-function countColumns(text, tabSize) {
-  let column = 0;
-  for (const char of text) {
-    if (char === "\t") {
-      column += tabSize - (column % tabSize || 0);
-    } else {
-      column += 1;
-    }
-  }
-  return column;
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function buildProofDiagnostic(meta) {
-  const diag = meta.diagnostic;
-  const span =
-    Number.isInteger(diag.spanStart) && Number.isInteger(diag.spanEnd)
-      ? { start: diag.spanStart, end: diag.spanEnd }
-      : null;
-  const location = span
-    ? offsetToLocation(ui.proof.value, span.start, span.end)
-    : { line: null, column: null, lineText: null };
-
-  return {
-    message: meta.message,
-    theorem: diag.theorem,
-    block: diag.block,
-    lineLabel: diag.lineLabel,
-    rule: diag.rule,
-    name: diag.name,
-    expected: diag.expected,
-    line: location.line ?? 0,
-    column: location.column ?? 0,
-    lineText: location.lineText,
-    span,
-  };
-}
-
-function offsetToLocation(text, start, end) {
-  const safeStart = Math.max(0, Math.min(start, text.length));
-  const safeEnd = Math.max(safeStart, Math.min(end, text.length));
-
-  let line = 1;
-  let column = 1;
-  let lineStart = 0;
-  for (let i = 0; i < safeStart; i += 1) {
-    if (text[i] === "\n") {
-      line += 1;
-      column = 1;
-      lineStart = i + 1;
-    } else {
-      column += 1;
-    }
-  }
-
-  let lineEnd = lineStart;
-  while (lineEnd < text.length && text[lineEnd] !== "\n") {
-    lineEnd += 1;
-  }
-
-  return {
-    line,
-    column,
-    lineText: text.slice(lineStart, lineEnd),
-    spanWidth: Math.max(1, safeEnd - safeStart),
-  };
-}
-
-function jumpToProofDiagnostic() {
-  if (!lastDiagnostic?.span) {
-    return;
-  }
-  setActivePane("proof");
-  ui.proof.focus();
-  ui.proof.setSelectionRange(
-    lastDiagnostic.span.start,
-    Math.max(lastDiagnostic.span.start + 1, lastDiagnostic.span.end),
-  );
-  updateInlineDiagnosticPosition();
-}
-
 function formatApproxMs(value) {
   if (!Number.isFinite(value)) {
     return "";
   }
   if (value < 1) {
-    return `≈ ${value.toFixed(1)} ms`;
+    return `\u2248 ${value.toFixed(1)} ms`;
   }
   if (value < 10) {
-    return `≈ ${value.toFixed(1)} ms`;
+    return `\u2248 ${value.toFixed(1)} ms`;
   }
-  return `≈ ${Math.round(value)} ms`;
+  return `\u2248 ${Math.round(value)} ms`;
 }
 
 function formatBytes(value) {
@@ -631,5 +603,5 @@ function renderFatal(error) {
   ui.compileTime.textContent = "";
   ui.verifyTime.textContent = "";
   ui.mmbSize.textContent = "";
-  clearInlineDiagnostic();
+  clearDiagnostics();
 }
