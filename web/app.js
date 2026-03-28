@@ -59,6 +59,8 @@ const editorTheme = EditorView.theme({
     fontFeatureSettings: '"calt" 1, "liga" 1',
     lineHeight: "1.65",
     fontSize: "14px",
+    overflow: "auto",
+    minHeight: "0",
   },
   ".cm-content": {
     padding: "1rem 0 6rem",
