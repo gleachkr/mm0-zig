@@ -237,3 +237,8 @@ theorem pb_preserves_mono_step {alpha beta x y z: mor} (f g h k: mor):
 
 theorem pb_preserves_mono {alpha beta: mor} (f g h k: mor):
   $ mono f , pullback f g h k ⊢ mono k $;
+
+--| @dummy x
+--| @dummy y
+theorem comp_mono {alpha beta x y: mor} (f g: mor):
+  $ mono f , mono g  ⊢ mono (f ∘ g) $;

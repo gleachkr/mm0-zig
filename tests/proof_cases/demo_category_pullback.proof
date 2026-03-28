@@ -43,3 +43,19 @@ l1: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ alpha ~ beta $ 
 l2: $ mono f , pullback f g h k ⊢ (k ∘ alpha ~ k ∘ beta) → (alpha ~ beta) $ by imp_intro [l1]
 l3: $ mono f , pullback f g h k ⊢ ∀ beta ((k ∘ alpha ~ k ∘ beta) → (alpha ~ beta)) $ by all_intro [l2]
 l4: $ mono f , pullback f g h k ⊢ ∀ alpha ∀ beta ((k ∘ alpha ~ k ∘ beta) → (alpha ~ beta)) $ by all_intro [l3]
+
+comp_mono
+--------------
+
+l1: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ mono f $ by ax
+l2: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ ∀ x ((f ∘ (g ∘ alpha) ~ f ∘ x) → (g ∘ alpha ~ x)) $ by all_elim [l1]
+l3: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) → (g ∘ alpha ~ g ∘ beta) $ by all_elim [l2]
+l4: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta) $ by ax
+l5: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ g ∘ alpha ~ g ∘ beta $ by imp_elim [l3, l4]
+l6: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ mono g $ by ax
+l7: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ ∀ y ((g ∘ alpha ~ g ∘ y) → (alpha ~ y)) $ by all_elim [l6]
+l8: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ (g ∘ alpha ~ g ∘ beta) → (alpha ~ beta) $ by all_elim [l7]
+l9: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ alpha ~ beta $ by imp_elim [l8, l5]
+l10: $ mono f , mono g ⊢ (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) → (alpha ~ beta) $ by imp_intro [l9]
+l11: $ mono f , mono g ⊢ ∀ beta ((f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) → (alpha ~ beta)) $ by all_intro [l10]
+l12: $ mono f , mono g ⊢ ∀ alpha ∀ beta (((f ∘ g) ∘ alpha ~ (f ∘ g) ∘ beta) → (alpha ~ beta)) $ by all_intro [l11]
