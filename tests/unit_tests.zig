@@ -1751,6 +1751,28 @@ test "compiler emits a valid hidden-dummy targeted unfold proof" {
     try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
+test "compiler handles normalize-plus-unfold hidden-dummy proof" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_def_hidden_dummy_all_elim_ctx_unfold",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_def_hidden_dummy_all_elim_ctx_unfold",
+        "proof",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+}
+
 test "compiler ignores legacy @abbrev on non-def terms" {
     const mm0_src =
         \\sort nat;
@@ -1923,6 +1945,51 @@ test "compiler records inference diagnostics for omitted arguments" {
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("ax_keep", diag.rule_name.?);
     try std.testing.expect(diag.span != null);
+}
+
+test "compiler reports dependency slot exhaustion clearly" {
+    const allocator = std.testing.allocator;
+
+    var mm0_buf = std.ArrayListUnmanaged(u8){};
+    defer mm0_buf.deinit(allocator);
+    try mm0_buf.appendSlice(allocator,
+        \\provable sort wff;
+        \\term top: wff;
+        \\--| @dummy y
+        \\axiom use_dummy {y: wff}: $ top $;
+        \\theorem overflow
+    );
+    for (0..CompilerExpr.tracked_bound_dep_limit) |idx| {
+        try mm0_buf.writer(allocator).print(" {{x{d}: wff}}", .{idx});
+    }
+    try mm0_buf.appendSlice(allocator, ": $ top $;\n");
+
+    const proof_src =
+        \\overflow
+        \\--------
+        \\l1: $ top $ by use_dummy []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        allocator,
+        mm0_buf.items,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.DependencySlotExhausted,
+        compiler.compileMmb(allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DependencySlotExhausted, diag.err);
+    try std.testing.expectEqualStrings("overflow", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("use_dummy", diag.rule_name.?);
+    try std.testing.expectEqualStrings("y", diag.name.?);
+    try std.testing.expectEqualStrings(
+        "theorem exceeded the 55 tracked bound-variable dependency slots",
+        mm0.compilerDiagnosticSummary(diag),
+    );
 }
 
 test "strict replay still infers exact omitted binders" {
@@ -2146,6 +2213,39 @@ test "theorem context preserves theorem var identity" {
         },
         else => return error.UnexpectedExprNode,
     }
+}
+
+test "theorem context rejects dummy dependency slot overflow" {
+    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    const limit = CompilerExpr.tracked_bound_dep_limit;
+    try ctx.seedBinderCount(limit - 1);
+    ctx.next_dummy_dep = limit - 1;
+
+    const last_dummy = try ctx.addDummyVarResolved("wff", 0);
+    try std.testing.expectEqual(@as(usize, 1), ctx.theorem_dummies.items.len);
+    try std.testing.expectEqual(
+        @as(u55, 1) << @intCast(limit - 1),
+        ctx.theorem_dummies.items[0].deps,
+    );
+    try std.testing.expectEqual(limit, ctx.next_dummy_dep);
+
+    const node = ctx.interner.node(last_dummy);
+    switch (node.*) {
+        .variable => |var_id| switch (var_id) {
+            .dummy_var => |idx| try std.testing.expectEqual(@as(u32, 0), idx),
+            else => return error.UnexpectedVariableKind,
+        },
+        else => return error.UnexpectedExprNode,
+    }
+
+    try std.testing.expectError(
+        error.DependencySlotExhausted,
+        ctx.addDummyVarResolved("wff", 0),
+    );
+    try std.testing.expectEqual(@as(usize, 1), ctx.theorem_dummies.items.len);
+    try std.testing.expectEqual(limit, ctx.next_dummy_dep);
 }
 
 test "theorem context interns parsed expressions with sharing" {

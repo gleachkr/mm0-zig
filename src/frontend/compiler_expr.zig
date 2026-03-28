@@ -9,6 +9,7 @@ const TermStmt = @import("../trusted/parse.zig").TermStmt;
 pub const ExprId = u32;
 pub const TheoremVarId = u32;
 pub const DummyVarId = u32;
+pub const tracked_bound_dep_limit: u32 = @bitSizeOf(u55);
 
 pub const VarId = union(enum) {
     theorem_var: TheoremVarId,
@@ -235,6 +236,10 @@ pub const TheoremContext = struct {
         sort_name: []const u8,
         sort_id: u8,
     ) !ExprId {
+        if (self.next_dummy_dep >= tracked_bound_dep_limit) {
+            return error.DependencySlotExhausted;
+        }
+
         const dummy_id = self.next_dummy_id;
         self.next_dummy_id = try std.math.add(DummyVarId, dummy_id, 1);
         try self.theorem_dummies.append(self.allocator, .{

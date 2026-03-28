@@ -1030,7 +1030,10 @@ pub const Solver = struct {
             self.env,
         );
         defer def_ops.deinit();
-        return (try def_ops.compareTransparent(lhs, rhs)) != null;
+        return (def_ops.compareTransparent(lhs, rhs) catch |err| switch (err) {
+            error.DependencySlotExhausted => return false,
+            else => return err,
+        }) != null;
     }
 
     fn matchExprTransparent(
@@ -1053,11 +1056,14 @@ pub const Solver = struct {
             self.env,
         );
         defer def_ops.deinit();
-        if (!try def_ops.matchTemplateTransparent(
+        if (!(def_ops.matchTemplateTransparent(
             template,
             actual,
             bindings,
-        )) {
+        ) catch |err| switch (err) {
+            error.DependencySlotExhausted => return &.{},
+            else => return err,
+        })) {
             return &.{};
         }
         for (bindings, old_bindings, 0..) |binding, old_binding, idx| {

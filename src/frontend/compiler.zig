@@ -11,6 +11,7 @@ const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
 const ProofScriptParser = @import("./proof_script.zig").Parser;
 const TheoremBlock = @import("./proof_script.zig").TheoremBlock;
+const Span = @import("./proof_script.zig").Span;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const CheckedIr = @import("./compiler/checked_ir.zig");
 pub const DebugConfig = @import("./debug.zig").DebugConfig;
@@ -110,7 +111,7 @@ pub const Compiler = struct {
                             proofs,
                             assertion.name,
                         );
-                        _ = try Check.checkTheoremBlock(
+                        _ = Check.checkTheoremBlock(
                             self,
                             arena.allocator(),
                             &parser,
@@ -122,7 +123,14 @@ pub const Compiler = struct {
                             block,
                             &theorem,
                             theorem_concl,
-                        );
+                        ) catch |err| {
+                            self.setTheoremDiagnosticIfMissing(
+                                assertion.name,
+                                block.name_span,
+                                err,
+                            );
+                            return err;
+                        };
                     }
 
                     try env.addStmt(stmt);
@@ -280,7 +288,7 @@ pub const Compiler = struct {
                                 &proof_parser,
                                 assertion.name,
                             );
-                            const checked = try Check.checkTheoremBlock(
+                            const checked = Check.checkTheoremBlock(
                                 self,
                                 allocator,
                                 &parser,
@@ -292,13 +300,27 @@ pub const Compiler = struct {
                                 block,
                                 &theorem,
                                 theorem_concl,
-                            );
-                            const body = try Emit.buildTheoremProofBody(
+                            ) catch |err| {
+                                self.setTheoremDiagnosticIfMissing(
+                                    assertion.name,
+                                    block.name_span,
+                                    err,
+                                );
+                                return err;
+                            };
+                            const body = Emit.buildTheoremProofBody(
                                 allocator,
                                 &theorem,
                                 &env,
                                 checked,
-                            );
+                            ) catch |err| {
+                                self.setTheoremDiagnosticIfMissing(
+                                    assertion.name,
+                                    block.name_span,
+                                    err,
+                                );
+                                return err;
+                            };
                             try theorems.append(allocator, .{
                                 .args = args,
                                 .unify = unify,
@@ -427,6 +449,21 @@ pub const Compiler = struct {
 
     pub fn setDiagnostic(self: *Compiler, diag: Diagnostic) void {
         self.last_diagnostic = diag;
+    }
+
+    fn setTheoremDiagnosticIfMissing(
+        self: *Compiler,
+        theorem_name: []const u8,
+        span: Span,
+        err: anyerror,
+    ) void {
+        if (self.last_diagnostic != null) return;
+        self.setDiagnostic(.{
+            .kind = .generic,
+            .err = err,
+            .theorem_name = theorem_name,
+            .span = span,
+        });
     }
 
     fn expectProofBlock(
