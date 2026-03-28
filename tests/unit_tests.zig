@@ -2361,6 +2361,12 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
             "rewriting; see " ++
             "docs/design_notes/witness_driven_rewriting.md",
     },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_hyp",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "rewriting (hypothesis side); see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
 };
 
 fn lookupProofCaseReason(
@@ -2432,6 +2438,10 @@ const proof_cases = [_]ProofCase{
     },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_concl",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_hyp",
         .outcome = .unsupported,
     },
     .{ .stem = "pass_normalize", .outcome = .pass },
