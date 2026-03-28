@@ -1,0 +1,6 @@
+delimiter $ ( ) $;
+provable sort wff;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+axiom h1 (a b: wff): $ a -> (b -> a) $;
+axiom mp (a b: wff): $ a $ > $ a -> b $ > $ b $;
+theorem weaken (a b: wff): $ a $ > $ b -> a $;

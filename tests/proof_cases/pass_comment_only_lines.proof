@@ -1,0 +1,5 @@
+-- A simple proof with a trailing comment on the theorem header
+weaken -- weakening lemma
+------
+l1: $ a -> (b -> a) $ by h1 []
+l2: $ b -> a $ by mp [#1, l1]

@@ -2609,6 +2609,9 @@ const proof_cases = [_]ProofCase{
         .stem = "fail_var_conclusion_mismatch",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
+    .{ .stem = "pass_comment_trailing", .outcome = .pass },
+    .{ .stem = "pass_comment_standalone", .outcome = .pass },
+    .{ .stem = "pass_comment_only_lines", .outcome = .pass },
 };
 
 fn readProofCaseFile(

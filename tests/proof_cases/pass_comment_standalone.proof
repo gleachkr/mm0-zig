@@ -1,0 +1,14 @@
+-- Proof of imp_refl: a -> a
+-- Uses the standard Hilbert-style trick
+
+imp_refl
+--------
+
+-- First, set up the two instances of h1
+l1: $ a -> ((a -> a) -> a) $ by h1 []
+l2: $ a -> (a -> a) $ by h1 []
+
+-- Now use h2 and mp to close it off
+l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 []
+l4: $ (a -> (a -> a)) -> (a -> a) $ by mp [l1, l3]
+l5: $ a -> a $ by mp [l2, l4]

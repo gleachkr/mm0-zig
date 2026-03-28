@@ -312,6 +312,7 @@ pub const Parser = struct {
 
     fn expectLineEnd(self: *Parser) !void {
         self.skipHorizontalSpace();
+        self.skipLineComment();
         if (self.pos >= self.src.len) return;
         if (self.src[self.pos] != '\n') return error.ExpectedLineEnd;
         self.consumeNewline();
@@ -326,6 +327,12 @@ pub const Parser = struct {
     fn peek(self: *Parser) u8 {
         if (self.pos >= self.src.len) return 0;
         return self.src[self.pos];
+    }
+
+    fn skipLineComment(self: *Parser) void {
+        if (self.pos + 1 < self.src.len and self.src[self.pos] == '-' and self.src[self.pos + 1] == '-') {
+            while (self.pos < self.src.len and self.src[self.pos] != '\n') : (self.pos += 1) {}
+        }
     }
 
     fn skipHorizontalSpace(self: *Parser) void {
@@ -348,6 +355,12 @@ pub const Parser = struct {
                 i += 1;
             }
             if (i >= self.src.len) return i;
+            // Treat comment-only lines as blank
+            if (i + 1 < self.src.len and self.src[i] == '-' and self.src[i + 1] == '-') {
+                while (i < self.src.len and self.src[i] != '\n') : (i += 1) {}
+                if (i < self.src.len) i += 1; // skip the newline
+                continue;
+            }
             if (self.src[i] != '\n') return line_start;
             i += 1;
         }

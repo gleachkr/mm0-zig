@@ -1,0 +1,7 @@
+imp_refl
+--------
+l1: $ a -> ((a -> a) -> a) $ by h1 []  -- weaken with (a -> a)
+l2: $ a -> (a -> a) $ by h1 []  -- trivial weakening
+l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 []  -- distribute
+l4: $ (a -> (a -> a)) -> (a -> a) $ by mp [l1, l3]  -- modus ponens
+l5: $ a -> a $ by mp [l2, l4]  -- final step
