@@ -340,8 +340,9 @@ A rule-match session can:
 
 - match rule templates against concrete theorem expressions
 - look through transparent defs while matching
-- keep hidden-dummy witnesses (i.e. witnesses for the "dot variables" that 
-  occur in certain definitions) symbolic until the whole match succeeds
+- keep hidden-dummy witnesses (i.e. witnesses for the "dot variables"
+  that occur in certain definitions) symbolic until the whole match
+  succeeds
 - compare normalized forms for rule parts that are explicitly marked by
   `@normalize`
 
@@ -355,11 +356,14 @@ Internally, `def_ops.zig` uses a `MatchSession` with:
 
 - binder assignments
 - symbolic hidden-dummy metadata
-- witness maps for materialization
+- provisional and materialized witness maps
+- separate representative caches for transparent and normalized matching
 - backtracking snapshots
 
 That state does not live as ambient mutable context on the solver or on
 `DefOps.Context`. Each matching problem owns its own witness identity.
+The main theorem's dummy budget is not spent just because matching or
+representative selection looked through a def.
 
 #### Binding modes and representatives
 
@@ -390,6 +394,11 @@ After a successful rule match, finalization returns an ordinary concrete
 `[]const ExprId` binding list. Only after that do the usual sort,
 boundness, and dependency checks run.
 
+That finalization step is also the only place where hidden-dummy
+witnesses are allowed to materialize as main-theorem dummy vars. If a
+match is abandoned before finalization, it should leave the main theorem
+context's dummy state unchanged.
+
 Nothing symbolic escapes into proof emission or into the trusted kernel.
 
 ### Normalized comparison inside a rule match
@@ -400,6 +409,11 @@ can create a mirrored theorem context using `def_ops/mirror_support.zig`.
 The mirrored theorem serves one narrow purpose: it lets the frontend
 instantiate template placeholders, normalize both sides, and then map the
 result back into the original theorem's binding session.
+
+Those normalization placeholders live in the mirrored theorem, not in the
+main theorem. So normalized comparison can still introduce temporary
+placeholder dummies without consuming the main theorem's real dummy
+supply.
 
 This is not a kernel feature. It is an internal frontend device used only
 while solving omitted binders.
@@ -428,8 +442,8 @@ The central design principles here are:
 
 - there is no general frontend API that means "open this def body with no
   target"
-- hidden-dummy defs (i.e. defs with "dot variables") are only exposed toward a 
-  concrete witness problem
+- hidden-dummy defs (i.e. defs with "dot variables") are only exposed
+  toward a concrete witness problem
 
 In practice, `def_ops.zig` provides three related services:
 
