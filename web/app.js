@@ -176,12 +176,18 @@ function makeExtensions(ariaLabel, withLint) {
   return exts;
 }
 
+function exampleFromHash() {
+  const name = location.hash.replace(/^#/, "");
+  return examples[name] ? name : "hilbert";
+}
+
 async function main() {
+  const initial = exampleFromHash();
   const [compiler, verifier, mm0Text, proofText] = await Promise.all([
     loadWasm("./compiler.wasm"),
     loadWasm("./verifier.wasm"),
-    fetchText(examples.hilbert.mm0),
-    fetchText(examples.hilbert.proof),
+    fetchText(examples[initial].mm0),
+    fetchText(examples[initial].proof),
   ]);
 
   compilerModule = compiler;
@@ -210,14 +216,35 @@ async function main() {
     btn.addEventListener("click", () => loadExample(btn.dataset.example));
   }
 
+  markActiveExample(initial);
+  window.addEventListener("hashchange", () => {
+    const name = exampleFromHash();
+    loadExample(name);
+  });
+
   warmUpAnalysis(mm0Text, proofText);
   await runAnalysis();
+}
+
+function markActiveExample(name) {
+  const example = examples[name];
+  if (!example) return;
+  for (const btn of ui.exampleButtons) {
+    const active = btn.dataset.example === name;
+    btn.classList.toggle("is-active", active);
+    btn.setAttribute("aria-pressed", String(active));
+  }
+  ui.examplesBtn.textContent = example.label;
 }
 
 async function loadExample(name) {
   const example = examples[name];
   if (!example || !compilerModule || !verifierModule || !mm0View || !proofView) {
     return;
+  }
+
+  if (location.hash.replace(/^#/, "") !== name) {
+    window.history.pushState(null, "", `#${name}`);
   }
 
   const [mm0Text, proofText] = await Promise.all([
@@ -230,12 +257,7 @@ async function loadExample(name) {
   updateSourceMeta();
   clearDiagnostics();
 
-  for (const btn of ui.exampleButtons) {
-    const active = btn.dataset.example === name;
-    btn.classList.toggle("is-active", active);
-    btn.setAttribute("aria-pressed", String(active));
-  }
-  ui.examplesBtn.textContent = example.label;
+  markActiveExample(name);
   ui.exampleModal.close();
 
   await runAnalysis();
