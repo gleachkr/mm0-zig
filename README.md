@@ -44,6 +44,29 @@ If you cloned without submodules, run:
 
 `git submodule update --init --recursive`
 
+## Benchmarking
+
+There is a small harness for verifier timing comparisons:
+
+- `tools/bench_peano.sh`
+- `tools/bench_verify.sh --mm0 FILE.mm0 --mmb FILE.mmb`
+
+`bench_peano.sh` rebuilds `mm0-zig`, compiles `peano.mm1` to
+`.bench-cache/peano.mmb` with `mm0-rs`, smoke-checks both verifiers,
+and then runs `hyperfine`.
+
+Example:
+
+`tools/bench_peano.sh --runs 10 --warmup 2 --repeat 100`
+
+To include `perf stat` in the same run:
+
+`tools/bench_peano.sh --runs 10 --warmup 2 --repeat 100 --perf`
+
+The harness builds with repo-local Zig caches:
+
+`--cache-dir .zig-cache-local --global-cache-dir .zig-cache-global`
+
 ## Status
 
 - Verifier: working against the current MM0/MMB specs.
