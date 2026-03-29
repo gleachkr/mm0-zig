@@ -1,0 +1,4 @@
+unsupported_def_unfold_then_full_acui_abstract
+-------------------------------------------
+
+l1: $ ctx_eq (left_ctx r alpha) (right_ctx r beta) $ by ctx_subst (x := $ x $) [#1]

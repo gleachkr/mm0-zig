@@ -1,0 +1,61 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort mor;
+
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term mor_eq (f g: mor): wff;
+infixl mor_eq: $~$ prec 15;
+term comp (f g: mor): mor;
+infixl comp: $o$ prec 35;
+
+term sb_m {x: mor} (t: mor x) (a: mor x): mor;
+notation sb_m {x: mor} (t: mor x) (a: mor x): mor =
+  ($subst$:41) x ($/$:0) t a;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @relation mor mor_eq mor_refl_raw mor_trans_raw mor_sym_raw _
+axiom mor_refl_raw (f: mor): $ f ~ f $;
+axiom mor_trans_raw (f g h: mor):
+  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+axiom mor_sym_raw (f g: mor): $ f ~ g $ > $ g ~ f $;
+
+--| @congr
+axiom mor_eq_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) <-> (f2 ~ g2) $;
+--| @congr
+axiom comp_congr (f1 f2 g1 g2: mor):
+  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ f1 o g1 ~ f2 o g2 $;
+
+--| @rewrite
+axiom comp_assoc (f g h: mor): $ (f o g) o h ~ f o (g o h) $;
+--| @rewrite
+axiom sb_m_var {x: mor} (t: mor x): $ subst x / t x ~ t $;
+--| @rewrite
+axiom sb_m_other {x y: mor} (t: mor x): $ subst x / t y ~ y $;
+--| @rewrite
+axiom sb_m_irrel {x: mor} (t: mor x) (a: mor): $ subst x / t a ~ a $;
+--| @rewrite
+axiom sb_m_comp {x: mor} (t: mor x) (a b: mor x):
+  $ subst x / t (a o b) ~ (subst x / t a o subst x / t b) $;
+
+--| @view {x: mor} (a b: mor) (r: mor x) (p q: mor): $ p ~ q $ > $ a ~ b $
+--| @abstract r p q x a b
+--| @normalize hyp0
+axiom use_ctx_congr {x: mor} (a b: mor) (r: mor x):
+  $ subst x / a r ~ subst x / b r $ > $ a ~ b $;
+
+-- The abstracted context is only visible after unfolding the cited def-headed
+-- ref and then using comp_assoc to expose g o (f o _).
+def left_shell (f g t: mor): mor = $ (g o f) o t $;
+def right_shell (f g t: mor): mor = $ g o (f o t) $;
+
+theorem unsupported_def_unfold_then_rewrite_abstract_hyp
+    {x: mor} (f g alpha beta: mor):
+  $ left_shell f g alpha ~ right_shell f g beta $ >
+  $ f o alpha ~ f o beta $;

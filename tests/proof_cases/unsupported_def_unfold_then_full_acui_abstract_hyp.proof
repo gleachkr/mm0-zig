@@ -1,0 +1,4 @@
+unsupported_def_unfold_then_full_acui_abstract_hyp
+------------------------------------------------
+
+l1: $ ctx_eq (tag alpha) (tag beta) $ by use_ctx_subst (x := $ x $) [#1]

@@ -2746,6 +2746,68 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
             "rewriting (hypothesis side); see " ++
             "docs/design_notes/witness_driven_rewriting.md",
     },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_view",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "rewriting during @view/@recover matching; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_recover",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "rewriting during less-direct @recover matching; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_acui_concl",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "ACUI normalization; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_acui_hyp",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "ACUI normalization (hypothesis side); see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_abstract",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "rewriting during @view/@abstract matching; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_abstract_hyp",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "rewriting during @view/@abstract matching on the " ++
+            "hypothesis side; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_full_acui_concl",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "full ACUI normalization on the conclusion side; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_full_acui_hyp",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "full ACUI normalization on the hypothesis side; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_full_acui_abstract",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "full ACUI normalization during @view/@abstract matching; " ++
+            "see docs/design_notes/witness_driven_rewriting.md",
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_full_acui_abstract_hyp",
+        .reason = "needs witness-driven def exposure integrated with " ++
+            "full ACUI normalization during @view/@abstract matching " ++
+            "on the hypothesis side; see " ++
+            "docs/design_notes/witness_driven_rewriting.md",
+    },
 };
 
 fn lookupProofCaseReason(
@@ -2821,6 +2883,46 @@ const proof_cases = [_]ProofCase{
     },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_hyp",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_view",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_recover",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_acui_concl",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_acui_hyp",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_abstract",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_abstract_hyp",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_full_acui_concl",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_full_acui_hyp",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_full_acui_abstract",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_def_unfold_then_full_acui_abstract_hyp",
         .outcome = .unsupported,
     },
     .{ .stem = "pass_normalize", .outcome = .pass },

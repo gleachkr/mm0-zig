@@ -1,0 +1,5 @@
+unsupported_def_unfold_then_acui_hyp
+----------------------------------
+
+l1: $ u = u |- u = u $ by ax
+l2: $ u = u $ by use_pre_ctx (u := $ u $) [l1]

@@ -1,0 +1,74 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort ctx;
+sort obj;
+
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term tag (u: obj): ctx;
+term sb_c {x: ctx} (t: ctx x) (g: ctx x): ctx;
+notation sb_c {x: ctx} (t: ctx x) (g: ctx x): ctx =
+  ($subst$:41) x ($/$:0) t g;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+--| @congr
+axiom ctx_eq_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq g1 h1 <-> ctx_eq g2 h2 $;
+
+--| @rewrite
+axiom sb_c_var {x: ctx} (t: ctx x): $ ctx_eq (subst x / t x) t $;
+--| @rewrite
+axiom sb_c_other {x y: ctx} (t: ctx x): $ ctx_eq (subst x / t y) y $;
+--| @rewrite
+axiom sb_c_emp {x: ctx} (t: ctx x): $ ctx_eq (subst x / t emp) emp $;
+--| @rewrite
+axiom sb_c_tag {x: ctx} (t: ctx x) (u: obj):
+  $ ctx_eq (subst x / t (tag u)) (tag u) $;
+--| @rewrite
+axiom sb_c_join {x: ctx} (t: ctx x) (g h: ctx x):
+  $ ctx_eq (subst x / t (g , h)) ((subst x / t g) , (subst x / t h)) $;
+
+--| @view {x: ctx} (a b: ctx) (r: ctx x) (p q: ctx): $ ctx_eq p q $ > $ ctx_eq a b $
+--| @abstract r p q x a b
+--| @normalize hyp0
+axiom use_ctx_subst {x: ctx} (a b: ctx x) (r: ctx x):
+  $ ctx_eq (subst x / a r) (subst x / b r) $ > $ ctx_eq a b $;
+
+-- The common context only lines up after unfolding both defs and then using
+-- assoc/comm/unit/idem to reach the same ctx skeleton around the plug pair.
+def left_ctx (r: ctx) (u: obj): ctx =
+  $ (emp , tag u) , (r , (tag u , emp)) $;
+def right_ctx (r: ctx) (u: obj): ctx =
+  $ tag u , ((r , emp) , tag u) $;
+
+theorem unsupported_def_unfold_then_full_acui_abstract_hyp
+    {x: ctx} (r: ctx) (alpha beta: obj):
+  $ ctx_eq (left_ctx r alpha) (right_ctx r beta) $ >
+  $ ctx_eq (tag alpha) (tag beta) $;

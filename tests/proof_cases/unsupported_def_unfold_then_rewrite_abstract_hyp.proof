@@ -1,0 +1,4 @@
+unsupported_def_unfold_then_rewrite_abstract_hyp
+---------------------------------------------
+
+l1: $ f o alpha ~ f o beta $ by use_ctx_congr (x := $ x $) [#1]

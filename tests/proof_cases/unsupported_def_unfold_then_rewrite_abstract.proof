@@ -1,0 +1,4 @@
+unsupported_def_unfold_then_rewrite_abstract
+-----------------------------------------
+
+l1: $ left_shell f g alpha ~ right_shell f g beta $ by ctx_congr (x := $ x $) [#1]

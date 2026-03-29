@@ -1,0 +1,4 @@
+unsupported_def_unfold_then_rewrite_recover
+-----------------------------------------
+
+l1: $ emp , mono (g o f) |- c $ by all_left [#1]
