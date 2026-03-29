@@ -271,6 +271,7 @@ pub const Verifier = struct {
         _ = self;
         if (expr.sort() != arg.sort) return error.SortMismatch;
         if (arg.bound and !expr.bound()) return error.ExpectedBoundVar;
+        if (expr.deps() & ~arg.deps != 0) return error.DepViolation;
     }
 
     pub fn verifyProofStream(
@@ -498,9 +499,8 @@ pub const Verifier = struct {
         const args = term.getArgs(self.file_bytes);
         const n = term.num_args;
 
-        // Pop n args in reverse order
+        // Pop n args in reverse order.
         const popped = try self.arena.allocator().alloc(*const Expr, n);
-        var deps: u55 = 0;
         var i: usize = n;
         while (i > 0) {
             i -= 1;
@@ -509,15 +509,42 @@ pub const Verifier = struct {
                 .expr => |e| e,
                 else => return error.ExpectedExpr,
             };
-            // Check sort matches
             if (expr.sort() != args[i].sort) return error.SortMismatch;
-            // If arg is bound, expr must be a bound variable
             if (args[i].bound and !expr.bound()) return error.ExpectedBoundVar;
             popped[i] = expr;
-            deps |= expr.deps();
         }
 
-        // Allocate new node
+        // Cache theorem-mode V(e) or def-mode FV(e), matching mm0-c.
+        const context = self.proof_context orelse return error.InvalidProofContext;
+        var deps: u55 = 0;
+        switch (context) {
+            .axiom, .theorem => {
+                for (popped) |expr| deps |= expr.deps();
+            },
+            .defn => {
+                var bound_deps: [56]u55 = undefined;
+                var bound_len: usize = 0;
+                for (args, popped) |arg, expr| {
+                    var arg_deps = expr.deps();
+                    if (arg.bound) {
+                        bound_deps[bound_len] = arg_deps;
+                        bound_len += 1;
+                        continue;
+                    }
+                    for (0..bound_len) |j| {
+                        if (arg.dependsOn(@intCast(j))) {
+                            arg_deps &= ~bound_deps[j];
+                        }
+                    }
+                    deps |= arg_deps;
+                }
+                const ret = term.getRetArg(self.file_bytes);
+                for (0..bound_len) |j| {
+                    if (ret.dependsOn(@intCast(j))) deps |= bound_deps[j];
+                }
+            },
+        }
+
         const node = try self.arena.allocator().create(Expr);
         node.* = .{ .term = .{
             .sort = term.ret_sort.sort,

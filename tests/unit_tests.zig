@@ -1396,6 +1396,51 @@ test "Verifier checks definition return sorts" {
     );
 }
 
+test "Verifier checks definition return dependencies" {
+    const checker = NoopChecker{};
+    const sorts = [_]Sort{.{}};
+    const args = [_]Arg{.{
+        .deps = 1,
+        .reserved = 0,
+        .sort = 0,
+        .bound = true,
+    }};
+    const ret = Arg{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 0,
+        .bound = false,
+    };
+    var proof = buildLocalDefFixture(
+        &args,
+        ret,
+        &.{ 0x72, 0x00, 0x00 },
+        &.{ 0x52, 0x00 },
+    );
+    const terms = [_]Term{.{
+        .num_args = 1,
+        .ret_sort = .{ .sort = 0, .is_def = true },
+        .reserved = 0,
+        .p_data = 32,
+    }};
+    const theorems = [_]Theorem{};
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.DepViolation,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
 test "Verifier replays definition unify streams" {
     const checker = NoopChecker{};
     const sorts = [_]Sort{.{}};
