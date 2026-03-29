@@ -120,7 +120,11 @@ pub const Verifier = struct {
         try self.initHeapFromThmArgs(thm);
         try self.runProofStream(proof_pos, proof_end);
         const top = try self.stack.pop();
-        if (top != .proof) return error.ExpectedProof;
+        const proof_expr = switch (top) {
+            .proof => |e| e,
+            else => return error.ExpectedProof,
+        };
+        if (!self.sort_table[proof_expr.sort()].provable) return error.NotProvable;
         if (self.stack.top != 0) return error.StackNotEmpty;
         if (self.sorry_used) return error.SorryUsed;
     }
@@ -142,8 +146,19 @@ pub const Verifier = struct {
         try self.initHeapFromTermArgs(term);
         try self.runProofStream(proof_pos, proof_end);
         const top = try self.stack.pop();
-        if (top != .expr) return error.ExpectedExpr;
+        const def_expr = switch (top) {
+            .expr => |e| e,
+            else => return error.ExpectedExpr,
+        };
+        const ret = term.getRetArg(self.file_bytes);
+        try self.checkExprAgainstArg(def_expr, ret);
         if (self.stack.top != 0) return error.StackNotEmpty;
+        try self.initUHeapFromHeapArgs(term.num_args);
+        try self.runUnifyStream(
+            term.getUnifyPtr(self.file_bytes) orelse return error.ExpectedDef,
+            def_expr,
+            .defn,
+        );
         if (self.sorry_used) return error.SorryUsed;
     }
 
@@ -164,7 +179,11 @@ pub const Verifier = struct {
         try self.initHeapFromThmArgs(thm);
         try self.runProofStream(proof_pos, proof_end);
         const top = try self.stack.pop();
-        if (top != .expr) return error.ExpectedExpr;
+        const concl_expr = switch (top) {
+            .expr => |e| e,
+            else => return error.ExpectedExpr,
+        };
+        if (!self.sort_table[concl_expr.sort()].provable) return error.NotProvable;
         if (self.stack.top != 0) return error.StackNotEmpty;
         if (self.sorry_used) return error.SorryUsed;
     }
@@ -214,6 +233,7 @@ pub const Verifier = struct {
         for (args) |arg| {
             const expr = try self.arena.allocator().create(Expr);
             if (arg.bound) {
+                if (self.sort_table[arg.sort].strict) return error.StrictSort;
                 expr.* = .{ .variable = .{
                     .sort = arg.sort,
                     .bound = true,
@@ -230,6 +250,27 @@ pub const Verifier = struct {
             }
             try self.heap.push(.{ .expr = expr });
         }
+    }
+
+    fn initUHeapFromHeapArgs(self: *Verifier, arg_count: u16) !void {
+        self.uheap.len = 0;
+        for (0..arg_count) |i| {
+            const expr = switch (self.heap.entries[i]) {
+                .expr => |e| e,
+                else => return error.ExpectedExpr,
+            };
+            try self.uheap.push(expr);
+        }
+    }
+
+    fn checkExprAgainstArg(
+        self: *Verifier,
+        expr: *const Expr,
+        arg: Arg,
+    ) !void {
+        _ = self;
+        if (expr.sort() != arg.sort) return error.SortMismatch;
+        if (arg.bound and !expr.bound()) return error.ExpectedBoundVar;
     }
 
     pub fn verifyProofStream(
@@ -276,6 +317,8 @@ pub const Verifier = struct {
                         try index.validateTermProof(term_count, stmt_start);
                     }
                     const term = self.term_table[term_count];
+                    if (self.sort_table[term.ret_sort.sort].pure)
+                        return error.PureSort;
                     try checker.checkTerm(
                         @intCast(term_count),
                         term,
@@ -349,6 +392,8 @@ pub const Verifier = struct {
                     if (self.index) |index| {
                         try index.validateTermProof(term_count, stmt_start);
                     }
+                    if (self.sort_table[self.term_table[term_count].ret_sort.sort].pure)
+                        return error.PureSort;
                     try self.verifyDef(
                         self.term_table[term_count],
                         @intCast(pos),

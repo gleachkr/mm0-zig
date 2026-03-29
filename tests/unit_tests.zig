@@ -226,6 +226,73 @@ fn buildLocalDefDummyProof() [16]u8 {
     return bytes;
 }
 
+const NoopChecker = struct {
+    pub fn checkSort(_: @This(), _: u32, _: Sort) !void {}
+
+    pub fn checkTerm(
+        _: @This(),
+        _: u32,
+        _: Term,
+        _: []const u8,
+    ) !void {}
+
+    pub fn checkAssertion(
+        _: @This(),
+        _: Theorem,
+        _: []const u8,
+    ) !void {}
+};
+
+fn buildSingleStmtProof(stmt_op: u8, body: []const u8) [32]u8 {
+    var bytes: [32]u8 = std.mem.zeroes([32]u8);
+    bytes[0] = 0x40 | stmt_op;
+    bytes[1] = @intCast(2 + body.len + 1);
+    @memcpy(bytes[2 .. 2 + body.len], body);
+    bytes[2 + body.len] = 0x00;
+    bytes[3 + body.len] = 0x00;
+    return bytes;
+}
+
+fn buildAssertionFixture(
+    stmt_op: u8,
+    args: []const Arg,
+    body: []const u8,
+) [128]u8 {
+    var bytes: [128]u8 align(@alignOf(Arg)) = std.mem.zeroes([128]u8);
+    const proof = buildSingleStmtProof(stmt_op, body);
+    @memcpy(bytes[0..proof.len], proof[0..]);
+
+    const p_data: usize = 32;
+    for (args, 0..) |arg, i| {
+        writeArg(bytes[0..], p_data + i * @sizeOf(Arg), arg);
+    }
+    return bytes;
+}
+
+fn buildLocalDefFixture(
+    args: []const Arg,
+    ret: Arg,
+    unify: []const u8,
+    body: []const u8,
+) [128]u8 {
+    var bytes: [128]u8 align(@alignOf(Arg)) = std.mem.zeroes([128]u8);
+    const proof = buildSingleStmtProof(0x0D, body);
+    @memcpy(bytes[0..proof.len], proof[0..]);
+
+    const p_data: usize = 32;
+    for (args, 0..) |arg, i| {
+        writeArg(bytes[0..], p_data + i * @sizeOf(Arg), arg);
+    }
+
+    const ret_offset = p_data + args.len * @sizeOf(Arg);
+    writeArg(bytes[0..], ret_offset, ret);
+    @memcpy(
+        bytes[ret_offset + @sizeOf(Arg) ..][0..unify.len],
+        unify,
+    );
+    return bytes;
+}
+
 test "header parsing accepts valid header" {
     const header = Header{
         .magic = MAGIC,
@@ -1103,6 +1170,273 @@ test "Verifier rejects dummy variables in free sorts" {
 
     try std.testing.expectError(
         error.FreeSort,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
+test "Verifier rejects strict bound theorem arguments" {
+    const checker = NoopChecker{};
+    const sorts = [_]Sort{.{ .strict = true, .provable = true }};
+    const args = [_]Arg{.{
+        .deps = 1,
+        .reserved = 0,
+        .sort = 0,
+        .bound = true,
+    }};
+    var proof = buildAssertionFixture(0x0E, &args, &.{});
+    const terms = [_]Term{};
+    const theorems = [_]Theorem{.{
+        .num_args = 1,
+        .reserved = 0,
+        .p_data = 32,
+    }};
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.StrictSort,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
+test "Verifier rejects strict bound definition arguments" {
+    const checker = NoopChecker{};
+    const sorts = [_]Sort{.{ .strict = true }};
+    const args = [_]Arg{.{
+        .deps = 1,
+        .reserved = 0,
+        .sort = 0,
+        .bound = true,
+    }};
+    const ret = Arg{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 0,
+        .bound = false,
+    };
+    var proof = buildLocalDefFixture(&args, ret, &.{ 0x72, 0x00, 0x00 }, &.{});
+    const terms = [_]Term{.{
+        .num_args = 1,
+        .ret_sort = .{ .sort = 0, .is_def = true },
+        .reserved = 0,
+        .p_data = 32,
+    }};
+    const theorems = [_]Theorem{};
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.StrictSort,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
+test "Verifier rejects pure return sorts in local defs" {
+    const checker = NoopChecker{};
+    const sorts = [_]Sort{.{ .pure = true }};
+    const ret = Arg{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 0,
+        .bound = false,
+    };
+    var proof = buildLocalDefFixture(&.{}, ret, &.{0x00}, &.{});
+    const terms = [_]Term{.{
+        .num_args = 0,
+        .ret_sort = .{ .sort = 0, .is_def = true },
+        .reserved = 0,
+        .p_data = 32,
+    }};
+    const theorems = [_]Theorem{};
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.PureSort,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
+test "Verifier rejects non-provable axiom conclusions" {
+    const checker = NoopChecker{};
+    const sorts = [_]Sort{.{}};
+    const args = [_]Arg{.{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 0,
+        .bound = false,
+    }};
+    var proof = buildAssertionFixture(0x02, &args, &.{ 0x52, 0x00 });
+    const terms = [_]Term{};
+    const theorems = [_]Theorem{.{
+        .num_args = 1,
+        .reserved = 0,
+        .p_data = 32,
+    }};
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.NotProvable,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
+test "Verifier rejects non-provable theorem conclusions" {
+    const checker = NoopChecker{};
+    const sorts = [_]Sort{.{}};
+    const args = [_]Arg{.{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 0,
+        .bound = false,
+    }};
+    var proof = buildAssertionFixture(
+        0x0E,
+        &args,
+        &.{ 0x52, 0x00, 0x20 },
+    );
+    const terms = [_]Term{};
+    const theorems = [_]Theorem{.{
+        .num_args = 1,
+        .reserved = 0,
+        .p_data = 32,
+    }};
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.NotProvable,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
+test "Verifier checks definition return sorts" {
+    const checker = NoopChecker{};
+    const sorts = [_]Sort{ .{}, .{} };
+    const args = [_]Arg{.{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 1,
+        .bound = false,
+    }};
+    const ret = Arg{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 0,
+        .bound = false,
+    };
+    var proof = buildLocalDefFixture(
+        &args,
+        ret,
+        &.{ 0x72, 0x00, 0x00 },
+        &.{ 0x52, 0x00 },
+    );
+    const terms = [_]Term{.{
+        .num_args = 1,
+        .ret_sort = .{ .sort = 0, .is_def = true },
+        .reserved = 0,
+        .p_data = 32,
+    }};
+    const theorems = [_]Theorem{};
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.SortMismatch,
+        verifier.verifyProofStream(0, checker),
+    );
+}
+
+test "Verifier replays definition unify streams" {
+    const checker = NoopChecker{};
+    const sorts = [_]Sort{.{}};
+    const args = [_]Arg{.{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 0,
+        .bound = false,
+    }};
+    const ret = Arg{
+        .deps = 0,
+        .reserved = 0,
+        .sort = 0,
+        .bound = false,
+    };
+    var proof = buildLocalDefFixture(
+        &args,
+        ret,
+        &.{ 0x70, 0x00, 0x00 },
+        &.{ 0x52, 0x00 },
+    );
+    const terms = [_]Term{.{
+        .num_args = 1,
+        .ret_sort = .{ .sort = 0, .is_def = true },
+        .reserved = 0,
+        .p_data = 32,
+    }};
+    const theorems = [_]Theorem{};
+
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        proof[0..],
+        &sorts,
+        &terms,
+        &theorems,
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    try std.testing.expectError(
+        error.ExpectedTermApp,
         verifier.verifyProofStream(0, checker),
     );
 }
