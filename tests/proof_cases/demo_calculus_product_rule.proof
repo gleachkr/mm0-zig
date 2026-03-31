@@ -1,0 +1,107 @@
+sum_rule
+--------
+
+-- Body algebra: (fh+gh-(f+g))/h = (fh-f)/h + (gh-g)/h
+l1: $ fh + gh - (f + g) = (fh - f) + (gh - g) $ by sub_add []
+l2: $ h = h $ by eq_refl []
+l3: $ (fh + gh - (f + g)) / h = ((fh - f) + (gh - g)) / h $ by div_congr [l1, l2]
+l4: $ ((fh - f) + (gh - g)) / h = (fh - f) / h + (gh - g) / h $ by div_add []
+l5: $ (fh + gh - (f + g)) / h = (fh - f) / h + (gh - g) / h $ by eq_trans [l3, l4]
+
+-- Lift to lim and distribute
+l6: $ lim h ((fh + gh - (f + g)) / h) = lim h ((fh - f) / h + (gh - g) / h) $ by lim_congr [l5]
+l7: $ lim h ((fh - f) / h + (gh - g) / h) = lim h ((fh - f) / h) + lim h ((gh - g) / h) $ by lim_add []
+
+-- Apply hypotheses
+l8: $ lim h ((fh - f) / h) + lim h ((gh - g) / h) = df + lim h ((gh - g) / h) $ by eq_subst [#1]
+l9: $ df + lim h ((gh - g) / h) = df + dg $ by eq_subst [#2]
+
+-- Chain
+l10: $ lim h ((fh + gh - (f + g)) / h) = lim h ((fh - f) / h) + lim h ((gh - g) / h) $ by eq_trans [l6, l7]
+l11: $ lim h ((fh + gh - (f + g)) / h) = df + lim h ((gh - g) / h) $ by eq_trans [l10, l8]
+l12: $ lim h ((fh + gh - (f + g)) / h) = df + dg $ by eq_trans [l11, l9]
+
+const_mul_rule
+--------------
+
+-- Body algebra: (c*fh - c*f)/h = c*((fh-f)/h)
+l1: $ c * fh - c * f = c * (fh - f) $ by mul_sub []
+l2: $ h = h $ by eq_refl []
+l3: $ (c * fh - c * f) / h = c * (fh - f) / h $ by div_congr [l1, l2]
+l4: $ c * (fh - f) / h = c * ((fh - f) / h) $ by div_mul []
+l5: $ (c * fh - c * f) / h = c * ((fh - f) / h) $ by eq_trans [l3, l4]
+
+-- Lift to lim and distribute
+l6: $ lim h ((c * fh - c * f) / h) = lim h (c * ((fh - f) / h)) $ by lim_congr [l5]
+l7: $ lim h (c * ((fh - f) / h)) = (lim h c) * (lim h ((fh - f) / h)) $ by lim_mul []
+
+-- Simplify: lim of constant, then apply hypothesis
+l8: $ lim h c = c $ by lim_const []
+l9: $ (lim h c) * (lim h ((fh - f) / h)) = c * (lim h ((fh - f) / h)) $ by eq_subst [l8]
+l10: $ c * (lim h ((fh - f) / h)) = c * df $ by eq_subst [#1]
+
+-- Chain
+l11: $ lim h ((c * fh - c * f) / h) = (lim h c) * (lim h ((fh - f) / h)) $ by eq_trans [l6, l7]
+l12: $ lim h ((c * fh - c * f) / h) = c * (lim h ((fh - f) / h)) $ by eq_trans [l11, l9]
+l13: $ lim h ((c * fh - c * f) / h) = c * df $ by eq_trans [l12, l10]
+
+product_rule
+------------
+
+-- Phase 1: Algebraic manipulation of the difference quotient body.
+-- Goal: (fh*gh - f*g)/h = fh*((gh-g)/h) + g*((fh-f)/h)
+-- These steps work at the body level (inside lim), using congruence
+-- to build the equality, then lim_congr to lift it.
+
+-- Factor the numerator: a*b - c*d = a*(b-d) + d*(a-c)
+l1: $ fh * gh - f * g = fh * (gh - g) + g * (fh - f) $ by factor []
+
+-- Lift to quotient: (fh*gh - f*g)/h = (fh*(gh-g) + g*(fh-f))/h
+l2: $ h = h $ by eq_refl []
+l3: $ (fh * gh - f * g) / h = (fh * (gh - g) + g * (fh - f)) / h $ by div_congr [l1, l2]
+
+-- Distribute division: (a+b)/c = a/c + b/c
+l4: $ (fh * (gh - g) + g * (fh - f)) / h = fh * (gh - g) / h + g * (fh - f) / h $ by div_add []
+l5: $ (fh * gh - f * g) / h = fh * (gh - g) / h + g * (fh - f) / h $ by eq_trans [l3, l4]
+
+-- Reassociate: (a*b)/c = a*(b/c) in each term
+l6: $ fh * (gh - g) / h = fh * ((gh - g) / h) $ by div_mul []
+l7: $ g * (fh - f) / h = g * ((fh - f) / h) $ by div_mul []
+l8: $ fh * (gh - g) / h + g * (fh - f) / h = fh * ((gh - g) / h) + g * ((fh - f) / h) $ by add_congr [l6, l7]
+
+-- Complete body equality
+l9: $ (fh * gh - f * g) / h = fh * ((gh - g) / h) + g * ((fh - f) / h) $ by eq_trans [l5, l8]
+
+-- Lift to lim
+l10: $ lim h ((fh * gh - f * g) / h) = lim h (fh * ((gh - g) / h) + g * ((fh - f) / h)) $ by lim_congr [l9]
+
+-- Phase 2: Distribute lim over arithmetic.
+-- lim(a + b) = lim(a) + lim(b), lim(a * b) = lim(a) * lim(b)
+
+l11: $ lim h (fh * ((gh - g) / h) + g * ((fh - f) / h)) = lim h (fh * ((gh - g) / h)) + lim h (g * ((fh - f) / h)) $ by lim_add []
+l12: $ lim h (fh * ((gh - g) / h)) = (lim h fh) * (lim h ((gh - g) / h)) $ by lim_mul []
+l13: $ lim h (g * ((fh - f) / h)) = (lim h g) * (lim h ((fh - f) / h)) $ by lim_mul []
+
+-- Substitute each lim_mul result into the sum
+l14: $ lim h (fh * ((gh - g) / h)) + lim h (g * ((fh - f) / h)) = (lim h fh) * (lim h ((gh - g) / h)) + lim h (g * ((fh - f) / h)) $ by eq_subst [l12]
+l15: $ (lim h fh) * (lim h ((gh - g) / h)) + lim h (g * ((fh - f) / h)) = (lim h fh) * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) $ by eq_subst [l13]
+
+-- Phase 3: Apply hypotheses to evaluate each limit.
+-- #3: lim h fh = f  (continuity)
+l16: $ (lim h fh) * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) = f * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) $ by eq_subst [#3]
+-- #2: lim h ((gh - g) / h) = dg  (derivative of g)
+l17: $ f * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) = f * dg + (lim h g) * (lim h ((fh - f) / h)) $ by eq_subst [#2]
+-- lim of constant: lim h g = g
+l18: $ lim h g = g $ by lim_const []
+l19: $ f * dg + (lim h g) * (lim h ((fh - f) / h)) = f * dg + g * (lim h ((fh - f) / h)) $ by eq_subst [l18]
+-- #1: lim h ((fh - f) / h) = df  (derivative of f)
+l20: $ f * dg + g * (lim h ((fh - f) / h)) = f * dg + g * df $ by eq_subst [#1]
+
+-- Chain all equalities
+l21: $ lim h ((fh * gh - f * g) / h) = lim h (fh * ((gh - g) / h)) + lim h (g * ((fh - f) / h)) $ by eq_trans [l10, l11]
+l22: $ lim h ((fh * gh - f * g) / h) = (lim h fh) * (lim h ((gh - g) / h)) + lim h (g * ((fh - f) / h)) $ by eq_trans [l21, l14]
+l23: $ lim h ((fh * gh - f * g) / h) = (lim h fh) * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l22, l15]
+l24: $ lim h ((fh * gh - f * g) / h) = f * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l23, l16]
+l25: $ lim h ((fh * gh - f * g) / h) = f * dg + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l24, l17]
+l26: $ lim h ((fh * gh - f * g) / h) = f * dg + g * (lim h ((fh - f) / h)) $ by eq_trans [l25, l19]
+l27: $ lim h ((fh * gh - f * g) / h) = f * dg + g * df $ by eq_trans [l26, l20]

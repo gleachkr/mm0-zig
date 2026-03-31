@@ -39,6 +39,11 @@ const examples = {
     mm0: "./fixtures/quant_nd.mm0",
     proof: "./fixtures/quant_nd.proof",
   },
+  demo_calculus_product_rule: {
+    label: "calculus product rule",
+    mm0: "./fixtures/demo_calculus_product_rule.mm0",
+    proof: "./fixtures/demo_calculus_product_rule.proof",
+  },
   demo_category_pullback: {
     label: "category pullback",
     mm0: "./fixtures/demo_category_pullback.mm0",

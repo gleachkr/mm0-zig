@@ -1,0 +1,154 @@
+-- Product Rule in Calculus
+--
+-- Derives (fg)' = f'g + fg' using equational reasoning and
+-- limit algebra.
+--
+-- The operator "lim h f" represents the limit of f(h) as h → 0.
+--
+-- The limit algebra axioms (lim_add, lim_mul, lim_const) are stated
+-- without convergence side-conditions for simplicity. A rigorous
+-- treatment would introduce a "converges" predicate and require each
+-- intermediate limit to exist. The theorem's hypotheses (both
+-- derivatives exist, f is continuous) would suffice to establish all
+-- intermediate convergence, but formalizing that argument is beyond
+-- the scope of this example.
+
+delimiter $ ( ) [ | ] / $;
+provable sort wff;
+sort real;
+
+term eq (a b: real): wff;
+infixl eq: $=$ prec 15;
+
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+
+term add (a b: real): real;
+infixl add: $+$ prec 30;
+term sub (a b: real): real;
+infixl sub: $-$ prec 30;
+term mul (a b: real): real;
+infixl mul: $*$ prec 35;
+term div (a b: real): real;
+infixl div: $/$ prec 35;
+
+-- Limit: "lim h f" is the limit of f(h) as h → 0
+term lim {h: real} (f: real h): real;
+prefix lim: $lim$ prec 41;
+
+-- Explicit substitution (internal to eq_subst normalization)
+term sb (t: real) {x: real} (r: real x): real;
+notation sb (t: real) {x: real} (r: real x): real =
+  ($[$:41) x ($|$:0) t ($]$:0) r;
+
+-- Wff-level equivalence (used internally by normalization engine)
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+-- Real equality
+--| @relation real eq eq_refl eq_trans eq_sym _
+axiom eq_refl (a: real): $ a = a $;
+axiom eq_trans (a b c: real):
+  $ a = b $ > $ b = c $ > $ a = c $;
+axiom eq_sym (a b: real): $ a = b $ > $ b = a $;
+
+-- Congruence rules
+--| @congr
+axiom eq_congr (a b c d: real):
+  $ a = b $ > $ c = d $ > $ (a = c) <-> (b = d) $;
+--| @congr
+axiom add_congr (a b c d: real):
+  $ a = b $ > $ c = d $ > $ a + c = b + d $;
+--| @congr
+axiom sub_congr (a b c d: real):
+  $ a = b $ > $ c = d $ > $ a - c = b - d $;
+--| @congr
+axiom mul_congr (a b c d: real):
+  $ a = b $ > $ c = d $ > $ a * c = b * d $;
+--| @congr
+axiom div_congr (a b c d: real):
+  $ a = b $ > $ c = d $ > $ a / c = b / d $;
+--| @congr
+axiom lim_congr {h: real} (a b: real h):
+  $ a = b $ > $ lim h a = lim h b $;
+
+-- Substitution rewrite rules
+--| @rewrite
+axiom sb_var {x: real} (t: real x): $ [x | t] x = t $;
+--| @rewrite
+axiom sb_irrel {x: real} (t: real x) (a: real): $ [x | t] a = a $;
+--| @rewrite
+axiom sb_add {x: real} (t: real x) (a b: real x):
+  $ [x | t] (a + b) = [x | t] a + [x | t] b $;
+--| @rewrite
+axiom sb_sub {x: real} (t: real x) (a b: real x):
+  $ [x | t] (a - b) = [x | t] a - [x | t] b $;
+--| @rewrite
+axiom sb_mul {x: real} (t: real x) (a b: real x):
+  $ [x | t] (a * b) = [x | t] a * [x | t] b $;
+--| @rewrite
+axiom sb_div {x: real} (t: real x) (a b: real x):
+  $ [x | t] (a / b) = [x | t] a / [x | t] b $;
+--| @rewrite
+axiom sb_lim {x h: real} (t: real x) (f: real x h):
+  $ [x | t] (lim h f) = lim h ([x | t] f) $;
+
+-- Algebra
+axiom factor (a b c d: real):
+  $ a * b - c * d = a * (b - d) + d * (a - c) $;
+axiom sub_add (a b c d: real):
+  $ (a + b) - (c + d) = (a - c) + (b - d) $;
+axiom mul_sub (a b c: real):
+  $ a * b - a * c = a * (b - c) $;
+axiom div_add (a b c: real):
+  $ (a + b) / c = a / c + b / c $;
+axiom div_mul (a b c: real):
+  $ a * b / c = a * (b / c) $;
+
+-- Limit algebra (without convergence hypotheses; see note above)
+axiom lim_add {h: real} (a b: real h):
+  $ lim h (a + b) = lim h a + lim h b $;
+axiom lim_mul {h: real} (a b: real h):
+  $ lim h (a * b) = (lim h a) * (lim h b) $;
+axiom lim_const {h: real} (c: real):
+  $ lim h c = c $;
+
+-- Equational substitution: rewrite a subexpression using an equality
+--| @view {x: real} (a b: real) (r: real x) (p q: real): $ a = b $ > $ p = q $
+--| @abstract r p q x a b
+--| @dummy x
+--| @normalize conc
+axiom eq_subst {x: real} (a b: real) (r: real x):
+  $ a = b $ > $ [x | a] r = [x | b] r $;
+
+-- The Product Rule: (fg)' = f'g + fg'
+--
+-- f, g:   function values at x
+-- fh, gh: function values at x+h (depend on h)
+-- df, dg: derivatives at x
+--
+-- Hypotheses:
+--   #1  f is differentiable with derivative df
+--   #2  g is differentiable with derivative dg
+--   #3  f is continuous at x
+-- Sum Rule: (f+g)' = f' + g'
+theorem sum_rule {h: real} (f g df dg: real) (fh gh: real h):
+  $ lim h ((fh - f) / h) = df $ >
+  $ lim h ((gh - g) / h) = dg $ >
+  $ lim h ((fh + gh - (f + g)) / h) = df + dg $;
+
+-- Constant Multiple Rule: (cf)' = cf'
+theorem const_mul_rule {h: real} (f df c: real) (fh: real h):
+  $ lim h ((fh - f) / h) = df $ >
+  $ lim h ((c * fh - c * f) / h) = c * df $;
+
+-- Product Rule: (fg)' = f'g + fg'
+theorem product_rule {h: real} (f g df dg: real) (fh gh: real h):
+  $ lim h ((fh - f) / h) = df $ >
+  $ lim h ((gh - g) / h) = dg $ >
+  $ lim h fh = f $ >
+  $ lim h ((fh * gh - f * g) / h) = f * dg + g * df $;
