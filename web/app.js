@@ -1,4 +1,4 @@
-import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection }
+import { EditorView, keymap, highlightActiveLine, drawSelection }
   from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
@@ -160,7 +160,6 @@ main().catch((error) => {
 
 function makeExtensions(ariaLabel, withLint) {
   const exts = [
-    lineNumbers(),
     highlightActiveLine(),
     drawSelection(),
     history(),
