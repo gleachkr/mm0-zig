@@ -97,6 +97,11 @@ Compiler-side data models:
 Elaboration engines and shared helpers:
 
 - `def_ops.zig`
+- `def_ops/types.zig`
+- `def_ops/match_state.zig`
+- `def_ops/shared_context.zig`
+- `def_ops/symbolic_engine.zig`
+- `def_ops/normalized_match.zig`
 - `def_ops/mirror_support.zig`
 - `inference_solver.zig`
 - `normalizer.zig`
@@ -334,7 +339,16 @@ ordinary rules that do not request the heavier machinery.
 When a rule has a view or normalization metadata, omitted binder
 inference goes through `def_ops.zig` first, not through raw replay.
 
-The key abstraction is `RuleMatchSession`.
+`def_ops.zig` is now mostly a façade. The main internal pieces are:
+
+- `def_ops/shared_context.zig` for immutable theorem/environment services
+- `def_ops/match_state.zig` for mutable per-match state and snapshots
+- `def_ops/symbolic_engine.zig` for def-aware symbolic matching and
+  representative logic
+- `def_ops/normalized_match.zig` for the mirrored-theorem normalization
+  bridge
+
+The key abstraction exposed upward is `RuleMatchSession`.
 
 A rule-match session can:
 
@@ -352,7 +366,7 @@ This is the current semantic center for binder-aware, def-aware matching.
 
 All symbolic witness state is match-local.
 
-Internally, `def_ops.zig` uses a `MatchSession` with:
+Internally, the def-ops subsystem uses a `MatchSession` with:
 
 - binder assignments
 - symbolic hidden-dummy metadata
@@ -369,7 +383,7 @@ representative selection looked through a def.
 
 A solved binder is not always stored as a bare `ExprId` during matching.
 
-Internally, `def_ops.zig` distinguishes:
+Internally, the symbolic engine distinguishes:
 
 - exact bindings
 - transparent bindings
@@ -404,7 +418,9 @@ Nothing symbolic escapes into proof emission or into the trusted kernel.
 ### Normalized comparison inside a rule match
 
 For `@normalize`-marked hypotheses or conclusions, a rule-match session
-can create a mirrored theorem context using `def_ops/mirror_support.zig`.
+can create a mirrored theorem context using
+`def_ops/normalized_match.zig` together with
+`def_ops/mirror_support.zig`.
 
 The mirrored theorem serves one narrow purpose: it lets the frontend
 instantiate template placeholders, normalize both sides, and then map the
@@ -436,7 +452,8 @@ predicates, and then requires a unique concrete solution.
 
 ## Definition-aware comparison and conversion
 
-`def_ops.zig` is the main implementation point for transparent defs.
+`def_ops.zig` is the public entry point for transparent defs, with most
+of the implementation now living in `def_ops/symbolic_engine.zig`.
 
 The central design principles here are:
 
@@ -445,7 +462,7 @@ The central design principles here are:
 - hidden-dummy defs (i.e. defs with "dot variables") are only exposed
   toward a concrete witness problem
 
-In practice, `def_ops.zig` provides three related services:
+In practice, the def-ops subsystem provides three related services:
 
 - template matching through defs
 - witness-directed instantiation of defs toward a concrete expression or
