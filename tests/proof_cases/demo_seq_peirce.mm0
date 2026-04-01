@@ -1,4 +1,4 @@
-delimiter $ ( ) $;
+delimiter $ ( ) , $;
 provable sort wff;
 sort ctx;
 
