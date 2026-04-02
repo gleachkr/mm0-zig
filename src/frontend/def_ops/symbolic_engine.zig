@@ -79,7 +79,7 @@ pub const SymbolicEngine = struct {
         item_expr: ExprId,
         head_term_id: u32,
     ) anyerror!?ExprId {
-        const def = self.getConcreteDef(def_expr) orelse return null;
+        _ = self.getConcreteDef(def_expr) orelse return null;
         var session = try MatchSession.init(self.shared.allocator, 0);
         defer session.deinit(self.shared.allocator);
         const symbolic = try self.expandConcreteDef(
@@ -87,23 +87,23 @@ pub const SymbolicEngine = struct {
             &session,
         ) orelse return null;
 
-        var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
-        defer dummy_bindings.deinit(self.shared.allocator);
-
-        if (!try self.matchSymbolicAcuiLeafToExpr(
+        if (!try self.matchSymbolicAcuiLeafToExprState(
             symbolic,
             item_expr,
             head_term_id,
             &session,
-            &dummy_bindings,
+        ) and !try self.matchSymbolicAcuiLeafToExprSemantic(
+            symbolic,
+            item_expr,
+            head_term_id,
+            &session,
+            semantic_match_budget,
         )) {
             return null;
         }
-        if (dummy_bindings.items.len != def.term.dummy_args.len) return null;
-        return try self.materializeSymbolic(
+        return try self.materializeFinalSymbolicForEscape(
             symbolic,
             &session,
-            dummy_bindings.items,
         );
     }
 
@@ -1566,12 +1566,12 @@ pub const SymbolicEngine = struct {
         return true;
     }
 
-    fn instantiateDefTowardExpr(
+    pub fn instantiateDefTowardExpr(
         self: *SymbolicEngine,
         def_expr: ExprId,
         target_expr: ExprId,
     ) anyerror!?ExprId {
-        const def = self.getConcreteDef(def_expr) orelse return null;
+        _ = self.getConcreteDef(def_expr) orelse return null;
         var session = try MatchSession.init(self.shared.allocator, 0);
         defer session.deinit(self.shared.allocator);
         const symbolic = try self.expandConcreteDef(
@@ -1591,10 +1591,7 @@ pub const SymbolicEngine = struct {
         )) {
             return null;
         }
-        for (def.term.dummy_args, 0..) |_, idx| {
-            if (self.currentWitnessExpr(idx, &session) == null) return null;
-        }
-        return try self.materializeRepresentativeSymbolic(
+        return try self.materializeFinalSymbolicForEscape(
             symbolic,
             &session,
         );
@@ -2181,56 +2178,153 @@ pub const SymbolicEngine = struct {
         }
     }
 
-    fn matchSymbolicAcuiLeafToExpr(
+    fn matchSymbolicAcuiLeafToExprState(
         self: *SymbolicEngine,
         symbolic: *const SymbolicExpr,
         actual: ExprId,
         head_term_id: u32,
         state: *MatchSession,
-        dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
     ) anyerror!bool {
         switch (symbolic.*) {
             .app => |app| {
                 if (app.term_id == head_term_id and app.args.len == 2) {
-                    const checkpoint = dummy_bindings.items.len;
-                    if (try self.matchSymbolicAcuiLeafToExpr(
+                    var snapshot = try self.saveMatchSnapshot(state);
+                    defer self.deinitMatchSnapshot(&snapshot);
+
+                    if (try self.matchSymbolicAcuiLeafToExprState(
                         app.args[0],
                         actual,
                         head_term_id,
                         state,
-                        dummy_bindings,
                     )) {
                         return true;
                     }
-                    dummy_bindings.shrinkRetainingCapacity(checkpoint);
-                    if (try self.matchSymbolicAcuiLeafToExpr(
+                    try self.restoreMatchSnapshot(&snapshot, state);
+                    if (try self.matchSymbolicAcuiLeafToExprState(
                         app.args[1],
                         actual,
                         head_term_id,
                         state,
-                        dummy_bindings,
                     )) {
                         return true;
                     }
-                    dummy_bindings.shrinkRetainingCapacity(checkpoint);
+                    try self.restoreMatchSnapshot(&snapshot, state);
                     return false;
                 }
             },
             else => {},
         }
+        return try self.tryMatchSymbolicToExprDirect(symbolic, actual, state);
+    }
 
-        const checkpoint = dummy_bindings.items.len;
-        if (try self.matchSymbolicToExpr(
+    fn matchSymbolicAcuiLeafToExprSemantic(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        head_term_id: u32,
+        state: *MatchSession,
+        budget: usize,
+    ) anyerror!bool {
+        var visited: SemanticSearchVisited = .empty;
+        defer visited.deinit(self.shared.allocator);
+        return try self.matchSymbolicAcuiLeafToExprSemanticSearch(
             symbolic,
             actual,
+            head_term_id,
             state,
-            &[_]?ExprId{},
-            dummy_bindings,
-            .transparent,
+            budget,
+            &visited,
+        );
+    }
+
+    fn matchSymbolicAcuiLeafToExprSemanticSearch(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        head_term_id: u32,
+        state: *MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        if (try self.matchSymbolicAcuiLeafToExprState(
+            symbolic,
+            actual,
+            head_term_id,
+            state,
         )) {
             return true;
         }
-        dummy_bindings.shrinkRetainingCapacity(checkpoint);
+        if (budget == 0) return false;
+        if (!try self.noteSemanticExprSearchState(
+            symbolic,
+            actual,
+            state,
+            budget,
+            visited,
+        )) {
+            return false;
+        }
+
+        switch (symbolic.*) {
+            .app => |app| {
+                if (app.term_id == head_term_id and app.args.len == 2) {
+                    var snapshot = try self.saveMatchSnapshot(state);
+                    defer self.deinitMatchSnapshot(&snapshot);
+
+                    if (try self.matchSymbolicAcuiLeafToExprSemanticSearch(
+                        app.args[0],
+                        actual,
+                        head_term_id,
+                        state,
+                        budget,
+                        visited,
+                    )) {
+                        return true;
+                    }
+                    try self.restoreMatchSnapshot(&snapshot, state);
+                    if (try self.matchSymbolicAcuiLeafToExprSemanticSearch(
+                        app.args[1],
+                        actual,
+                        head_term_id,
+                        state,
+                        budget,
+                        visited,
+                    )) {
+                        return true;
+                    }
+                    try self.restoreMatchSnapshot(&snapshot, state);
+                }
+            },
+            else => {},
+        }
+
+        var steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+        defer steps.deinit(self.shared.allocator);
+        try self.collectSemanticStepCandidatesSymbolic(symbolic, &steps);
+        for (steps.items) |step| {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            const next = try self.applySemanticStepToSymbolic(
+                step,
+                symbolic,
+                state,
+            ) orelse {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                continue;
+            };
+            if (try self.matchSymbolicAcuiLeafToExprSemanticSearch(
+                next,
+                actual,
+                head_term_id,
+                state,
+                budget - 1,
+                visited,
+            )) {
+                return true;
+            }
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
         return false;
     }
 

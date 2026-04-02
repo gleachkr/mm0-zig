@@ -307,6 +307,9 @@ pub const Context = struct {
         if (try self.buildDirectTransparentCommonTarget(lhs, rhs)) |direct| {
             return direct;
         }
+        if (try self.buildSemanticDefCommonTarget(lhs, rhs)) |semantic| {
+            return semantic;
+        }
         if (try self.buildAcuiCommonTarget(lhs, rhs)) |acui| {
             return acui;
         }
@@ -318,10 +321,11 @@ pub const Context = struct {
         lhs: ExprId,
         rhs: ExprId,
     ) anyerror!?ExprId {
-        var def_ops = DefOps.Context.init(
+        var def_ops = DefOps.Context.initWithRegistry(
             self.allocator,
             self.theorem,
             self.env,
+            self.registry,
         );
         defer def_ops.deinit();
 
@@ -332,6 +336,38 @@ pub const Context = struct {
             return lhs;
         }
         return null;
+    }
+
+    fn buildSemanticDefCommonTarget(
+        self: *Context,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) anyerror!?ExprId {
+        if (try self.buildSemanticCommonTargetFromDef(lhs, rhs)) |target| {
+            return target;
+        }
+        return try self.buildSemanticCommonTargetFromDef(rhs, lhs);
+    }
+
+    fn buildSemanticCommonTargetFromDef(
+        self: *Context,
+        def_expr: ExprId,
+        other_expr: ExprId,
+    ) anyerror!?ExprId {
+        var def_ops = DefOps.Context.initWithRegistry(
+            self.allocator,
+            self.theorem,
+            self.env,
+            self.registry,
+        );
+        defer def_ops.deinit();
+
+        const witness = try def_ops.instantiateDefTowardExpr(
+            def_expr,
+            other_expr,
+        ) orelse return null;
+        if (witness == other_expr) return other_expr;
+        return try self.buildCommonTarget(witness, other_expr);
     }
 
     fn buildNonAcuiCommonTarget(
@@ -578,10 +614,11 @@ pub const Context = struct {
             return true;
         }
 
-        var def_ops = DefOps.Context.init(
+        var def_ops = DefOps.Context.initWithRegistry(
             self.allocator,
             self.theorem,
             self.env,
+            self.registry,
         );
         defer def_ops.deinit();
 

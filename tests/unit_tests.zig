@@ -2738,12 +2738,6 @@ const known_proof_case_failures = [_]ProofCaseMetadata{
 
 const unsupported_proof_cases = [_]ProofCaseMetadata{
     .{
-        .stem = "unsupported_def_unfold_then_rewrite_concl",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "rewriting; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
         .stem = "unsupported_def_unfold_then_rewrite_hyp",
         .reason = "needs witness-driven def exposure integrated with " ++
             "rewriting (hypothesis side); see " ++
@@ -2876,14 +2870,8 @@ const proof_cases = [_]ProofCase{
         .stem = "fail_def_unfold_then_rewrite",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
-    .{
-        .stem = "fail_nested_def_unfold_then_acui",
-        .outcome = .{ .fail = error.ConclusionMismatch },
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_concl",
-        .outcome = .unsupported,
-    },
+    .{ .stem = "fail_nested_def_unfold_then_acui", .outcome = .pass },
+    .{ .stem = "unsupported_def_unfold_then_rewrite_concl", .outcome = .pass },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_hyp",
         .outcome = .unsupported,
@@ -3012,10 +3000,7 @@ const proof_cases = [_]ProofCase{
         .stem = "fail_acui_cross_side_uncovered",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
-    .{
-        .stem = "fail_acui_cross_side_leftover_def",
-        .outcome = .{ .fail = error.ConclusionMismatch },
-    },
+    .{ .stem = "fail_acui_cross_side_leftover_def", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_ax", .outcome = .pass },
     .{ .stem = "pass_legacy_abbrev_on_nondef", .outcome = .pass },
     .{

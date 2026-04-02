@@ -132,6 +132,9 @@ pub const Normalizer = struct {
         if (try self.buildDirectTransparentCommonTarget(lhs, rhs)) |direct| {
             return direct;
         }
+        if (try self.buildSemanticDefCommonTarget(lhs, rhs)) |semantic| {
+            return semantic;
+        }
         if (try self.buildAcuiCommonTarget(lhs, rhs)) |acui| {
             return acui;
         }
@@ -210,10 +213,11 @@ pub const Normalizer = struct {
     ) Error!?CommonTargetResult {
         const relation = self.resolveRelationForExpr(lhs) orelse return null;
 
-        var def_ops = DefOps.Context.init(
+        var def_ops = DefOps.Context.initWithRegistry(
             self.allocator,
             self.theorem,
             self.env,
+            self.registry,
         );
         defer def_ops.deinit();
 
@@ -240,6 +244,98 @@ pub const Normalizer = struct {
             };
         }
         return null;
+    }
+
+    fn buildSemanticDefCommonTarget(
+        self: *Normalizer,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) Error!?CommonTargetResult {
+        const relation = self.resolveRelationForExpr(lhs) orelse return null;
+        if (try self.buildSemanticCommonTargetFromDef(
+            lhs,
+            rhs,
+            relation,
+        )) |result| {
+            return result;
+        }
+        if (try self.buildSemanticCommonTargetFromDef(
+            rhs,
+            lhs,
+            relation,
+        )) |result| {
+            return .{
+                .target_expr = result.target_expr,
+                .lhs_conv_line_idx = result.rhs_conv_line_idx,
+                .rhs_conv_line_idx = result.lhs_conv_line_idx,
+            };
+        }
+        return null;
+    }
+
+    fn buildSemanticCommonTargetFromDef(
+        self: *Normalizer,
+        def_expr: ExprId,
+        other_expr: ExprId,
+        relation: ResolvedRelation,
+    ) Error!?CommonTargetResult {
+        var def_ops = DefOps.Context.initWithRegistry(
+            self.allocator,
+            self.theorem,
+            self.env,
+            self.registry,
+        );
+        defer def_ops.deinit();
+
+        const witness = try def_ops.instantiateDefTowardExpr(
+            def_expr,
+            other_expr,
+        ) orelse return null;
+        const def_to_witness = try self.emitTransparentRelationProof(
+            relation,
+            def_expr,
+            witness,
+        );
+        const norm_witness = try self.normalize(witness);
+        if (norm_witness.result_expr == other_expr) {
+            return .{
+                .target_expr = other_expr,
+                .lhs_conv_line_idx = try self.composeTransitivity(
+                    relation,
+                    def_expr,
+                    witness,
+                    other_expr,
+                    def_to_witness,
+                    norm_witness.conv_line_idx,
+                ),
+                .rhs_conv_line_idx = null,
+            };
+        }
+
+        const common = try self.buildCommonTarget(
+            norm_witness.result_expr,
+            other_expr,
+        ) orelse return null;
+        const witness_to_common = try self.composeTransitivity(
+            relation,
+            witness,
+            norm_witness.result_expr,
+            common.target_expr,
+            norm_witness.conv_line_idx,
+            common.lhs_conv_line_idx,
+        );
+        return .{
+            .target_expr = common.target_expr,
+            .lhs_conv_line_idx = try self.composeTransitivity(
+                relation,
+                def_expr,
+                witness,
+                common.target_expr,
+                def_to_witness,
+                witness_to_common,
+            ),
+            .rhs_conv_line_idx = common.rhs_conv_line_idx,
+        };
     }
 
     fn buildAcuiCommonTarget(
@@ -462,10 +558,11 @@ pub const Normalizer = struct {
             );
         }
 
-        var def_ops = DefOps.Context.init(
+        var def_ops = DefOps.Context.initWithRegistry(
             self.allocator,
             self.theorem,
             self.env,
+            self.registry,
         );
         defer def_ops.deinit();
 
