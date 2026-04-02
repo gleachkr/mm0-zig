@@ -165,6 +165,7 @@ pub fn checkTheoremBlock(
                     allocator,
                     theorem,
                     env,
+                    registry,
                     &view,
                     line_expr,
                     ref_exprs,

@@ -4,6 +4,7 @@ const RuleDecl = @import("./compiler_env.zig").RuleDecl;
 const ExprId = @import("./compiler_expr.zig").ExprId;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
+const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const DefOps = @import("./def_ops.zig");
 const DerivedBindings = @import("./derived_bindings.zig");
 const Expr = @import("../trusted/expressions.zig").Expr;
@@ -137,42 +138,60 @@ pub fn applyViewBindings(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     env: *const GlobalEnv,
+    registry: *RewriteRegistry,
     view: *const ViewDecl,
     line_expr: ExprId,
     ref_exprs: []const ExprId,
     partial_bindings: []?ExprId,
 ) !void {
-    const view_bindings = try allocator.alloc(?ExprId, view.num_binders);
-    @memset(view_bindings, null);
-
+    const seeds = try allocator.alloc(DefOps.BindingSeed, view.num_binders);
+    defer allocator.free(seeds);
     for (view.binder_map, 0..) |mapping, vi| {
-        const rule_idx = mapping orelse continue;
-        view_bindings[vi] = partial_bindings[rule_idx];
+        seeds[vi] = if (mapping) |rule_idx|
+            if (partial_bindings[rule_idx]) |expr_id|
+                .{ .exact = expr_id }
+            else
+                .none
+        else
+            .none;
     }
 
-    var def_ops = DefOps.Context.init(
+    var def_ops = DefOps.Context.initWithRegistry(
         allocator,
         theorem,
         env,
+        registry,
     );
     defer def_ops.deinit();
 
-    if (!try def_ops.matchTemplateTransparent(
+    var session = try def_ops.beginRuleMatch(view.arg_infos, seeds);
+    defer session.deinit();
+
+    if (!try session.matchTransparent(
         view.concl,
         line_expr,
-        view_bindings,
+    ) and !try session.matchSemantic(
+        view.concl,
+        line_expr,
+        DefOps.default_semantic_match_budget,
     )) {
         return error.ViewConclusionMismatch;
     }
     for (view.hyps, ref_exprs) |hyp_template, ref_expr| {
-        if (!try def_ops.matchTemplateTransparent(
+        if (!try session.matchTransparent(
             hyp_template,
             ref_expr,
-            view_bindings,
+        ) and !try session.matchSemantic(
+            hyp_template,
+            ref_expr,
+            DefOps.default_semantic_match_budget,
         )) {
             return error.ViewHypothesisMismatch;
         }
     }
+
+    const view_bindings = try session.finalizeOptionalBindings();
+    defer allocator.free(view_bindings);
 
     try DerivedBindings.applyDerivedBindings(
         theorem,

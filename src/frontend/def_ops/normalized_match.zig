@@ -221,6 +221,21 @@ pub const RuleMatchSession = struct {
         );
     }
 
+    pub fn matchSemantic(
+        self: *RuleMatchSession,
+        template: TemplateExpr,
+        actual: ExprId,
+        budget: usize,
+    ) anyerror!bool {
+        var symbolic_engine = self.engine();
+        return try symbolic_engine.matchTemplateSemanticState(
+            template,
+            actual,
+            &self.state,
+            budget,
+        );
+    }
+
     pub fn beginNormalizedComparison(
         self: *RuleMatchSession,
         template: TemplateExpr,
@@ -249,19 +264,36 @@ pub const RuleMatchSession = struct {
         };
     }
 
-    pub fn finalizeConcreteBindings(self: *RuleMatchSession) ![]const ExprId {
+    pub fn finalizeOptionalBindings(self: *RuleMatchSession) ![]?ExprId {
         var symbolic_engine = self.engine();
         const bindings = try self.shared.allocator.alloc(
-            ExprId,
+            ?ExprId,
             self.state.bindings.len,
         );
         for (self.state.bindings, 0..) |binding, idx| {
-            const bound = binding orelse return error.MissingBinderAssignment;
-            bindings[idx] = try symbolic_engine.finalizeBoundValue(
-                bound,
-                &self.state,
-            );
+            bindings[idx] = if (binding) |bound|
+                try symbolic_engine.finalizeBoundValue(
+                    bound,
+                    &self.state,
+                )
+            else
+                null;
         }
+        return bindings;
+    }
+
+    pub fn finalizeConcreteBindings(self: *RuleMatchSession) ![]ExprId {
+        const maybe_bindings = try self.finalizeOptionalBindings();
+        errdefer self.shared.allocator.free(maybe_bindings);
+
+        const bindings = try self.shared.allocator.alloc(
+            ExprId,
+            maybe_bindings.len,
+        );
+        for (maybe_bindings, 0..) |binding, idx| {
+            bindings[idx] = binding orelse return error.MissingBinderAssignment;
+        }
+        self.shared.allocator.free(maybe_bindings);
         return bindings;
     }
 

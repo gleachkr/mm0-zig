@@ -150,25 +150,49 @@ fn exactBindingSeeds(
     return seeds;
 }
 
-fn bindingSeedsWithSemanticOverrides(
+fn bindingSeedsWithSelectiveSemanticOverrides(
     allocator: std.mem.Allocator,
     exact_bindings: []const ?ExprId,
     semantic_bindings: []const ?ExprId,
+    allow_semantic: []const bool,
     mode: DefOps.BindingMode,
 ) ![]DefOps.BindingSeed {
     const seeds = try allocator.alloc(
         DefOps.BindingSeed,
         exact_bindings.len,
     );
-    for (exact_bindings, semantic_bindings, 0..) |exact, semantic, idx| {
+    for (exact_bindings, semantic_bindings, allow_semantic, 0..) |
+        exact,
+        semantic,
+        allow,
+        idx,
+    | {
         seeds[idx] = if (exact) |expr_id|
             .{ .exact = expr_id }
-        else if (semantic) |expr_id|
-            .{ .semantic = .{ .expr_id = expr_id, .mode = mode } }
+        else if (allow and semantic != null)
+            .{ .semantic = .{ .expr_id = semantic.?, .mode = mode } }
         else
             .none;
     }
     return seeds;
+}
+
+fn derivedViewRuleSeedMask(
+    allocator: std.mem.Allocator,
+    rule_arg_len: usize,
+    view: ViewDecl,
+) ![]bool {
+    const mask = try allocator.alloc(bool, rule_arg_len);
+    @memset(mask, false);
+    for (view.derived_bindings) |binding| {
+        const target_view_idx = switch (binding) {
+            .recover => |recover| recover.target_view_idx,
+            .abstract => |abstract| abstract.target_view_idx,
+        };
+        const rule_idx = view.binder_map[target_view_idx] orelse continue;
+        mask[rule_idx] = true;
+    }
+    return mask;
 }
 
 pub fn inferBindingsTransparent(
@@ -408,6 +432,7 @@ pub fn inferBindings(
                 allocator,
                 theorem,
                 env,
+                registry,
                 &view,
                 line_expr,
                 ref_exprs,
@@ -420,10 +445,19 @@ pub fn inferBindings(
                 );
             };
             seeded_bindings_storage = seeded;
-            break :blk try bindingSeedsWithSemanticOverrides(
+
+            const semantic_mask = try derivedViewRuleSeedMask(
+                allocator,
+                rule.args.len,
+                view,
+            );
+            defer allocator.free(semantic_mask);
+
+            break :blk try bindingSeedsWithSelectiveSemanticOverrides(
                 allocator,
                 partial_bindings,
                 seeded,
+                semantic_mask,
                 .transparent,
             );
         } else try exactBindingSeeds(allocator, partial_bindings);

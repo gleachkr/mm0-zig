@@ -257,7 +257,7 @@ fn buildAssertionFixture(
     stmt_op: u8,
     args: []const Arg,
     body: []const u8,
-) [128]u8 {
+) align(@alignOf(Arg)) [128]u8 {
     var bytes: [128]u8 align(@alignOf(Arg)) = std.mem.zeroes([128]u8);
     const proof = buildSingleStmtProof(stmt_op, body);
     @memcpy(bytes[0..proof.len], proof[0..]);
@@ -274,7 +274,7 @@ fn buildLocalDefFixture(
     ret: Arg,
     unify: []const u8,
     body: []const u8,
-) [128]u8 {
+) align(@alignOf(Arg)) [128]u8 {
     var bytes: [128]u8 align(@alignOf(Arg)) = std.mem.zeroes([128]u8);
     const proof = buildSingleStmtProof(0x0D, body);
     @memcpy(bytes[0..proof.len], proof[0..]);
@@ -1183,7 +1183,8 @@ test "Verifier rejects strict bound theorem arguments" {
         .sort = 0,
         .bound = true,
     }};
-    var proof = buildAssertionFixture(0x0E, &args, &.{});
+    var proof: [128]u8 align(@alignOf(Arg)) =
+        buildAssertionFixture(0x0E, &args, &.{});
     const terms = [_]Term{};
     const theorems = [_]Theorem{.{
         .num_args = 1,
@@ -1222,7 +1223,8 @@ test "Verifier rejects strict bound definition arguments" {
         .sort = 0,
         .bound = false,
     };
-    var proof = buildLocalDefFixture(&args, ret, &.{ 0x72, 0x00, 0x00 }, &.{});
+    var proof: [128]u8 align(@alignOf(Arg)) =
+        buildLocalDefFixture(&args, ret, &.{ 0x72, 0x00, 0x00 }, &.{});
     const terms = [_]Term{.{
         .num_args = 1,
         .ret_sort = .{ .sort = 0, .is_def = true },
@@ -1290,7 +1292,8 @@ test "Verifier rejects non-provable axiom conclusions" {
         .sort = 0,
         .bound = false,
     }};
-    var proof = buildAssertionFixture(0x02, &args, &.{ 0x52, 0x00 });
+    var proof: [128]u8 align(@alignOf(Arg)) =
+        buildAssertionFixture(0x02, &args, &.{ 0x52, 0x00 });
     const terms = [_]Term{};
     const theorems = [_]Theorem{.{
         .num_args = 1,
@@ -1323,7 +1326,7 @@ test "Verifier rejects non-provable theorem conclusions" {
         .sort = 0,
         .bound = false,
     }};
-    var proof = buildAssertionFixture(
+    var proof: [128]u8 align(@alignOf(Arg)) = buildAssertionFixture(
         0x0E,
         &args,
         &.{ 0x52, 0x00, 0x20 },
@@ -1366,7 +1369,7 @@ test "Verifier checks definition return sorts" {
         .sort = 0,
         .bound = false,
     };
-    var proof = buildLocalDefFixture(
+    var proof: [128]u8 align(@alignOf(Arg)) = buildLocalDefFixture(
         &args,
         ret,
         &.{ 0x72, 0x00, 0x00 },
@@ -1411,7 +1414,7 @@ test "Verifier checks definition return dependencies" {
         .sort = 0,
         .bound = false,
     };
-    var proof = buildLocalDefFixture(
+    var proof: [128]u8 align(@alignOf(Arg)) = buildLocalDefFixture(
         &args,
         ret,
         &.{ 0x72, 0x00, 0x00 },
@@ -1456,7 +1459,7 @@ test "Verifier replays definition unify streams" {
         .sort = 0,
         .bound = false,
     };
-    var proof = buildLocalDefFixture(
+    var proof: [128]u8 align(@alignOf(Arg)) = buildLocalDefFixture(
         &args,
         ret,
         &.{ 0x70, 0x00, 0x00 },

@@ -4,18 +4,23 @@ const ExprId = @import("./compiler_expr.zig").ExprId;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
 const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
+const RewriteRule = @import("./rewrite_registry.zig").RewriteRule;
 const Types = @import("./def_ops/types.zig");
 const MatchState = @import("./def_ops/match_state.zig");
 const SharedContext = @import("./def_ops/shared_context.zig").SharedContext;
 const SymbolicEngine = @import("./def_ops/symbolic_engine.zig").SymbolicEngine;
 const NormalizedMatch = @import("./def_ops/normalized_match.zig");
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
+const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
 const Expr = @import("../trusted/expressions.zig").Expr;
 
 pub const ConversionPlan = Types.ConversionPlan;
 pub const BindingMode = Types.BindingMode;
 pub const BindingSeed = Types.BindingSeed;
+pub const SemanticStepCandidate =
+    @import("./def_ops/symbolic_engine.zig").SemanticStepCandidate;
+pub const default_semantic_match_budget: usize = 3;
 pub const RuleMatchSession = NormalizedMatch.RuleMatchSession;
 pub const NormalizedComparison =
     NormalizedMatch.NormalizedComparison;
@@ -136,6 +141,122 @@ pub const Context = struct {
             template,
             actual,
             bindings,
+        );
+    }
+
+    pub fn matchTemplateSemantic(
+        self: *Context,
+        template: TemplateExpr,
+        actual: ExprId,
+        bindings: []?ExprId,
+        budget: usize,
+    ) anyerror!bool {
+        var symbolic_engine = self.symbolicEngine();
+        return try symbolic_engine.matchTemplateSemantic(
+            template,
+            actual,
+            bindings,
+            budget,
+        );
+    }
+
+    fn collectSemanticStepCandidatesExpr(
+        self: *Context,
+        expr_id: ExprId,
+        out: *std.ArrayListUnmanaged(SemanticStepCandidate),
+    ) anyerror!void {
+        var symbolic_engine = self.symbolicEngine();
+        return try symbolic_engine.collectSemanticStepCandidatesExpr(
+            expr_id,
+            out,
+        );
+    }
+
+    fn collectSemanticStepCandidatesSymbolic(
+        self: *Context,
+        symbolic: *const SymbolicExpr,
+        out: *std.ArrayListUnmanaged(SemanticStepCandidate),
+    ) anyerror!void {
+        var symbolic_engine = self.symbolicEngine();
+        return try symbolic_engine.collectSemanticStepCandidatesSymbolic(
+            symbolic,
+            out,
+        );
+    }
+
+    fn applyRewriteRuleToExpr(
+        self: *Context,
+        rule: RewriteRule,
+        expr_id: ExprId,
+        state: *MatchSession,
+    ) anyerror!?*const SymbolicExpr {
+        var symbolic_engine = self.symbolicEngine();
+        return try symbolic_engine.applyRewriteRuleToExpr(
+            rule,
+            expr_id,
+            state,
+        );
+    }
+
+    fn applyRewriteRuleToSymbolic(
+        self: *Context,
+        rule: RewriteRule,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!?*const SymbolicExpr {
+        var symbolic_engine = self.symbolicEngine();
+        return try symbolic_engine.applyRewriteRuleToSymbolic(
+            rule,
+            symbolic,
+            state,
+        );
+    }
+
+    fn matchTemplateSemanticState(
+        self: *Context,
+        template: TemplateExpr,
+        actual: ExprId,
+        state: *MatchSession,
+        budget: usize,
+    ) anyerror!bool {
+        var symbolic_engine = self.symbolicEngine();
+        return try symbolic_engine.matchTemplateSemanticState(
+            template,
+            actual,
+            state,
+            budget,
+        );
+    }
+
+    fn matchSymbolicToExprSemantic(
+        self: *Context,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        state: *MatchSession,
+        budget: usize,
+    ) anyerror!bool {
+        var symbolic_engine = self.symbolicEngine();
+        return try symbolic_engine.matchSymbolicToExprSemantic(
+            symbolic,
+            actual,
+            state,
+            budget,
+        );
+    }
+
+    fn matchSymbolicToSymbolicSemantic(
+        self: *Context,
+        lhs: *const SymbolicExpr,
+        rhs: *const SymbolicExpr,
+        state: *MatchSession,
+        budget: usize,
+    ) anyerror!bool {
+        var symbolic_engine = self.symbolicEngine();
+        return try symbolic_engine.matchSymbolicToSymbolicSemantic(
+            lhs,
+            rhs,
+            state,
+            budget,
         );
     }
 
@@ -380,6 +501,215 @@ const SessionWitnessFixture = struct {
     }
 };
 
+const SemanticStepFixture = struct {
+    arena: std.heap.ArenaAllocator,
+    env: GlobalEnv,
+    registry: RewriteRegistry,
+    theorem: TheoremContext,
+    mono_expr: ExprId,
+    comp_expr: ExprId,
+    ctx_expr: ExprId,
+    semantic_target_expr: ExprId,
+    mono_body: TemplateExpr,
+    mono_term_id: u32,
+    comp_term_id: u32,
+    join_term_id: u32,
+    comp_assoc_rule_id: u32,
+    dup_left_rule_id: u32,
+    mor_sort_id: u8,
+
+    fn init() !SemanticStepFixture {
+        const src =
+            \\delimiter $ ( ) $;
+            \\provable sort wff;
+            \\sort ctx;
+            \\sort mor;
+            \\
+            \\term mor_eq (f g: mor): wff;
+            \\infixl mor_eq: $~$ prec 15;
+            \\term comp (f g: mor): mor;
+            \\infixl comp: $o$ prec 35;
+            \\
+            \\term ctx_eq (g h: ctx): wff;
+            \\term emp: ctx;
+            \\notation emp: ctx = ($_$:max);
+            \\--| @acui ctx_assoc ctx_comm emp ctx_idem
+            \\term join (g h: ctx): ctx;
+            \\infixl join: $,$ prec 5;
+            \\term hyp (a: wff): ctx;
+            \\
+            \\--| @relation mor mor_eq mor_refl_raw mor_trans_raw mor_sym_raw _
+            \\axiom mor_refl_raw (f: mor): $ f ~ f $;
+            \\axiom mor_trans_raw (f g h: mor):
+            \\  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+            \\axiom mor_sym_raw (f g: mor): $ f ~ g $ > $ g ~ f $;
+            \\
+            \\--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+            \\axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+            \\axiom ctx_trans (g h i: ctx):
+            \\  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+            \\axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+            \\axiom ctx_assoc (g h i: ctx):
+            \\  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+            \\axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+            \\axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+            \\axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+            \\
+            \\--| @rewrite
+            \\axiom comp_assoc (f g h: mor): $ (f o g) o h ~ f o (g o h) $;
+            \\--| @rewrite
+            \\axiom dup_left (x y: mor): $ x o x ~ y $;
+            \\
+            \\def mono {.a .b: mor} (f: mor): wff =
+            \\  $ (f o a) o b ~ f o (a o b) $;
+            \\
+            \\theorem host (f g alpha: mor) (p q: wff): $ g ~ g $;
+        ;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        errdefer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        var env = GlobalEnv.init(arena.allocator());
+        var registry = RewriteRegistry.init(arena.allocator());
+        var host_assertion: ?AssertionStmt = null;
+
+        while (try parser.next()) |stmt| {
+            switch (stmt) {
+                .sort => try env.addStmt(stmt),
+                .term => |term_stmt| {
+                    try env.addStmt(stmt);
+                    try registry.processAnnotations(
+                        &env,
+                        term_stmt.name,
+                        parser.last_annotations,
+                    );
+                },
+                .assertion => |assertion| {
+                    try env.addStmt(stmt);
+                    try registry.processAnnotations(
+                        &env,
+                        assertion.name,
+                        parser.last_annotations,
+                    );
+                    if (std.mem.eql(u8, assertion.name, "host")) {
+                        host_assertion = assertion;
+                    }
+                },
+            }
+        }
+
+        var theorem = TheoremContext.init(arena.allocator());
+        errdefer theorem.deinit();
+        const host = host_assertion orelse return error.MissingAssertion;
+        try theorem.seedAssertion(host);
+
+        const comp_term_id = env.term_names.get("comp") orelse {
+            return error.MissingTerm;
+        };
+        const mono_term_id = env.term_names.get("mono") orelse {
+            return error.MissingTerm;
+        };
+        const join_term_id = env.term_names.get("join") orelse {
+            return error.MissingTerm;
+        };
+        const hyp_term_id = env.term_names.get("hyp") orelse {
+            return error.MissingTerm;
+        };
+        const comp_assoc_rule_id = env.getRuleId("comp_assoc") orelse {
+            return error.MissingRule;
+        };
+        const dup_left_rule_id = env.getRuleId("dup_left") orelse {
+            return error.MissingRule;
+        };
+        const mor_sort_id = env.sort_names.get("mor") orelse {
+            return error.MissingSort;
+        };
+
+        const f = theorem.theorem_vars.items[0];
+        const g = theorem.theorem_vars.items[1];
+        const alpha = theorem.theorem_vars.items[2];
+        const p = theorem.theorem_vars.items[3];
+        const q = theorem.theorem_vars.items[4];
+
+        const gof = try theorem.interner.internApp(
+            comp_term_id,
+            &[_]ExprId{ g, f },
+        );
+        const comp_expr = try theorem.interner.internApp(
+            comp_term_id,
+            &[_]ExprId{ gof, alpha },
+        );
+        const mono_expr = try theorem.interner.internApp(
+            mono_term_id,
+            &[_]ExprId{gof},
+        );
+
+        const semantic_lhs_inner = try theorem.interner.internApp(
+            comp_term_id,
+            &[_]ExprId{ gof, g },
+        );
+        const semantic_lhs = try theorem.interner.internApp(
+            comp_term_id,
+            &[_]ExprId{ semantic_lhs_inner, alpha },
+        );
+        const semantic_rhs_inner = try theorem.interner.internApp(
+            comp_term_id,
+            &[_]ExprId{ g, alpha },
+        );
+        const semantic_rhs_mid = try theorem.interner.internApp(
+            comp_term_id,
+            &[_]ExprId{ f, semantic_rhs_inner },
+        );
+        const semantic_rhs = try theorem.interner.internApp(
+            comp_term_id,
+            &[_]ExprId{ g, semantic_rhs_mid },
+        );
+        const semantic_target_expr = try theorem.interner.internApp(
+            env.term_names.get("mor_eq") orelse return error.MissingTerm,
+            &[_]ExprId{ semantic_lhs, semantic_rhs },
+        );
+
+        const hp = try theorem.interner.internApp(
+            hyp_term_id,
+            &[_]ExprId{p},
+        );
+        const hq = try theorem.interner.internApp(
+            hyp_term_id,
+            &[_]ExprId{q},
+        );
+        const ctx_expr = try theorem.interner.internApp(
+            join_term_id,
+            &[_]ExprId{ hp, hq },
+        );
+
+        return .{
+            .arena = arena,
+            .env = env,
+            .registry = registry,
+            .theorem = theorem,
+            .mono_expr = mono_expr,
+            .comp_expr = comp_expr,
+            .ctx_expr = ctx_expr,
+            .semantic_target_expr = semantic_target_expr,
+            .mono_body = env.terms.items[mono_term_id].body orelse {
+                return error.MissingTermBody;
+            },
+            .mono_term_id = mono_term_id,
+            .comp_term_id = comp_term_id,
+            .join_term_id = join_term_id,
+            .comp_assoc_rule_id = comp_assoc_rule_id,
+            .dup_left_rule_id = dup_left_rule_id,
+            .mor_sort_id = mor_sort_id,
+        };
+    }
+
+    fn deinit(self: *SemanticStepFixture) void {
+        self.theorem.deinit();
+        self.arena.deinit();
+    }
+};
+
 fn allocNoneSeeds(
     allocator: std.mem.Allocator,
     len: usize,
@@ -389,6 +719,524 @@ fn allocNoneSeeds(
         seed.* = .none;
     }
     return seeds;
+}
+
+fn hasConcreteUnfold(
+    steps: []const SemanticStepCandidate,
+    expr_id: ExprId,
+    term_id: u32,
+) bool {
+    for (steps) |step| {
+        switch (step) {
+            .unfold_concrete_def => |unfold| {
+                if (unfold.expr_id == expr_id and unfold.term_id == term_id) {
+                    return true;
+                }
+            },
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn hasSymbolicUnfold(
+    steps: []const SemanticStepCandidate,
+    term_id: u32,
+) bool {
+    for (steps) |step| {
+        switch (step) {
+            .unfold_symbolic_def => |unfold| {
+                if (unfold.term_id == term_id) return true;
+            },
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn hasRewriteRule(
+    steps: []const SemanticStepCandidate,
+    rule_id: u32,
+    head_term_id: u32,
+) bool {
+    for (steps) |step| {
+        switch (step) {
+            .rewrite_rule => |rule| {
+                if (rule.rule_id == rule_id and rule.head_term_id == head_term_id) {
+                    return true;
+                }
+            },
+            else => {},
+        }
+    }
+    return false;
+}
+
+fn hasAcuiHead(
+    steps: []const SemanticStepCandidate,
+    head_term_id: u32,
+) bool {
+    for (steps) |step| {
+        switch (step) {
+            .acui => |acui| {
+                if (acui.head_term_id == head_term_id) return true;
+            },
+            else => {},
+        }
+    }
+    return false;
+}
+
+test "semantic step enumeration finds root def rewrite and acui moves" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    var mono_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer mono_steps.deinit(fixture.arena.allocator());
+    try ctx.collectSemanticStepCandidatesExpr(
+        fixture.mono_expr,
+        &mono_steps,
+    );
+    try std.testing.expect(
+        hasConcreteUnfold(
+            mono_steps.items,
+            fixture.mono_expr,
+            fixture.mono_term_id,
+        ),
+    );
+    try std.testing.expect(!hasRewriteRule(
+        mono_steps.items,
+        fixture.comp_assoc_rule_id,
+        fixture.comp_term_id,
+    ));
+    try std.testing.expect(!hasAcuiHead(
+        mono_steps.items,
+        fixture.join_term_id,
+    ));
+
+    var comp_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer comp_steps.deinit(fixture.arena.allocator());
+    try ctx.collectSemanticStepCandidatesExpr(
+        fixture.comp_expr,
+        &comp_steps,
+    );
+    try std.testing.expect(hasRewriteRule(
+        comp_steps.items,
+        fixture.comp_assoc_rule_id,
+        fixture.comp_term_id,
+    ));
+    try std.testing.expect(!hasConcreteUnfold(
+        comp_steps.items,
+        fixture.comp_expr,
+        fixture.comp_term_id,
+    ));
+    try std.testing.expect(!hasAcuiHead(
+        comp_steps.items,
+        fixture.join_term_id,
+    ));
+
+    var ctx_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer ctx_steps.deinit(fixture.arena.allocator());
+    try ctx.collectSemanticStepCandidatesExpr(
+        fixture.ctx_expr,
+        &ctx_steps,
+    );
+    try std.testing.expect(hasAcuiHead(
+        ctx_steps.items,
+        fixture.join_term_id,
+    ));
+    try std.testing.expect(!hasRewriteRule(
+        ctx_steps.items,
+        fixture.comp_assoc_rule_id,
+        fixture.comp_term_id,
+    ));
+}
+
+test "semantic step enumeration is registry-gated" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.init(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+    );
+    defer ctx.deinit();
+
+    var mono_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer mono_steps.deinit(fixture.arena.allocator());
+    try ctx.collectSemanticStepCandidatesExpr(
+        fixture.mono_expr,
+        &mono_steps,
+    );
+    try std.testing.expect(
+        hasConcreteUnfold(
+            mono_steps.items,
+            fixture.mono_expr,
+            fixture.mono_term_id,
+        ),
+    );
+
+    var comp_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer comp_steps.deinit(fixture.arena.allocator());
+    try ctx.collectSemanticStepCandidatesExpr(
+        fixture.comp_expr,
+        &comp_steps,
+    );
+    try std.testing.expectEqual(@as(usize, 0), comp_steps.items.len);
+
+    var ctx_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer ctx_steps.deinit(fixture.arena.allocator());
+    try ctx.collectSemanticStepCandidatesExpr(
+        fixture.ctx_expr,
+        &ctx_steps,
+    );
+    try std.testing.expectEqual(@as(usize, 0), ctx_steps.items.len);
+}
+
+test "semantic step enumeration handles symbolic roots" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const mono_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        1,
+    );
+    mono_args[0] = try ctx.allocSymbolic(.{ .fixed = fixture.comp_expr });
+    const symbolic_mono = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.mono_term_id,
+        .args = mono_args,
+    } });
+
+    var symbolic_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer symbolic_steps.deinit(fixture.arena.allocator());
+    try ctx.collectSemanticStepCandidatesSymbolic(
+        symbolic_mono,
+        &symbolic_steps,
+    );
+    try std.testing.expect(
+        hasSymbolicUnfold(symbolic_steps.items, fixture.mono_term_id),
+    );
+
+    const fixed_comp = try ctx.allocSymbolic(.{ .fixed = fixture.comp_expr });
+    var fixed_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer fixed_steps.deinit(fixture.arena.allocator());
+    try ctx.collectSemanticStepCandidatesSymbolic(
+        fixed_comp,
+        &fixed_steps,
+    );
+    try std.testing.expect(hasRewriteRule(
+        fixed_steps.items,
+        fixture.comp_assoc_rule_id,
+        fixture.comp_term_id,
+    ));
+}
+
+test "semantic search matches def unfold then rewrite" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const mono_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        1,
+    );
+    mono_args[0] = try ctx.allocSymbolic(.{ .fixed = fixture.comp_expr });
+    const symbolic_mono = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.mono_term_id,
+        .args = mono_args,
+    } });
+
+    var state = try MatchSession.init(fixture.arena.allocator(), 0);
+    defer state.deinit(fixture.arena.allocator());
+
+    try std.testing.expect(
+        try ctx.matchSymbolicToExprSemantic(
+            symbolic_mono,
+            fixture.semantic_target_expr,
+            &state,
+            1,
+        ),
+    );
+    try std.testing.expectEqual(@as(usize, 0), state.witnesses.count());
+    try std.testing.expectEqual(
+        @as(usize, 2),
+        state.symbolic_dummy_infos.items.len,
+    );
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
+}
+
+test "semantic search budget failure restores state" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const mono_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        1,
+    );
+    mono_args[0] = try ctx.allocSymbolic(.{ .fixed = fixture.comp_expr });
+    const symbolic_mono = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.mono_term_id,
+        .args = mono_args,
+    } });
+
+    var state = try MatchSession.init(fixture.arena.allocator(), 0);
+    defer state.deinit(fixture.arena.allocator());
+    const start_dummy_info_len = state.symbolic_dummy_infos.items.len;
+    const start_witness_count = state.witnesses.count();
+
+    try std.testing.expect(!try ctx.matchSymbolicToExprSemantic(
+        symbolic_mono,
+        fixture.semantic_target_expr,
+        &state,
+        0,
+    ));
+    try std.testing.expectEqual(
+        start_dummy_info_len,
+        state.symbolic_dummy_infos.items.len,
+    );
+    try std.testing.expectEqual(start_witness_count, state.witnesses.count());
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
+}
+
+test "rewrite application works on concrete roots" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    var state = try MatchSession.init(fixture.arena.allocator(), 0);
+    defer state.deinit(fixture.arena.allocator());
+
+    const rule = fixture.registry.getRewriteRules(
+        fixture.comp_term_id,
+    )[0];
+    const result = try ctx.applyRewriteRuleToExpr(
+        rule,
+        fixture.comp_expr,
+        &state,
+    ) orelse return error.MissingRewriteResult;
+
+    const f = fixture.theorem.theorem_vars.items[0];
+    const g = fixture.theorem.theorem_vars.items[1];
+    const alpha = fixture.theorem.theorem_vars.items[2];
+
+    const rhs_inner_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        2,
+    );
+    rhs_inner_args[0] = try ctx.allocSymbolic(.{ .fixed = f });
+    rhs_inner_args[1] = try ctx.allocSymbolic(.{ .fixed = alpha });
+    const rhs_inner = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.comp_term_id,
+        .args = rhs_inner_args,
+    } });
+
+    const expected_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        2,
+    );
+    expected_args[0] = try ctx.allocSymbolic(.{ .fixed = g });
+    expected_args[1] = rhs_inner;
+    const expected = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.comp_term_id,
+        .args = expected_args,
+    } });
+
+    try std.testing.expect(ctx.symbolicExprEql(result, expected));
+    try std.testing.expectEqual(@as(usize, 0), state.witnesses.count());
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        state.symbolic_dummy_infos.items.len,
+    );
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
+}
+
+test "rewrite application keeps hidden dummies symbolic" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    var state = try MatchSession.init(fixture.arena.allocator(), 0);
+    defer state.deinit(fixture.arena.allocator());
+    try state.symbolic_dummy_infos.append(
+        fixture.arena.allocator(),
+        .{ .sort_name = "mor" },
+    );
+    try state.symbolic_dummy_infos.append(
+        fixture.arena.allocator(),
+        .{ .sort_name = "mor" },
+    );
+
+    const f = fixture.theorem.theorem_vars.items[0];
+    const dummy0 = try ctx.allocSymbolic(.{ .dummy = 0 });
+    const dummy1 = try ctx.allocSymbolic(.{ .dummy = 1 });
+
+    const lhs_inner_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        2,
+    );
+    lhs_inner_args[0] = try ctx.allocSymbolic(.{ .fixed = f });
+    lhs_inner_args[1] = dummy0;
+    const lhs_inner = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.comp_term_id,
+        .args = lhs_inner_args,
+    } });
+
+    const lhs_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        2,
+    );
+    lhs_args[0] = lhs_inner;
+    lhs_args[1] = dummy1;
+    const lhs = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.comp_term_id,
+        .args = lhs_args,
+    } });
+
+    const rule = fixture.registry.getRewriteRules(
+        fixture.comp_term_id,
+    )[0];
+    const result = try ctx.applyRewriteRuleToSymbolic(
+        rule,
+        lhs,
+        &state,
+    ) orelse return error.MissingRewriteResult;
+
+    const rhs_inner_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        2,
+    );
+    rhs_inner_args[0] = dummy0;
+    rhs_inner_args[1] = dummy1;
+    const rhs_inner = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.comp_term_id,
+        .args = rhs_inner_args,
+    } });
+
+    const expected_args = try fixture.arena.allocator().alloc(
+        *const SymbolicExpr,
+        2,
+    );
+    expected_args[0] = try ctx.allocSymbolic(.{ .fixed = f });
+    expected_args[1] = rhs_inner;
+    const expected = try ctx.allocSymbolic(.{ .app = .{
+        .term_id = fixture.comp_term_id,
+        .args = expected_args,
+    } });
+
+    try std.testing.expect(ctx.symbolicExprEql(result, expected));
+    try std.testing.expectEqual(
+        @as(usize, 2),
+        state.symbolic_dummy_infos.items.len,
+    );
+    try std.testing.expectEqual(@as(usize, 0), state.witnesses.count());
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
+}
+
+test "failed rewrite application restores witness state" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    var state = try MatchSession.init(fixture.arena.allocator(), 0);
+    defer state.deinit(fixture.arena.allocator());
+
+    const theorem_dummy = try fixture.theorem.addDummyVarResolved(
+        "mor",
+        fixture.mor_sort_id,
+    );
+    const f = fixture.theorem.theorem_vars.items[0];
+    const dup_expr = try fixture.theorem.interner.internApp(
+        fixture.comp_term_id,
+        &[_]ExprId{ theorem_dummy, f },
+    );
+    const start_dummy_info_len = state.symbolic_dummy_infos.items.len;
+    const start_witness_count = state.witnesses.count();
+
+    const rules = fixture.registry.getRewriteRules(fixture.comp_term_id);
+    var dup_rule: ?RewriteRule = null;
+    for (rules) |rule| {
+        if (rule.rule_id == fixture.dup_left_rule_id) {
+            dup_rule = rule;
+            break;
+        }
+    }
+
+    try std.testing.expectEqual(
+        start_dummy_info_len,
+        state.symbolic_dummy_infos.items.len,
+    );
+    try std.testing.expectEqual(start_witness_count, state.witnesses.count());
+    try std.testing.expect(
+        (try ctx.applyRewriteRuleToExpr(
+            dup_rule orelse return error.MissingRule,
+            dup_expr,
+            &state,
+        )) == null,
+    );
+    try std.testing.expectEqual(
+        start_dummy_info_len,
+        state.symbolic_dummy_infos.items.len,
+    );
+    try std.testing.expectEqual(start_witness_count, state.witnesses.count());
+    try std.testing.expectEqual(@as(u32, 1), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 1), fixture.theorem.next_dummy_dep);
 }
 
 test "match sessions keep witness placeholders session-local" {

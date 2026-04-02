@@ -150,12 +150,13 @@ pub const Verifier = struct {
             .expr => |e| e,
             else => return error.ExpectedExpr,
         };
-        const ret = term.getRetArg(self.file_bytes);
+        const ret = try term.getRetArgChecked(self.file_bytes);
         try self.checkExprAgainstArg(def_expr, ret);
         if (self.stack.top != 0) return error.StackNotEmpty;
         try self.initUHeapFromHeapArgs(term.num_args);
         try self.runUnifyStream(
-            term.getUnifyPtr(self.file_bytes) orelse return error.ExpectedDef,
+            try term.getUnifyPtrChecked(self.file_bytes) orelse
+                return error.ExpectedDef,
             def_expr,
             .defn,
         );
@@ -221,11 +222,11 @@ pub const Verifier = struct {
     }
 
     fn initHeapFromThmArgs(self: *Verifier, thm: Theorem) !void {
-        try self.initHeapFromArgs(thm.getArgs(self.file_bytes));
+        try self.initHeapFromArgs(try thm.getArgsChecked(self.file_bytes));
     }
 
     fn initHeapFromTermArgs(self: *Verifier, term: Term) !void {
-        try self.initHeapFromArgs(term.getArgs(self.file_bytes));
+        try self.initHeapFromArgs(try term.getArgsChecked(self.file_bytes));
     }
 
     fn initHeapFromArgs(self: *Verifier, args: []const Arg) !void {
@@ -496,7 +497,7 @@ pub const Verifier = struct {
         if (term_id >= self.available_terms) return error.ForwardTermRef;
 
         const term = self.term_table[term_id];
-        const args = term.getArgs(self.file_bytes);
+        const args = try term.getArgsChecked(self.file_bytes);
         const n = term.num_args;
 
         // Pop n args in reverse order.
@@ -538,7 +539,7 @@ pub const Verifier = struct {
                     }
                     deps |= arg_deps;
                 }
-                const ret = term.getRetArg(self.file_bytes);
+                const ret = try term.getRetArgChecked(self.file_bytes);
                 for (0..bound_len) |j| {
                     if (ret.dependsOn(@intCast(j))) deps |= bound_deps[j];
                 }
@@ -566,7 +567,7 @@ pub const Verifier = struct {
 
         self.uheap.len = 0;
         const thm = self.thm_table[thm_id];
-        const args = thm.getArgs(self.file_bytes);
+        const args = try thm.getArgsChecked(self.file_bytes);
         const n = thm.num_args;
 
         // Pop the conclusion expression
@@ -621,7 +622,7 @@ pub const Verifier = struct {
 
         // Run unification against the conclusion
         try self.runUnifyStream(
-            thm.getUnifyPtr(self.file_bytes),
+            try thm.getUnifyPtrChecked(self.file_bytes),
             concl,
             .theorem,
         );
@@ -897,7 +898,8 @@ pub const Verifier = struct {
             self.uheap.entries[i] = .{ .expr = arg, .saved = false };
         }
         // Run the def's unify stream with e on the unify stack
-        const unify_ptr = self.term_table[t.id].getUnifyPtr(self.file_bytes).?;
+        const unify_ptr =
+            (try self.term_table[t.id].getUnifyPtrChecked(self.file_bytes)).?;
         self.ustack.reset();
         try self.ustack.push(e);
         try self.runUnifyStreamRaw(unify_ptr, .defn);

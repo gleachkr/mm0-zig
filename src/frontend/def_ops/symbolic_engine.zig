@@ -4,6 +4,10 @@ const ExprId = @import("../compiler_expr.zig").ExprId;
 const ExprApp = @import("../compiler_expr.zig").ExprNode.App;
 const TemplateExpr = @import("../compiler_rules.zig").TemplateExpr;
 const Canonicalizer = @import("../canonicalizer.zig").Canonicalizer;
+const AcuiSupport = @import("../acui_support.zig");
+const RewriteRule = @import("../rewrite_registry.zig").RewriteRule;
+const ResolvedStructuralCombiner =
+    @import("../rewrite_registry.zig").ResolvedStructuralCombiner;
 const Types = @import("./types.zig");
 const MatchState = @import("./match_state.zig");
 const SharedContext = @import("./shared_context.zig").SharedContext;
@@ -27,6 +31,28 @@ const RepresentativeCache = Types.RepresentativeCache;
 const MatchSession = MatchState.MatchSession;
 const MatchSnapshot = MatchState.MatchSnapshot;
 const ConcreteVarInfo = Types.ConcreteVarInfo;
+const semantic_match_budget: usize = 8;
+
+pub const SemanticStepCandidate = union(enum) {
+    unfold_concrete_def: struct {
+        expr_id: ExprId,
+        term_id: u32,
+    },
+    unfold_symbolic_def: struct {
+        term_id: u32,
+    },
+    rewrite_rule: RewriteRule,
+    acui: ResolvedStructuralCombiner,
+};
+
+const SemanticSearchKey = struct {
+    lhs_hash: u64,
+    rhs_hash: u64,
+    state_hash: u64,
+};
+
+const SemanticSearchVisited =
+    std.AutoHashMapUnmanaged(SemanticSearchKey, usize);
 
 pub const SymbolicEngine = struct {
     shared: *SharedContext,
@@ -147,6 +173,1333 @@ pub const SymbolicEngine = struct {
         return null;
     }
 
+    pub fn collectSemanticStepCandidatesExpr(
+        self: *SymbolicEngine,
+        expr_id: ExprId,
+        out: *std.ArrayListUnmanaged(SemanticStepCandidate),
+    ) anyerror!void {
+        const node = self.shared.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |value| value,
+            .variable => return,
+        };
+
+        if (self.getOpenableTerm(app.term_id) != null) {
+            try out.append(self.shared.allocator, .{
+                .unfold_concrete_def = .{
+                    .expr_id = expr_id,
+                    .term_id = app.term_id,
+                },
+            });
+        }
+        try self.appendSemanticHeadStepCandidates(app.term_id, out);
+    }
+
+    pub fn collectSemanticStepCandidatesSymbolic(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        out: *std.ArrayListUnmanaged(SemanticStepCandidate),
+    ) anyerror!void {
+        switch (symbolic.*) {
+            .fixed => |expr_id| {
+                return try self.collectSemanticStepCandidatesExpr(expr_id, out);
+            },
+            .app => |app| {
+                if (self.getOpenableTerm(app.term_id) != null) {
+                    try out.append(self.shared.allocator, .{
+                        .unfold_symbolic_def = .{
+                            .term_id = app.term_id,
+                        },
+                    });
+                }
+                try self.appendSemanticHeadStepCandidates(app.term_id, out);
+            },
+            .binder, .dummy => {},
+        }
+    }
+
+    fn appendSemanticHeadStepCandidates(
+        self: *SymbolicEngine,
+        head_term_id: u32,
+        out: *std.ArrayListUnmanaged(SemanticStepCandidate),
+    ) anyerror!void {
+        const registry = self.shared.registry orelse return;
+        for (registry.getRewriteRules(head_term_id)) |rule| {
+            try out.append(self.shared.allocator, .{ .rewrite_rule = rule });
+        }
+        if (registry.resolveStructuralCombiner(
+            self.shared.env,
+            head_term_id,
+        )) |acui| {
+            try out.append(self.shared.allocator, .{ .acui = acui });
+        }
+    }
+
+    pub fn matchTemplateSemanticState(
+        self: *SymbolicEngine,
+        template: TemplateExpr,
+        actual: ExprId,
+        state: *MatchSession,
+        budget: usize,
+    ) anyerror!bool {
+        if (try self.tryMatchTemplateStateDirect(template, actual, state)) {
+            return true;
+        }
+
+        var visited: SemanticSearchVisited = .empty;
+        defer visited.deinit(self.shared.allocator);
+        const symbolic = try self.symbolicFromTemplate(template);
+        return try self.matchSymbolicToExprSemanticSearch(
+            symbolic,
+            actual,
+            state,
+            budget,
+            &visited,
+        );
+    }
+
+    pub fn matchSymbolicToExprSemantic(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        state: *MatchSession,
+        budget: usize,
+    ) anyerror!bool {
+        var visited: SemanticSearchVisited = .empty;
+        defer visited.deinit(self.shared.allocator);
+        return try self.matchSymbolicToExprSemanticSearch(
+            symbolic,
+            actual,
+            state,
+            budget,
+            &visited,
+        );
+    }
+
+    pub fn matchExprToSymbolicSemantic(
+        self: *SymbolicEngine,
+        actual: ExprId,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+        budget: usize,
+    ) anyerror!bool {
+        var visited: SemanticSearchVisited = .empty;
+        defer visited.deinit(self.shared.allocator);
+        return try self.matchExprToSymbolicSemanticSearch(
+            actual,
+            symbolic,
+            state,
+            budget,
+            &visited,
+        );
+    }
+
+    pub fn matchSymbolicToSymbolicSemantic(
+        self: *SymbolicEngine,
+        lhs: *const SymbolicExpr,
+        rhs: *const SymbolicExpr,
+        state: *MatchSession,
+        budget: usize,
+    ) anyerror!bool {
+        var visited: SemanticSearchVisited = .empty;
+        defer visited.deinit(self.shared.allocator);
+        return try self.matchSymbolicToSymbolicSemanticSearch(
+            lhs,
+            rhs,
+            state,
+            budget,
+            &visited,
+        );
+    }
+
+    fn matchSymbolicToExprSemanticSearch(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        state: *MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        if (try self.tryMatchSymbolicToExprDirect(symbolic, actual, state)) {
+            return true;
+        }
+        if (budget == 0) return false;
+        if (!try self.noteSemanticExprSearchState(
+            symbolic,
+            actual,
+            state,
+            budget,
+            visited,
+        )) {
+            return false;
+        }
+        if (try self.tryMatchSymbolicToExprChildrenSemantic(
+            symbolic,
+            actual,
+            state,
+            budget,
+            visited,
+        )) {
+            return true;
+        }
+
+        var symbolic_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+        defer symbolic_steps.deinit(self.shared.allocator);
+        try self.collectSemanticStepCandidatesSymbolic(symbolic, &symbolic_steps);
+        for (symbolic_steps.items) |step| {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            const next = try self.applySemanticStepToSymbolic(
+                step,
+                symbolic,
+                state,
+            ) orelse {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                continue;
+            };
+            if (try self.matchSymbolicToExprSemanticSearch(
+                next,
+                actual,
+                state,
+                budget - 1,
+                visited,
+            )) {
+                return true;
+            }
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+
+        var expr_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+        defer expr_steps.deinit(self.shared.allocator);
+        try self.collectSemanticStepCandidatesExpr(actual, &expr_steps);
+        for (expr_steps.items) |step| {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            const next = try self.applySemanticStepToExpr(
+                step,
+                actual,
+                state,
+            ) orelse {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                continue;
+            };
+            if (try self.matchSymbolicToSymbolicSemanticSearch(
+                symbolic,
+                next,
+                state,
+                budget - 1,
+                visited,
+            )) {
+                return true;
+            }
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+        return false;
+    }
+
+    fn matchExprToSymbolicSemanticSearch(
+        self: *SymbolicEngine,
+        actual: ExprId,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        if (try self.tryMatchExprToSymbolicDirect(
+            actual,
+            symbolic,
+            state,
+        )) {
+            return true;
+        }
+        if (budget == 0) return false;
+        if (!try self.noteExprSemanticSearchState(
+            actual,
+            symbolic,
+            state,
+            budget,
+            visited,
+        )) {
+            return false;
+        }
+        if (try self.tryMatchExprToSymbolicChildrenSemantic(
+            actual,
+            symbolic,
+            state,
+            budget,
+            visited,
+        )) {
+            return true;
+        }
+
+        var expr_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+        defer expr_steps.deinit(self.shared.allocator);
+        try self.collectSemanticStepCandidatesExpr(actual, &expr_steps);
+        for (expr_steps.items) |step| {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            const next = try self.applySemanticStepToExpr(
+                step,
+                actual,
+                state,
+            ) orelse {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                continue;
+            };
+            if (try self.matchSymbolicToSymbolicSemanticSearch(
+                next,
+                symbolic,
+                state,
+                budget - 1,
+                visited,
+            )) {
+                return true;
+            }
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+
+        var symbolic_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+        defer symbolic_steps.deinit(self.shared.allocator);
+        try self.collectSemanticStepCandidatesSymbolic(symbolic, &symbolic_steps);
+        for (symbolic_steps.items) |step| {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            const next = try self.applySemanticStepToSymbolic(
+                step,
+                symbolic,
+                state,
+            ) orelse {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                continue;
+            };
+            if (try self.matchExprToSymbolicSemanticSearch(
+                actual,
+                next,
+                state,
+                budget - 1,
+                visited,
+            )) {
+                return true;
+            }
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+        return false;
+    }
+
+    fn matchSymbolicToSymbolicSemanticSearch(
+        self: *SymbolicEngine,
+        lhs: *const SymbolicExpr,
+        rhs: *const SymbolicExpr,
+        state: *MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        if (try self.tryMatchSymbolicToSymbolicDirect(lhs, rhs, state)) {
+            return true;
+        }
+        if (budget == 0) return false;
+        if (!try self.noteSymbolicSemanticSearchState(
+            lhs,
+            rhs,
+            state,
+            budget,
+            visited,
+        )) {
+            return false;
+        }
+        if (try self.tryMatchSymbolicToSymbolicChildrenSemantic(
+            lhs,
+            rhs,
+            state,
+            budget,
+            visited,
+        )) {
+            return true;
+        }
+
+        var lhs_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+        defer lhs_steps.deinit(self.shared.allocator);
+        try self.collectSemanticStepCandidatesSymbolic(lhs, &lhs_steps);
+        for (lhs_steps.items) |step| {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            const next = try self.applySemanticStepToSymbolic(
+                step,
+                lhs,
+                state,
+            ) orelse {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                continue;
+            };
+            if (try self.matchSymbolicToSymbolicSemanticSearch(
+                next,
+                rhs,
+                state,
+                budget - 1,
+                visited,
+            )) {
+                return true;
+            }
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+
+        var rhs_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+        defer rhs_steps.deinit(self.shared.allocator);
+        try self.collectSemanticStepCandidatesSymbolic(rhs, &rhs_steps);
+        for (rhs_steps.items) |step| {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            const next = try self.applySemanticStepToSymbolic(
+                step,
+                rhs,
+                state,
+            ) orelse {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                continue;
+            };
+            if (try self.matchSymbolicToSymbolicSemanticSearch(
+                lhs,
+                next,
+                state,
+                budget - 1,
+                visited,
+            )) {
+                return true;
+            }
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+        return false;
+    }
+
+    fn tryMatchTemplateStateDirect(
+        self: *SymbolicEngine,
+        template: TemplateExpr,
+        actual: ExprId,
+        state: *MatchSession,
+    ) anyerror!bool {
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
+        if (try self.matchTemplateRecState(template, actual, state)) {
+            return true;
+        }
+        try self.restoreMatchSnapshot(&snapshot, state);
+        return false;
+    }
+
+    fn tryMatchSymbolicToExprDirect(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        state: *MatchSession,
+    ) anyerror!bool {
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
+        if (try self.matchSymbolicToExprState(symbolic, actual, state)) {
+            return true;
+        }
+        try self.restoreMatchSnapshot(&snapshot, state);
+        return false;
+    }
+
+    fn tryMatchSymbolicToExprChildrenSemantic(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        actual: ExprId,
+        state: *MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        const symbolic_app = switch (symbolic.*) {
+            .app => |app| app,
+            else => return false,
+        };
+        const actual_node = self.shared.theorem.interner.node(actual);
+        const actual_app = switch (actual_node.*) {
+            .app => |app| app,
+            .variable => return false,
+        };
+        if (symbolic_app.term_id != actual_app.term_id) return false;
+        if (symbolic_app.args.len != actual_app.args.len) return false;
+
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
+
+        var remaining_budget = budget;
+        var used_semantic = false;
+        for (symbolic_app.args, actual_app.args) |symbolic_arg, actual_arg| {
+            if (try self.tryMatchSymbolicToExprDirect(
+                symbolic_arg,
+                actual_arg,
+                state,
+            )) {
+                continue;
+            }
+            if (remaining_budget == 0) {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                return false;
+            }
+            remaining_budget -= 1;
+            if (!try self.matchSymbolicToExprSemanticSearch(
+                symbolic_arg,
+                actual_arg,
+                state,
+                remaining_budget,
+                visited,
+            )) {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                return false;
+            }
+            used_semantic = true;
+        }
+        if (!used_semantic) {
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+        return used_semantic;
+    }
+
+    fn tryMatchExprToSymbolicDirect(
+        self: *SymbolicEngine,
+        actual: ExprId,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!bool {
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
+        if (try self.matchExprToSymbolic(
+            actual,
+            symbolic,
+            state,
+            .transparent,
+        )) {
+            return true;
+        }
+        try self.restoreMatchSnapshot(&snapshot, state);
+        return false;
+    }
+
+    fn tryMatchExprToSymbolicChildrenSemantic(
+        self: *SymbolicEngine,
+        actual: ExprId,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        const actual_node = self.shared.theorem.interner.node(actual);
+        const actual_app = switch (actual_node.*) {
+            .app => |app| app,
+            .variable => return false,
+        };
+        const symbolic_app = switch (symbolic.*) {
+            .app => |app| app,
+            else => return false,
+        };
+        if (actual_app.term_id != symbolic_app.term_id) return false;
+        if (actual_app.args.len != symbolic_app.args.len) return false;
+
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
+
+        var remaining_budget = budget;
+        var used_semantic = false;
+        for (actual_app.args, symbolic_app.args) |actual_arg, symbolic_arg| {
+            if (try self.tryMatchExprToSymbolicDirect(
+                actual_arg,
+                symbolic_arg,
+                state,
+            )) {
+                continue;
+            }
+            if (remaining_budget == 0) {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                return false;
+            }
+            remaining_budget -= 1;
+            if (!try self.matchExprToSymbolicSemanticSearch(
+                actual_arg,
+                symbolic_arg,
+                state,
+                remaining_budget,
+                visited,
+            )) {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                return false;
+            }
+            used_semantic = true;
+        }
+        if (!used_semantic) {
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+        return used_semantic;
+    }
+
+    fn tryMatchSymbolicToSymbolicDirect(
+        self: *SymbolicEngine,
+        lhs: *const SymbolicExpr,
+        rhs: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!bool {
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
+        if (try self.matchSymbolicToSymbolicState(lhs, rhs, state)) {
+            return true;
+        }
+        try self.restoreMatchSnapshot(&snapshot, state);
+
+        if (rhs.* == .fixed) {
+            if (try self.matchExprToSymbolic(
+                rhs.fixed,
+                lhs,
+                state,
+                .transparent,
+            )) {
+                return true;
+            }
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+        return false;
+    }
+
+    fn tryMatchSymbolicToSymbolicChildrenSemantic(
+        self: *SymbolicEngine,
+        lhs: *const SymbolicExpr,
+        rhs: *const SymbolicExpr,
+        state: *MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        const lhs_app = switch (lhs.*) {
+            .app => |app| app,
+            else => return false,
+        };
+        const rhs_app = switch (rhs.*) {
+            .app => |app| app,
+            else => return false,
+        };
+        if (lhs_app.term_id != rhs_app.term_id) return false;
+        if (lhs_app.args.len != rhs_app.args.len) return false;
+
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
+
+        var remaining_budget = budget;
+        var used_semantic = false;
+        for (lhs_app.args, rhs_app.args) |lhs_arg, rhs_arg| {
+            if (try self.tryMatchSymbolicToSymbolicDirect(
+                lhs_arg,
+                rhs_arg,
+                state,
+            )) {
+                continue;
+            }
+            if (remaining_budget == 0) {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                return false;
+            }
+            remaining_budget -= 1;
+            if (!try self.matchSymbolicToSymbolicSemanticSearch(
+                lhs_arg,
+                rhs_arg,
+                state,
+                remaining_budget,
+                visited,
+            )) {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                return false;
+            }
+            used_semantic = true;
+        }
+        if (!used_semantic) {
+            try self.restoreMatchSnapshot(&snapshot, state);
+        }
+        return used_semantic;
+    }
+
+    fn applySemanticStepToExpr(
+        self: *SymbolicEngine,
+        step: SemanticStepCandidate,
+        expr_id: ExprId,
+        state: *MatchSession,
+    ) anyerror!?*const SymbolicExpr {
+        return switch (step) {
+            .unfold_concrete_def => |unfold| if (unfold.expr_id != expr_id)
+                null
+            else
+                try self.expandConcreteDef(expr_id, state),
+            .unfold_symbolic_def => null,
+            .rewrite_rule => |rule| try self.applyRewriteRuleToExpr(
+                rule,
+                expr_id,
+                state,
+            ),
+            .acui => |acui| try self.applyAcuiToExpr(acui, expr_id),
+        };
+    }
+
+    fn applySemanticStepToSymbolic(
+        self: *SymbolicEngine,
+        step: SemanticStepCandidate,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!?*const SymbolicExpr {
+        return switch (step) {
+            .unfold_concrete_def => switch (symbolic.*) {
+                .fixed => |expr_id| blk: {
+                    if (expr_id != step.unfold_concrete_def.expr_id) {
+                        break :blk null;
+                    }
+                    break :blk try self.expandConcreteDef(expr_id, state);
+                },
+                else => null,
+            },
+            .unfold_symbolic_def => |unfold| switch (symbolic.*) {
+                .app => |app| if (app.term_id != unfold.term_id)
+                    null
+                else
+                    try self.expandSymbolicApp(app, state),
+                .fixed => |expr_id| blk: {
+                    const node = self.shared.theorem.interner.node(expr_id);
+                    const app = switch (node.*) {
+                        .app => |value| value,
+                        .variable => break :blk null,
+                    };
+                    if (app.term_id != unfold.term_id) break :blk null;
+                    break :blk try self.expandConcreteDef(expr_id, state);
+                },
+                else => null,
+            },
+            .rewrite_rule => |rule| try self.applyRewriteRuleToSymbolic(
+                rule,
+                symbolic,
+                state,
+            ),
+            .acui => |acui| try self.applyAcuiToSymbolic(acui, symbolic, state),
+        };
+    }
+
+    fn applyAcuiToExpr(
+        self: *SymbolicEngine,
+        acui: ResolvedStructuralCombiner,
+        expr_id: ExprId,
+    ) anyerror!?*const SymbolicExpr {
+        const registry = self.shared.registry orelse return null;
+        var support = AcuiSupport.Context.init(
+            self.shared.allocator,
+            self.shared.theorem,
+            self.shared.env,
+            registry,
+        );
+        const canonical = try support.canonicalizeAcui(expr_id, acui);
+        if (canonical == expr_id) return null;
+        return try self.allocSymbolic(.{ .fixed = canonical });
+    }
+
+    fn applyAcuiToSymbolic(
+        self: *SymbolicEngine,
+        acui: ResolvedStructuralCombiner,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!?*const SymbolicExpr {
+        const plain = switch (symbolic.*) {
+            .fixed => |expr_id| expr_id,
+            else => (try self.symbolicToConcreteIfPlain(symbolic, state)) orelse {
+                return null;
+            },
+        };
+        return try self.applyAcuiToExpr(acui, plain);
+    }
+
+    fn noteSemanticExprSearchState(
+        self: *SymbolicEngine,
+        lhs: *const SymbolicExpr,
+        rhs: ExprId,
+        state: *const MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        return try self.noteSemanticSearchState(
+            self.hashSymbolicForSearch(lhs),
+            self.hashExprForSearch(rhs),
+            state,
+            budget,
+            visited,
+        );
+    }
+
+    fn noteExprSemanticSearchState(
+        self: *SymbolicEngine,
+        lhs: ExprId,
+        rhs: *const SymbolicExpr,
+        state: *const MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        return try self.noteSemanticSearchState(
+            self.hashExprForSearch(lhs),
+            self.hashSymbolicForSearch(rhs),
+            state,
+            budget,
+            visited,
+        );
+    }
+
+    fn noteSymbolicSemanticSearchState(
+        self: *SymbolicEngine,
+        lhs: *const SymbolicExpr,
+        rhs: *const SymbolicExpr,
+        state: *const MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        return try self.noteSemanticSearchState(
+            self.hashSymbolicForSearch(lhs),
+            self.hashSymbolicForSearch(rhs),
+            state,
+            budget,
+            visited,
+        );
+    }
+
+    fn noteSemanticSearchState(
+        self: *SymbolicEngine,
+        lhs_hash: u64,
+        rhs_hash: u64,
+        state: *const MatchSession,
+        budget: usize,
+        visited: *SemanticSearchVisited,
+    ) anyerror!bool {
+        const key = SemanticSearchKey{
+            .lhs_hash = lhs_hash,
+            .rhs_hash = rhs_hash,
+            .state_hash = try self.hashMatchSessionForSearch(state),
+        };
+        const entry = try visited.getOrPut(self.shared.allocator, key);
+        if (entry.found_existing) {
+            if (entry.value_ptr.* >= budget) return false;
+        }
+        entry.value_ptr.* = budget;
+        return true;
+    }
+
+    fn hashExprForSearch(
+        self: *SymbolicEngine,
+        expr_id: ExprId,
+    ) u64 {
+        var hasher = std.hash.Wyhash.init(0x7419ef6a1fd348d1);
+        const tag: u8 = 1;
+        hasher.update(std.mem.asBytes(&tag));
+        hasher.update(std.mem.asBytes(&expr_id));
+        _ = self;
+        return hasher.final();
+    }
+
+    fn hashSymbolicForSearch(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+    ) u64 {
+        var hasher = std.hash.Wyhash.init(0x4fd443d41d41de49);
+        self.hashSymbolicExprForSearch(symbolic, &hasher);
+        return hasher.final();
+    }
+
+    fn hashSymbolicExprForSearch(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        hasher: *std.hash.Wyhash,
+    ) void {
+        switch (symbolic.*) {
+            .binder => |idx| {
+                const tag: u8 = 2;
+                hasher.update(std.mem.asBytes(&tag));
+                hasher.update(std.mem.asBytes(&idx));
+            },
+            .fixed => |expr_id| {
+                const tag: u8 = 3;
+                hasher.update(std.mem.asBytes(&tag));
+                hasher.update(std.mem.asBytes(&expr_id));
+            },
+            .dummy => |slot| {
+                const tag: u8 = 4;
+                hasher.update(std.mem.asBytes(&tag));
+                hasher.update(std.mem.asBytes(&slot));
+            },
+            .app => |app| {
+                const tag: u8 = 5;
+                hasher.update(std.mem.asBytes(&tag));
+                hasher.update(std.mem.asBytes(&app.term_id));
+                hasher.update(std.mem.asBytes(&app.args.len));
+                for (app.args) |arg| {
+                    self.hashSymbolicExprForSearch(arg, hasher);
+                }
+            },
+        }
+    }
+
+    fn hashMatchSessionForSearch(
+        self: *SymbolicEngine,
+        state: *const MatchSession,
+    ) anyerror!u64 {
+        var hasher = std.hash.Wyhash.init(0x9ff6116d7c0ed8a3);
+
+        hasher.update(std.mem.asBytes(&state.bindings.len));
+        for (state.bindings) |binding_opt| {
+            const present: u8 = if (binding_opt == null) 0 else 1;
+            hasher.update(std.mem.asBytes(&present));
+            if (binding_opt) |binding| {
+                try self.hashBoundValueForSearch(binding, &hasher);
+            }
+        }
+
+        hasher.update(std.mem.asBytes(&state.symbolic_dummy_infos.items.len));
+        for (state.symbolic_dummy_infos.items) |info| {
+            hasher.update(info.sort_name);
+        }
+
+        try self.hashWitnessMapForSearch(state.witnesses, &hasher);
+        try self.hashWitnessMapForSearch(
+            state.materialized_witnesses,
+            &hasher,
+        );
+        try self.hashWitnessSlotMapForSearch(
+            state.materialized_witness_slots,
+            &hasher,
+        );
+        return hasher.final();
+    }
+
+    fn hashBoundValueForSearch(
+        self: *SymbolicEngine,
+        bound: BoundValue,
+        hasher: *std.hash.Wyhash,
+    ) anyerror!void {
+        switch (bound) {
+            .concrete => |concrete| {
+                const tag: u8 = 6;
+                const mode = @intFromEnum(concrete.mode);
+                hasher.update(std.mem.asBytes(&tag));
+                hasher.update(std.mem.asBytes(&concrete.raw));
+                hasher.update(std.mem.asBytes(&mode));
+                self.hashSymbolicExprForSearch(concrete.repr, hasher);
+            },
+            .symbolic => |symbolic| {
+                const tag: u8 = 7;
+                const mode = @intFromEnum(symbolic.mode);
+                hasher.update(std.mem.asBytes(&tag));
+                hasher.update(std.mem.asBytes(&mode));
+                self.hashSymbolicExprForSearch(symbolic.expr, hasher);
+            },
+        }
+    }
+
+    fn hashWitnessMapForSearch(
+        self: *SymbolicEngine,
+        map: WitnessMap,
+        hasher: *std.hash.Wyhash,
+    ) anyerror!void {
+        var count: usize = 0;
+        var xor_acc: u64 = 0;
+        var sum_acc: u64 = 0;
+        var it = map.iterator();
+        while (it.next()) |entry| {
+            var entry_hasher = std.hash.Wyhash.init(0x0d48ab295c1ee8d7);
+            entry_hasher.update(std.mem.asBytes(entry.key_ptr));
+            entry_hasher.update(std.mem.asBytes(entry.value_ptr));
+            const entry_hash = entry_hasher.final();
+            count += 1;
+            xor_acc ^= entry_hash;
+            sum_acc +%= entry_hash;
+        }
+        const tag: u8 = 8;
+        hasher.update(std.mem.asBytes(&tag));
+        hasher.update(std.mem.asBytes(&count));
+        hasher.update(std.mem.asBytes(&xor_acc));
+        hasher.update(std.mem.asBytes(&sum_acc));
+        _ = self;
+    }
+
+    fn hashWitnessSlotMapForSearch(
+        self: *SymbolicEngine,
+        map: WitnessSlotMap,
+        hasher: *std.hash.Wyhash,
+    ) anyerror!void {
+        var count: usize = 0;
+        var xor_acc: u64 = 0;
+        var sum_acc: u64 = 0;
+        var it = map.iterator();
+        while (it.next()) |entry| {
+            var entry_hasher = std.hash.Wyhash.init(0x8c64a0f5a76d9f19);
+            entry_hasher.update(std.mem.asBytes(entry.key_ptr));
+            entry_hasher.update(std.mem.asBytes(entry.value_ptr));
+            const entry_hash = entry_hasher.final();
+            count += 1;
+            xor_acc ^= entry_hash;
+            sum_acc +%= entry_hash;
+        }
+        const tag: u8 = 9;
+        hasher.update(std.mem.asBytes(&tag));
+        hasher.update(std.mem.asBytes(&count));
+        hasher.update(std.mem.asBytes(&xor_acc));
+        hasher.update(std.mem.asBytes(&sum_acc));
+        _ = self;
+    }
+
+    pub fn applyRewriteRuleToExpr(
+        self: *SymbolicEngine,
+        rule: RewriteRule,
+        expr_id: ExprId,
+        state: *MatchSession,
+    ) anyerror!?*const SymbolicExpr {
+        const node = self.shared.theorem.interner.node(expr_id);
+        const app = switch (node.*) {
+            .app => |value| value,
+            .variable => return null,
+        };
+        if (app.term_id != rule.head_term_id) return null;
+
+        var snapshot = try self.saveMatchSnapshot(state);
+        defer self.deinitMatchSnapshot(&snapshot);
+
+        const rewrite_bindings = try self.shared.allocator.alloc(
+            ?BoundValue,
+            rule.num_binders,
+        );
+        defer self.shared.allocator.free(rewrite_bindings);
+        @memset(rewrite_bindings, null);
+
+        if (!try self.matchRewriteTemplateToExpr(
+            rule.lhs,
+            expr_id,
+            rewrite_bindings,
+            state,
+        )) {
+            try self.restoreMatchSnapshot(&snapshot, state);
+            return null;
+        }
+        if (!try self.validateRewriteRuleBindings(
+            rule,
+            rewrite_bindings,
+            state,
+        )) {
+            try self.restoreMatchSnapshot(&snapshot, state);
+            return null;
+        }
+        return try self.instantiateRewriteRuleRhs(
+            rule,
+            rewrite_bindings,
+        ) orelse blk: {
+            try self.restoreMatchSnapshot(&snapshot, state);
+            break :blk null;
+        };
+    }
+
+    pub fn applyRewriteRuleToSymbolic(
+        self: *SymbolicEngine,
+        rule: RewriteRule,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!?*const SymbolicExpr {
+        return switch (symbolic.*) {
+            .fixed => |expr_id| try self.applyRewriteRuleToExpr(
+                rule,
+                expr_id,
+                state,
+            ),
+            .app => |app| blk: {
+                if (app.term_id != rule.head_term_id) break :blk null;
+
+                var snapshot = try self.saveMatchSnapshot(state);
+                defer self.deinitMatchSnapshot(&snapshot);
+
+                const rewrite_bindings = try self.shared.allocator.alloc(
+                    ?BoundValue,
+                    rule.num_binders,
+                );
+                defer self.shared.allocator.free(rewrite_bindings);
+                @memset(rewrite_bindings, null);
+
+                if (!try self.matchRewriteTemplateToSymbolic(
+                    rule.lhs,
+                    symbolic,
+                    rewrite_bindings,
+                    state,
+                )) {
+                    try self.restoreMatchSnapshot(&snapshot, state);
+                    break :blk null;
+                }
+                if (!try self.validateRewriteRuleBindings(
+                    rule,
+                    rewrite_bindings,
+                    state,
+                )) {
+                    try self.restoreMatchSnapshot(&snapshot, state);
+                    break :blk null;
+                }
+                break :blk try self.instantiateRewriteRuleRhs(
+                    rule,
+                    rewrite_bindings,
+                ) orelse inner: {
+                    try self.restoreMatchSnapshot(&snapshot, state);
+                    break :inner null;
+                };
+            },
+            .binder, .dummy => null,
+        };
+    }
+
+    fn matchRewriteTemplateToExpr(
+        self: *SymbolicEngine,
+        template: TemplateExpr,
+        actual: ExprId,
+        rewrite_bindings: []?BoundValue,
+        state: *MatchSession,
+    ) anyerror!bool {
+        return switch (template) {
+            .binder => |idx| try self.assignRewriteBinderFromExpr(
+                rewrite_bindings,
+                idx,
+                actual,
+                state,
+            ),
+            .app => |tmpl_app| blk: {
+                const actual_node = self.shared.theorem.interner.node(actual);
+                const actual_app = switch (actual_node.*) {
+                    .app => |value| value,
+                    .variable => break :blk false,
+                };
+                if (actual_app.term_id != tmpl_app.term_id or
+                    actual_app.args.len != tmpl_app.args.len)
+                {
+                    break :blk false;
+                }
+
+                const saved = try self.shared.allocator.dupe(
+                    ?BoundValue,
+                    rewrite_bindings,
+                );
+                defer self.shared.allocator.free(saved);
+                var snapshot = try self.saveMatchSnapshot(state);
+                defer self.deinitMatchSnapshot(&snapshot);
+
+                for (tmpl_app.args, actual_app.args) |tmpl_arg, actual_arg| {
+                    if (!try self.matchRewriteTemplateToExpr(
+                        tmpl_arg,
+                        actual_arg,
+                        rewrite_bindings,
+                        state,
+                    )) {
+                        @memcpy(rewrite_bindings, saved);
+                        try self.restoreMatchSnapshot(&snapshot, state);
+                        break :blk false;
+                    }
+                }
+                break :blk true;
+            },
+        };
+    }
+
+    fn matchRewriteTemplateToSymbolic(
+        self: *SymbolicEngine,
+        template: TemplateExpr,
+        actual: *const SymbolicExpr,
+        rewrite_bindings: []?BoundValue,
+        state: *MatchSession,
+    ) anyerror!bool {
+        return switch (template) {
+            .binder => |idx| try self.assignRewriteBinderFromSymbolic(
+                rewrite_bindings,
+                idx,
+                actual,
+                state,
+            ),
+            .app => |tmpl_app| switch (actual.*) {
+                .fixed => |expr_id| try self.matchRewriteTemplateToExpr(
+                    template,
+                    expr_id,
+                    rewrite_bindings,
+                    state,
+                ),
+                .app => |actual_app| blk: {
+                    if (actual_app.term_id != tmpl_app.term_id or
+                        actual_app.args.len != tmpl_app.args.len)
+                    {
+                        break :blk false;
+                    }
+
+                    const saved = try self.shared.allocator.dupe(
+                        ?BoundValue,
+                        rewrite_bindings,
+                    );
+                    defer self.shared.allocator.free(saved);
+                    var snapshot = try self.saveMatchSnapshot(state);
+                    defer self.deinitMatchSnapshot(&snapshot);
+
+                    for (tmpl_app.args, actual_app.args) |tmpl_arg, actual_arg| {
+                        if (!try self.matchRewriteTemplateToSymbolic(
+                            tmpl_arg,
+                            actual_arg,
+                            rewrite_bindings,
+                            state,
+                        )) {
+                            @memcpy(rewrite_bindings, saved);
+                            try self.restoreMatchSnapshot(&snapshot, state);
+                            break :blk false;
+                        }
+                    }
+                    break :blk true;
+                },
+                .binder, .dummy => false,
+            },
+        };
+    }
+
+    fn assignRewriteBinderFromExpr(
+        self: *SymbolicEngine,
+        rewrite_bindings: []?BoundValue,
+        idx: usize,
+        actual: ExprId,
+        state: *MatchSession,
+    ) anyerror!bool {
+        if (idx >= rewrite_bindings.len) return false;
+        const value = try self.rebuildBoundValueFromState(
+            actual,
+            state,
+            .transparent,
+        );
+        if (rewrite_bindings[idx]) |existing| {
+            return try self.rewriteBoundValuesEql(existing, value);
+        }
+        rewrite_bindings[idx] = value;
+        return true;
+    }
+
+    fn assignRewriteBinderFromSymbolic(
+        self: *SymbolicEngine,
+        rewrite_bindings: []?BoundValue,
+        idx: usize,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!bool {
+        if (idx >= rewrite_bindings.len) return false;
+        const value = try self.rewriteBoundValueFromSymbolic(symbolic, state);
+        if (rewrite_bindings[idx]) |existing| {
+            return try self.rewriteBoundValuesEql(existing, value);
+        }
+        rewrite_bindings[idx] = value;
+        return true;
+    }
+
+    fn rewriteBoundValueFromSymbolic(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!BoundValue {
+        return switch (symbolic.*) {
+            .fixed => |expr_id| try self.rebuildBoundValueFromState(
+                expr_id,
+                state,
+                .transparent,
+            ),
+            else => self.makeSymbolicBoundValue(symbolic, .transparent),
+        };
+    }
+
+    fn rewriteBoundValuesEql(
+        self: *SymbolicEngine,
+        lhs: BoundValue,
+        rhs: BoundValue,
+    ) anyerror!bool {
+        const lhs_repr = try self.boundValueRepresentative(lhs);
+        const rhs_repr = try self.boundValueRepresentative(rhs);
+        return self.symbolicExprEql(lhs_repr, rhs_repr);
+    }
+
+    fn validateRewriteRuleBindings(
+        self: *SymbolicEngine,
+        rule: RewriteRule,
+        rewrite_bindings: []const ?BoundValue,
+        state: *MatchSession,
+    ) anyerror!bool {
+        if (rule.rule_id >= self.shared.env.rules.items.len) return false;
+        const rule_decl = &self.shared.env.rules.items[rule.rule_id];
+        if (rule_decl.args.len != rewrite_bindings.len) return false;
+
+        for (rule_decl.args, rewrite_bindings) |arg, binding_opt| {
+            const binding = binding_opt orelse return false;
+            const sort_name = try self.rewriteBoundValueSortName(
+                binding,
+                state,
+            ) orelse return false;
+            if (!std.mem.eql(u8, sort_name, arg.sort_name)) return false;
+            const actual_bound = try self.rewriteBoundValueIsBound(
+                binding,
+                state,
+            );
+            if (arg.bound and !actual_bound) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    fn rewriteBoundValueSortName(
+        self: *SymbolicEngine,
+        bound: BoundValue,
+        state: *MatchSession,
+    ) anyerror!?[]const u8 {
+        const symbolic = try self.boundValueRepresentative(bound);
+        return self.symbolicSortName(symbolic, state);
+    }
+
+    fn rewriteBoundValueIsBound(
+        self: *SymbolicEngine,
+        bound: BoundValue,
+        state: *MatchSession,
+    ) anyerror!bool {
+        _ = state;
+        const symbolic = try self.boundValueRepresentative(bound);
+        return try self.symbolicIsBound(symbolic);
+    }
+
+    fn symbolicIsBound(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+    ) anyerror!bool {
+        return switch (symbolic.*) {
+            .binder => false,
+            .dummy => true,
+            .app => false,
+            .fixed => |expr_id| blk: {
+                const node = self.shared.theorem.interner.node(expr_id);
+                switch (node.*) {
+                    .app => break :blk false,
+                    .variable => break :blk (try self.getConcreteVarInfo(expr_id)).bound,
+                }
+            },
+        };
+    }
+
+    fn instantiateRewriteRuleRhs(
+        self: *SymbolicEngine,
+        rule: RewriteRule,
+        rewrite_bindings: []const ?BoundValue,
+    ) anyerror!?*const SymbolicExpr {
+        const subst = try self.shared.allocator.alloc(
+            *const SymbolicExpr,
+            rewrite_bindings.len,
+        );
+        for (rewrite_bindings, 0..) |binding_opt, idx| {
+            const binding = binding_opt orelse return null;
+            subst[idx] = try self.boundValueRepresentative(binding);
+        }
+        return try self.symbolicFromTemplateSubst(rule.rhs, subst);
+    }
+
     pub fn matchTemplateTransparent(
         self: *SymbolicEngine,
         template: TemplateExpr,
@@ -177,6 +1530,42 @@ pub const SymbolicEngine = struct {
         return true;
     }
 
+    pub fn matchTemplateSemantic(
+        self: *SymbolicEngine,
+        template: TemplateExpr,
+        actual: ExprId,
+        bindings: []?ExprId,
+        budget: usize,
+    ) anyerror!bool {
+        var state = try MatchSession.init(self.shared.allocator, bindings.len);
+        defer state.deinit(self.shared.allocator);
+
+        var witness_slots: std.AutoHashMapUnmanaged(ExprId, usize) = .empty;
+        defer witness_slots.deinit(self.shared.allocator);
+        for (bindings, 0..) |binding, idx| {
+            state.bindings[idx] = if (binding) |expr_id|
+                try self.rebuildBoundValue(
+                    expr_id,
+                    &state,
+                    &witness_slots,
+                    .exact,
+                )
+            else
+                null;
+        }
+
+        if (!try self.matchTemplateSemanticState(
+            template,
+            actual,
+            &state,
+            budget,
+        )) {
+            return false;
+        }
+        try self.finalizeBindings(&state, bindings);
+        return true;
+    }
+
     fn instantiateDefTowardExpr(
         self: *SymbolicEngine,
         def_expr: ExprId,
@@ -190,33 +1579,25 @@ pub const SymbolicEngine = struct {
             &session,
         ) orelse return null;
 
-        var dummy_bindings = std.ArrayListUnmanaged(DummyBinding){};
-        defer dummy_bindings.deinit(self.shared.allocator);
-
-        if (!try self.matchSymbolicToExpr(
+        if (!try self.matchSymbolicToExprState(
             symbolic,
             target_expr,
             &session,
-            &[_]?ExprId{},
-            &dummy_bindings,
-            .transparent,
+        ) and !try self.matchSymbolicToExprSemantic(
+            symbolic,
+            target_expr,
+            &session,
+            semantic_match_budget,
         )) {
             return null;
         }
-        if (dummy_bindings.items.len != def.term.dummy_args.len) return null;
-
-        const binders = try self.shared.allocator.alloc(
-            ExprId,
-            def.term.args.len + def.term.dummy_args.len,
-        );
-        @memcpy(binders[0..def.term.args.len], def.app.args);
         for (def.term.dummy_args, 0..) |_, idx| {
-            const actual = findDummyBinding(dummy_bindings.items, idx) orelse {
-                return null;
-            };
-            binders[def.term.args.len + idx] = actual;
+            if (self.currentWitnessExpr(idx, &session) == null) return null;
         }
-        return try self.shared.theorem.instantiateTemplate(def.body, binders);
+        return try self.materializeRepresentativeSymbolic(
+            symbolic,
+            &session,
+        );
     }
 
     pub fn matchTemplateRecState(
@@ -987,7 +2368,26 @@ pub const SymbolicEngine = struct {
     ) anyerror!bool {
         if (idx >= state.bindings.len) return false;
         if (state.bindings[idx]) |existing| {
-            return try self.boundValueMatchesExpr(existing, actual, state);
+            if (!try self.boundValueMatchesExpr(existing, actual, state)) {
+                return false;
+            }
+            switch (existing) {
+                .concrete => {},
+                .symbolic => {
+                    // If a binder was first solved from a symbolic expansion
+                    // with hidden dummy slots, and we later see a concrete
+                    // proof expression that matches it, prefer the concrete
+                    // witness-preserving form over keeping the symbolic
+                    // placeholder. This avoids needlessly finalizing hidden
+                    // binders back into fresh theorem dummies.
+                    state.bindings[idx] = try self.rebuildBoundValueFromState(
+                        actual,
+                        state,
+                        mode,
+                    );
+                },
+            }
+            return true;
         }
         state.bindings[idx] = try self.rebuildBoundValueFromState(
             actual,
