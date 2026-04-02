@@ -30,6 +30,7 @@ pub const CrossChecker = struct {
     // Working storage for unify-stream replay: the saved-expression heap, the
     // expression traversal stack, and the non-recursive equality stack.
     uheap: [UHEAP_SIZE]*const Expr = undefined,
+    uheap_saved: [UHEAP_SIZE]bool = [_]bool{false} ** UHEAP_SIZE,
     uheap_len: usize = 0,
     ustack: [USTACK_SIZE]*const Expr = undefined,
     ustack_top: usize = 0,
@@ -178,6 +179,7 @@ pub const CrossChecker = struct {
         self.uheap_len = args.len;
         for (args, 0..) |expr, idx| {
             self.uheap[idx] = expr;
+            self.uheap_saved[idx] = false;
         }
 
         self.ustack_top = 1;
@@ -218,6 +220,7 @@ pub const CrossChecker = struct {
         if (save) {
             if (self.uheap_len >= UHEAP_SIZE) return error.UHeapOverflow;
             self.uheap[self.uheap_len] = expr;
+            self.uheap_saved[self.uheap_len] = true;
             self.uheap_len += 1;
         }
         var i: usize = term.args.len;
@@ -227,28 +230,35 @@ pub const CrossChecker = struct {
         }
     }
 
-    fn matchUDummy(
-        self: *CrossChecker,
-        sort_id: u32,
-        args: []const *const Expr,
-    ) !void {
+    fn matchUDummy(self: *CrossChecker, sort_id: u32) !void {
         const expr = try self.popUStack();
         const variable = switch (expr.*) {
             .variable => |v| v,
             else => return error.ExpectedVariable,
         };
-        if (variable.sort != @as(u7, @intCast(sort_id))) return error.SortMismatch;
-        for (args) |arg_expr| {
-            if (arg_expr == expr) return error.ExpectedDummy;
+        // Keep MM0/MMB replay aligned with the trusted verifier and
+        // vendored mm0-c: `UDummy` only matches bound variables. See
+        // third_party/mm0/mm0-c/verifier.c and
+        // third_party/mm0/mm0-rs/components/mm1_parser/src/ast.rs.
+        if (!variable.bound) return error.ExpectedBoundVar;
+        if (variable.sort != @as(u7, @intCast(sort_id))) {
+            return error.SortMismatch;
+        }
+        for (self.uheap[0..self.uheap_len], 0..) |heap_expr, idx| {
+            if (self.uheap_saved[idx]) continue;
+            if (heap_expr.deps() & expr.deps() != 0) {
+                return error.DepViolation;
+            }
         }
         if (self.uheap_len >= UHEAP_SIZE) return error.UHeapOverflow;
         self.uheap[self.uheap_len] = expr;
+        self.uheap_saved[self.uheap_len] = false;
         self.uheap_len += 1;
     }
 
     pub fn uopDummy(self: *CrossChecker, sort_id: u32) !void {
         return switch (self.unify_mode) {
-            .definition => self.matchUDummy(sort_id, self.unify_args),
+            .definition => self.matchUDummy(sort_id),
             .theorem => error.UDummyNotAllowed,
         };
     }

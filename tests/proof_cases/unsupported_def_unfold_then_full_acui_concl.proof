@@ -1,4 +1,4 @@
 unsupported_def_unfold_then_full_acui_concl
 -----------------------------------------
 
-l1: $ r , (u = u) |- u = u $ by pre_ctx_ax (u := $ u $, r := $ r $) []
+l1: $ r , (u = v) |- u = v $ by pre_ctx_ax (u := $ u $, r := $ r $) []

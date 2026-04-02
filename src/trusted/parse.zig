@@ -528,7 +528,8 @@ pub const MM0Parser = struct {
             try self.expect(close);
 
             for (names.items, is_dummy_buf.items) |name, is_dummy| {
-                const actual_arg = if (is_bound)
+                const treat_as_bound = is_bound or is_dummy;
+                const actual_arg = if (treat_as_bound)
                     ArgInfo{
                         .sort_name = arg.sort_name,
                         .bound = true,
@@ -541,7 +542,7 @@ pub const MM0Parser = struct {
                     actual_arg.bound,
                     actual_arg.deps,
                 );
-                if (is_bound) {
+                if (treat_as_bound) {
                     try ctx.bound_names.append(self.allocator, name);
                 }
                 if (!std.mem.eql(u8, name, "_")) {
@@ -1334,7 +1335,7 @@ pub const MM0Parser = struct {
                     var end = self.pos;
                     while (end > start and
                         (self.src[end - 1] == ' ' or self.src[end - 1] == '\t' or
-                        self.src[end - 1] == '\r'))
+                            self.src[end - 1] == '\r'))
                     {
                         end -= 1;
                     }

@@ -58,5 +58,5 @@ def pre_ctx (u: obj) {.x: obj}: wff =
 --| @normalize conc
 axiom pre_ctx_ax (u: obj): $ pre_ctx u $;
 
-theorem unsupported_def_unfold_then_acui_concl (u: obj):
-  $ u = u |- u = u $;
+theorem unsupported_def_unfold_then_acui_concl {u v: obj}:
+  $ u = v |- u = v $;

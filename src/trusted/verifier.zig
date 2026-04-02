@@ -668,14 +668,17 @@ pub const Verifier = struct {
         if (sort_id >= self.available_sorts) return error.InvalidSort;
 
         const expr = try self.ustack.pop();
-        // Must be a bound variable of the right sort
         const v = switch (expr.*) {
             .variable => |v| v,
             else => return error.ExpectedVariable,
         };
+        // mm0-c's verifier and the mm1 parser both treat `(.x)` and `{.x}`
+        // as dummy-bound variables, even though the written MMB `UDummy`
+        // rule does not spell out the boundness check. Keep that
+        // compatibility here. See third_party/mm0/mm0-c/verifier.c and
+        // third_party/mm0/mm0-rs/components/mm1_parser/src/ast.rs.
         if (!v.bound) return error.ExpectedBoundVar;
         if (v.sort != @as(u7, @intCast(sort_id))) return error.SortMismatch;
-        // Must not overlap with any non-saved expr already in uheap
         for (self.uheap.entries[0..self.uheap.len]) |prev| {
             if (prev.saved) continue;
             if (prev.expr.deps() & expr.deps() != 0) {

@@ -1174,6 +1174,98 @@ test "Verifier rejects dummy variables in free sorts" {
     );
 }
 
+test "Verifier requires bound variables for UDummy" {
+    const sorts = [_]Sort{.{}};
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        "",
+        &sorts,
+        &.{},
+        &.{},
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    verifier.available_sorts = 1;
+    verifier.unify_context = .defn;
+
+    const expr = try verifier.arena.allocator().create(Expr);
+    expr.* = .{ .variable = .{
+        .sort = 0,
+        .bound = false,
+        .deps = 0,
+    } };
+    try verifier.ustack.push(expr);
+
+    try std.testing.expectError(error.ExpectedBoundVar, verifier.uopDummy(0));
+}
+
+test "CrossChecker requires bound variables for UDummy" {
+    var checker = try CrossChecker.init("", std.testing.allocator);
+    defer checker.deinit(std.testing.allocator);
+
+    checker.unify_mode = .definition;
+
+    const expr = try checker.arena.allocator().create(Expr);
+    expr.* = .{ .variable = .{
+        .sort = 0,
+        .bound = false,
+        .deps = 0,
+    } };
+    checker.ustack[0] = expr;
+    checker.ustack_top = 1;
+
+    try std.testing.expectError(error.ExpectedBoundVar, checker.uopDummy(0));
+}
+
+test "Verifier rejects aliasing UDummy witnesses" {
+    const sorts = [_]Sort{.{}};
+    const verifier = try Verifier.init(
+        std.testing.allocator,
+        "",
+        &sorts,
+        &.{},
+        &.{},
+        null,
+    );
+    defer verifier.deinit(std.testing.allocator);
+
+    verifier.available_sorts = 1;
+    verifier.unify_context = .defn;
+
+    const expr = try verifier.arena.allocator().create(Expr);
+    expr.* = .{ .variable = .{
+        .sort = 0,
+        .bound = true,
+        .deps = 1,
+    } };
+    try verifier.uheap.push(expr);
+    try verifier.ustack.push(expr);
+
+    try std.testing.expectError(error.DepViolation, verifier.uopDummy(0));
+}
+
+test "CrossChecker rejects aliasing UDummy witnesses" {
+    var checker = try CrossChecker.init("", std.testing.allocator);
+    defer checker.deinit(std.testing.allocator);
+
+    checker.unify_mode = .definition;
+
+    const expr = try checker.arena.allocator().create(Expr);
+    expr.* = .{ .variable = .{
+        .sort = 0,
+        .bound = true,
+        .deps = 1,
+    } };
+    checker.uheap[0] = expr;
+    checker.uheap_saved[0] = false;
+    checker.uheap_len = 1;
+    checker.ustack[0] = expr;
+    checker.ustack_top = 1;
+
+    try std.testing.expectError(error.DepViolation, checker.uopDummy(0));
+}
+
 test "Verifier rejects strict bound theorem arguments" {
     const checker = NoopChecker{};
     const sorts = [_]Sort{.{ .strict = true, .provable = true }};

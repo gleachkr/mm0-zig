@@ -55,7 +55,7 @@ def pre_ctx (u: obj) {.x: obj}: wff =
   $ (hyp (u = x) , emp) |- (u = x) $;
 
 --| @normalize hyp0
-axiom use_pre_ctx (u: obj): $ pre_ctx u $ > $ u = u $;
+axiom use_pre_ctx (u v: obj): $ pre_ctx u $ > $ u = v $;
 
-theorem unsupported_def_unfold_then_acui_hyp (u: obj):
-  $ u = u $;
+theorem unsupported_def_unfold_then_acui_hyp {u v: obj}:
+  $ u = v $;
