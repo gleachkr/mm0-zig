@@ -202,6 +202,8 @@ pub const Solver = struct {
             };
             DerivedBindings.applyDerivedBindings(
                 self.theorem,
+                self.env,
+                self.registry,
                 view_bindings,
                 derived_bindings,
             ) catch |err| {

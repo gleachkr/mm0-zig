@@ -195,6 +195,8 @@ pub fn applyViewBindings(
 
     try DerivedBindings.applyDerivedBindings(
         theorem,
+        env,
+        registry,
         view_bindings,
         view.derived_bindings,
     );

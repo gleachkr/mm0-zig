@@ -41,6 +41,10 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom ctx_eq_congr (g1 g2 h1 h2: ctx):
   $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
   $ ctx_eq g1 h1 <-> ctx_eq g2 h2 $;
+--| @congr
+axiom sb_c_congr {x: ctx} (t u g h: ctx x):
+  $ ctx_eq t u $ > $ ctx_eq g h $ >
+  $ ctx_eq (subst x / t g) (subst x / u h) $;
 
 --| @rewrite
 axiom sb_c_var {x: ctx} (t: ctx x): $ ctx_eq (subst x / t x) t $;

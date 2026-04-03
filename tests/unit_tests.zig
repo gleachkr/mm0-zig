@@ -2886,48 +2886,19 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
             "unfold then rewrite; treating that as out of scope",
     },
     .{
-        .stem = "unsupported_def_unfold_then_rewrite_hyp",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "rewriting (hypothesis side); see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_view",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "rewriting during @view/@recover matching; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
         .stem = "unsupported_def_unfold_then_rewrite_recover",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "rewriting during less-direct @recover matching; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_abstract",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "rewriting during @view/@abstract matching; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_abstract_hyp",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "rewriting during @view/@abstract matching on the " ++
-            "hypothesis side; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
+        .reason = "@recover now finds the witness, but the cited ref still " ++
+            "misses unfold-then-rewrite alignment after substitution",
     },
     .{
         .stem = "unsupported_def_unfold_then_full_acui_abstract",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "full ACUI normalization during @view/@abstract matching; " ++
-            "see docs/design_notes/witness_driven_rewriting.md",
+        .reason = "@abstract now finds the context, but conclusion matching " ++
+            "still misses def-to-full-ACUI alignment after substitution",
     },
     .{
         .stem = "unsupported_def_unfold_then_full_acui_abstract_hyp",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "full ACUI normalization during @view/@abstract matching " ++
-            "on the hypothesis side; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
+        .reason = "@abstract now finds the context, but hypothesis matching " ++
+            "still misses def-to-full-ACUI alignment after substitution",
     },
 };
 
@@ -2999,14 +2970,8 @@ const proof_cases = [_]ProofCase{
         .stem = "unsupported_def_unfold_then_rewrite_concl",
         .outcome = .unsupported,
     },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_hyp",
-        .outcome = .unsupported,
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_view",
-        .outcome = .unsupported,
-    },
+    .{ .stem = "unsupported_def_unfold_then_rewrite_hyp", .outcome = .pass },
+    .{ .stem = "unsupported_def_unfold_then_rewrite_view", .outcome = .pass },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_recover",
         .outcome = .unsupported,
@@ -3015,11 +2980,11 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "unsupported_def_unfold_then_acui_hyp", .outcome = .pass },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_abstract",
-        .outcome = .unsupported,
+        .outcome = .pass,
     },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_abstract_hyp",
-        .outcome = .unsupported,
+        .outcome = .pass,
     },
     .{
         .stem = "unsupported_def_unfold_then_full_acui_concl",

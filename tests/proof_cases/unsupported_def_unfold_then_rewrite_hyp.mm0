@@ -77,6 +77,12 @@ axiom mor_eq_congr (f1 f2 g1 g2: mor):
 --| @congr
 axiom comp_congr (f1 f2 g1 g2: mor):
   $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ f1 o g1 ~ f2 o g2 $;
+--| @congr
+axiom sb_m_congr {x: mor} (t u a b: mor x):
+  $ t ~ u $ > $ a ~ b $ > $ subst x / t a ~ subst x / u b $;
+--| @congr
+axiom sb_f_congr {x: mor} (t u: mor x) (p q: wff x):
+  $ t ~ u $ > $ p <-> q $ > $ [x/t] p <-> [x/u] q $;
 
 --| @rewrite
 axiom comp_assoc (f g h: mor): $ (f o g) o h ~ f o (g o h) $;

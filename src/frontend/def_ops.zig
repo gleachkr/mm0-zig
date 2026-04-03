@@ -295,7 +295,7 @@ pub const Context = struct {
         return try symbolic_engine.boundValueFromSeed(seed, state, witness_slots);
     }
 
-    fn chooseRepresentative(
+    pub fn chooseRepresentative(
         self: *Context,
         expr_id: ExprId,
         mode: BindingMode,
