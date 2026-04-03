@@ -1059,6 +1059,7 @@ pub const SymbolicEngine = struct {
         hasher.update(std.mem.asBytes(&state.symbolic_dummy_infos.items.len));
         for (state.symbolic_dummy_infos.items) |info| {
             hasher.update(info.sort_name);
+            hasher.update(std.mem.asBytes(&info.bound));
         }
 
         try self.hashWitnessMapForSearch(state.witnesses, &hasher);
@@ -1572,6 +1573,24 @@ pub const SymbolicEngine = struct {
         target_expr: ExprId,
     ) anyerror!?ExprId {
         _ = self.getConcreteDef(def_expr) orelse return null;
+
+        if (try self.instantiateDefTowardExprViaSearch(
+            def_expr,
+            target_expr,
+        )) |witness| {
+            return witness;
+        }
+        return try self.instantiateDefTowardExprViaTargetGuidance(
+            def_expr,
+            target_expr,
+        );
+    }
+
+    fn instantiateDefTowardExprViaSearch(
+        self: *SymbolicEngine,
+        def_expr: ExprId,
+        target_expr: ExprId,
+    ) anyerror!?ExprId {
         var session = try MatchSession.init(self.shared.allocator, 0);
         defer session.deinit(self.shared.allocator);
         const symbolic = try self.expandConcreteDef(
@@ -1591,10 +1610,156 @@ pub const SymbolicEngine = struct {
         )) {
             return null;
         }
-        return try self.materializeFinalSymbolicForEscape(
+        return try self.materializeResolvedSymbolicForEscape(
             symbolic,
             &session,
         );
+    }
+
+    fn instantiateDefTowardExprViaTargetGuidance(
+        self: *SymbolicEngine,
+        def_expr: ExprId,
+        target_expr: ExprId,
+    ) anyerror!?ExprId {
+        var session = try MatchSession.init(self.shared.allocator, 0);
+        defer session.deinit(self.shared.allocator);
+        const symbolic = try self.expandConcreteDef(
+            def_expr,
+            &session,
+        ) orelse return null;
+
+        while (true) {
+            if (try self.materializeResolvedSymbolicForEscape(
+                symbolic,
+                &session,
+            )) |witness| {
+                return witness;
+            }
+            if (!try self.guideSymbolicWitnessesFromTarget(
+                symbolic,
+                target_expr,
+                &session,
+            )) {
+                return null;
+            }
+        }
+    }
+
+    fn guideSymbolicWitnessesFromTarget(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        target_expr: ExprId,
+        state: *MatchSession,
+    ) anyerror!bool {
+        const symbolic_app = switch (symbolic.*) {
+            .app => |app| app,
+            else => return false,
+        };
+        const target_node = self.shared.theorem.interner.node(target_expr);
+        const target_app = switch (target_node.*) {
+            .app => |app| app,
+            .variable => return try self.guideSymbolicWitnessesFromAcuiTarget(
+                symbolic,
+                target_expr,
+                state,
+            ),
+        };
+
+        if (symbolic_app.term_id == target_app.term_id and
+            symbolic_app.args.len == target_app.args.len)
+        {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            var made_progress = false;
+            var same_head_failed = false;
+            for (symbolic_app.args, target_app.args) |symbolic_arg, target_arg| {
+                if (try self.tryMatchSymbolicToExprDirect(
+                    symbolic_arg,
+                    target_arg,
+                    state,
+                )) {
+                    continue;
+                }
+                if (!try self.guideSymbolicWitnessesFromTarget(
+                    symbolic_arg,
+                    target_arg,
+                    state,
+                )) {
+                    same_head_failed = true;
+                    break;
+                }
+                made_progress = true;
+            }
+            if (!same_head_failed) {
+                if (made_progress) return true;
+                try self.restoreMatchSnapshot(&snapshot, state);
+            } else {
+                try self.restoreMatchSnapshot(&snapshot, state);
+            }
+        }
+
+        return try self.guideSymbolicWitnessesFromAcuiTarget(
+            symbolic,
+            target_expr,
+            state,
+        );
+    }
+
+    fn guideSymbolicWitnessesFromAcuiTarget(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        target_expr: ExprId,
+        state: *MatchSession,
+    ) anyerror!bool {
+        const registry = self.shared.registry orelse return false;
+        const symbolic_sort = self.symbolicSortName(symbolic, state) orelse {
+            return false;
+        };
+        const acui = registry.resolveStructuralCombinerForSort(
+            self.shared.env,
+            symbolic_sort,
+        ) orelse return false;
+
+        var support = AcuiSupport.Context.init(
+            self.shared.allocator,
+            self.shared.theorem,
+            self.shared.env,
+            registry,
+        );
+        if (!support.exprMatchesCombinerSort(target_expr, acui)) return false;
+
+        var items = std.ArrayListUnmanaged(ExprId){};
+        defer items.deinit(self.shared.allocator);
+        try support.collectConcreteSetItems(
+            target_expr,
+            acui.head_term_id,
+            acui.unit_term_id,
+            &items,
+        );
+
+        for (items.items) |item_expr| {
+            var snapshot = try self.saveMatchSnapshot(state);
+            defer self.deinitMatchSnapshot(&snapshot);
+
+            if (!try self.matchSymbolicAcuiLeafToExprState(
+                symbolic,
+                item_expr,
+                acui.head_term_id,
+                state,
+            ) and !try self.matchSymbolicAcuiLeafToExprSemantic(
+                symbolic,
+                item_expr,
+                acui.head_term_id,
+                state,
+                semantic_match_budget,
+            )) {
+                try self.restoreMatchSnapshot(&snapshot, state);
+                continue;
+            }
+            return true;
+        }
+        return false;
     }
 
     pub fn matchTemplateRecState(
@@ -2336,7 +2501,7 @@ pub const SymbolicEngine = struct {
         dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
     ) anyerror!bool {
         const actual_info = try self.getConcreteVarInfo(actual);
-        if (!actual_info.bound) return false;
+        if (info.bound and !actual_info.bound) return false;
         if (!std.mem.eql(u8, info.sort_name, actual_info.sort_name)) {
             return false;
         }
@@ -3269,7 +3434,7 @@ pub const SymbolicEngine = struct {
         state: *MatchSession,
     ) anyerror!bool {
         const actual_info = try self.getConcreteVarInfo(actual);
-        if (!actual_info.bound) return false;
+        if (info.bound and !actual_info.bound) return false;
         if (!std.mem.eql(u8, info.sort_name, actual_info.sort_name)) {
             return false;
         }
@@ -3315,6 +3480,9 @@ pub const SymbolicEngine = struct {
                 const lhs_info = state.symbolic_dummy_infos.items[slot];
                 const rhs_info = state.symbolic_dummy_infos.items[rhs_slot];
                 if (!std.mem.eql(u8, lhs_info.sort_name, rhs_info.sort_name)) {
+                    return false;
+                }
+                if (lhs_info.bound != rhs_info.bound) {
                     return false;
                 }
                 if (slot == rhs_slot) return true;
@@ -3457,6 +3625,64 @@ pub const SymbolicEngine = struct {
         return try self.chooseRepresentative(expr_id, mode);
     }
 
+    fn materializeResolvedBoundValue(
+        self: *SymbolicEngine,
+        bound: BoundValue,
+        state: *MatchSession,
+    ) anyerror!?ExprId {
+        return switch (bound) {
+            .concrete => |concrete| try self.concreteBindingMatchExpr(
+                concrete,
+                state,
+            ),
+            .symbolic => |symbolic| blk: {
+                const expr_id = (try self.materializeResolvedSymbolicForEscape(
+                    symbolic.expr,
+                    state,
+                )) orelse break :blk null;
+                break :blk try self.chooseRepresentative(
+                    expr_id,
+                    symbolic.mode,
+                );
+            },
+        };
+    }
+
+    fn materializeResolvedSymbolicForEscape(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!?ExprId {
+        return switch (symbolic.*) {
+            .binder => |idx| blk: {
+                if (idx >= state.bindings.len) {
+                    return error.TemplateBinderOutOfRange;
+                }
+                const bound = state.bindings[idx] orelse break :blk null;
+                break :blk try self.materializeResolvedBoundValue(
+                    bound,
+                    state,
+                );
+            },
+            .fixed => |expr_id| expr_id,
+            .dummy => |slot| self.currentWitnessExpr(slot, state),
+            .app => |app| blk: {
+                const args = try self.shared.allocator.alloc(ExprId, app.args.len);
+                errdefer self.shared.allocator.free(args);
+                for (app.args, 0..) |arg, idx| {
+                    args[idx] = (try self.materializeResolvedSymbolicForEscape(
+                        arg,
+                        state,
+                    )) orelse break :blk null;
+                }
+                break :blk try self.shared.theorem.interner.internAppOwned(
+                    app.term_id,
+                    args,
+                );
+            },
+        };
+    }
+
     fn materializeFinalSymbolicForEscape(
         self: *SymbolicEngine,
         symbolic: *const SymbolicExpr,
@@ -3562,7 +3788,10 @@ pub const SymbolicEngine = struct {
                         return error.UnknownDummyVar;
                     }
                     const dummy = self.shared.theorem.theorem_dummies.items[idx];
-                    break :blk .{ .sort_name = dummy.sort_name };
+                    break :blk .{
+                        .sort_name = dummy.sort_name,
+                        .bound = true,
+                    };
                 },
             },
         };
@@ -3617,6 +3846,7 @@ pub const SymbolicEngine = struct {
             const slot = state.symbolic_dummy_infos.items.len;
             try state.symbolic_dummy_infos.append(self.shared.allocator, .{
                 .sort_name = dummy_arg.sort_name,
+                .bound = dummy_arg.bound,
             });
             subst[term.args.len + idx] = try self.allocSymbolic(
                 .{ .dummy = slot },
@@ -3643,6 +3873,7 @@ pub const SymbolicEngine = struct {
             const slot = state.symbolic_dummy_infos.items.len;
             try state.symbolic_dummy_infos.append(self.shared.allocator, .{
                 .sort_name = dummy_arg.sort_name,
+                .bound = dummy_arg.bound,
             });
             subst[def.term.args.len + idx] = try self.allocSymbolic(
                 .{ .dummy = slot },
@@ -3668,6 +3899,7 @@ pub const SymbolicEngine = struct {
             const slot = state.symbolic_dummy_infos.items.len;
             try state.symbolic_dummy_infos.append(self.shared.allocator, .{
                 .sort_name = dummy_arg.sort_name,
+                .bound = dummy_arg.bound,
             });
             subst[term.args.len + idx] = try self.allocSymbolic(
                 .{ .dummy = slot },

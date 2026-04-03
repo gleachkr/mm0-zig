@@ -18,6 +18,7 @@ pub const ConversionPlan = union(enum) {
 
 pub const SymbolicDummyInfo = struct {
     sort_name: []const u8,
+    bound: bool,
 };
 
 pub const SymbolicExpr = union(enum) {

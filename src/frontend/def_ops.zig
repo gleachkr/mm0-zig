@@ -728,12 +728,24 @@ const SemanticAcuiExposureFixture = struct {
     registry: RewriteRegistry,
     theorem: TheoremContext,
     pre_ctx_expr: ExprId,
-    item_expr: ExprId,
-    rejected_item_expr: ExprId,
-    expected_witness: ExprId,
+    bound_item_expr: ExprId,
+    free_item_expr: ExprId,
+    expected_bound_witness: ExprId,
+    expected_free_witness: ExprId,
     join_term_id: u32,
 
-    fn init() !SemanticAcuiExposureFixture {
+    fn init(
+        comptime hidden_bound: bool,
+        comptime host_u_bound: bool,
+    ) !SemanticAcuiExposureFixture {
+        const hidden_binder = if (hidden_bound)
+            "def pre_ctx (u: obj) {.x: obj}: ctx = $ box (hyp (u = x)) $;\n\n"
+        else
+            "def pre_ctx (u: obj) (.x: obj): ctx = $ box (hyp (u = x)) $;\n\n";
+        const host_decl = if (host_u_bound)
+            "theorem host {x u: obj}: $ ctx_eq emp emp $;\n"
+        else
+            "theorem host {x: obj} (u: obj): $ ctx_eq emp emp $;\n";
         const src =
             \\delimiter $ ( ) $;
             \\provable sort wff;
@@ -764,10 +776,7 @@ const SemanticAcuiExposureFixture = struct {
             \\--| @rewrite
             \\axiom box_flat (g: ctx): $ ctx_eq (box g) (emp , g) $;
             \\
-            \\def pre_ctx (u: obj) {.x: obj}: ctx = $ box (hyp (u = x)) $;
-            \\
-            \\theorem host {x: obj} (u: obj): $ ctx_eq emp emp $;
-        ;
+        ++ hidden_binder ++ host_decl;
 
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
         errdefer arena.deinit();
@@ -807,17 +816,8 @@ const SemanticAcuiExposureFixture = struct {
         const host = host_assertion orelse return error.MissingAssertion;
         try theorem.seedAssertion(host);
 
-        var bound_var: ?ExprId = null;
-        var free_var: ?ExprId = null;
-        for (theorem.arg_infos, theorem.theorem_vars.items) |arg, expr_id| {
-            if (arg.bound) {
-                bound_var = expr_id;
-            } else {
-                free_var = expr_id;
-            }
-        }
-        const x = bound_var orelse return error.MissingBoundVar;
-        const u = free_var orelse return error.MissingFreeVar;
+        const x = theorem.theorem_vars.items[0];
+        const u = theorem.theorem_vars.items[1];
 
         const eq_term_id = env.term_names.get("eq") orelse {
             return error.MissingTerm;
@@ -835,29 +835,33 @@ const SemanticAcuiExposureFixture = struct {
             return error.MissingTerm;
         };
 
-        const item_eq = try theorem.interner.internApp(
+        const bound_item_eq = try theorem.interner.internApp(
             eq_term_id,
             &[_]ExprId{ u, x },
         );
-        const item_expr = try theorem.interner.internApp(
+        const bound_item_expr = try theorem.interner.internApp(
             hyp_term_id,
-            &[_]ExprId{item_eq},
+            &[_]ExprId{bound_item_eq},
         );
-        const rejected_item_eq = try theorem.interner.internApp(
+        const free_item_eq = try theorem.interner.internApp(
             eq_term_id,
             &[_]ExprId{ u, u },
         );
-        const rejected_item_expr = try theorem.interner.internApp(
+        const free_item_expr = try theorem.interner.internApp(
             hyp_term_id,
-            &[_]ExprId{rejected_item_eq},
+            &[_]ExprId{free_item_eq},
         );
         const pre_ctx_expr = try theorem.interner.internApp(
             pre_ctx_term_id,
             &[_]ExprId{u},
         );
-        const expected_witness = try theorem.interner.internApp(
+        const expected_bound_witness = try theorem.interner.internApp(
             box_term_id,
-            &[_]ExprId{item_expr},
+            &[_]ExprId{bound_item_expr},
+        );
+        const expected_free_witness = try theorem.interner.internApp(
+            box_term_id,
+            &[_]ExprId{free_item_expr},
         );
 
         return .{
@@ -866,14 +870,452 @@ const SemanticAcuiExposureFixture = struct {
             .registry = registry,
             .theorem = theorem,
             .pre_ctx_expr = pre_ctx_expr,
-            .item_expr = item_expr,
-            .rejected_item_expr = rejected_item_expr,
-            .expected_witness = expected_witness,
+            .bound_item_expr = bound_item_expr,
+            .free_item_expr = free_item_expr,
+            .expected_bound_witness = expected_bound_witness,
+            .expected_free_witness = expected_free_witness,
             .join_term_id = join_term_id,
         };
     }
 
     fn deinit(self: *SemanticAcuiExposureFixture) void {
+        self.theorem.deinit();
+        self.arena.deinit();
+    }
+};
+
+const SemanticWrappedAcuiDefFixture = struct {
+    arena: std.heap.ArenaAllocator,
+    env: GlobalEnv,
+    registry: RewriteRegistry,
+    theorem: TheoremContext,
+    pre_ctx_expr: ExprId,
+    target_expr: ExprId,
+    expected_witness: ExprId,
+
+    fn init(
+        comptime full_acui: bool,
+        comptime hidden_bound: bool,
+        comptime host_u_bound: bool,
+    ) !SemanticWrappedAcuiDefFixture {
+        const hidden_binder = if (hidden_bound) "{.x: obj}" else "(.x: obj)";
+        const def_body = if (full_acui)
+            "def pre_ctx (u: obj) (r: wff) " ++ hidden_binder ++ ": wff =\n" ++
+                "  $ ((emp , hyp (u = x)) , (hyp r , " ++
+                "(hyp (u = x) , emp))) |- (u = x) $;\n\n"
+        else
+            "def pre_ctx (u: obj) " ++ hidden_binder ++ ": wff =\n" ++
+                "  $ (hyp (u = x) , emp) |- (u = x) $;\n\n";
+        const host = if (full_acui)
+            if (host_u_bound)
+                "theorem host {u v: obj} (r: wff): $ u = v $;\n"
+            else
+                "theorem host (u: obj) (r: wff): $ u = u $;\n"
+        else if (host_u_bound)
+            "theorem host {u v: obj}: $ u = v $;\n"
+        else
+            "theorem host (u: obj): $ u = u $;\n";
+        const src =
+            \\delimiter $ ( ) $;
+            \\provable sort wff;
+            \\sort ctx;
+            \\sort obj;
+            \\
+            \\term iff (a b: wff): wff;
+            \\infixr iff: $<->$ prec 20;
+            \\term eq (a b: obj): wff;
+            \\infixl eq: $=$ prec 35;
+            \\
+            \\term ctx_eq (g h: ctx): wff;
+            \\term emp: ctx;
+            \\--| @acui ctx_assoc ctx_comm emp ctx_idem
+            \\term join (g h: ctx): ctx;
+            \\infixl join: $,$ prec 5;
+            \\term hyp (a: wff): ctx;
+            \\coercion hyp: wff > ctx;
+            \\term nd (g: ctx) (a: wff): wff;
+            \\infixl nd: $|-$ prec 0;
+            \\
+            \\--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+            \\axiom iff_refl (a: wff): $ a <-> a $;
+            \\axiom iff_trans (a b c: wff):
+            \\  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+            \\axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+            \\axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+            \\
+            \\--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+            \\axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+            \\axiom ctx_trans (g h i: ctx):
+            \\  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+            \\axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+            \\axiom ctx_assoc (g h i: ctx):
+            \\  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+            \\axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+            \\axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+            \\axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+            \\
+            \\--| @congr
+            \\axiom join_congr (g1 g2 h1 h2: ctx):
+            \\  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+            \\  $ ctx_eq (g1 , h1) (g2 , h2) $;
+            \\
+            \\--| @congr
+            \\axiom nd_congr (g h: ctx) (a b: wff):
+            \\  $ ctx_eq g h $ > $ a <-> b $ > $ (g |- a) <-> (h |- b) $;
+            \\
+        ++ def_body ++ host;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        errdefer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        var env = GlobalEnv.init(arena.allocator());
+        var registry = RewriteRegistry.init(arena.allocator());
+        var host_assertion: ?AssertionStmt = null;
+
+        while (try parser.next()) |stmt| {
+            switch (stmt) {
+                .sort => try env.addStmt(stmt),
+                .term => |term_stmt| {
+                    try env.addStmt(stmt);
+                    try registry.processAnnotations(
+                        &env,
+                        term_stmt.name,
+                        parser.last_annotations,
+                    );
+                },
+                .assertion => |assertion| {
+                    try env.addStmt(stmt);
+                    try registry.processAnnotations(
+                        &env,
+                        assertion.name,
+                        parser.last_annotations,
+                    );
+                    if (std.mem.eql(u8, assertion.name, "host")) {
+                        host_assertion = assertion;
+                    }
+                },
+            }
+        }
+
+        var theorem = TheoremContext.init(arena.allocator());
+        errdefer theorem.deinit();
+        const host_stmt = host_assertion orelse return error.MissingAssertion;
+        try theorem.seedAssertion(host_stmt);
+
+        const u = theorem.theorem_vars.items[0];
+        const v: ExprId = if (host_u_bound)
+            theorem.theorem_vars.items[1]
+        else
+            u;
+        const r: ?ExprId = if (full_acui)
+            theorem.theorem_vars.items[if (host_u_bound) 2 else 1]
+        else
+            null;
+        const eq_term_id = env.term_names.get("eq") orelse {
+            return error.MissingTerm;
+        };
+        const hyp_term_id = env.term_names.get("hyp") orelse {
+            return error.MissingTerm;
+        };
+        const nd_term_id = env.term_names.get("nd") orelse {
+            return error.MissingTerm;
+        };
+        const join_term_id = env.term_names.get("join") orelse {
+            return error.MissingTerm;
+        };
+        const emp_term_id = env.term_names.get("emp") orelse {
+            return error.MissingTerm;
+        };
+        const pre_ctx_term_id = env.term_names.get("pre_ctx") orelse {
+            return error.MissingTerm;
+        };
+
+        const eq_uv = try theorem.interner.internApp(
+            eq_term_id,
+            &[_]ExprId{ u, v },
+        );
+        const hyp_uv = try theorem.interner.internApp(
+            hyp_term_id,
+            &[_]ExprId{eq_uv},
+        );
+        const target_ctx = if (full_acui)
+            try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{
+                    try theorem.interner.internApp(
+                        hyp_term_id,
+                        &[_]ExprId{r.?},
+                    ),
+                    hyp_uv,
+                },
+            )
+        else
+            hyp_uv;
+        const target_expr = try theorem.interner.internApp(
+            nd_term_id,
+            &[_]ExprId{ target_ctx, eq_uv },
+        );
+        const emp_expr = try theorem.interner.internApp(emp_term_id, &.{});
+        const expected_ctx = if (full_acui) blk: {
+            const left = try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{ emp_expr, hyp_uv },
+            );
+            const r_ctx = try theorem.interner.internApp(
+                hyp_term_id,
+                &[_]ExprId{r.?},
+            );
+            const right_tail = try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{ hyp_uv, emp_expr },
+            );
+            const right = try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{ r_ctx, right_tail },
+            );
+            break :blk try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{ left, right },
+            );
+        } else try theorem.interner.internApp(
+            join_term_id,
+            &[_]ExprId{ hyp_uv, emp_expr },
+        );
+        const expected_witness = try theorem.interner.internApp(
+            nd_term_id,
+            &[_]ExprId{ expected_ctx, eq_uv },
+        );
+        const pre_ctx_expr = if (full_acui)
+            try theorem.interner.internApp(
+                pre_ctx_term_id,
+                &[_]ExprId{ u, r.? },
+            )
+        else
+            try theorem.interner.internApp(
+                pre_ctx_term_id,
+                &[_]ExprId{u},
+            );
+
+        return .{
+            .arena = arena,
+            .env = env,
+            .registry = registry,
+            .theorem = theorem,
+            .pre_ctx_expr = pre_ctx_expr,
+            .target_expr = target_expr,
+            .expected_witness = expected_witness,
+        };
+    }
+
+    fn deinit(self: *SemanticWrappedAcuiDefFixture) void {
+        self.theorem.deinit();
+        self.arena.deinit();
+    }
+};
+
+
+const SemanticQuantifiedAcuiDefFixture = struct {
+    arena: std.heap.ArenaAllocator,
+    env: GlobalEnv,
+    registry: RewriteRegistry,
+    theorem: TheoremContext,
+    pre_ctx_expr: ExprId,
+    target_expr: ExprId,
+    expected_witness: ExprId,
+
+    fn init(comptime full_acui: bool) !SemanticQuantifiedAcuiDefFixture {
+        const def_body = if (full_acui)
+            "def pre_ctx (u: obj) (r: wff) {.x: obj}: wff =\n" ++
+                "  $ A. x (((emp , hyp (u = x)) , (hyp r , " ++
+                "(hyp (u = x) , emp))) |- (u = x)) $;\n\n"
+        else
+            "def pre_ctx (u: obj) {.x: obj}: wff =\n" ++
+                "  $ A. x ((hyp (u = x) , emp) |- (u = x)) $;\n\n";
+        const host = if (full_acui)
+            "theorem host {u v: obj} (r: wff): $ u = v $;\n"
+        else
+            "theorem host {u v: obj}: $ u = v $;\n";
+        const src =
+            \\delimiter $ ( ) $;
+            \\provable sort wff;
+            \\sort ctx;
+            \\sort obj;
+            \\
+            \\term all {x: obj} (p: wff x): wff;
+            \\prefix all: $A.$ prec 41;
+            \\term eq (a b: obj): wff;
+            \\infixl eq: $=$ prec 35;
+            \\term ctx_eq (g h: ctx): wff;
+            \\term emp: ctx;
+            \\--| @acui ctx_assoc ctx_comm emp ctx_idem
+            \\term join (g h: ctx): ctx;
+            \\infixl join: $,$ prec 5;
+            \\term hyp (a: wff): ctx;
+            \\coercion hyp: wff > ctx;
+            \\term nd (g: ctx) (a: wff): wff;
+            \\infixl nd: $|-$ prec 0;
+            \\
+            \\axiom ctx_assoc (g h i: ctx):
+            \\  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+            \\axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+            \\axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+            \\axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+            \\
+        ++ def_body ++ host;
+
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        errdefer arena.deinit();
+
+        var parser = MM0Parser.init(src, arena.allocator());
+        var env = GlobalEnv.init(arena.allocator());
+        var registry = RewriteRegistry.init(arena.allocator());
+        var host_assertion: ?AssertionStmt = null;
+
+        while (try parser.next()) |stmt| {
+            switch (stmt) {
+                .sort => try env.addStmt(stmt),
+                .term => |term_stmt| {
+                    try env.addStmt(stmt);
+                    try registry.processAnnotations(
+                        &env,
+                        term_stmt.name,
+                        parser.last_annotations,
+                    );
+                },
+                .assertion => |assertion| {
+                    try env.addStmt(stmt);
+                    try registry.processAnnotations(
+                        &env,
+                        assertion.name,
+                        parser.last_annotations,
+                    );
+                    if (std.mem.eql(u8, assertion.name, "host")) {
+                        host_assertion = assertion;
+                    }
+                },
+            }
+        }
+
+        var theorem = TheoremContext.init(arena.allocator());
+        errdefer theorem.deinit();
+        const host_stmt = host_assertion orelse return error.MissingAssertion;
+        try theorem.seedAssertion(host_stmt);
+
+        const u = theorem.theorem_vars.items[0];
+        const v = theorem.theorem_vars.items[1];
+        const r: ?ExprId = if (full_acui)
+            theorem.theorem_vars.items[2]
+        else
+            null;
+        const all_term_id = env.term_names.get("all") orelse {
+            return error.MissingTerm;
+        };
+        const eq_term_id = env.term_names.get("eq") orelse {
+            return error.MissingTerm;
+        };
+        const hyp_term_id = env.term_names.get("hyp") orelse {
+            return error.MissingTerm;
+        };
+        const nd_term_id = env.term_names.get("nd") orelse {
+            return error.MissingTerm;
+        };
+        const join_term_id = env.term_names.get("join") orelse {
+            return error.MissingTerm;
+        };
+        const emp_term_id = env.term_names.get("emp") orelse {
+            return error.MissingTerm;
+        };
+        const pre_ctx_term_id = env.term_names.get("pre_ctx") orelse {
+            return error.MissingTerm;
+        };
+
+        const eq_uv = try theorem.interner.internApp(
+            eq_term_id,
+            &[_]ExprId{ u, v },
+        );
+        const hyp_uv = try theorem.interner.internApp(
+            hyp_term_id,
+            &[_]ExprId{eq_uv},
+        );
+        const target_ctx = if (full_acui)
+            try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{
+                    try theorem.interner.internApp(
+                        hyp_term_id,
+                        &[_]ExprId{r.?},
+                    ),
+                    hyp_uv,
+                },
+            )
+        else
+            hyp_uv;
+        const target_nd = try theorem.interner.internApp(
+            nd_term_id,
+            &[_]ExprId{ target_ctx, eq_uv },
+        );
+        const target_expr = try theorem.interner.internApp(
+            all_term_id,
+            &[_]ExprId{ v, target_nd },
+        );
+        const emp_expr = try theorem.interner.internApp(emp_term_id, &.{});
+        const expected_ctx = if (full_acui) blk: {
+            const left = try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{ emp_expr, hyp_uv },
+            );
+            const r_ctx = try theorem.interner.internApp(
+                hyp_term_id,
+                &[_]ExprId{r.?},
+            );
+            const right_tail = try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{ hyp_uv, emp_expr },
+            );
+            const right = try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{ r_ctx, right_tail },
+            );
+            break :blk try theorem.interner.internApp(
+                join_term_id,
+                &[_]ExprId{ left, right },
+            );
+        } else try theorem.interner.internApp(
+            join_term_id,
+            &[_]ExprId{ hyp_uv, emp_expr },
+        );
+        const expected_nd = try theorem.interner.internApp(
+            nd_term_id,
+            &[_]ExprId{ expected_ctx, eq_uv },
+        );
+        const expected_witness = try theorem.interner.internApp(
+            all_term_id,
+            &[_]ExprId{ v, expected_nd },
+        );
+        const pre_ctx_expr = if (full_acui)
+            try theorem.interner.internApp(
+                pre_ctx_term_id,
+                &[_]ExprId{ u, r.? },
+            )
+        else
+            try theorem.interner.internApp(
+                pre_ctx_term_id,
+                &[_]ExprId{u},
+            );
+
+        return .{
+            .arena = arena,
+            .env = env,
+            .registry = registry,
+            .theorem = theorem,
+            .pre_ctx_expr = pre_ctx_expr,
+            .target_expr = target_expr,
+            .expected_witness = expected_witness,
+        };
+    }
+
+    fn deinit(self: *SemanticQuantifiedAcuiDefFixture) void {
         self.theorem.deinit();
         self.arena.deinit();
     }
@@ -1250,7 +1692,7 @@ test "semantic def exposure materializes witness toward rewrite target" {
 }
 
 test "semantic ACUI leaf exposure rewrites before matching the leaf" {
-    var fixture = try SemanticAcuiExposureFixture.init();
+    var fixture = try SemanticAcuiExposureFixture.init(true, true);
     defer fixture.deinit();
 
     var ctx = Context.initWithRegistry(
@@ -1263,15 +1705,15 @@ test "semantic ACUI leaf exposure rewrites before matching the leaf" {
 
     const witness = try ctx.instantiateDefTowardAcuiItem(
         fixture.pre_ctx_expr,
-        fixture.item_expr,
+        fixture.bound_item_expr,
         fixture.join_term_id,
     ) orelse return error.MissingWitness;
 
-    try std.testing.expectEqual(fixture.expected_witness, witness);
+    try std.testing.expectEqual(fixture.expected_bound_witness, witness);
 }
 
-test "semantic ACUI exposure rejects theorem args as hidden witnesses" {
-    var fixture = try SemanticAcuiExposureFixture.init();
+test "semantic ACUI exposure allows theorem args for non-bound hidden witnesses" {
+    var fixture = try SemanticAcuiExposureFixture.init(false, false);
     defer fixture.deinit();
 
     var ctx = Context.initWithRegistry(
@@ -1284,11 +1726,142 @@ test "semantic ACUI exposure rejects theorem args as hidden witnesses" {
 
     const witness = try ctx.instantiateDefTowardAcuiItem(
         fixture.pre_ctx_expr,
-        fixture.rejected_item_expr,
+        fixture.free_item_expr,
+        fixture.join_term_id,
+    );
+
+    try std.testing.expectEqual(fixture.expected_free_witness, witness);
+}
+
+test "semantic ACUI exposure keeps bound hidden witnesses strict" {
+    var fixture = try SemanticAcuiExposureFixture.init(true, false);
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const witness = try ctx.instantiateDefTowardAcuiItem(
+        fixture.pre_ctx_expr,
+        fixture.free_item_expr,
         fixture.join_term_id,
     );
 
     try std.testing.expectEqual(@as(?ExprId, null), witness);
+}
+
+test "semantic def exposure matches wrapped ACUI witness" {
+    var fixture = try SemanticWrappedAcuiDefFixture.init(false, true, true);
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const witness = try ctx.instantiateDefTowardExpr(
+        fixture.pre_ctx_expr,
+        fixture.target_expr,
+    ) orelse return error.MissingWitness;
+
+    try std.testing.expectEqual(fixture.expected_witness, witness);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
+}
+
+test "semantic def exposure matches wrapped full ACUI witness" {
+    var fixture = try SemanticWrappedAcuiDefFixture.init(true, true, true);
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const witness = try ctx.instantiateDefTowardExpr(
+        fixture.pre_ctx_expr,
+        fixture.target_expr,
+    ) orelse return error.MissingWitness;
+
+    try std.testing.expectEqual(fixture.expected_witness, witness);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
+}
+
+test "semantic def exposure matches quantified wrapped ACUI witness" {
+    var fixture = try SemanticQuantifiedAcuiDefFixture.init(false);
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const witness = try ctx.instantiateDefTowardExpr(
+        fixture.pre_ctx_expr,
+        fixture.target_expr,
+    ) orelse return error.MissingWitness;
+
+    try std.testing.expectEqual(fixture.expected_witness, witness);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
+}
+
+test "semantic def exposure matches quantified wrapped full ACUI witness" {
+    var fixture = try SemanticQuantifiedAcuiDefFixture.init(true);
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const witness = try ctx.instantiateDefTowardExpr(
+        fixture.pre_ctx_expr,
+        fixture.target_expr,
+    ) orelse return error.MissingWitness;
+
+    try std.testing.expectEqual(fixture.expected_witness, witness);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
+}
+
+test "semantic def exposure keeps wrapped bound witnesses unresolved" {
+    var fixture = try SemanticWrappedAcuiDefFixture.init(false, true, false);
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const witness = try ctx.instantiateDefTowardExpr(
+        fixture.pre_ctx_expr,
+        fixture.target_expr,
+    );
+
+    try std.testing.expectEqual(@as(?ExprId, null), witness);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(@as(u32, 0), fixture.theorem.next_dummy_dep);
 }
 
 test "rewrite application works on concrete roots" {
@@ -1367,11 +1940,11 @@ test "rewrite application keeps hidden dummies symbolic" {
     defer state.deinit(fixture.arena.allocator());
     try state.symbolic_dummy_infos.append(
         fixture.arena.allocator(),
-        .{ .sort_name = "mor" },
+        .{ .sort_name = "mor", .bound = false },
     );
     try state.symbolic_dummy_infos.append(
         fixture.arena.allocator(),
-        .{ .sort_name = "mor" },
+        .{ .sort_name = "mor", .bound = false },
     );
 
     const f = fixture.theorem.theorem_vars.items[0];

@@ -89,6 +89,7 @@ pub const UnifyEmitter = struct {
     theorem: *const TheoremContext,
     bytes: std.ArrayListUnmanaged(u8) = .{},
     slots: ExprSlotMap = .empty,
+    remaining_uses: std.AutoHashMapUnmanaged(ExprId, u32) = .empty,
     heap_len: u32,
 
     pub fn init(
@@ -109,6 +110,34 @@ pub const UnifyEmitter = struct {
     pub fn deinit(self: *UnifyEmitter) void {
         self.bytes.deinit(self.allocator);
         self.slots.deinit(self.allocator);
+        self.remaining_uses.deinit(self.allocator);
+    }
+
+    pub fn noteExprUse(self: *UnifyEmitter, expr_id: ExprId) !void {
+        const gop = try self.remaining_uses.getOrPut(self.allocator, expr_id);
+        if (gop.found_existing) {
+            gop.value_ptr.* = try std.math.add(u32, gop.value_ptr.*, 1);
+        } else {
+            gop.value_ptr.* = 1;
+        }
+        switch (self.theorem.interner.node(expr_id).*) {
+            .variable => {},
+            .app => |app| {
+                for (app.args) |arg| {
+                    try self.noteExprUse(arg);
+                }
+            },
+        }
+    }
+
+    fn claimFirstUse(self: *UnifyEmitter, expr_id: ExprId) !bool {
+        const remaining = self.remaining_uses.getPtr(expr_id) orelse {
+            return error.UnknownExprUseCount;
+        };
+        const count = remaining.*;
+        if (count == 0) return error.InvalidExprUseCount;
+        remaining.* = count - 1;
+        return count > 1;
     }
 
     pub fn emitExpr(self: *UnifyEmitter, expr_id: ExprId) !void {
@@ -117,6 +146,7 @@ pub const UnifyEmitter = struct {
             return;
         }
 
+        const save_for_ref = try self.claimFirstUse(expr_id);
         const node = self.theorem.interner.node(expr_id);
         switch (node.*) {
             .variable => |var_id| switch (var_id) {
@@ -126,22 +156,31 @@ pub const UnifyEmitter = struct {
                         return error.UnknownDummyVar;
                     }
                     const info = self.theorem.theorem_dummies.items[dummy_id];
-                    try MmbWriter.appendCmd(&self.bytes, self.allocator, UnifyCmd.UDummy, info.sort_id);
-                    const slot = self.heap_len;
-                    self.heap_len = try std.math.add(u32, self.heap_len, 1);
-                    try self.slots.put(self.allocator, expr_id, slot);
+                    try MmbWriter.appendCmd(
+                        &self.bytes,
+                        self.allocator,
+                        UnifyCmd.UDummy,
+                        info.sort_id,
+                    );
+                    if (save_for_ref) {
+                        const slot = self.heap_len;
+                        self.heap_len = try std.math.add(u32, self.heap_len, 1);
+                        try self.slots.put(self.allocator, expr_id, slot);
+                    }
                 },
             },
             .app => |app| {
                 try MmbWriter.appendCmd(
                     &self.bytes,
                     self.allocator,
-                    UnifyCmd.UTermSave,
+                    if (save_for_ref) UnifyCmd.UTermSave else UnifyCmd.UTerm,
                     app.term_id,
                 );
-                const slot = self.heap_len;
-                self.heap_len = try std.math.add(u32, self.heap_len, 1);
-                try self.slots.put(self.allocator, expr_id, slot);
+                if (save_for_ref) {
+                    const slot = self.heap_len;
+                    self.heap_len = try std.math.add(u32, self.heap_len, 1);
+                    try self.slots.put(self.allocator, expr_id, slot);
+                }
                 for (app.args) |arg| {
                     try self.emitExpr(arg);
                 }
@@ -477,6 +516,7 @@ pub fn buildTermUnifyStream(
 ) ![]const u8 {
     var emitter = UnifyEmitter.init(allocator, theorem);
     defer emitter.deinit();
+    try emitter.noteExprUse(body);
     try emitter.emitExpr(body);
     try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.End, 0);
     return try emitter.bytes.toOwnedSlice(allocator);
@@ -489,11 +529,17 @@ pub fn buildAssertionUnifyStream(
 ) ![]const u8 {
     var emitter = UnifyEmitter.init(allocator, theorem);
     defer emitter.deinit();
+    try emitter.noteExprUse(concl);
+    var hyp_idx = theorem.theorem_hyps.items.len;
+    while (hyp_idx > 0) {
+        hyp_idx -= 1;
+        try emitter.noteExprUse(theorem.theorem_hyps.items[hyp_idx]);
+    }
     try emitter.emitExpr(concl);
     // `UHyp` pushes the next hypothesis target onto the unify stack before
     // replay continues. To make hypotheses replay in source order, the stream
     // therefore stores them in reverse.
-    var hyp_idx = theorem.theorem_hyps.items.len;
+    hyp_idx = theorem.theorem_hyps.items.len;
     while (hyp_idx > 0) {
         hyp_idx -= 1;
         try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.UHyp, 0);
@@ -520,14 +566,24 @@ pub fn buildRuleUnifyStream(
 
     const binders = theorem.theorem_vars.items;
     const concl = try theorem.instantiateTemplate(rule.concl, binders);
-    try emitter.emitExpr(concl);
+    try emitter.noteExprUse(concl);
 
+    var hyps = try allocator.alloc(ExprId, rule.hyps.len);
+    defer allocator.free(hyps);
     var hyp_idx = rule.hyps.len;
     while (hyp_idx > 0) {
         hyp_idx -= 1;
-        try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.UHyp, 0);
         const hyp = try theorem.instantiateTemplate(rule.hyps[hyp_idx], binders);
-        try emitter.emitExpr(hyp);
+        hyps[hyp_idx] = hyp;
+        try emitter.noteExprUse(hyp);
+    }
+
+    try emitter.emitExpr(concl);
+    hyp_idx = rule.hyps.len;
+    while (hyp_idx > 0) {
+        hyp_idx -= 1;
+        try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.UHyp, 0);
+        try emitter.emitExpr(hyps[hyp_idx]);
     }
 
     try MmbWriter.appendCmd(&emitter.bytes, allocator, UnifyCmd.End, 0);

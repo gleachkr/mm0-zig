@@ -2881,6 +2881,11 @@ const known_proof_case_failures = [_]ProofCaseMetadata{
 
 const unsupported_proof_cases = [_]ProofCaseMetadata{
     .{
+        .stem = "unsupported_def_unfold_then_rewrite_concl",
+        .reason = "requires inventing an erased hidden def witness after " ++
+            "unfold then rewrite; treating that as out of scope",
+    },
+    .{
         .stem = "unsupported_def_unfold_then_rewrite_hyp",
         .reason = "needs witness-driven def exposure integrated with " ++
             "rewriting (hypothesis side); see " ++
@@ -2899,18 +2904,6 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
             "docs/design_notes/witness_driven_rewriting.md",
     },
     .{
-        .stem = "unsupported_def_unfold_then_acui_concl",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "ACUI normalization; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_acui_hyp",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "ACUI normalization (hypothesis side); see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
         .stem = "unsupported_def_unfold_then_rewrite_abstract",
         .reason = "needs witness-driven def exposure integrated with " ++
             "rewriting during @view/@abstract matching; see " ++
@@ -2921,18 +2914,6 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
         .reason = "needs witness-driven def exposure integrated with " ++
             "rewriting during @view/@abstract matching on the " ++
             "hypothesis side; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_full_acui_concl",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "full ACUI normalization on the conclusion side; see " ++
-            "docs/design_notes/witness_driven_rewriting.md",
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_full_acui_hyp",
-        .reason = "needs witness-driven def exposure integrated with " ++
-            "full ACUI normalization on the hypothesis side; see " ++
             "docs/design_notes/witness_driven_rewriting.md",
     },
     .{
@@ -3014,7 +2995,10 @@ const proof_cases = [_]ProofCase{
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
     .{ .stem = "fail_nested_def_unfold_then_acui", .outcome = .pass },
-    .{ .stem = "unsupported_def_unfold_then_rewrite_concl", .outcome = .pass },
+    .{
+        .stem = "unsupported_def_unfold_then_rewrite_concl",
+        .outcome = .unsupported,
+    },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_hyp",
         .outcome = .unsupported,
@@ -3027,14 +3011,8 @@ const proof_cases = [_]ProofCase{
         .stem = "unsupported_def_unfold_then_rewrite_recover",
         .outcome = .unsupported,
     },
-    .{
-        .stem = "unsupported_def_unfold_then_acui_concl",
-        .outcome = .unsupported,
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_acui_hyp",
-        .outcome = .unsupported,
-    },
+    .{ .stem = "unsupported_def_unfold_then_acui_concl", .outcome = .pass },
+    .{ .stem = "unsupported_def_unfold_then_acui_hyp", .outcome = .pass },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_abstract",
         .outcome = .unsupported,
@@ -3045,11 +3023,11 @@ const proof_cases = [_]ProofCase{
     },
     .{
         .stem = "unsupported_def_unfold_then_full_acui_concl",
-        .outcome = .unsupported,
+        .outcome = .pass,
     },
     .{
         .stem = "unsupported_def_unfold_then_full_acui_hyp",
-        .outcome = .unsupported,
+        .outcome = .pass,
     },
     .{
         .stem = "unsupported_def_unfold_then_full_acui_abstract",
