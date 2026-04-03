@@ -39,6 +39,12 @@ axiom iff_trans (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
 axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
 axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
 
+--| @relation mor mor_eq mor_refl_raw mor_trans_raw mor_sym_raw _
+axiom mor_refl_raw (f: mor): $ f ~ f $;
+axiom mor_trans_raw (f g h: mor):
+  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+axiom mor_sym_raw (f g: mor): $ f ~ g $ > $ g ~ f $;
+
 --| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
 axiom ctx_refl (g: ctx): $ ctx_eq g g $;
 axiom ctx_trans (g h i: ctx):

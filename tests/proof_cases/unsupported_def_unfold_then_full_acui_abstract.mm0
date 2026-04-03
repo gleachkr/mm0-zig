@@ -53,6 +53,9 @@ axiom sb_c_other {x y: ctx} (t: ctx x): $ ctx_eq (subst x / t y) y $;
 --| @rewrite
 axiom sb_c_emp {x: ctx} (t: ctx x): $ ctx_eq (subst x / t emp) emp $;
 --| @rewrite
+axiom sb_c_irrel {x: ctx} (t: ctx x) (g: ctx):
+  $ ctx_eq (subst x / t g) g $;
+--| @rewrite
 axiom sb_c_tag {x: ctx} (t: ctx x) (u: obj): $ ctx_eq (subst x / t (tag u)) (tag u) $;
 --| @rewrite
 axiom sb_c_join {x: ctx} (t: ctx x) (g h: ctx x):

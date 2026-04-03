@@ -11,6 +11,7 @@ const Span = @import("./proof_script.zig").Span;
 const TheoremBlock = @import("./proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const NormalizeSpec = @import("./rewrite_registry.zig").NormalizeSpec;
+const Normalizer = @import("./normalizer.zig").Normalizer;
 const CompilerViews = @import("./compiler_views.zig");
 const CompilerDummies = @import("./compiler_dummies.zig");
 const ViewDecl = CompilerViews.ViewDecl;
@@ -205,6 +206,21 @@ pub fn checkTheoremBlock(
                 allocator,
                 partial_bindings,
             );
+
+        if (self.debug.check) {
+            debugDumpRuleContext(
+                allocator,
+                theorem,
+                env,
+                assertion.arg_names,
+                assertion.name,
+                line,
+                rule,
+                line_expr,
+                ref_exprs,
+                bindings,
+            ) catch {};
+        }
         if (!had_omitted) {
             try Inference.validateResolvedBindings(
                 self,
@@ -239,6 +255,21 @@ pub fn checkTheoremBlock(
             )) |matched_ref| {
                 refs[idx] = matched_ref;
                 continue;
+            }
+
+            if (self.debug.check) {
+                debugDumpHypMismatch(
+                    allocator,
+                    theorem,
+                    env,
+                    registry,
+                    assertion.arg_names,
+                    assertion.name,
+                    line,
+                    idx,
+                    actual,
+                    expected,
+                ) catch {};
             }
 
             const name = switch (ref) {
@@ -279,6 +310,19 @@ pub fn checkTheoremBlock(
             bindings,
             refs,
         ) orelse {
+            if (self.debug.check) {
+                debugDumpConclusionMismatch(
+                    allocator,
+                    theorem,
+                    env,
+                    registry,
+                    assertion.arg_names,
+                    assertion.name,
+                    line,
+                    line_expr,
+                    expected_line,
+                ) catch {};
+            }
             self.setDiagnostic(.{
                 .kind = .conclusion_mismatch,
                 .err = error.ConclusionMismatch,
@@ -481,4 +525,272 @@ fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
         }
     }
     return null;
+}
+
+fn debugDumpRuleContext(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    theorem_arg_names: []const ?[]const u8,
+    theorem_name: []const u8,
+    line: ProofLine,
+    rule: *const RuleDecl,
+    line_expr: ExprId,
+    ref_exprs: []const ExprId,
+    bindings: []const ExprId,
+) !void {
+    std.debug.print(
+        "[debug:check] theorem={s} line={s} rule={s}\n",
+        .{ theorem_name, line.label, line.rule_name },
+    );
+    const line_text = try debugExprText(
+        allocator,
+        theorem,
+        env,
+        theorem_arg_names,
+        line_expr,
+    );
+    defer allocator.free(line_text);
+    std.debug.print("[debug:check]   line_expr={s}\n", .{line_text});
+
+    for (ref_exprs, 0..) |ref_expr, idx| {
+        const ref_text = try debugExprText(
+            allocator,
+            theorem,
+            env,
+            theorem_arg_names,
+            ref_expr,
+        );
+        defer allocator.free(ref_text);
+        std.debug.print(
+            "[debug:check]   ref[{d}]={s}\n",
+            .{ idx, ref_text },
+        );
+    }
+
+    for (bindings, rule.arg_names, 0..) |binding, arg_name, idx| {
+        const name = arg_name orelse "_";
+        const text = try debugExprText(
+            allocator,
+            theorem,
+            env,
+            theorem_arg_names,
+            binding,
+        );
+        defer allocator.free(text);
+        std.debug.print(
+            "[debug:check]   binding[{d}] {s} = {s}\n",
+            .{ idx, name, text },
+        );
+    }
+}
+
+fn debugDumpHypMismatch(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    theorem_arg_names: []const ?[]const u8,
+    theorem_name: []const u8,
+    line: ProofLine,
+    hyp_idx: usize,
+    actual: ExprId,
+    expected: ExprId,
+) !void {
+    const actual_text = try debugExprText(
+        allocator,
+        theorem,
+        env,
+        theorem_arg_names,
+        actual,
+    );
+    defer allocator.free(actual_text);
+    const expected_text = try debugExprText(
+        allocator,
+        theorem,
+        env,
+        theorem_arg_names,
+        expected,
+    );
+    defer allocator.free(expected_text);
+    std.debug.print(
+        "[debug:check] hypothesis mismatch theorem={s} line={s} " ++
+            "hyp={d}\n",
+        .{ theorem_name, line.label, hyp_idx },
+    );
+    std.debug.print(
+        "[debug:check]   actual={s}\n",
+        .{actual_text},
+    );
+    std.debug.print(
+        "[debug:check]   expected={s}\n",
+        .{expected_text},
+    );
+    try debugDumpNormalizedPair(
+        allocator,
+        theorem,
+        env,
+        registry,
+        theorem_arg_names,
+        actual,
+        expected,
+    );
+}
+
+fn debugDumpConclusionMismatch(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    theorem_arg_names: []const ?[]const u8,
+    theorem_name: []const u8,
+    line: ProofLine,
+    actual: ExprId,
+    expected: ExprId,
+) !void {
+    const actual_text = try debugExprText(
+        allocator,
+        theorem,
+        env,
+        theorem_arg_names,
+        actual,
+    );
+    defer allocator.free(actual_text);
+    const expected_text = try debugExprText(
+        allocator,
+        theorem,
+        env,
+        theorem_arg_names,
+        expected,
+    );
+    defer allocator.free(expected_text);
+    std.debug.print(
+        "[debug:check] conclusion mismatch theorem={s} line={s}\n",
+        .{ theorem_name, line.label },
+    );
+    std.debug.print(
+        "[debug:check]   actual={s}\n",
+        .{actual_text},
+    );
+    std.debug.print(
+        "[debug:check]   expected={s}\n",
+        .{expected_text},
+    );
+    try debugDumpNormalizedPair(
+        allocator,
+        theorem,
+        env,
+        registry,
+        theorem_arg_names,
+        actual,
+        expected,
+    );
+}
+
+fn debugDumpNormalizedPair(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    theorem_arg_names: []const ?[]const u8,
+    actual: ExprId,
+    expected: ExprId,
+) !void {
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer checked.deinit(allocator);
+
+    var normalizer = Normalizer.init(
+        allocator,
+        @constCast(theorem),
+        registry,
+        env,
+        &checked,
+    );
+    const norm_actual = try normalizer.normalize(actual);
+    const norm_expected = try normalizer.normalize(expected);
+    const actual_text = try debugExprText(
+        allocator,
+        theorem,
+        env,
+        theorem_arg_names,
+        norm_actual.result_expr,
+    );
+    defer allocator.free(actual_text);
+    const expected_text = try debugExprText(
+        allocator,
+        theorem,
+        env,
+        theorem_arg_names,
+        norm_expected.result_expr,
+    );
+    defer allocator.free(expected_text);
+    std.debug.print(
+        "[debug:check]   normalized_actual={s}\n",
+        .{actual_text},
+    );
+    std.debug.print(
+        "[debug:check]   normalized_expected={s}\n",
+        .{expected_text},
+    );
+}
+
+fn debugExprText(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    theorem_arg_names: []const ?[]const u8,
+    expr_id: ExprId,
+) ![]u8 {
+    return switch (theorem.interner.node(expr_id).*) {
+        .variable => |var_id| switch (var_id) {
+            .theorem_var => |idx| blk: {
+                const name = if (idx < theorem_arg_names.len)
+                    theorem_arg_names[idx] orelse "_"
+                else
+                    "_";
+                break :blk try allocator.dupe(u8, name);
+            },
+            .dummy_var => |idx| std.fmt.allocPrint(
+                allocator,
+                ".d{d}",
+                .{idx},
+            ),
+        },
+        .app => |app| blk: {
+            const term_name = if (app.term_id < env.terms.items.len)
+                env.terms.items[app.term_id].name
+            else
+                "?term";
+            if (app.args.len == 0) {
+                break :blk try std.fmt.allocPrint(
+                    allocator,
+                    "{s}()",
+                    .{term_name},
+                );
+            }
+
+            const parts = try allocator.alloc([]const u8, app.args.len);
+            defer allocator.free(parts);
+            for (app.args, 0..) |arg, idx| {
+                parts[idx] = try debugExprText(
+                    allocator,
+                    theorem,
+                    env,
+                    theorem_arg_names,
+                    arg,
+                );
+            }
+            defer {
+                for (parts) |part| allocator.free(part);
+            }
+
+            const joined = try std.mem.join(allocator, ", ", parts);
+            defer allocator.free(joined);
+            break :blk try std.fmt.allocPrint(
+                allocator,
+                "{s}({s})",
+                .{ term_name, joined },
+            );
+        },
+    };
 }

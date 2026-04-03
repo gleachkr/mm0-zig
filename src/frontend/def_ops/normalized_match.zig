@@ -28,6 +28,9 @@ const NormalizedView = struct {
         ExprId,
         NormalizedPlaceholderTarget,
     ) = .empty,
+    concrete_bound_matches: std.AutoHashMapUnmanaged(ExprId, ExprId) = .empty,
+    concrete_bound_matches_rev: std.AutoHashMapUnmanaged(ExprId, ExprId) =
+        .empty,
     mirror_binders: []ExprId,
     binder_status: []u8,
     dummy_values: []?ExprId,
@@ -78,6 +81,8 @@ const NormalizedView = struct {
     ) void {
         self.to_mirror.deinit(allocator);
         self.placeholder_targets.deinit(allocator);
+        self.concrete_bound_matches.deinit(allocator);
+        self.concrete_bound_matches_rev.deinit(allocator);
         allocator.free(self.mirror_binders);
         allocator.free(self.binder_status);
         allocator.free(self.dummy_values);
@@ -357,7 +362,7 @@ pub const RuleMatchSession = struct {
 
     fn matchNormalizedPattern(
         self: *RuleMatchSession,
-        view: *const NormalizedView,
+        view: *NormalizedView,
         pattern_expr: ExprId,
         actual_expr: ExprId,
     ) anyerror!bool {
@@ -392,7 +397,14 @@ pub const RuleMatchSession = struct {
         const actual_node = view.mirror.theorem.interner.node(actual_expr);
         return switch (pattern_node.*) {
             .variable => switch (actual_node.*) {
-                .variable => pattern_expr == actual_expr,
+                .variable => if (pattern_expr == actual_expr)
+                    true
+                else
+                    try self.matchConcreteBoundVar(
+                        view,
+                        pattern_expr,
+                        actual_expr,
+                    ),
                 .app => false,
             },
             .app => |pattern_app| switch (actual_node.*) {
@@ -423,7 +435,7 @@ pub const RuleMatchSession = struct {
         self: *RuleMatchSession,
         target: NormalizedPlaceholderTarget,
         actual_expr: ExprId,
-        view: *const NormalizedView,
+        view: *NormalizedView,
     ) anyerror!bool {
         if (view.placeholder_targets.get(actual_expr)) |actual_target| {
             if (samePlaceholderTarget(target, actual_target)) return true;
@@ -472,6 +484,43 @@ pub const RuleMatchSession = struct {
                 };
             },
         };
+    }
+
+    fn matchConcreteBoundVar(
+        self: *RuleMatchSession,
+        view: *NormalizedView,
+        pattern_expr: ExprId,
+        actual_expr: ExprId,
+    ) anyerror!bool {
+        const pattern_info =
+            try mirrorBoundVarInfo(&view.mirror.theorem, pattern_expr) orelse {
+                return false;
+            };
+        const actual_info =
+            try mirrorBoundVarInfo(&view.mirror.theorem, actual_expr) orelse {
+                return false;
+            };
+        if (!std.mem.eql(u8, pattern_info.sort_name, actual_info.sort_name)) {
+            return false;
+        }
+
+        if (view.concrete_bound_matches.get(pattern_expr)) |existing| {
+            return existing == actual_expr;
+        }
+        if (view.concrete_bound_matches_rev.get(actual_expr)) |existing| {
+            return existing == pattern_expr;
+        }
+        try view.concrete_bound_matches.put(
+            self.shared.allocator,
+            pattern_expr,
+            actual_expr,
+        );
+        try view.concrete_bound_matches_rev.put(
+            self.shared.allocator,
+            actual_expr,
+            pattern_expr,
+        );
+        return true;
     }
 
     fn mirrorExprToBoundValue(
@@ -651,6 +700,37 @@ pub const NormalizedComparison = struct {
         );
     }
 };
+
+const MirrorBoundVarInfo = struct {
+    sort_name: []const u8,
+};
+
+fn mirrorBoundVarInfo(
+    theorem: *const TheoremContext,
+    expr_id: ExprId,
+) anyerror!?MirrorBoundVarInfo {
+    const node = theorem.interner.node(expr_id);
+    return switch (node.*) {
+        .app => null,
+        .variable => |var_id| switch (var_id) {
+            .theorem_var => |idx| blk: {
+                if (idx >= theorem.arg_infos.len) {
+                    return error.UnknownTheoremVariable;
+                }
+                const arg = theorem.arg_infos[idx];
+                if (!arg.bound) break :blk null;
+                break :blk .{ .sort_name = arg.sort_name };
+            },
+            .dummy_var => |idx| blk: {
+                if (idx >= theorem.theorem_dummies.items.len) {
+                    return error.UnknownDummyVar;
+                }
+                const dummy = theorem.theorem_dummies.items[idx];
+                break :blk .{ .sort_name = dummy.sort_name };
+            },
+        },
+    };
+}
 
 fn samePlaceholderTarget(
     lhs: NormalizedPlaceholderTarget,
