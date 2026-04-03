@@ -5,6 +5,8 @@ sort obj;
 
 term iff (a b: wff): wff;
 infixr iff: $<->$ prec 20;
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
 term eq (a b: obj): wff;
 infixl eq: $=$ prec 35;
 
@@ -45,16 +47,23 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom nd_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a <-> b $ > $ (g |- a) <-> (h |- b) $;
 
+--| @congr
+axiom all_congr {x: obj} (p q: wff x):
+  $ p <-> q $ > $ A. x p <-> A. x q $;
+
 --| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a |- a $;
 
 -- As above, but here the exposed body has to be fully ACUI-normalized
 -- before a normalized hypothesis can be accepted.
 def pre_ctx (u: obj) (r: wff) {.x: obj}: wff =
-  $ ((emp , hyp (u = x)) , (hyp r , (hyp (u = x) , emp))) |- (u = x) $;
+  $ A. x (((emp , hyp (u = x)) , (hyp r , (hyp (u = x) , emp))) |- (u = x)) $;
+
+axiom ax_all (u: obj) {v: obj} (r: wff):
+  $ A. v (r , (u = v) |- u = v) $;
 
 --| @normalize hyp0
-axiom use_pre_ctx (u v: obj) (r: wff): $ pre_ctx u r $ > $ r $ > $ u = v $;
+axiom use_pre_ctx (u: obj) (r: wff): $ pre_ctx u r $ > $ r $ > $ u = u $;
 
 theorem unsupported_def_unfold_then_full_acui_hyp {u v: obj} (r: wff):
-  $ r $ > $ u = v $;
+  $ r $ > $ u = u $;

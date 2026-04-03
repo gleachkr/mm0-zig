@@ -480,6 +480,57 @@ test "MM0 parser handles binders and dependencies" {
     }
 }
 
+test "MM0 parser treats parenthesized dot binders as bound dummies" {
+    const src =
+        \\sort nat;
+        \\provable sort wff;
+        \\term all {x: nat} (p: wff x): wff;
+        \\prefix all: $A.$ prec 41;
+        \\def subset (.x: nat) (p: wff x): wff = $ A. x p $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    const stmt = (try parser.next()).?;
+
+    switch (stmt) {
+        .term => |term_stmt| {
+            try std.testing.expectEqualStrings("subset", term_stmt.name);
+            try std.testing.expectEqual(@as(usize, 1), term_stmt.args.len);
+            try std.testing.expectEqual(@as(usize, 1), term_stmt.dummy_args.len);
+            try std.testing.expect(term_stmt.dummy_args[0].bound);
+            try std.testing.expectEqual(
+                @as(u55, 1),
+                term_stmt.dummy_args[0].deps,
+            );
+            try std.testing.expect(term_stmt.dummy_exprs[0].bound());
+            try std.testing.expectEqual(
+                @as(u55, 1),
+                term_stmt.dummy_exprs[0].deps(),
+            );
+            try std.testing.expectEqual(@as(u55, 1), term_stmt.args[0].deps);
+
+            const body = term_stmt.body orelse return error.ExpectedDefinitionBody;
+            switch (body.*) {
+                .term => |app| {
+                    try std.testing.expectEqual(@as(usize, 2), app.args.len);
+                    try std.testing.expect(
+                        app.args[0] == term_stmt.dummy_exprs[0],
+                    );
+                    try std.testing.expect(app.args[0].bound());
+                },
+                else => return error.ExpectedTermApp,
+            }
+        },
+        else => return error.UnexpectedStatementKind,
+    }
+}
+
 test "MM0 parser handles arrow-style term signatures" {
     const src =
         \\sort hex;

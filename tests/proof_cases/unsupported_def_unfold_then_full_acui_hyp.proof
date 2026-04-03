@@ -1,5 +1,5 @@
 unsupported_def_unfold_then_full_acui_hyp
 ---------------------------------------
 
-l1: $ r , (u = v) |- u = v $ by ax
-l2: $ u = v $ by use_pre_ctx (u := $ u $, v := $ v $, r := $ r $) [l1, #1]
+l1: $ A. v (r , (u = v) |- u = v) $ by ax_all (u := $ u $, v := $ v $, r := $ r $) []
+l2: $ u = u $ by use_pre_ctx (u := $ u $, r := $ r $) [l1, #1]

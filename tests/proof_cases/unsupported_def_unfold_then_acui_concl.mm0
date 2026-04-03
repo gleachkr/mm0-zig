@@ -5,6 +5,8 @@ sort obj;
 
 term iff (a b: wff): wff;
 infixr iff: $<->$ prec 20;
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
 term eq (a b: obj): wff;
 infixl eq: $=$ prec 35;
 
@@ -45,6 +47,10 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom nd_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a <-> b $ > $ (g |- a) <-> (h |- b) $;
 
+--| @congr
+axiom all_congr {x: obj} (p q: wff x):
+  $ p <-> q $ > $ A. x p <-> A. x q $;
+
 --| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a |- a $;
 
@@ -53,10 +59,10 @@ axiom ax (g: ctx) (a: wff): $ g , a |- a $;
 -- step is that normalization only becomes available after witness-driven
 -- def exposure has chosen x := u.
 def pre_ctx (u: obj) {.x: obj}: wff =
-  $ (hyp (u = x) , emp) |- (u = x) $;
+  $ A. x ((hyp (u = x) , emp) |- (u = x)) $;
 
 --| @normalize conc
 axiom pre_ctx_ax (u: obj): $ pre_ctx u $;
 
 theorem unsupported_def_unfold_then_acui_concl {u v: obj}:
-  $ u = v |- u = v $;
+  $ A. v (u = v |- u = v) $;

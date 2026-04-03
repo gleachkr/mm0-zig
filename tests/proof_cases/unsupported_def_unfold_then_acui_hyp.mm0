@@ -5,6 +5,8 @@ sort obj;
 
 term iff (a b: wff): wff;
 infixr iff: $<->$ prec 20;
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
 term eq (a b: obj): wff;
 infixl eq: $=$ prec 35;
 
@@ -45,17 +47,24 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom nd_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a <-> b $ > $ (g |- a) <-> (h |- b) $;
 
+--| @congr
+axiom all_congr {x: obj} (p q: wff x):
+  $ p <-> q $ > $ A. x p <-> A. x q $;
+
 --| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a |- a $;
 
 -- A hidden-dummy def whose exposed body needs ACUI normalization before
--- a normalized hypothesis can match. The witness x := u only appears once
--- def exposure has already started.
+-- a normalized hypothesis can match. Keep the witness bound in the raw def
+-- body so the emitted MMB stays valid.
 def pre_ctx (u: obj) {.x: obj}: wff =
-  $ (hyp (u = x) , emp) |- (u = x) $;
+  $ A. x ((hyp (u = x) , emp) |- (u = x)) $;
+
+axiom ax_all (u: obj) {v: obj}:
+  $ A. v (u = v |- u = v) $;
 
 --| @normalize hyp0
-axiom use_pre_ctx (u v: obj): $ pre_ctx u $ > $ u = v $;
+axiom use_pre_ctx (u: obj): $ pre_ctx u $ > $ u = u $;
 
 theorem unsupported_def_unfold_then_acui_hyp {u v: obj}:
-  $ u = v $;
+  $ u = u $;
