@@ -29,6 +29,9 @@ pub const MirroredTheoremContext = struct {
         );
         errdefer allocator.free(mirror_dummy_map);
 
+        // Mirror-only allocation: these dummies live in a temporary
+        // MirroredTheoremContext, not the real theorem being compiled.
+        // They do not consume real theorem dependency slots.
         for (source.theorem_dummies.items, 0..) |dummy, idx| {
             const mirror_dummy = try theorem.addDummyVarResolved(
                 dummy.sort_name,

@@ -3450,3 +3450,60 @@ test "compiler records theorem-local dummy vars in theorem var table" {
     try std.testing.expectEqualStrings("b", (try vars.get(1)).?);
     try std.testing.expectEqual(@as(?[]const u8, null), try vars.get(2));
 }
+
+// ---------- Phase 0: dummy allocation classification tests ----------
+
+test "explicit source dummy allocation is allowed and tracks dependency slots" {
+    // Explicit user/source dummies (seedTerm, applyDummyBindings) are
+    // legitimate and must keep working. This test verifies the low-level
+    // addDummyVarResolved API that those paths use.
+    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    // Allocate two explicit dummies — simulates what seedTerm does for
+    // dummies declared in .mm0 source.
+    const d0 = try ctx.addDummyVarResolved("wff", 0);
+    const d1 = try ctx.addDummyVarResolved("wff", 0);
+
+    // Each allocation should produce a distinct ExprId.
+    try std.testing.expect(d0 != d1);
+
+    // Both should be tracked in theorem_dummies.
+    try std.testing.expectEqual(@as(usize, 2), ctx.theorem_dummies.items.len);
+
+    // Each should consume a distinct dependency slot (one-hot bit).
+    try std.testing.expect(ctx.theorem_dummies.items[0].deps != ctx.theorem_dummies.items[1].deps);
+
+    // The dependency counter should advance by 2.
+    try std.testing.expectEqual(@as(u32, 2), ctx.next_dummy_dep);
+}
+
+test "mirror-only dummy allocation does not affect source theorem context" {
+    // Mirror-only allocations (mirror_support.zig, normalized_match.zig)
+    // create dummies in a temporary TheoremContext. This test verifies that
+    // allocating dummies in a separate "mirror" context leaves the original
+    // source context's dummy count untouched.
+    var source = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    defer source.deinit();
+
+    // Allocate one explicit dummy in the source context.
+    _ = try source.addDummyVarResolved("wff", 0);
+    try std.testing.expectEqual(@as(usize, 1), source.theorem_dummies.items.len);
+    const source_dep_after = source.next_dummy_dep;
+
+    // Create a separate "mirror" context (simulates MirroredTheoremContext).
+    var mirror = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    defer mirror.deinit();
+
+    // Allocate several dummies in the mirror context.
+    _ = try mirror.addDummyVarResolved("wff", 0);
+    _ = try mirror.addDummyVarResolved("wff", 0);
+    _ = try mirror.addDummyVarResolved("wff", 0);
+
+    // Mirror allocations should not have touched the source context.
+    try std.testing.expectEqual(@as(usize, 1), source.theorem_dummies.items.len);
+    try std.testing.expectEqual(source_dep_after, source.next_dummy_dep);
+
+    // Mirror context should have its own independent count.
+    try std.testing.expectEqual(@as(usize, 3), mirror.theorem_dummies.items.len);
+}

@@ -202,6 +202,7 @@ pub const TheoremContext = struct {
 
     pub fn seedTerm(self: *TheoremContext, parser: *const MM0Parser, stmt: TermStmt) !void {
         try self.seedArgs(stmt.args, stmt.arg_exprs);
+        // Explicit source allocation: dummies declared in the .mm0 source term definition.
         for (stmt.dummy_args, stmt.dummy_exprs) |arg, expr| {
             const dummy_var_id = try self.addDummyVar(parser, arg);
             const var_id = self.interner.node(dummy_var_id).*.variable;
@@ -231,6 +232,19 @@ pub const TheoremContext = struct {
         return try self.addDummyVarResolved(arg.sort_name, sort_id);
     }
 
+    /// Allocate a fresh theorem-local dummy variable. This is the low-level
+    /// API that all dummy allocation routes through. It is intentionally kept
+    /// for legitimate use cases:
+    ///
+    /// - Explicit source/user dummies: seedTerm (compiler_expr.zig) and
+    ///   applyDummyBindings (compiler_check.zig) for user-written @dummy.
+    /// - Mirror-only placeholders: mirror_support.zig and normalized_match.zig,
+    ///   which allocate into temporary MirroredTheoremContext instances that do
+    ///   not consume real theorem dependency slots.
+    ///
+    /// The *accidental* allocation site — materializeEscapingWitnessForDummySlot
+    /// in symbolic_engine.zig — is the footgun targeted for removal (see PLAN.md).
+    /// Do NOT remove this API; only remove the accidental caller.
     pub fn addDummyVarResolved(
         self: *TheoremContext,
         sort_name: []const u8,

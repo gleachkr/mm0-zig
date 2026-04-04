@@ -453,6 +453,7 @@ fn applyDummyBindings(
     bindings: []?ExprId,
     dummies_list: []const DummyDecl,
 ) !void {
+    // Explicit source allocation: user-written @dummy annotations in proof lines.
     for (dummies_list) |dummy| {
         if (bindings[dummy.target_arg_idx] != null) continue;
         bindings[dummy.target_arg_idx] = theorem.addDummyVar(

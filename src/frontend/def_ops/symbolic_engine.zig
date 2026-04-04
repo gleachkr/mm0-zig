@@ -3737,8 +3737,27 @@ pub const SymbolicEngine = struct {
             state.materialized_witness_infos.contains(expr_id);
     }
 
-    // This is the only main-theorem dummy allocation point in the def-ops
-    // subsystem. Call it only from explicit escape/finalization paths.
+    // ACCIDENTAL ALLOCATION SITE (Phase 0 target)
+    //
+    // This is the only place where the def-ops subsystem allocates a fresh
+    // theorem-local dummy variable in the *real* theorem context. It fires
+    // when a hidden def dummy escapes symbolic matching and must be turned
+    // into a concrete ExprId binding.
+    //
+    // This is the footgun targeted for removal. It invents variables that
+    // the user never wrote and consumes the finite 55-slot bound-variable
+    // dependency budget. It should only be removed after the pipeline can
+    // carry symbolic hidden-dummy state through to an explicit lowering
+    // boundary (see PLAN.md Phases 1–4).
+    //
+    // Contrast with mirror-only allocations in mirror_support.zig and
+    // normalized_match.zig, which operate on temporary MirroredTheoremContext
+    // instances and do not consume real theorem dependency slots. Those are
+    // *not* targeted by this plan.
+    //
+    // Contrast also with explicit source/user allocations in
+    // compiler_expr.zig (seedTerm, applyDummyBindings via addDummyVar),
+    // which are legitimate and intentional.
     fn materializeEscapingWitnessForDummySlot(
         self: *SymbolicEngine,
         slot: usize,
