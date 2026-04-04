@@ -1527,7 +1527,7 @@ pub const SymbolicEngine = struct {
         if (!try self.matchTemplateRecState(template, actual, &state)) {
             return false;
         }
-        try self.finalizeBindings(&state, bindings);
+        try self.resolveBindings(&state, bindings);
         return true;
     }
 
@@ -1563,7 +1563,7 @@ pub const SymbolicEngine = struct {
         )) {
             return false;
         }
-        try self.finalizeBindings(&state, bindings);
+        try self.resolveBindings(&state, bindings);
         return true;
     }
 
@@ -1610,7 +1610,7 @@ pub const SymbolicEngine = struct {
         )) {
             return null;
         }
-        return try self.materializeResolvedSymbolicForEscape(
+        return try self.materializeResolvedSymbolic(
             symbolic,
             &session,
         );
@@ -1629,7 +1629,7 @@ pub const SymbolicEngine = struct {
         ) orelse return null;
 
         while (true) {
-            if (try self.materializeResolvedSymbolicForEscape(
+            if (try self.materializeResolvedSymbolic(
                 symbolic,
                 &session,
             )) |witness| {
@@ -3524,17 +3524,40 @@ pub const SymbolicEngine = struct {
         };
     }
 
-    fn finalizeBindings(
+    fn resolveBindings(
         self: *SymbolicEngine,
         state: *MatchSession,
         bindings: []?ExprId,
     ) anyerror!void {
         for (state.bindings, 0..) |binding, idx| {
             bindings[idx] = if (binding) |value|
-                try self.finalizeBoundValue(value, state)
+                try self.resolveBoundValue(value, state)
             else
                 null;
         }
+    }
+
+    pub fn resolveBoundValue(
+        self: *SymbolicEngine,
+        bound: BoundValue,
+        state: *MatchSession,
+    ) anyerror!?ExprId {
+        return switch (bound) {
+            .concrete => |concrete| try self.concreteBindingMatchExpr(
+                concrete,
+                state,
+            ),
+            .symbolic => |symbolic| blk: {
+                const expr_id = (try self.materializeResolvedSymbolic(
+                    symbolic.expr,
+                    state,
+                )) orelse break :blk null;
+                break :blk try self.chooseRepresentative(
+                    expr_id,
+                    symbolic.mode,
+                );
+            },
+        };
     }
 
     // This is the only escape path that turns symbolic match state back into
@@ -3625,30 +3648,7 @@ pub const SymbolicEngine = struct {
         return try self.chooseRepresentative(expr_id, mode);
     }
 
-    fn materializeResolvedBoundValue(
-        self: *SymbolicEngine,
-        bound: BoundValue,
-        state: *MatchSession,
-    ) anyerror!?ExprId {
-        return switch (bound) {
-            .concrete => |concrete| try self.concreteBindingMatchExpr(
-                concrete,
-                state,
-            ),
-            .symbolic => |symbolic| blk: {
-                const expr_id = (try self.materializeResolvedSymbolicForEscape(
-                    symbolic.expr,
-                    state,
-                )) orelse break :blk null;
-                break :blk try self.chooseRepresentative(
-                    expr_id,
-                    symbolic.mode,
-                );
-            },
-        };
-    }
-
-    fn materializeResolvedSymbolicForEscape(
+    fn materializeResolvedSymbolic(
         self: *SymbolicEngine,
         symbolic: *const SymbolicExpr,
         state: *MatchSession,
@@ -3659,10 +3659,7 @@ pub const SymbolicEngine = struct {
                     return error.TemplateBinderOutOfRange;
                 }
                 const bound = state.bindings[idx] orelse break :blk null;
-                break :blk try self.materializeResolvedBoundValue(
-                    bound,
-                    state,
-                );
+                break :blk try self.resolveBoundValue(bound, state);
             },
             .fixed => |expr_id| expr_id,
             .dummy => |slot| self.currentWitnessExpr(slot, state),
@@ -3670,7 +3667,7 @@ pub const SymbolicEngine = struct {
                 const args = try self.shared.allocator.alloc(ExprId, app.args.len);
                 errdefer self.shared.allocator.free(args);
                 for (app.args, 0..) |arg, idx| {
-                    args[idx] = (try self.materializeResolvedSymbolicForEscape(
+                    args[idx] = (try self.materializeResolvedSymbolic(
                         arg,
                         state,
                     )) orelse break :blk null;

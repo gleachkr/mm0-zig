@@ -1965,29 +1965,14 @@ test "def matcher binds quantified templates through hidden dummies" {
         actual,
         bindings,
     ));
-    try std.testing.expect(bindings[0] != null);
+
+    // Public template matching now stays on the resolved, non-escaping path.
+    // Hidden def dummies therefore remain unresolved here instead of being
+    // materialized into fresh theorem-local dummy vars.
+    try std.testing.expect(bindings[0] == null);
     try std.testing.expect(bindings[1] == null);
-    try std.testing.expect(bindings[2] != null);
-    try std.testing.expectEqual(@as(usize, 2), theorem.theorem_dummies.items.len);
-
-    const x = bindings[0].?;
-    switch (theorem.interner.node(x).*) {
-        .variable => |var_id| switch (var_id) {
-            .dummy_var => {},
-            .theorem_var => return error.ExpectedDummyVariable,
-        },
-        .app => return error.ExpectedVariable,
-    }
-
-    const all_id = env.term_names.get("all") orelse return error.MissingTerm;
-    const p = bindings[2].?;
-    switch (theorem.interner.node(p).*) {
-        .variable => return error.ExpectedTermApp,
-        .app => |app| {
-            try std.testing.expectEqual(all_id, app.term_id);
-            try std.testing.expect(exprContainsExprId(&theorem, app.args[1], x));
-        },
-    }
+    try std.testing.expect(bindings[2] == null);
+    try std.testing.expectEqual(@as(usize, 0), theorem.theorem_dummies.items.len);
 }
 
 test "def matcher opens nested user-side defs under matching heads" {
@@ -2885,21 +2870,6 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
         .reason = "requires inventing an erased hidden def witness after " ++
             "unfold then rewrite; treating that as out of scope",
     },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_recover",
-        .reason = "@recover now finds the witness, but the cited ref still " ++
-            "misses unfold-then-rewrite alignment after substitution",
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_full_acui_abstract",
-        .reason = "@abstract now finds the context, but conclusion matching " ++
-            "still misses def-to-full-ACUI alignment after substitution",
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_full_acui_abstract_hyp",
-        .reason = "@abstract now finds the context, but hypothesis matching " ++
-            "still misses def-to-full-ACUI alignment after substitution",
-    },
 };
 
 fn lookupProofCaseReason(
@@ -2974,7 +2944,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "unsupported_def_unfold_then_rewrite_view", .outcome = .pass },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_recover",
-        .outcome = .unsupported,
+        .outcome = .pass,
     },
     .{ .stem = "unsupported_def_unfold_then_acui_concl", .outcome = .pass },
     .{ .stem = "unsupported_def_unfold_then_acui_hyp", .outcome = .pass },
@@ -2996,11 +2966,11 @@ const proof_cases = [_]ProofCase{
     },
     .{
         .stem = "unsupported_def_unfold_then_full_acui_abstract",
-        .outcome = .unsupported,
+        .outcome = .pass,
     },
     .{
         .stem = "unsupported_def_unfold_then_full_acui_abstract_hyp",
-        .outcome = .unsupported,
+        .outcome = .pass,
     },
     .{ .stem = "pass_normalize", .outcome = .pass },
     .{ .stem = "pass_normalize_nested", .outcome = .pass },

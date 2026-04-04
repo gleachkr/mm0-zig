@@ -430,6 +430,197 @@ annotation responsible.
 
 ---
 
+## Unfold / rewrite behavior in the view pipeline
+
+The points above describe the user-facing model. For rules that interact with
+transparent defs, rewrites, and normalization, the internal process is a bit
+more specific.
+
+### 1. `@view` seeding happens before ordinary omitted-binder inference
+
+When a proof line omits some rule binders, the compiler first tries to seed as
+many of them as it can from the view. This happens in a def-aware matching
+session, before the general omitted-binder solver runs.
+
+The important consequence is that `@view`, `@recover`, and `@abstract` are not
+an optional postprocessing step. They are part of how the solver gets its
+starting information.
+
+### 2. View matching is def-aware, and may use semantic steps
+
+The initial view pass matches:
+
+- the view conclusion against the user's proof line assertion, and
+- each view hypothesis against the cited reference expression for that slot.
+
+Each part first tries transparent matching. If that fails, the matcher may use
+semantic search. In practice this means the view layer can look through
+transparent defs and can also follow registered rewrite / structural steps when
+those are needed to relate the view shape to the concrete proof expression.
+
+So, for example, a view can match a user-facing expression that only appears
+*after* a def body is unfolded and a rewrite is applied.
+
+### 3. Bindings stay on a resolved, non-escaping path during view reuse
+
+After the initial view match, the compiler resolves the current optional view
+bindings, but it does **not** immediately finalize them into main-theorem
+expressions.
+
+That distinction matters for hidden-dummy defs.
+
+When a def body contains hidden binders, matching against the expanded body may
+create symbolic dummy slots inside the matching session. Those slots are useful
+for continuing the match, but they are not yet a concrete witness that should
+be committed to the theorem.
+
+So the view pipeline intentionally prefers a *resolved* result:
+
+- if a binder has a concrete expression, the resolved binding is that expr;
+- if a binder still depends on unresolved hidden symbolic witnesses, the
+  resolved binding remains `null`;
+- no fresh theorem-local dummy vars are allocated merely because the view was
+  inspected.
+
+Only explicit finalization paths are allowed to escape from symbolic match
+state back into theorem-local expressions.
+
+### 4. `@recover` and `@abstract` run on the resolved bindings
+
+Derived bindings are applied after the initial view match.
+
+- `@recover` compares a solved source expr against a solved pattern expr and
+  extracts the subtree that sits where the hole binder occurs.
+- `@abstract` compares solved left / right exprs and reconstructs the shared
+  one-hole context that explains the plug pair.
+
+The key point is that these operations run on the resolved expressions coming
+out of view matching, not on eagerly-finalized witnesses.
+
+That keeps the derived-binding step from inventing fresh theorem dummies just
+because a hidden witness has not been pinned down yet.
+
+### 5. Derived bindings get an unfold / canonicalize retry path
+
+Raw structural comparison is tried first. If that fails, the compiler retries
+with a preprocessed version of the relevant expressions.
+
+That preprocessing is intentionally narrow:
+
+- repeatedly unfold concrete defs that have no hidden dummy args,
+- recursively preprocess children,
+- canonicalize with the rewrite / ACUI registry, and then
+- try structural recovery / abstraction again.
+
+This is the path that lets `@recover` or `@abstract` succeed when the source
+and pattern only line up *after* a concrete def has been exposed and rewrite /
+ACUI normalization has aligned the two shapes.
+
+In other words, the annotations do not require the raw stored exprs to already
+have identical syntax. They get one more chance after the compiler has exposed
+and canonicalized the relevant concrete structure.
+
+### 6. Replaying refs is useful; replaying the conclusion is dangerous
+
+After the first full view match, the compiler replays the cited references once
+more against the view hypotheses. This is not a second proof check; it is a
+heuristic meant to bias still-symbolic witnesses toward the concrete cited proof
+shapes.
+
+This helps because the references are usually where the concrete information
+needed by `@recover` / `@abstract` lives.
+
+The compiler deliberately does **not** replay the view conclusion a second
+time.
+
+That extra conclusion replay looks harmless, but under unfold / rewrite it can
+re-open the same transparent def body again, which may allocate a fresh set of
+hidden symbolic dummy slots. Those fresh slots are distinct from the ones that
+were created during the first pass, so they can fight the bindings already in
+session state instead of refining them.
+
+This was exactly the failure mode in the unfold-then-rewrite recover cases: the
+first conclusion match found the right structure, and the second conclusion
+replay destabilized it by introducing fresh hidden symbolic witnesses.
+
+So the current rule is:
+
+- do the full conclusion match once,
+- replay only the refs, and
+- let explicit guidance refine unresolved derived bindings.
+
+### 7. Unresolved recover patterns are guided toward the cited source expr
+
+After the initial replay of the refs, the compiler runs derived bindings in a
+small fixed-point loop.
+
+If a `@recover` target is still unresolved, the compiler takes the recover
+pattern binder and tries to guide its symbolic binding toward the concrete
+source expression from the cited proof. After that guidance step, it resolves
+bindings again and reruns derived binding application.
+
+This is more precise than replaying the whole conclusion again:
+
+- it acts only on the binder that `@recover` needs,
+- it uses the concrete source expr that actually contains the missing witness,
+  and
+- it avoids reopening the conclusion-side def body and minting fresh hidden
+  dummy slots.
+
+### 8. The general solver starts from the view-derived seeds
+
+Once the view pipeline has done everything it can, the resulting rule bindings
+are copied into the ordinary omitted-binder inference path.
+
+Two details matter here:
+
+- if view seeding already solved every omitted binder, the compiler validates
+  those bindings immediately and returns;
+- otherwise the general solver starts from the seeded bindings, not from the
+  original unseeded partial binding array.
+
+Additionally, bindings that came directly from the view are treated as exact
+seeds, while bindings produced by `@recover` / `@abstract` are allowed to act
+as semantic seeds. This lets later matching respect the information the view
+already discovered without forcing unnecessary re-parsing of the same witness.
+
+### 9. Where finalization actually happens
+
+The final concrete instantiation of the rule still happens later, after the
+view-derived seeds and the ordinary solver have agreed on the rule binders.
+
+That is the stage where the compiler may need to finalize a symbolic binding
+into a concrete theorem expression. If a hidden symbolic witness truly has to
+escape into theorem space, this is where that happens.
+
+The practical guideline is simple:
+
+- matching, view reuse, `@recover`, and `@abstract` should stay resolved and
+  non-escaping for as long as possible;
+- only the final rule-instantiation path should force escape.
+
+This keeps the compiler from spending theorem-local dummy slots on witnesses
+that were only temporary artifacts of def unfolding.
+
+### 10. Authoring guidance for annotated rules
+
+When writing a rule that combines `@view` with unfold / rewrite behavior, the
+annotations are easiest to reason about if you keep the roles separate:
+
+- use `@view` to expose the user-facing shape that the proof line and refs will
+  actually mention;
+- use `@recover` when a missing witness is present as a subtree of some solved
+  concrete expr;
+- use `@abstract` when the missing witness is a context shared by two solved
+  concrete exprs;
+- prefer cited refs, not the conclusion, as the concrete evidence that should
+  drive recover / abstract guidance;
+- and avoid designs that require a hidden def witness to escape early, because
+  that usually means the rule is leaning on implementation artifacts rather
+  than on concrete proof data.
+
+---
+
 ## Interaction with structural contexts
 
 `@view` is often the cleanest way to expose a user-facing rule shape for

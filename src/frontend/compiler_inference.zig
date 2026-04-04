@@ -150,6 +150,28 @@ fn exactBindingSeeds(
     return seeds;
 }
 
+fn bindingSeedsFromSeededBindings(
+    allocator: std.mem.Allocator,
+    seeded_bindings: []const ?ExprId,
+    allow_semantic: []const bool,
+    mode: DefOps.BindingMode,
+) ![]DefOps.BindingSeed {
+    const seeds = try allocator.alloc(
+        DefOps.BindingSeed,
+        seeded_bindings.len,
+    );
+    for (seeded_bindings, allow_semantic, 0..) |binding, allow, idx| {
+        seeds[idx] = if (binding) |expr_id|
+            if (allow)
+                .{ .semantic = .{ .expr_id = expr_id, .mode = mode } }
+            else
+                .{ .exact = expr_id }
+        else
+            .none;
+    }
+    return seeds;
+}
+
 fn bindingSeedsWithSelectiveSemanticOverrides(
     allocator: std.mem.Allocator,
     exact_bindings: []const ?ExprId,
@@ -446,6 +468,19 @@ pub fn inferBindings(
             };
             seeded_bindings_storage = seeded;
 
+            if (!hasOmittedBindings(seeded)) {
+                return try validateInferredBindings(
+                    self,
+                    allocator,
+                    env,
+                    theorem,
+                    assertion,
+                    line,
+                    rule,
+                    try requireConcreteBindings(allocator, seeded),
+                );
+            }
+
             const semantic_mask = try derivedViewRuleSeedMask(
                 allocator,
                 rule.args.len,
@@ -453,9 +488,8 @@ pub fn inferBindings(
             );
             defer allocator.free(semantic_mask);
 
-            break :blk try bindingSeedsWithSelectiveSemanticOverrides(
+            break :blk try bindingSeedsFromSeededBindings(
                 allocator,
-                partial_bindings,
                 seeded,
                 semantic_mask,
                 .transparent,
@@ -494,8 +528,12 @@ pub fn inferBindings(
             rule,
             if (maybe_view) |*view| view else null,
         );
+        const solver_bindings = if (seeded_bindings_storage) |seeded|
+            seeded
+        else
+            partial_bindings;
         const bindings = solver.solve(
-            partial_bindings,
+            solver_bindings,
             ref_exprs,
             line_expr,
         ) catch |err| {

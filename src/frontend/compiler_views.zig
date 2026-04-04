@@ -12,6 +12,8 @@ const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
 
+const recover_guidance_match_budget: usize = 8;
+
 const ViewSignature = struct {
     arg_names: []const ?[]const u8,
     arg_infos: []const ArgInfo,
@@ -167,6 +169,90 @@ pub fn applyViewBindings(
     var session = try def_ops.beginRuleMatch(view.arg_infos, seeds);
     defer session.deinit();
 
+    try matchViewAgainstConcreteExprs(
+        &session,
+        view,
+        line_expr,
+        ref_exprs,
+    );
+
+    // Keep view reuse on the resolved path, then replay only the cited refs
+    // once more so symbolic witnesses prefer the concrete proof shapes
+    // before @recover / @abstract try to read them back out.
+    try matchViewHypsAgainstConcreteExprs(
+        &session,
+        view,
+        ref_exprs,
+    );
+
+    var view_bindings = try session.resolveOptionalBindings();
+
+    var guide_passes: usize = 0;
+    while (true) {
+        try DerivedBindings.applyDerivedBindings(
+            theorem,
+            env,
+            registry,
+            view_bindings,
+            view.derived_bindings,
+        );
+        if (guide_passes >= view.derived_bindings.len) break;
+        if (!try guideRecoverBindingsTowardSources(
+            &session,
+            view,
+            view_bindings,
+        )) break;
+
+        const next_view_bindings = try session.resolveOptionalBindings();
+        allocator.free(view_bindings);
+        view_bindings = next_view_bindings;
+        guide_passes += 1;
+    }
+    defer allocator.free(view_bindings);
+
+    for (view.binder_map, 0..) |mapping, vi| {
+        const rule_idx = mapping orelse continue;
+        const binding = view_bindings[vi] orelse continue;
+        if (partial_bindings[rule_idx]) |existing| {
+            if (existing != binding) return error.ViewBindingConflict;
+        } else {
+            partial_bindings[rule_idx] = binding;
+        }
+    }
+}
+
+fn guideRecoverBindingsTowardSources(
+    session: *DefOps.RuleMatchSession,
+    view: *const ViewDecl,
+    view_bindings: []const ?ExprId,
+) !bool {
+    var guided = false;
+    for (view.derived_bindings) |binding| {
+        const recover = switch (binding) {
+            .recover => |recover| recover,
+            .abstract => continue,
+        };
+        if (view_bindings[recover.target_view_idx] != null) continue;
+        const source_expr = view_bindings[recover.source_view_idx] orelse {
+            continue;
+        };
+        if (try session.guideBindingTowardExpr(
+            recover.pattern_view_idx,
+            source_expr,
+            recover_guidance_match_budget,
+        )) {
+            guided = true;
+        }
+    }
+    return guided;
+}
+
+fn matchViewAgainstConcreteExprs(
+    session: *DefOps.RuleMatchSession,
+    view: *const ViewDecl,
+    line_expr: ExprId,
+    ref_exprs: []const ExprId,
+) !void {
     if (!try session.matchTransparent(
         view.concl,
         line_expr,
@@ -177,6 +263,18 @@ pub fn applyViewBindings(
     )) {
         return error.ViewConclusionMismatch;
     }
+    try matchViewHypsAgainstConcreteExprs(
+        session,
+        view,
+        ref_exprs,
+    );
+}
+
+fn matchViewHypsAgainstConcreteExprs(
+    session: *DefOps.RuleMatchSession,
+    view: *const ViewDecl,
+    ref_exprs: []const ExprId,
+) !void {
     for (view.hyps, ref_exprs) |hyp_template, ref_expr| {
         if (!try session.matchTransparent(
             hyp_template,
@@ -187,27 +285,6 @@ pub fn applyViewBindings(
             DefOps.default_semantic_match_budget,
         )) {
             return error.ViewHypothesisMismatch;
-        }
-    }
-
-    const view_bindings = try session.finalizeOptionalBindings();
-    defer allocator.free(view_bindings);
-
-    try DerivedBindings.applyDerivedBindings(
-        theorem,
-        env,
-        registry,
-        view_bindings,
-        view.derived_bindings,
-    );
-
-    for (view.binder_map, 0..) |mapping, vi| {
-        const rule_idx = mapping orelse continue;
-        const binding = view_bindings[vi] orelse continue;
-        if (partial_bindings[rule_idx]) |existing| {
-            if (existing != binding) return error.ViewBindingConflict;
-        } else {
-            partial_bindings[rule_idx] = binding;
         }
     }
 }
