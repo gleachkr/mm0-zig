@@ -185,8 +185,13 @@ pub fn checkTheoremBlock(
             }
         }
 
-        const bindings = if (had_omitted)
-            try Inference.inferBindings(
+        // --- Explicit concretization boundary ---
+        // This is the single deliberate place where inference results
+        // are lowered to concrete []const ExprId for rule application.
+        // If inference produced bindings via the allocating fallback
+        // (concretized_with_dummies), we report the diagnostic here.
+        const bindings = if (had_omitted) blk: {
+            const result = try Inference.inferBindings(
                 self,
                 allocator,
                 env,
@@ -200,12 +205,25 @@ pub fn checkTheoremBlock(
                 line_expr,
                 maybe_view,
                 use_advanced_inference,
-            )
-        else
-            try Inference.requireConcreteBindings(
+            );
+            if (result == .concretized_with_dummies) {
+                self.setDiagnostic(.{
+                    .kind = .symbolic_pending_inference,
+                    .err = error.UnresolvedDummyWitness,
+                    .theorem_name = assertion.name,
+                    .line_label = line.label,
+                    .rule_name = line.rule_name,
+                    .span = line.span,
+                });
+            }
+            break :blk result.bindings();
+        } else blk: {
+            const b = try Inference.requireConcreteBindings(
                 allocator,
                 partial_bindings,
             );
+            break :blk b;
+        };
         if (!had_omitted) {
             try Inference.validateResolvedBindings(
                 self,

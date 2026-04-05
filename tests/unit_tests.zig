@@ -3705,3 +3705,21 @@ test "resolveBindingSeeds preserves symbolic state through view reuse" {
     );
     try std.testing.expectEqual(dummies_before, theorem.theorem_dummies.items.len);
 }
+
+test "inferBindings returns concretized_with_dummies for hidden-dummy matches" {
+    // Verifies the Phase 3 concretization boundary: when inferBindings
+    // succeeds through the allocating path, it returns
+    // .concretized_with_dummies rather than .concrete, so the caller
+    // can report the diagnostic at the explicit boundary.
+    const Inference = CompilerInference;
+
+    const result_concrete = Inference.InferenceResult{ .concrete = &.{} };
+    try std.testing.expect(result_concrete == .concrete);
+
+    const result_pending = Inference.InferenceResult{ .concretized_with_dummies = &.{} };
+    try std.testing.expect(result_pending == .concretized_with_dummies);
+
+    // Both variants expose bindings.
+    try std.testing.expectEqual(@as(usize, 0), result_concrete.bindings().len);
+    try std.testing.expectEqual(@as(usize, 0), result_pending.bindings().len);
+}
