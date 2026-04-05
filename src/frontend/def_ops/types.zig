@@ -46,6 +46,9 @@ pub const BindingSeed = union(enum) {
         expr_id: ExprId,
         mode: BindingMode,
     },
+    /// Carry a pre-built BoundValue (possibly symbolic) from one session
+    /// into another without collapsing it to a concrete ExprId first.
+    bound: BoundValue,
 };
 
 pub const ConcreteBinding = struct {

@@ -145,6 +145,7 @@ pub fn applyViewBindings(
     line_expr: ExprId,
     ref_exprs: []const ExprId,
     partial_bindings: []?ExprId,
+    exported_seeds: ?[]DefOps.BindingSeed,
 ) !void {
     const seeds = try allocator.alloc(DefOps.BindingSeed, view.num_binders);
     defer allocator.free(seeds);
@@ -209,6 +210,28 @@ pub fn applyViewBindings(
         guide_passes += 1;
     }
     defer allocator.free(view_bindings);
+
+    // Export symbolic-preserving seeds in rule-binder space if requested.
+    if (exported_seeds) |out_seeds| {
+        const view_seeds = try session.resolveBindingSeeds();
+        defer allocator.free(view_seeds);
+        for (view.binder_map, 0..) |mapping, vi| {
+            const rule_idx = mapping orelse continue;
+            switch (view_seeds[vi]) {
+                .none => {},
+                else => |_| {
+                    // Only export if the rule slot doesn't already have
+                    // a concrete exact seed.
+                    switch (out_seeds[rule_idx]) {
+                        .exact => {},
+                        else => {
+                            out_seeds[rule_idx] = view_seeds[vi];
+                        },
+                    }
+                },
+            }
+        }
+    }
 
     for (view.binder_map, 0..) |mapping, vi| {
         const rule_idx = mapping orelse continue;

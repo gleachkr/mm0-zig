@@ -488,6 +488,16 @@ pub fn inferBindings(
         defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
         const session_seeds = if (maybe_view) |view| blk: {
             const seeded = try allocator.dupe(?ExprId, partial_bindings);
+
+            // Allocate exported seeds initialized to .none; applyViewBindings
+            // will fill in .bound seeds for symbolic view bindings.
+            const view_exported_seeds = try allocator.alloc(
+                DefOps.BindingSeed,
+                rule.args.len,
+            );
+            defer allocator.free(view_exported_seeds);
+            @memset(view_exported_seeds, .none);
+
             CompilerViews.applyViewBindings(
                 allocator,
                 theorem,
@@ -497,6 +507,7 @@ pub fn inferBindings(
                 line_expr,
                 ref_exprs,
                 seeded,
+                view_exported_seeds,
             ) catch {
                 allocator.free(seeded);
                 break :blk try exactBindingSeeds(
@@ -526,12 +537,30 @@ pub fn inferBindings(
             );
             defer allocator.free(semantic_mask);
 
-            break :blk try bindingSeedsFromSeededBindings(
+            // Build seeds from resolved concrete bindings, then overlay
+            // view-exported symbolic seeds for slots that are still .none.
+            const concrete_seeds = try bindingSeedsFromSeededBindings(
                 allocator,
                 seeded,
                 semantic_mask,
                 .transparent,
             );
+            // Merge: where concrete_seeds has .none but view exported a
+            // .bound seed, use the .bound seed to preserve symbolic state.
+            for (view_exported_seeds, 0..) |vs, idx| {
+                switch (vs) {
+                    .bound => {
+                        switch (concrete_seeds[idx]) {
+                            .none => {
+                                concrete_seeds[idx] = vs;
+                            },
+                            else => {},
+                        }
+                    },
+                    else => {},
+                }
+            }
+            break :blk concrete_seeds;
         } else try exactBindingSeeds(allocator, partial_bindings);
         defer allocator.free(session_seeds);
 

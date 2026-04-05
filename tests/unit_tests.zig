@@ -3601,3 +3601,107 @@ test "strict finalization detects unresolved hidden-dummy witnesses" {
     try std.testing.expect(bindings.len == rule.args.len);
     try std.testing.expect(theorem.theorem_dummies.items.len > dummies_before);
 }
+
+test "resolveBindingSeeds preserves symbolic state through view reuse" {
+    // Same setup as the strict finalization test: matching "mono f" against
+    // keep_all's ∀ x p produces symbolic bindings with hidden-dummy structure.
+    // resolveBindingSeeds should return .bound seeds (preserving symbolic
+    // BoundValues) where resolveOptionalBindings would lose the info.
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\term all {x: obj} (p: wff x): wff; prefix all: $A.$ prec 41;
+        \\term eq (a b: obj): wff; infixl eq: $=$ prec 35;
+        \\term pair (a b: obj): obj;
+        \\axiom keep_all {x: obj} (p: wff x): $ A. x p $ > $ A. x p $;
+        \\def mono {.a .b: obj} (f: obj): wff =
+        \\  $ A. a A. b ((pair f a = pair f b) -> (a = b)) $;
+        \\theorem test (f: obj): $ mono f $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const parsed_actual = try parser.parseFormulaText(" mono f ", &theorem_vars);
+    const actual = try theorem.internParsedExpr(parsed_actual);
+
+    const rule_id = env.getRuleId("keep_all") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(rule.args, &.{ .none, .none });
+    defer session.deinit();
+
+    // Match hyp (∀ x p) against "mono f" — produces symbolic bindings.
+    try std.testing.expect(try session.matchTransparent(rule.hyps[0], actual));
+
+    // resolveOptionalBindings collapses symbolic bindings to null where
+    // the symbolic structure contains unresolved hidden dummies.
+    const optional = try session.resolveOptionalBindings();
+    defer arena.allocator().free(optional);
+
+    // resolveBindingSeeds should preserve symbolic state as .bound seeds.
+    const binding_seeds = try session.resolveBindingSeeds();
+    defer arena.allocator().free(binding_seeds);
+
+    // At least one seed should be .bound (symbolic), not .none.
+    var has_bound_seed = false;
+    for (binding_seeds) |seed| {
+        switch (seed) {
+            .bound => {
+                has_bound_seed = true;
+            },
+            else => {},
+        }
+    }
+    try std.testing.expect(has_bound_seed);
+
+    // The .bound seeds should be usable as seeds in a new session,
+    // transferring the symbolic state without allocating dummies.
+    const dummies_before = theorem.theorem_dummies.items.len;
+
+    var session2 = try def_ops.beginRuleMatch(rule.args, binding_seeds);
+    defer session2.deinit();
+
+    // Import dummy infos so slot indices remain valid.
+    try session2.importDummyInfos(&session);
+
+    // The second session should now have the symbolic bindings seeded.
+    // Strict finalization still fails (dummies are unresolved) but the
+    // bindings were transferred without allocating.
+    try std.testing.expectError(
+        error.UnresolvedDummyWitness,
+        session2.finalizeConcreteBindingsStrict(),
+    );
+    try std.testing.expectEqual(dummies_before, theorem.theorem_dummies.items.len);
+}

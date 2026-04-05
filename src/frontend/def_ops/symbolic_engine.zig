@@ -2726,6 +2726,7 @@ pub const SymbolicEngine = struct {
                 witness_slots,
                 semantic.mode,
             ),
+            .bound => |bv| bv,
         };
     }
 

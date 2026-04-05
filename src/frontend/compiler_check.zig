@@ -170,6 +170,7 @@ pub fn checkTheoremBlock(
                     line_expr,
                     ref_exprs,
                     partial_bindings,
+                    null,
                 ) catch |err| {
                     self.setDiagnostic(.{
                         .kind = .generic,

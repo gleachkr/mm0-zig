@@ -286,6 +286,65 @@ pub const RuleMatchSession = struct {
         return bindings;
     }
 
+    /// Like resolveOptionalBindings, but returns BindingSeeds that preserve
+    /// symbolic BoundValues instead of collapsing them to concrete ExprIds.
+    /// Concrete bindings become .exact seeds; symbolic bindings become
+    /// .bound seeds carrying the full BoundValue.
+    pub fn resolveBindingSeeds(self: *RuleMatchSession) ![]BindingSeed {
+        var symbolic_engine = self.engine();
+        const seeds = try self.shared.allocator.alloc(
+            BindingSeed,
+            self.state.bindings.len,
+        );
+        for (self.state.bindings, 0..) |binding, idx| {
+            seeds[idx] = if (binding) |bound| switch (bound) {
+                .concrete => |concrete| blk: {
+                    const expr_id = (try symbolic_engine.concreteBindingMatchExpr(
+                        concrete,
+                        &self.state,
+                    )) orelse break :blk BindingSeed{ .bound = bound };
+                    break :blk BindingSeed{ .exact = expr_id };
+                },
+                .symbolic => BindingSeed{ .bound = bound },
+            } else .none;
+        }
+        return seeds;
+    }
+
+    /// Import symbolic dummy infos from another session so that .dummy
+    /// slot indices in transferred BoundValue/SymbolicExpr nodes remain
+    /// valid. Must be called before using .bound seeds that reference
+    /// dummy slots from the source session.
+    pub fn importDummyInfos(
+        self: *RuleMatchSession,
+        source: *const RuleMatchSession,
+    ) !void {
+        for (source.state.symbolic_dummy_infos.items) |info| {
+            try self.state.symbolic_dummy_infos.append(
+                self.shared.allocator,
+                info,
+            );
+        }
+        // Also import witness mappings so materializeFinalSymbolic can
+        // find witnesses resolved in the source session.
+        var wit_iter = source.state.witnesses.iterator();
+        while (wit_iter.next()) |entry| {
+            try self.state.witnesses.put(
+                self.shared.allocator,
+                entry.key_ptr.*,
+                entry.value_ptr.*,
+            );
+        }
+        var mat_iter = source.state.materialized_witnesses.iterator();
+        while (mat_iter.next()) |entry| {
+            try self.state.materialized_witnesses.put(
+                self.shared.allocator,
+                entry.key_ptr.*,
+                entry.value_ptr.*,
+            );
+        }
+    }
+
     pub fn guideBindingTowardExpr(
         self: *RuleMatchSession,
         idx: usize,
