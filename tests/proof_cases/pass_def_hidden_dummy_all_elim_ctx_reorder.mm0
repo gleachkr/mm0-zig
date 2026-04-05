@@ -229,7 +229,7 @@ axiom pullback_eq (g0: ctx) (f g h k: mor):
   $ g0 ⊢ pullback f g h k $ > $ g0 ⊢ f ∘ h ~ g ∘ k $;
 
 
-theorem pass_def_hidden_dummy_all_elim_ctx_reorder {alpha y: mor}
+theorem pass_def_hidden_dummy_all_elim_ctx_reorder {alpha y a: mor}
     (f g h k: mor):
   $ pullback f g h k , (k ∘ alpha ~ k ∘ alpha) , mono f ⊢
     ∀ y ((f ∘ (h ∘ alpha) ~ f ∘ y) → (h ∘ alpha ~ y)) $;

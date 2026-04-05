@@ -3,4 +3,4 @@ pass_def_hidden_dummy_all_elim_ctx_reorder
 
 l1: $ pullback f g h k , (k ∘ alpha ~ k ∘ alpha) , mono f ⊢ mono f $ by ax
 l2: $ pullback f g h k , (k ∘ alpha ~ k ∘ alpha) , mono f ⊢
-  ∀ y ((f ∘ (h ∘ alpha) ~ f ∘ y) → (h ∘ alpha ~ y)) $ by all_elim [l1]
+  ∀ y ((f ∘ (h ∘ alpha) ~ f ∘ y) → (h ∘ alpha ~ y)) $ by all_elim (x := $ a $) [l1]

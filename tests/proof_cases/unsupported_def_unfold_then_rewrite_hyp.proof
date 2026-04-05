@@ -2,7 +2,7 @@ unsupported_def_unfold_then_rewrite_hyp
 ---------------------------------------
 
 l1: $ mono (g o f) , (f o alpha ~ f o beta) |- mono (g o f) $ by ax
-l2: $ mono (g o f) , (f o alpha ~ f o beta) |- A. y ((g o (f o alpha) ~ (g o f) o y) -> (alpha ~ y)) $ by all_elim [l1]
+l2: $ mono (g o f) , (f o alpha ~ f o beta) |- A. y ((g o (f o alpha) ~ (g o f) o y) -> (alpha ~ y)) $ by all_elim(x := $ x $) [l1]
 l3: $ mono (g o f) , (f o alpha ~ f o beta) |- (g o (f o alpha) ~ g o (f o beta)) -> (alpha ~ beta) $ by all_elim [l2]
 l4: $ mono (g o f) , (f o alpha ~ f o beta) |- f o alpha ~ f o beta $ by ax
 l5: $ mono (g o f) , (f o alpha ~ f o beta) |- g o (f o alpha) ~ g o (f o beta) $ by comp_left [l4]

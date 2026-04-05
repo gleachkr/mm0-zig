@@ -1,5 +1,5 @@
 def_all_elim_free_param
 -----------------------
 
-l1: $ ∀ v ((pair f u = pair f v) → (u = v)) $ by all_elim [#1]
+l1: $ ∀ v ((pair f u = pair f v) → (u = v)) $ by all_elim (x := $ b $) [#1]
 l2: $ (pair f u = pair f v) → (u = v) $ by all_elim [l1]

@@ -80,5 +80,5 @@ axiom all_elim {x: obj} (t: obj x) (p: wff x):
 def mono {.a .b: obj} (f: obj): wff =
   $ ∀ a ∀ b ((pair f a = pair f b) → (a = b)) $;
 
-theorem def_all_elim_free_param {u v: obj} (f: obj):
+theorem def_all_elim_free_param {u v a b : obj} (f: obj):
   $ mono f $ > $ (pair f u = pair f v) → (u = v) $;

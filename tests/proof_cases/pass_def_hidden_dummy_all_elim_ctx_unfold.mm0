@@ -123,5 +123,5 @@ axiom all_elim (g: ctx) {x: obj} (t: obj x) (p: wff x):
 def mono {.a .b: obj} (f: obj): wff =
   $ A. a A. b ((pair f a = pair f b) -> (a = b)) $;
 
-theorem def_hidden_dummy_all_elim_ctx_unfold {u v a b: obj} (f: obj):
+theorem def_hidden_dummy_all_elim_ctx_unfold {u v a b x : obj} (f: obj):
   $ nd (join (hyp (A. a A. b ((pair f a = pair f b) -> (a = b)))) (hyp (pair f u = pair f u))) (A. v ((pair f u = pair f v) -> (u = v))) $;

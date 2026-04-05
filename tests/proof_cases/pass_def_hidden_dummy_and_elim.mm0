@@ -63,5 +63,5 @@ axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
 def packed {.x: obj} (a q: wff): wff =
   $ a ∧ ∀ x q $;
 
-theorem pass_def_hidden_dummy_and_elim (a q: wff):
+theorem pass_def_hidden_dummy_and_elim {x: obj} (a q: wff):
   $ emp ⊢ packed a q $ > $ emp ⊢ a $;

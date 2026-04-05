@@ -2222,7 +2222,7 @@ test "repeated transparent comparison through defs stays symbolic" {
     );
 }
 
-test "finalization materializes escaping witnesses exactly once" {
+test "finalization rejects unresolved hidden-dummy witnesses without allocating" {
     var fixture = try SessionWitnessFixture.init();
     defer fixture.deinit();
 
@@ -2247,37 +2247,19 @@ test "finalization materializes escaping witnesses exactly once" {
     const start_dummy_id = fixture.theorem.next_dummy_id;
     const start_dummy_dep = fixture.theorem.next_dummy_dep;
 
-    const first = try session.finalizeConcreteBindings();
-    try std.testing.expectEqual(
-        start_dummy_id + fixture.dummy_arg_count,
-        fixture.theorem.next_dummy_id,
-    );
-    try std.testing.expectEqual(
-        start_dummy_dep + fixture.dummy_arg_count,
-        fixture.theorem.next_dummy_dep,
-    );
-    try std.testing.expectEqual(
-        fixture.dummy_arg_count,
-        fixture.theorem.theorem_dummies.items.len,
+    // Finalization rejects unresolved hidden-dummy witnesses.
+    try std.testing.expectError(
+        error.UnresolvedDummyWitness,
+        session.finalizeConcreteBindings(),
     );
 
-    const second = try session.finalizeConcreteBindings();
+    // No dummies should have been allocated.
+    try std.testing.expectEqual(start_dummy_id, fixture.theorem.next_dummy_id);
+    try std.testing.expectEqual(start_dummy_dep, fixture.theorem.next_dummy_dep);
     try std.testing.expectEqual(
-        start_dummy_id + fixture.dummy_arg_count,
-        fixture.theorem.next_dummy_id,
-    );
-    try std.testing.expectEqual(
-        start_dummy_dep + fixture.dummy_arg_count,
-        fixture.theorem.next_dummy_dep,
-    );
-    try std.testing.expectEqual(
-        fixture.dummy_arg_count,
+        @as(usize, 0),
         fixture.theorem.theorem_dummies.items.len,
     );
-    try std.testing.expectEqual(first.len, second.len);
-    for (first, second) |lhs, rhs| {
-        try std.testing.expectEqual(lhs, rhs);
-    }
 }
 
 test "abandoning a matched session leaves theorem dummy state unchanged" {
@@ -2318,7 +2300,7 @@ test "abandoning a matched session leaves theorem dummy state unchanged" {
     );
 }
 
-test "many sessions only spend theorem dummies on escaped results" {
+test "repeated sessions never allocate theorem dummies for hidden-dummy structure" {
     var fixture = try SessionWitnessFixture.init();
     defer fixture.deinit();
 
@@ -2329,7 +2311,6 @@ test "many sessions only spend theorem dummies on escaped results" {
     );
     defer ctx.deinit();
 
-    var finalized_sessions: usize = 0;
     for (0..40) |idx| {
         {
             const seeds = try allocNoneSeeds(
@@ -2347,28 +2328,34 @@ test "many sessions only spend theorem dummies on escaped results" {
             );
 
             if (idx % 3 == 0) {
-                _ = try session.finalizeConcreteBindings();
-                finalized_sessions += 1;
+                // Finalization rejects unresolved hidden-dummy witnesses.
+                try std.testing.expectError(
+                    error.UnresolvedDummyWitness,
+                    session.finalizeConcreteBindings(),
+                );
             }
         }
 
-        const expected = finalized_sessions * fixture.dummy_arg_count;
+        // No dummies should ever be allocated.
         try std.testing.expectEqual(
-            expected,
+            @as(usize, 0),
             fixture.theorem.theorem_dummies.items.len,
         );
         try std.testing.expectEqual(
-            @as(u32, @intCast(expected)),
+            @as(u32, 0),
             fixture.theorem.next_dummy_id,
         );
         try std.testing.expectEqual(
-            @as(u32, @intCast(expected)),
+            @as(u32, 0),
             fixture.theorem.next_dummy_dep,
         );
     }
 }
 
-test "real escape-point exhaustion stays explicit under repeated finalization" {
+test "hidden-dummy finalization never reaches dependency slot exhaustion" {
+    // With the allocating escape removed, finalization rejects
+    // unresolved dummies immediately, so the 55-slot dependency
+    // limit is never reachable through this path.
     var fixture = try SessionWitnessFixture.init();
     defer fixture.deinit();
 
@@ -2379,48 +2366,25 @@ test "real escape-point exhaustion stays explicit under repeated finalization" {
     );
     defer ctx.deinit();
 
-    const limit = @as(usize, @intCast(@import("./compiler_expr.zig")
-        .tracked_bound_dep_limit));
-
-    while (fixture.theorem.theorem_dummies.items.len +
-        fixture.dummy_arg_count < limit)
-    {
-        {
-            const seeds = try allocNoneSeeds(
-                fixture.arena.allocator(),
-                fixture.rule_args.len,
-            );
-            var session = try ctx.beginRuleMatch(fixture.rule_args, seeds);
-            defer session.deinit();
-            try std.testing.expect(
-                try session.matchTransparent(fixture.body, fixture.actual),
-            );
-            _ = try session.finalizeConcreteBindings();
-        }
+    for (0..60) |_| {
+        const seeds = try allocNoneSeeds(
+            fixture.arena.allocator(),
+            fixture.rule_args.len,
+        );
+        var session = try ctx.beginRuleMatch(fixture.rule_args, seeds);
+        defer session.deinit();
+        try std.testing.expect(
+            try session.matchTransparent(fixture.body, fixture.actual),
+        );
+        try std.testing.expectError(
+            error.UnresolvedDummyWitness,
+            session.finalizeConcreteBindings(),
+        );
     }
 
-    try std.testing.expectEqual(limit - 1, fixture.theorem.next_dummy_dep);
+    // No dummies allocated despite 60 finalization attempts.
     try std.testing.expectEqual(
-        limit - 1,
-        fixture.theorem.theorem_dummies.items.len,
-    );
-
-    const seeds = try allocNoneSeeds(
-        fixture.arena.allocator(),
-        fixture.rule_args.len,
-    );
-    var session = try ctx.beginRuleMatch(fixture.rule_args, seeds);
-    defer session.deinit();
-    try std.testing.expect(
-        try session.matchTransparent(fixture.body, fixture.actual),
-    );
-    try std.testing.expectError(
-        error.DependencySlotExhausted,
-        session.finalizeConcreteBindings(),
-    );
-    try std.testing.expectEqual(limit, fixture.theorem.next_dummy_dep);
-    try std.testing.expectEqual(
-        limit,
+        @as(usize, 0),
         fixture.theorem.theorem_dummies.items.len,
     );
 }

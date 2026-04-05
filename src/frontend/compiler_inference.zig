@@ -24,47 +24,17 @@ const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const Emit = @import("./compiler_emit.zig");
 
-/// Result of an advanced rule match attempt. Distinguishes between a
-/// successful concrete match, a match that succeeded symbolically but
-/// contains unresolved hidden-dummy structure, and no match at all.
+/// Result of an advanced rule match attempt.
 pub const RuleMatchResult = union(enum) {
     /// Match succeeded and all bindings are concrete ExprIds.
     concrete: []const ExprId,
-    /// Match succeeded symbolically but at least one binding contains
-    /// unresolved hidden-dummy structure that could not be concretized
-    /// without allocating fresh theorem-local dummies. The bindings
-    /// were obtained via the allocating fallback path and are usable,
-    /// but the classification is preserved so later phases can remove
-    /// the fallback (see PLAN.md Phase 4).
-    symbolic_pending: []const ExprId,
     /// The rule's hypotheses/conclusion did not match.
     no_match,
 
     pub fn bindings(self: RuleMatchResult) ?[]const ExprId {
         return switch (self) {
             .concrete => |b| b,
-            .symbolic_pending => |b| b,
             .no_match => null,
-        };
-    }
-};
-
-/// Result of inference, returned to the caller (compiler_check.zig).
-/// Carries the concrete/symbolic classification so the caller can act
-/// on it at the explicit concretization boundary.
-pub const InferenceResult = union(enum) {
-    /// Bindings are fully concrete — no dummy allocation was needed.
-    concrete: []const ExprId,
-    /// Bindings were concretized via the allocating fallback path because
-    /// hidden-dummy structure could not be resolved without inventing
-    /// fresh theorem-local dummies. The caller should report this at
-    /// the concretization boundary. Phase 4 will make this an error.
-    concretized_with_dummies: []const ExprId,
-
-    pub fn bindings(self: InferenceResult) []const ExprId {
-        return switch (self) {
-            .concrete => |b| b,
-            .concretized_with_dummies => |b| b,
         };
     }
 };
@@ -293,10 +263,8 @@ pub fn inferBindingsTransparent(
         return error.UnifyMismatch;
     }
     // Use strict finalization — transparent matching with exact seeds
-    // should never produce unresolved hidden-dummy structure. Fall back
-    // to the allocating path only as a safety net (Phase 4 will remove).
-    return session.finalizeConcreteBindingsStrict() catch
-        try session.finalizeConcreteBindings();
+    // should never produce unresolved hidden-dummy structure.
+    return try session.finalizeConcreteBindings();
 }
 
 fn hypMarkedForNormalize(norm_spec: ?NormalizeSpec, hyp_idx: usize) bool {
@@ -407,20 +375,16 @@ fn inferBindingsByRuleMatchSession(
         return .no_match;
     }
 
-    // Try strict finalization first (no dummy allocation).
-    // If this succeeds, the match is fully concrete.
-    if (session.finalizeConcreteBindingsStrict()) |bindings| {
+    // Finalize bindings. All hidden-dummy slots must have been resolved
+    // by matching (via explicit bindings or structural discovery).
+    // Unresolved hidden dummies are an error — the user needs to provide
+    // explicit bindings that cover the hidden def structure.
+    if (session.finalizeConcreteBindings()) |bindings| {
         return .{ .concrete = bindings };
     } else |err| {
-        if (err != error.UnresolvedDummyWitness) return err;
+        if (err == error.UnresolvedDummyWitness) return .no_match;
+        return err;
     }
-
-    // Strict finalization detected unresolved hidden-dummy structure.
-    // Fall back to the allocating path for now (Phase 4 will remove this
-    // fallback). Return symbolic_pending so the caller preserves the
-    // classification instead of erasing it.
-    const bindings = try session.finalizeConcreteBindings();
-    return .{ .symbolic_pending = bindings };
 }
 
 fn tryRuleMatchBindings(
@@ -495,7 +459,7 @@ pub fn inferBindings(
     line_expr: ExprId,
     maybe_view: ?ViewDecl,
     use_advanced_inference: bool,
-) !InferenceResult {
+) ![]const ExprId {
     if (use_advanced_inference) {
         const rule_id = env.getRuleId(line.rule_name) orelse {
             self.setDiagnostic(.{
@@ -542,7 +506,7 @@ pub fn inferBindings(
             seeded_bindings_storage = seeded;
 
             if (!hasOmittedBindings(seeded)) {
-                return .{ .concrete = try validateInferredBindings(
+                return try validateInferredBindings(
                     self,
                     allocator,
                     env,
@@ -551,7 +515,7 @@ pub fn inferBindings(
                     line,
                     rule,
                     try requireConcreteBindings(allocator, seeded),
-                ) };
+                );
             }
 
             const semantic_mask = try derivedViewRuleSeedMask(
@@ -600,7 +564,7 @@ pub fn inferBindings(
             line_expr,
         );
         if (match_result.bindings()) |bindings| {
-            const validated = try validateInferredBindings(
+            return try validateInferredBindings(
                 self,
                 allocator,
                 env,
@@ -610,11 +574,6 @@ pub fn inferBindings(
                 rule,
                 bindings,
             );
-            return switch (match_result) {
-                .concrete => .{ .concrete = validated },
-                .symbolic_pending => .{ .concretized_with_dummies = validated },
-                .no_match => unreachable,
-            };
         }
 
         var solver = InferenceSolver.init(
@@ -645,7 +604,7 @@ pub fn inferBindings(
             return err;
         };
 
-        return .{ .concrete = try validateInferredBindings(
+        return try validateInferredBindings(
             self,
             allocator,
             env,
@@ -654,7 +613,7 @@ pub fn inferBindings(
             line,
             rule,
             bindings,
-        ) };
+        );
     }
 
     if (strictInferBindings(
@@ -669,7 +628,7 @@ pub fn inferBindings(
         ref_exprs,
         line_expr,
     )) |b| {
-        return .{ .concrete = b };
+        return b;
     } else |err| {
         if (maybe_view == null) {
             const transparent = inferBindingsTransparent(
@@ -682,7 +641,7 @@ pub fn inferBindings(
                 line_expr,
             ) catch null;
             if (transparent) |bindings| {
-                return .{ .concrete = try validateInferredBindings(
+                return try validateInferredBindings(
                     self,
                     allocator,
                     env,
@@ -691,7 +650,7 @@ pub fn inferBindings(
                     line,
                     rule,
                     bindings,
-                ) };
+                );
             }
         }
         self.setDiagnostic(.{

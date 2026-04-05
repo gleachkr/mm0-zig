@@ -3508,20 +3508,11 @@ test "mirror-only dummy allocation does not affect source theorem context" {
     try std.testing.expectEqual(@as(usize, 3), mirror.theorem_dummies.items.len);
 }
 
-test "strict finalization detects unresolved hidden-dummy witnesses" {
-    // Phase 1 core test: when template matching through a def with hidden
-    // dummies produces a symbolic binding containing unresolved dummy
-    // structure, finalizeConcreteBindingsStrict returns
-    // error.UnresolvedDummyWitness while finalizeConcreteBindings succeeds
-    // (via the allocating fallback).
-    //
-    // Setup: "keep" rule has one binder p and hyp/concl both = $ p $.
-    // We match hyp against "mono f" which the symbolic engine unfolds to
-    // ∀ a ∀ b (...) with hidden def dummies .a and .b. This produces a
-    // symbolic binding for p that contains dummy structure.
-    // Use a rule with ∀ x p in the hyp template, so matching against
-    // "mono f" forces def unfolding and produces symbolic bindings
-    // containing hidden-dummy structure.
+test "finalization rejects unresolved hidden-dummy witnesses" {
+    // When matching through a def with hidden dummies produces symbolic
+    // bindings containing unresolved dummy structure, finalization
+    // returns error.UnresolvedDummyWitness. The user must provide
+    // explicit bindings that cover the hidden def structure.
     const src =
         \\delimiter $ ( ) $;
         \\provable sort wff;
@@ -3586,20 +3577,14 @@ test "strict finalization detects unresolved hidden-dummy witnesses" {
 
     const dummies_before = theorem.theorem_dummies.items.len;
 
-    // Strict finalization should detect the unresolved hidden-dummy
-    // witness and return UnresolvedDummyWitness instead of allocating.
+    // Finalization rejects unresolved hidden-dummy witnesses.
     try std.testing.expectError(
         error.UnresolvedDummyWitness,
-        session.finalizeConcreteBindingsStrict(),
+        session.finalizeConcreteBindings(),
     );
 
-    // No dummies should have been allocated by the strict attempt.
+    // No dummies should have been allocated.
     try std.testing.expectEqual(dummies_before, theorem.theorem_dummies.items.len);
-
-    // Regular (allocating) finalization should succeed and allocate dummies.
-    const bindings = try session.finalizeConcreteBindings();
-    try std.testing.expect(bindings.len == rule.args.len);
-    try std.testing.expect(theorem.theorem_dummies.items.len > dummies_before);
 }
 
 test "resolveBindingSeeds preserves symbolic state through view reuse" {
@@ -3697,29 +3682,12 @@ test "resolveBindingSeeds preserves symbolic state through view reuse" {
     try session2.importDummyInfos(&session);
 
     // The second session should now have the symbolic bindings seeded.
-    // Strict finalization still fails (dummies are unresolved) but the
+    // Finalization still fails (dummies are unresolved) but the
     // bindings were transferred without allocating.
     try std.testing.expectError(
         error.UnresolvedDummyWitness,
-        session2.finalizeConcreteBindingsStrict(),
+        session2.finalizeConcreteBindings(),
     );
     try std.testing.expectEqual(dummies_before, theorem.theorem_dummies.items.len);
 }
 
-test "inferBindings returns concretized_with_dummies for hidden-dummy matches" {
-    // Verifies the Phase 3 concretization boundary: when inferBindings
-    // succeeds through the allocating path, it returns
-    // .concretized_with_dummies rather than .concrete, so the caller
-    // can report the diagnostic at the explicit boundary.
-    const Inference = CompilerInference;
-
-    const result_concrete = Inference.InferenceResult{ .concrete = &.{} };
-    try std.testing.expect(result_concrete == .concrete);
-
-    const result_pending = Inference.InferenceResult{ .concretized_with_dummies = &.{} };
-    try std.testing.expect(result_pending == .concretized_with_dummies);
-
-    // Both variants expose bindings.
-    try std.testing.expectEqual(@as(usize, 0), result_concrete.bindings().len);
-    try std.testing.expectEqual(@as(usize, 0), result_pending.bindings().len);
-}

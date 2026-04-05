@@ -382,6 +382,10 @@ pub const RuleMatchSession = struct {
         };
     }
 
+    /// Finalize all bindings to concrete ExprIds. Returns
+    /// error.UnresolvedDummyWitness if any hidden-dummy slot lacks a
+    /// witness — the user must provide explicit bindings that cover the
+    /// hidden def structure.
     pub fn finalizeConcreteBindings(self: *RuleMatchSession) ![]ExprId {
         var symbolic_engine = self.engine();
         const bindings = try self.shared.allocator.alloc(
@@ -392,26 +396,6 @@ pub const RuleMatchSession = struct {
         for (self.state.bindings, 0..) |binding, idx| {
             const bound = binding orelse return error.MissingBinderAssignment;
             bindings[idx] = try symbolic_engine.finalizeBoundValue(
-                bound,
-                &self.state,
-            );
-        }
-        return bindings;
-    }
-
-    /// Like finalizeConcreteBindings but returns error.UnresolvedDummyWitness
-    /// instead of allocating fresh theorem-local dummies. Used to detect
-    /// whether finalization would require accidental dummy allocation.
-    pub fn finalizeConcreteBindingsStrict(self: *RuleMatchSession) ![]ExprId {
-        var symbolic_engine = self.engine();
-        const bindings = try self.shared.allocator.alloc(
-            ExprId,
-            self.state.bindings.len,
-        );
-        errdefer self.shared.allocator.free(bindings);
-        for (self.state.bindings, 0..) |binding, idx| {
-            const bound = binding orelse return error.MissingBinderAssignment;
-            bindings[idx] = try symbolic_engine.finalizeBoundValueStrict(
                 bound,
                 &self.state,
             );

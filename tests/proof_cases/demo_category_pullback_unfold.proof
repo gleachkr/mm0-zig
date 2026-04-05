@@ -2,10 +2,10 @@ pb_preserves_mono_step
 ----------------------
 
 l1: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ mono f $ by ax
-l2: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ ∀ y ((f ∘ (h ∘ alpha) ~ f ∘ y) → (h ∘ alpha ~ y)) $ by all_elim [l1]
+l2: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ ∀ y ((f ∘ (h ∘ alpha) ~ f ∘ y) → (h ∘ alpha ~ y)) $ by all_elim(x := $ x $) [l1]
 l3: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ (f ∘ (h ∘ alpha) ~ f ∘ (h ∘ beta)) → (h ∘ alpha ~ h ∘ beta) $ by all_elim [l2]
 l4: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ pullback f g h k $ by ax
-l5: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ f ∘ h ~ g ∘ k $ by and_elim_l [l4]
+l5: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ f ∘ h ~ g ∘ k $ by and_elim_l(b := $ ∀ x ∀ y ∀ z ((f ∘ x ~ g ∘ y) → ((h ∘ z ~ x) → ((k ∘ z ~ y) → (z ~ pb_med f g h k x y)))) $) [l4]
 l6: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ f ∘ (h ∘ alpha) ~ g ∘ (k ∘ alpha) $ by comp_right [l5]
 l7: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ f ∘ (h ∘ beta) ~ g ∘ (k ∘ beta) $ by comp_right [l5]
 l8: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ k ∘ alpha ~ k ∘ beta $ by ax
@@ -14,7 +14,7 @@ l10: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ f ∘ (h ∘ a
 l11: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ g ∘ (k ∘ beta) ~ f ∘ (h ∘ beta) $ by mor_sym [l7]
 l12: $ ∀ x ∀ y ((f ∘ x ~ f ∘ y) → (x ~ y)) , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ f ∘ (h ∘ alpha) ~ f ∘ (h ∘ beta) $ by mor_trans [l10, l11]
 l13: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ h ∘ alpha ~ h ∘ beta $ by imp_elim [l3, l12]
-l14: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ ∀ x ∀ y ∀ z ((f ∘ x ~ g ∘ y) → ((h ∘ z ~ x) → ((k ∘ z ~ y) → (z ~ pb_med f g h k x y)))) $ by and_elim_r [l4]
+l14: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ ∀ x ∀ y ∀ z ((f ∘ x ~ g ∘ y) → ((h ∘ z ~ x) → ((k ∘ z ~ y) → (z ~ pb_med f g h k x y)))) $ by and_elim_r(a := $ f ∘ h ~ g ∘ k $) [l4]
 l14a: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ ∀ y ∀ z ((f ∘ (h ∘ alpha) ~ g ∘ y) → ((h ∘ z ~ h ∘ alpha) → ((k ∘ z ~ y) → (z ~ pb_med f g h k (h ∘ alpha) y)))) $ by all_elim [l14]
 l14b: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ ∀ z ((f ∘ (h ∘ alpha) ~ g ∘ (k ∘ alpha)) → ((h ∘ z ~ h ∘ alpha) → ((k ∘ z ~ k ∘ alpha) → (z ~ pb_med f g h k (h ∘ alpha) (k ∘ alpha))))) $ by all_elim [l14a]
 l14c: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ (f ∘ (h ∘ alpha) ~ g ∘ (k ∘ alpha)) → ((h ∘ alpha ~ h ∘ alpha) → ((k ∘ alpha ~ k ∘ alpha) → (alpha ~ pb_med f g h k (h ∘ alpha) (k ∘ alpha)))) $ by all_elim [l14b]

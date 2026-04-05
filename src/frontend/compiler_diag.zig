@@ -9,7 +9,6 @@ pub const DiagnosticKind = enum {
     parse_binding,
     parse_dummy,
     inference_failed,
-    symbolic_pending_inference,
     unknown_rule,
     unknown_binder_name,
     duplicate_binder_assignment,
@@ -46,9 +45,6 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
         .parse_binding => "could not parse binder assignment",
         .parse_dummy => compilerErrorSummary(diag.err),
         .inference_failed => compilerErrorSummary(diag.err),
-        .symbolic_pending_inference =>
-            "matched rule through hidden def structure, but could not " ++
-            "materialize omitted binders without inventing theorem-local dummies",
         .unknown_rule => "unknown rule in proof line",
         .unknown_binder_name => "unknown binder name in rule application",
         .duplicate_binder_assignment => "duplicate binder assignment in rule application",

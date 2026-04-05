@@ -200,10 +200,10 @@ def pullback {.a .b .u: mor} (f g h k: mor): wff =
             (u ~ pb_med f g h k a b)))) $;
 
 --| @dummy y
-theorem mono_direct {alpha beta y: mor} (f: mor):
+theorem mono_direct {alpha beta y x : mor} (f: mor):
   $ mono f , (f ∘ alpha ~ f ∘ beta) ⊢ alpha ~ beta $;
 
-theorem pullback_eq_direct (f g h k: mor):
+theorem pullback_eq_direct { a b u : mor } (f g h k: mor):
   $ pullback f g h k ⊢ f ∘ h ~ g ∘ k $;
 
 --| @dummy x
@@ -217,6 +217,6 @@ theorem pullback_use_direct {x y z: mor} (f g h k a b u: mor):
             (u ~ pb_med f g h k a b))) $;
 
 --| @dummy y
-theorem mono_pullback_step {alpha beta y: mor} (f g h k: mor):
+theorem mono_pullback_step {alpha beta y x a b u : mor} (f g h k: mor):
   $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢
       h ∘ alpha ~ h ∘ beta $;

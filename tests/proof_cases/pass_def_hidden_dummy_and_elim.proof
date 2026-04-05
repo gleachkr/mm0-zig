@@ -1,4 +1,4 @@
 pass_def_hidden_dummy_and_elim
 ----------------------------
 
-l1: $ emp ⊢ a $ by and_elim_l [#1]
+l1: $ emp ⊢ a $ by and_elim_l(b := $ ∀ x q $) [#1]

@@ -101,7 +101,7 @@ pub const SymbolicEngine = struct {
         )) {
             return null;
         }
-        return try self.materializeFinalSymbolicForEscape(
+        return try self.materializeFinalSymbolic(
             symbolic,
             &session,
         );
@@ -3564,6 +3564,9 @@ pub const SymbolicEngine = struct {
     // This is the only escape path that turns symbolic match state back into
     // main-theorem expressions. Internal matching and representative work
     // should stay symbolic until a caller explicitly finalizes bindings.
+    /// Finalize a BoundValue to a concrete ExprId. Returns
+    /// error.UnresolvedDummyWitness if any hidden-dummy slot in the
+    /// symbolic structure lacks a witness.
     pub fn finalizeBoundValue(
         self: *SymbolicEngine,
         bound: BoundValue,
@@ -3577,32 +3580,7 @@ pub const SymbolicEngine = struct {
                 )) orelse error.MissingRepresentative;
             },
             .symbolic => |symbolic| {
-                const expr_id = try self.materializeFinalSymbolicForEscape(
-                    symbolic.expr,
-                    state,
-                );
-                return try self.chooseRepresentative(expr_id, symbolic.mode);
-            },
-        };
-    }
-
-    /// Like finalizeBoundValue but returns error.UnresolvedDummyWitness
-    /// instead of allocating fresh theorem-local dummies for symbolic
-    /// bindings containing unresolved hidden-dummy structure.
-    pub fn finalizeBoundValueStrict(
-        self: *SymbolicEngine,
-        bound: BoundValue,
-        state: *MatchSession,
-    ) anyerror!ExprId {
-        return switch (bound) {
-            .concrete => |concrete| {
-                return (try self.concreteBindingMatchExpr(
-                    concrete,
-                    state,
-                )) orelse error.MissingRepresentative;
-            },
-            .symbolic => |symbolic| {
-                const expr_id = try self.materializeFinalSymbolicStrict(
+                const expr_id = try self.materializeFinalSymbolic(
                     symbolic.expr,
                     state,
                 );
@@ -3706,31 +3684,12 @@ pub const SymbolicEngine = struct {
         };
     }
 
-    fn materializeFinalSymbolicForEscape(
+    /// Materialize a symbolic expression to a concrete ExprId. Returns
+    /// error.UnresolvedDummyWitness if any hidden-dummy slot lacks a witness.
+    fn materializeFinalSymbolic(
         self: *SymbolicEngine,
         symbolic: *const SymbolicExpr,
         state: *MatchSession,
-    ) anyerror!ExprId {
-        return self.materializeFinalSymbolicImpl(symbolic, state, false);
-    }
-
-    /// Like materializeFinalSymbolicForEscape but returns
-    /// error.UnresolvedDummyWitness instead of allocating fresh theorem-local
-    /// dummies. Used to detect whether finalization would need accidental
-    /// allocation, without actually performing it.
-    fn materializeFinalSymbolicStrict(
-        self: *SymbolicEngine,
-        symbolic: *const SymbolicExpr,
-        state: *MatchSession,
-    ) anyerror!ExprId {
-        return self.materializeFinalSymbolicImpl(symbolic, state, true);
-    }
-
-    fn materializeFinalSymbolicImpl(
-        self: *SymbolicEngine,
-        symbolic: *const SymbolicExpr,
-        state: *MatchSession,
-        strict: bool,
     ) anyerror!ExprId {
         return switch (symbolic.*) {
             .binder => |idx| blk: {
@@ -3740,31 +3699,17 @@ pub const SymbolicEngine = struct {
                 const bound = state.bindings[idx] orelse {
                     return error.MissingBinderAssignment;
                 };
-                break :blk if (strict)
-                    try self.finalizeBoundValueStrict(bound, state)
-                else
-                    try self.finalizeBoundValue(bound, state);
+                break :blk try self.finalizeBoundValue(bound, state);
             },
             .fixed => |expr_id| expr_id,
-            .dummy => |slot| blk: {
-                if (strict) {
-                    if (state.witnesses.get(slot)) |existing| break :blk existing;
-                    if (state.materialized_witnesses.get(slot)) |existing| break :blk existing;
-                    return error.UnresolvedDummyWitness;
-                }
-                break :blk try self.materializeEscapingWitnessForDummySlot(
-                    slot,
-                    state,
-                );
-            },
+            .dummy => |slot| try self.resolveWitnessForDummySlot(slot, state),
             .app => |app| blk: {
                 const args = try self.shared.allocator.alloc(ExprId, app.args.len);
                 errdefer self.shared.allocator.free(args);
                 for (app.args, 0..) |arg, idx| {
-                    args[idx] = try self.materializeFinalSymbolicImpl(
+                    args[idx] = try self.materializeFinalSymbolic(
                         arg,
                         state,
-                        strict,
                     );
                 }
                 break :blk try self.shared.theorem.interner.internAppOwned(
@@ -3795,58 +3740,21 @@ pub const SymbolicEngine = struct {
             state.materialized_witness_infos.contains(expr_id);
     }
 
-    // ACCIDENTAL ALLOCATION SITE (Phase 0 target)
-    //
-    // This is the only place where the def-ops subsystem allocates a fresh
-    // theorem-local dummy variable in the *real* theorem context. It fires
-    // when a hidden def dummy escapes symbolic matching and must be turned
-    // into a concrete ExprId binding.
-    //
-    // This is the footgun targeted for removal. It invents variables that
-    // the user never wrote and consumes the finite 55-slot bound-variable
-    // dependency budget. It should only be removed after the pipeline can
-    // carry symbolic hidden-dummy state through to an explicit lowering
-    // boundary (see PLAN.md Phases 1–4).
-    //
-    // Contrast with mirror-only allocations in mirror_support.zig and
-    // normalized_match.zig, which operate on temporary MirroredTheoremContext
-    // instances and do not consume real theorem dependency slots. Those are
-    // *not* targeted by this plan.
-    //
-    // Contrast also with explicit source/user allocations in
-    // compiler_expr.zig (seedTerm, applyDummyBindings via addDummyVar),
-    // which are legitimate and intentional.
-    fn materializeEscapingWitnessForDummySlot(
-        self: *SymbolicEngine,
+    /// Resolve a hidden-dummy slot to a concrete ExprId. Only succeeds
+    /// if the slot was previously filled by a witness during matching.
+    /// Returns error.UnresolvedDummyWitness if the slot has no witness —
+    /// the user must provide explicit bindings that cover the hidden
+    /// def structure.
+    fn resolveWitnessForDummySlot(
+        _: *SymbolicEngine,
         slot: usize,
         state: *MatchSession,
     ) anyerror!ExprId {
         if (state.witnesses.get(slot)) |existing| return existing;
         if (state.materialized_witnesses.get(slot)) |existing| return existing;
-        if (slot >= state.symbolic_dummy_infos.items.len) {
-            return error.UnknownDummyVar;
-        }
-        const info = state.symbolic_dummy_infos.items[slot];
-        const sort_id = self.shared.env.sort_names.get(info.sort_name) orelse {
-            return error.UnknownSort;
-        };
-        const witness = try self.shared.theorem.addDummyVarResolved(
-            info.sort_name,
-            sort_id,
-        );
-        try state.materialized_witnesses.put(self.shared.allocator, slot, witness);
-        try state.materialized_witness_slots.put(
-            self.shared.allocator,
-            witness,
-            slot,
-        );
-        try state.materialized_witness_infos.put(
-            self.shared.allocator,
-            witness,
-            info,
-        );
-        return witness;
+        return error.UnresolvedDummyWitness;
     }
+
 
     fn getResymbolizableWitnessInfo(
         self: *SymbolicEngine,
