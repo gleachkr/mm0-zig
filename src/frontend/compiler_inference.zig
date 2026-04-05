@@ -24,6 +24,31 @@ const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const Emit = @import("./compiler_emit.zig");
 
+/// Result of an advanced rule match attempt. Distinguishes between a
+/// successful concrete match, a match that succeeded symbolically but
+/// contains unresolved hidden-dummy structure, and no match at all.
+pub const RuleMatchResult = union(enum) {
+    /// Match succeeded and all bindings are concrete ExprIds.
+    concrete: []const ExprId,
+    /// Match succeeded symbolically but at least one binding contains
+    /// unresolved hidden-dummy structure that could not be concretized
+    /// without allocating fresh theorem-local dummies. The bindings
+    /// were obtained via the allocating fallback path and are usable,
+    /// but the classification is preserved so later phases can remove
+    /// the fallback (see PLAN.md Phase 4).
+    symbolic_pending: []const ExprId,
+    /// The rule's hypotheses/conclusion did not match.
+    no_match,
+
+    pub fn bindings(self: RuleMatchResult) ?[]const ExprId {
+        return switch (self) {
+            .concrete => |b| b,
+            .symbolic_pending => |b| b,
+            .no_match => null,
+        };
+    }
+};
+
 const ExprInfo = struct {
     sort_name: []const u8,
     bound: bool,
@@ -312,7 +337,7 @@ fn inferBindingsByRuleMatchSession(
     seeds: []const DefOps.BindingSeed,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
-) ![]const ExprId {
+) !RuleMatchResult {
     var def_ops = DefOps.Context.initWithRegistry(
         allocator,
         theorem,
@@ -340,7 +365,7 @@ fn inferBindingsByRuleMatchSession(
         {
             continue;
         }
-        return error.UnifyMismatch;
+        return .no_match;
     }
 
     if (norm_spec != null and norm_spec.?.concl) {
@@ -352,16 +377,29 @@ fn inferBindingsByRuleMatchSession(
             rule.concl,
             line_expr,
         )) {
-            return error.UnifyMismatch;
+            return .no_match;
         }
     } else if (!try session.matchTransparent(rule.concl, line_expr)) {
-        return error.UnifyMismatch;
+        return .no_match;
     }
 
-    return try session.finalizeConcreteBindings();
+    // Try strict finalization first (no dummy allocation).
+    // If this succeeds, the match is fully concrete.
+    if (session.finalizeConcreteBindingsStrict()) |bindings| {
+        return .{ .concrete = bindings };
+    } else |err| {
+        if (err != error.UnresolvedDummyWitness) return err;
+    }
+
+    // Strict finalization detected unresolved hidden-dummy structure.
+    // Fall back to the allocating path for now (Phase 4 will remove this
+    // fallback). Return symbolic_pending so the caller preserves the
+    // classification instead of erasing it.
+    const bindings = try session.finalizeConcreteBindings();
+    return .{ .symbolic_pending = bindings };
 }
 
-fn tryRuleMatchFallbackBindings(
+fn tryRuleMatchBindings(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
@@ -371,7 +409,7 @@ fn tryRuleMatchFallbackBindings(
     seeds: []const DefOps.BindingSeed,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
-) ?[]const ExprId {
+) RuleMatchResult {
     return inferBindingsByRuleMatchSession(
         allocator,
         env,
@@ -383,7 +421,7 @@ fn tryRuleMatchFallbackBindings(
         ref_exprs,
         line_expr,
     ) catch {
-        return null;
+        return .no_match;
     };
 }
 
@@ -497,7 +535,7 @@ pub fn inferBindings(
         } else try exactBindingSeeds(allocator, partial_bindings);
         defer allocator.free(session_seeds);
 
-        if (tryRuleMatchFallbackBindings(
+        const match_result = tryRuleMatchBindings(
             allocator,
             env,
             registry,
@@ -507,7 +545,8 @@ pub fn inferBindings(
             session_seeds,
             ref_exprs,
             line_expr,
-        )) |bindings| {
+        );
+        if (match_result.bindings()) |bindings| {
             return try validateInferredBindings(
                 self,
                 allocator,

@@ -340,6 +340,26 @@ pub const RuleMatchSession = struct {
         return bindings;
     }
 
+    /// Like finalizeConcreteBindings but returns error.UnresolvedDummyWitness
+    /// instead of allocating fresh theorem-local dummies. Used to detect
+    /// whether finalization would require accidental dummy allocation.
+    pub fn finalizeConcreteBindingsStrict(self: *RuleMatchSession) ![]ExprId {
+        var symbolic_engine = self.engine();
+        const bindings = try self.shared.allocator.alloc(
+            ExprId,
+            self.state.bindings.len,
+        );
+        errdefer self.shared.allocator.free(bindings);
+        for (self.state.bindings, 0..) |binding, idx| {
+            const bound = binding orelse return error.MissingBinderAssignment;
+            bindings[idx] = try symbolic_engine.finalizeBoundValueStrict(
+                bound,
+                &self.state,
+            );
+        }
+        return bindings;
+    }
+
     fn boundValueToMirror(
         self: *RuleMatchSession,
         bound: BoundValue,

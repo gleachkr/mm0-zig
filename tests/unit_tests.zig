@@ -3507,3 +3507,97 @@ test "mirror-only dummy allocation does not affect source theorem context" {
     // Mirror context should have its own independent count.
     try std.testing.expectEqual(@as(usize, 3), mirror.theorem_dummies.items.len);
 }
+
+test "strict finalization detects unresolved hidden-dummy witnesses" {
+    // Phase 1 core test: when template matching through a def with hidden
+    // dummies produces a symbolic binding containing unresolved dummy
+    // structure, finalizeConcreteBindingsStrict returns
+    // error.UnresolvedDummyWitness while finalizeConcreteBindings succeeds
+    // (via the allocating fallback).
+    //
+    // Setup: "keep" rule has one binder p and hyp/concl both = $ p $.
+    // We match hyp against "mono f" which the symbolic engine unfolds to
+    // ∀ a ∀ b (...) with hidden def dummies .a and .b. This produces a
+    // symbolic binding for p that contains dummy structure.
+    // Use a rule with ∀ x p in the hyp template, so matching against
+    // "mono f" forces def unfolding and produces symbolic bindings
+    // containing hidden-dummy structure.
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\term all {x: obj} (p: wff x): wff; prefix all: $A.$ prec 41;
+        \\term eq (a b: obj): wff; infixl eq: $=$ prec 35;
+        \\term pair (a b: obj): obj;
+        \\axiom keep_all {x: obj} (p: wff x): $ A. x p $ > $ A. x p $;
+        \\def mono {.a .b: obj} (f: obj): wff =
+        \\  $ A. a A. b ((pair f a = pair f b) -> (a = b)) $;
+        \\theorem test (f: obj): $ mono f $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const parsed_actual = try parser.parseFormulaText(" mono f ", &theorem_vars);
+    const actual = try theorem.internParsedExpr(parsed_actual);
+
+    // keep_all has binders {x: obj} (p: wff x), hyp = $ ∀ x p $.
+    // Matching hyp against "mono f" forces unfolding of mono and
+    // produces symbolic bindings with hidden-dummy structure.
+    const rule_id = env.getRuleId("keep_all") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(rule.args, &.{ .none, .none });
+    defer session.deinit();
+
+    // Match hyp (∀ x p) against "mono f". The symbolic engine unfolds mono
+    // and binds x → hidden dummy .a, p → ∀ b (...) symbolically.
+    try std.testing.expect(try session.matchTransparent(rule.hyps[0], actual));
+
+    const dummies_before = theorem.theorem_dummies.items.len;
+
+    // Strict finalization should detect the unresolved hidden-dummy
+    // witness and return UnresolvedDummyWitness instead of allocating.
+    try std.testing.expectError(
+        error.UnresolvedDummyWitness,
+        session.finalizeConcreteBindingsStrict(),
+    );
+
+    // No dummies should have been allocated by the strict attempt.
+    try std.testing.expectEqual(dummies_before, theorem.theorem_dummies.items.len);
+
+    // Regular (allocating) finalization should succeed and allocate dummies.
+    const bindings = try session.finalizeConcreteBindings();
+    try std.testing.expect(bindings.len == rule.args.len);
+    try std.testing.expect(theorem.theorem_dummies.items.len > dummies_before);
+}

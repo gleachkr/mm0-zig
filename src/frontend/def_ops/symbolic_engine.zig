@@ -3585,6 +3585,31 @@ pub const SymbolicEngine = struct {
         };
     }
 
+    /// Like finalizeBoundValue but returns error.UnresolvedDummyWitness
+    /// instead of allocating fresh theorem-local dummies for symbolic
+    /// bindings containing unresolved hidden-dummy structure.
+    pub fn finalizeBoundValueStrict(
+        self: *SymbolicEngine,
+        bound: BoundValue,
+        state: *MatchSession,
+    ) anyerror!ExprId {
+        return switch (bound) {
+            .concrete => |concrete| {
+                return (try self.concreteBindingMatchExpr(
+                    concrete,
+                    state,
+                )) orelse error.MissingRepresentative;
+            },
+            .symbolic => |symbolic| {
+                const expr_id = try self.materializeFinalSymbolicStrict(
+                    symbolic.expr,
+                    state,
+                );
+                return try self.chooseRepresentative(expr_id, symbolic.mode);
+            },
+        };
+    }
+
     fn materializeAssignedBoundValue(
         self: *SymbolicEngine,
         bound: BoundValue,
@@ -3685,6 +3710,27 @@ pub const SymbolicEngine = struct {
         symbolic: *const SymbolicExpr,
         state: *MatchSession,
     ) anyerror!ExprId {
+        return self.materializeFinalSymbolicImpl(symbolic, state, false);
+    }
+
+    /// Like materializeFinalSymbolicForEscape but returns
+    /// error.UnresolvedDummyWitness instead of allocating fresh theorem-local
+    /// dummies. Used to detect whether finalization would need accidental
+    /// allocation, without actually performing it.
+    fn materializeFinalSymbolicStrict(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+    ) anyerror!ExprId {
+        return self.materializeFinalSymbolicImpl(symbolic, state, true);
+    }
+
+    fn materializeFinalSymbolicImpl(
+        self: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        state: *MatchSession,
+        strict: bool,
+    ) anyerror!ExprId {
         return switch (symbolic.*) {
             .binder => |idx| blk: {
                 if (idx >= state.bindings.len) {
@@ -3693,20 +3739,31 @@ pub const SymbolicEngine = struct {
                 const bound = state.bindings[idx] orelse {
                     return error.MissingBinderAssignment;
                 };
-                break :blk try self.finalizeBoundValue(bound, state);
+                break :blk if (strict)
+                    try self.finalizeBoundValueStrict(bound, state)
+                else
+                    try self.finalizeBoundValue(bound, state);
             },
             .fixed => |expr_id| expr_id,
-            .dummy => |slot| try self.materializeEscapingWitnessForDummySlot(
-                slot,
-                state,
-            ),
+            .dummy => |slot| blk: {
+                if (strict) {
+                    if (state.witnesses.get(slot)) |existing| break :blk existing;
+                    if (state.materialized_witnesses.get(slot)) |existing| break :blk existing;
+                    return error.UnresolvedDummyWitness;
+                }
+                break :blk try self.materializeEscapingWitnessForDummySlot(
+                    slot,
+                    state,
+                );
+            },
             .app => |app| blk: {
                 const args = try self.shared.allocator.alloc(ExprId, app.args.len);
                 errdefer self.shared.allocator.free(args);
                 for (app.args, 0..) |arg, idx| {
-                    args[idx] = try self.materializeFinalSymbolicForEscape(
+                    args[idx] = try self.materializeFinalSymbolicImpl(
                         arg,
                         state,
+                        strict,
                     );
                 }
                 break :blk try self.shared.theorem.interner.internAppOwned(
