@@ -30,13 +30,8 @@ pub const RuleMatchResult = union(enum) {
     concrete: []const ExprId,
     /// The rule's hypotheses/conclusion did not match.
     no_match,
-
-    pub fn bindings(self: RuleMatchResult) ?[]const ExprId {
-        return switch (self) {
-            .concrete => |b| b,
-            .no_match => null,
-        };
-    }
+    /// Matching succeeded symbolically but still needs explicit bindings.
+    unresolved_dummy_witness,
 };
 
 const ExprInfo = struct {
@@ -187,33 +182,6 @@ fn bindingSeedsFromSeededBindings(
     return seeds;
 }
 
-fn bindingSeedsWithSelectiveSemanticOverrides(
-    allocator: std.mem.Allocator,
-    exact_bindings: []const ?ExprId,
-    semantic_bindings: []const ?ExprId,
-    allow_semantic: []const bool,
-    mode: DefOps.BindingMode,
-) ![]DefOps.BindingSeed {
-    const seeds = try allocator.alloc(
-        DefOps.BindingSeed,
-        exact_bindings.len,
-    );
-    for (exact_bindings, semantic_bindings, allow_semantic, 0..) |
-        exact,
-        semantic,
-        allow,
-        idx,
-    | {
-        seeds[idx] = if (exact) |expr_id|
-            .{ .exact = expr_id }
-        else if (allow and semantic != null)
-            .{ .semantic = .{ .expr_id = semantic.?, .mode = mode } }
-        else
-            .none;
-    }
-    return seeds;
-}
-
 fn derivedViewRuleSeedMask(
     allocator: std.mem.Allocator,
     rule_arg_len: usize,
@@ -319,6 +287,64 @@ fn matchRulePartNormalized(
     );
 }
 
+fn finishRuleMatchSession(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    rule_id: u32,
+    rule: *const RuleDecl,
+    session: *DefOps.RuleMatchSession,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) !RuleMatchResult {
+    const norm_spec = registry.getNormalizeSpec(rule_id);
+
+    for (rule.hyps, ref_exprs, 0..) |hyp, ref_expr, hyp_idx| {
+        if (try session.matchTransparent(hyp, ref_expr)) continue;
+        if (hypMarkedForNormalize(norm_spec, hyp_idx) and
+            try matchRulePartNormalized(
+                allocator,
+                env,
+                registry,
+                session,
+                hyp,
+                ref_expr,
+            ))
+        {
+            continue;
+        }
+        return .no_match;
+    }
+
+    if (norm_spec != null and norm_spec.?.concl) {
+        if (!try matchRulePartNormalized(
+            allocator,
+            env,
+            registry,
+            session,
+            rule.concl,
+            line_expr,
+        )) {
+            return .no_match;
+        }
+    } else if (!try session.matchTransparent(rule.concl, line_expr)) {
+        return .no_match;
+    }
+
+    // Finalize bindings. All hidden-dummy slots must have been resolved
+    // by matching (via explicit bindings or structural discovery).
+    // Unresolved hidden dummies are an error — the user needs to provide
+    // explicit bindings that cover the hidden def structure.
+    if (session.finalizeConcreteBindings()) |bindings| {
+        return .{ .concrete = bindings };
+    } else |err| {
+        if (err == error.UnresolvedDummyWitness) {
+            return .unresolved_dummy_witness;
+        }
+        return err;
+    }
+}
+
 fn inferBindingsByRuleMatchSession(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
@@ -341,76 +367,53 @@ fn inferBindingsByRuleMatchSession(
     var session = try def_ops.beginRuleMatch(rule.args, seeds);
     defer session.deinit();
 
-    const norm_spec = registry.getNormalizeSpec(rule_id);
-
-    for (rule.hyps, ref_exprs, 0..) |hyp, ref_expr, hyp_idx| {
-        if (try session.matchTransparent(hyp, ref_expr)) continue;
-        if (hypMarkedForNormalize(norm_spec, hyp_idx) and
-            try matchRulePartNormalized(
-                allocator,
-                env,
-                registry,
-                &session,
-                hyp,
-                ref_expr,
-            ))
-        {
-            continue;
-        }
-        return .no_match;
-    }
-
-    if (norm_spec != null and norm_spec.?.concl) {
-        if (!try matchRulePartNormalized(
-            allocator,
-            env,
-            registry,
-            &session,
-            rule.concl,
-            line_expr,
-        )) {
-            return .no_match;
-        }
-    } else if (!try session.matchTransparent(rule.concl, line_expr)) {
-        return .no_match;
-    }
-
-    // Finalize bindings. All hidden-dummy slots must have been resolved
-    // by matching (via explicit bindings or structural discovery).
-    // Unresolved hidden dummies are an error — the user needs to provide
-    // explicit bindings that cover the hidden def structure.
-    if (session.finalizeConcreteBindings()) |bindings| {
-        return .{ .concrete = bindings };
-    } else |err| {
-        if (err == error.UnresolvedDummyWitness) return .no_match;
-        return err;
-    }
+    return try finishRuleMatchSession(
+        allocator,
+        env,
+        registry,
+        rule_id,
+        rule,
+        &session,
+        ref_exprs,
+        line_expr,
+    );
 }
 
-fn tryRuleMatchBindings(
+fn inferBindingsByMatchSeedState(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
     theorem: *TheoremContext,
     rule_id: u32,
     rule: *const RuleDecl,
-    seeds: []const DefOps.BindingSeed,
+    seed_state: *const DefOps.MatchSeedState,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
-) RuleMatchResult {
-    return inferBindingsByRuleMatchSession(
+) !RuleMatchResult {
+    var def_ops = DefOps.Context.initWithRegistry(
+        allocator,
+        theorem,
+        env,
+        registry,
+    );
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatchFromSeedState(
+        rule.args,
+        seed_state,
+    );
+    defer session.deinit();
+
+    return try finishRuleMatchSession(
         allocator,
         env,
         registry,
-        theorem,
         rule_id,
         rule,
-        seeds,
+        &session,
         ref_exprs,
         line_expr,
-    ) catch {
-        return .no_match;
-    };
+    );
 }
 
 fn validateInferredBindings(
@@ -474,18 +477,13 @@ pub fn inferBindings(
         };
         var seeded_bindings_storage: ?[]?ExprId = null;
         defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
-        const session_seeds = if (maybe_view) |view| blk: {
+        var view_seed_state: ?DefOps.MatchSeedState = null;
+        defer if (view_seed_state) |*seed_state| seed_state.deinit(allocator);
+        var session_seeds: ?[]DefOps.BindingSeed = null;
+        defer if (session_seeds) |seeds| allocator.free(seeds);
+
+        if (maybe_view) |view| {
             const seeded = try allocator.dupe(?ExprId, partial_bindings);
-
-            // Allocate exported seeds initialized to .none; applyViewBindings
-            // will fill in .bound seeds for symbolic view bindings.
-            const view_exported_seeds = try allocator.alloc(
-                DefOps.BindingSeed,
-                rule.args.len,
-            );
-            defer allocator.free(view_exported_seeds);
-            @memset(view_exported_seeds, .none);
-
             CompilerViews.applyViewBindings(
                 allocator,
                 theorem,
@@ -495,17 +493,85 @@ pub fn inferBindings(
                 line_expr,
                 ref_exprs,
                 seeded,
-                view_exported_seeds,
+                &view_seed_state,
             ) catch {
                 allocator.free(seeded);
-                break :blk try exactBindingSeeds(
+                session_seeds = try exactBindingSeeds(
                     allocator,
                     partial_bindings,
                 );
             };
-            seeded_bindings_storage = seeded;
+            if (session_seeds == null) {
+                seeded_bindings_storage = seeded;
 
-            if (!hasOmittedBindings(seeded)) {
+                if (!hasOmittedBindings(seeded)) {
+                    return try validateInferredBindings(
+                        self,
+                        allocator,
+                        env,
+                        theorem,
+                        assertion,
+                        line,
+                        rule,
+                        try requireConcreteBindings(allocator, seeded),
+                    );
+                }
+
+                const semantic_mask = try derivedViewRuleSeedMask(
+                    allocator,
+                    rule.args.len,
+                    view,
+                );
+                defer allocator.free(semantic_mask);
+
+                const concrete_seeds = try bindingSeedsFromSeededBindings(
+                    allocator,
+                    seeded,
+                    semantic_mask,
+                    .transparent,
+                );
+                if (view_seed_state) |*seed_state| {
+                    for (concrete_seeds, 0..) |seed, idx| {
+                        switch (seed) {
+                            .none => {},
+                            else => seed_state.bindings[idx] = seed,
+                        }
+                    }
+                    allocator.free(concrete_seeds);
+                } else {
+                    session_seeds = concrete_seeds;
+                }
+            }
+        } else {
+            session_seeds = try exactBindingSeeds(allocator, partial_bindings);
+        }
+
+        const match_result = if (view_seed_state) |*seed_state|
+            try inferBindingsByMatchSeedState(
+                allocator,
+                env,
+                registry,
+                theorem,
+                rule_id,
+                rule,
+                seed_state,
+                ref_exprs,
+                line_expr,
+            )
+        else
+            try inferBindingsByRuleMatchSession(
+                allocator,
+                env,
+                registry,
+                theorem,
+                rule_id,
+                rule,
+                session_seeds.?,
+                ref_exprs,
+                line_expr,
+            );
+        switch (match_result) {
+            .concrete => |bindings| {
                 return try validateInferredBindings(
                     self,
                     allocator,
@@ -514,66 +580,21 @@ pub fn inferBindings(
                     assertion,
                     line,
                     rule,
-                    try requireConcreteBindings(allocator, seeded),
+                    bindings,
                 );
-            }
-
-            const semantic_mask = try derivedViewRuleSeedMask(
-                allocator,
-                rule.args.len,
-                view,
-            );
-            defer allocator.free(semantic_mask);
-
-            // Build seeds from resolved concrete bindings, then overlay
-            // view-exported symbolic seeds for slots that are still .none.
-            const concrete_seeds = try bindingSeedsFromSeededBindings(
-                allocator,
-                seeded,
-                semantic_mask,
-                .transparent,
-            );
-            // Merge: where concrete_seeds has .none but view exported a
-            // .bound seed, use the .bound seed to preserve symbolic state.
-            for (view_exported_seeds, 0..) |vs, idx| {
-                switch (vs) {
-                    .bound => {
-                        switch (concrete_seeds[idx]) {
-                            .none => {
-                                concrete_seeds[idx] = vs;
-                            },
-                            else => {},
-                        }
-                    },
-                    else => {},
-                }
-            }
-            break :blk concrete_seeds;
-        } else try exactBindingSeeds(allocator, partial_bindings);
-        defer allocator.free(session_seeds);
-
-        const match_result = tryRuleMatchBindings(
-            allocator,
-            env,
-            registry,
-            theorem,
-            rule_id,
-            rule,
-            session_seeds,
-            ref_exprs,
-            line_expr,
-        );
-        if (match_result.bindings()) |bindings| {
-            return try validateInferredBindings(
-                self,
-                allocator,
-                env,
-                theorem,
-                assertion,
-                line,
-                rule,
-                bindings,
-            );
+            },
+            .no_match => {},
+            .unresolved_dummy_witness => {
+                self.setDiagnostic(.{
+                    .kind = .inference_failed,
+                    .err = error.UnresolvedDummyWitness,
+                    .theorem_name = assertion.name,
+                    .line_label = line.label,
+                    .rule_name = line.rule_name,
+                    .span = line.span,
+                });
+                return error.UnresolvedDummyWitness;
+            },
         }
 
         var solver = InferenceSolver.init(
@@ -639,7 +660,20 @@ pub fn inferBindings(
                 partial_bindings,
                 ref_exprs,
                 line_expr,
-            ) catch null;
+            ) catch |transparent_err| blk: {
+                if (transparent_err == error.UnresolvedDummyWitness) {
+                    self.setDiagnostic(.{
+                        .kind = .inference_failed,
+                        .err = transparent_err,
+                        .theorem_name = assertion.name,
+                        .line_label = line.label,
+                        .rule_name = line.rule_name,
+                        .span = line.span,
+                    });
+                    return transparent_err;
+                }
+                break :blk null;
+            };
             if (transparent) |bindings| {
                 return try validateInferredBindings(
                     self,

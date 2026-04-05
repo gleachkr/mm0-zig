@@ -82,6 +82,26 @@ pub const RepresentativeCache = std.AutoHashMapUnmanaged(
     *const SymbolicExpr,
 );
 
+pub const MatchSeedState = struct {
+    bindings: []BindingSeed,
+    symbolic_dummy_infos: []SymbolicDummyInfo,
+    witnesses: WitnessMap = .{},
+    materialized_witnesses: WitnessMap = .{},
+    materialized_witness_slots: WitnessSlotMap = .{},
+    provisional_witness_infos: ProvisionalWitnessInfoMap = .{},
+    materialized_witness_infos: MaterializedWitnessInfoMap = .{},
+
+    pub fn deinit(self: *MatchSeedState, allocator: std.mem.Allocator) void {
+        allocator.free(self.bindings);
+        allocator.free(self.symbolic_dummy_infos);
+        self.witnesses.deinit(allocator);
+        self.materialized_witnesses.deinit(allocator);
+        self.materialized_witness_slots.deinit(allocator);
+        self.provisional_witness_infos.deinit(allocator);
+        self.materialized_witness_infos.deinit(allocator);
+    }
+};
+
 pub const ConcreteVarInfo = struct {
     sort_name: []const u8,
     bound: bool,

@@ -3657,7 +3657,6 @@ test "resolveBindingSeeds preserves symbolic state through view reuse" {
 
     // resolveBindingSeeds should preserve symbolic state as .bound seeds.
     const binding_seeds = try session.resolveBindingSeeds();
-    defer arena.allocator().free(binding_seeds);
 
     // At least one seed should be .bound (symbolic), not .none.
     var has_bound_seed = false;
@@ -3671,23 +3670,25 @@ test "resolveBindingSeeds preserves symbolic state through view reuse" {
     }
     try std.testing.expect(has_bound_seed);
 
-    // The .bound seeds should be usable as seeds in a new session,
-    // transferring the symbolic state without allocating dummies.
+    var seed_state = try session.exportMatchSeedState(binding_seeds);
+    defer seed_state.deinit(arena.allocator());
+
+    // The exported state should be usable in a new session without any
+    // side-channel import step, and without allocating theorem dummies.
     const dummies_before = theorem.theorem_dummies.items.len;
 
-    var session2 = try def_ops.beginRuleMatch(rule.args, binding_seeds);
+    var session2 = try def_ops.beginRuleMatchFromSeedState(
+        rule.args,
+        &seed_state,
+    );
     defer session2.deinit();
 
-    // Import dummy infos so slot indices remain valid.
-    try session2.importDummyInfos(&session);
-
-    // The second session should now have the symbolic bindings seeded.
-    // Finalization still fails (dummies are unresolved) but the
-    // bindings were transferred without allocating.
     try std.testing.expectError(
         error.UnresolvedDummyWitness,
         session2.finalizeConcreteBindings(),
     );
-    try std.testing.expectEqual(dummies_before, theorem.theorem_dummies.items.len);
+    try std.testing.expectEqual(
+        dummies_before,
+        theorem.theorem_dummies.items.len,
+    );
 }
-

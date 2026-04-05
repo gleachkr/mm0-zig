@@ -18,6 +18,7 @@ const Expr = @import("../trusted/expressions.zig").Expr;
 pub const ConversionPlan = Types.ConversionPlan;
 pub const BindingMode = Types.BindingMode;
 pub const BindingSeed = Types.BindingSeed;
+pub const MatchSeedState = Types.MatchSeedState;
 pub const SemanticStepCandidate =
     @import("./def_ops/symbolic_engine.zig").SemanticStepCandidate;
 pub const default_semantic_match_budget: usize = 3;
@@ -76,6 +77,18 @@ pub const Context = struct {
             &self.shared,
             rule_args,
             seeds,
+        );
+    }
+
+    pub fn beginRuleMatchFromSeedState(
+        self: *Context,
+        rule_args: []const ArgInfo,
+        seed_state: *const MatchSeedState,
+    ) anyerror!RuleMatchSession {
+        return try RuleMatchSession.initFromSeedState(
+            &self.shared,
+            rule_args,
+            seed_state,
         );
     }
 
@@ -1113,7 +1126,6 @@ const SemanticWrappedAcuiDefFixture = struct {
         self.arena.deinit();
     }
 };
-
 
 const SemanticQuantifiedAcuiDefFixture = struct {
     arena: std.heap.ArenaAllocator,
