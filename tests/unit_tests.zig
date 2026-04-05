@@ -2856,13 +2856,7 @@ const ProofCaseMetadata = struct {
     reason: []const u8,
 };
 
-const known_proof_case_failures = [_]ProofCaseMetadata{
-    .{
-        .stem = "pass_def_hidden_dummy_all_elim_ctx_fold",
-        .reason = "reverse-direction hidden-dummy ctx folding still fails " ++
-            "omitted inference",
-    },
-};
+const known_proof_case_failures = [_]ProofCaseMetadata{ };
 
 const unsupported_proof_cases = [_]ProofCaseMetadata{
     .{
@@ -2924,10 +2918,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_reorder", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_unfold", .outcome = .pass },
-    .{
-        .stem = "pass_def_hidden_dummy_all_elim_ctx_fold",
-        .outcome = .known_fail,
-    },
+    .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_fold", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_twostep", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_imp_elim_ctx_mixed", .outcome = .pass },
     .{ .stem = "pass_def_acui_assoc", .outcome = .pass },
