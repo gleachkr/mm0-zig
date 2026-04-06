@@ -1,0 +1,6 @@
+--| @vars x y z
+provable sort wff;
+term top: wff;
+--| @fresh y
+axiom use_fresh {y: wff}: $ top $;
+theorem fresh_reuse: $ top $;

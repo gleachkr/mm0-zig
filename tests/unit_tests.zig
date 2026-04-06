@@ -2957,6 +2957,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_abstract_normalize", .outcome = .pass },
     .{ .stem = "pass_dummy_hole", .outcome = .pass },
     .{ .stem = "pass_dummy_explicit_override", .outcome = .pass },
+    .{ .stem = "pass_fresh_reuse", .outcome = .pass },
     .{ .stem = "demo_prop_cnf", .outcome = .pass },
     .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
     .{ .stem = "demo_seq_peirce", .outcome = .pass },
@@ -3090,6 +3091,10 @@ const proof_cases = [_]ProofCase{
     .{
         .stem = "fail_dummy_sort_restriction",
         .outcome = .{ .fail = error.DummyFreeSort },
+    },
+    .{
+        .stem = "fail_fresh_exhausted",
+        .outcome = .{ .fail = error.FreshNoAvailableVar },
     },
     .{
         .stem = "fail_var_conclusion_mismatch",
@@ -3437,6 +3442,44 @@ test "compiler records theorem-local dummy vars in theorem var table" {
     try std.testing.expectEqualStrings("a", (try vars.get(0)).?);
     try std.testing.expectEqualStrings("b", (try vars.get(1)).?);
     try std.testing.expectEqual(@as(?[]const u8, null), try vars.get(2));
+}
+
+test "compiler reuses @fresh pool vars across proof lines" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_fresh_reuse",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_fresh_reuse",
+        "proof",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb_bytes = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb_bytes);
+
+    const mmb = try Mmb.parse(allocator, mmb_bytes);
+    var theorem_id: ?u32 = null;
+    var idx: u32 = 0;
+    while (idx < mmb.header.num_thms) : (idx += 1) {
+        const maybe_name = try mmb.theoremName(idx);
+        if (maybe_name) |name| {
+            if (std.mem.eql(u8, name, "fresh_reuse")) {
+                theorem_id = idx;
+                break;
+            }
+        }
+    }
+
+    const fresh_reuse_id = theorem_id orelse return error.MissingTheorem;
+    const vars = (try mmb.theoremVarNames(fresh_reuse_id)).?;
+    try std.testing.expectEqual(@as(usize, 1), vars.len());
+    try std.testing.expectEqual(@as(?[]const u8, null), try vars.get(0));
 }
 
 // ---------- Phase 0: dummy allocation classification tests ----------

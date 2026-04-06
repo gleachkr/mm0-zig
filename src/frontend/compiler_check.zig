@@ -10,11 +10,11 @@ const ProofLine = @import("./proof_script.zig").ProofLine;
 const Span = @import("./proof_script.zig").Span;
 const TheoremBlock = @import("./proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
-const NormalizeSpec = @import("./rewrite_registry.zig").NormalizeSpec;
 const CompilerViews = @import("./compiler_views.zig");
 const CompilerDummies = @import("./compiler_dummies.zig");
 const ViewDecl = CompilerViews.ViewDecl;
 const DummyDecl = CompilerDummies.DummyDecl;
+const DummyMode = CompilerDummies.DummyMode;
 const CompilerDiag = @import("./compiler_diag.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
 const CheckedIr = @import("./compiler/checked_ir.zig");
@@ -24,7 +24,7 @@ const Inference = @import("./compiler_inference.zig");
 const Matching = @import("./compiler_check/matching.zig");
 const Emit = @import("./compiler_emit.zig");
 const CompilerVars = @import("./compiler_vars.zig");
-const SortVarDecl = CompilerVars.SortVarDecl;
+const SortVarRegistry = CompilerVars.SortVarRegistry;
 
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
@@ -37,7 +37,7 @@ pub fn checkTheoremBlock(
     registry: *RewriteRegistry,
     dummies: *const std.AutoHashMap(u32, []const DummyDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
-    sort_vars: *const std.StringHashMap(SortVarDecl),
+    sort_vars: *const SortVarRegistry,
     assertion: AssertionStmt,
     block: TheoremBlock,
     theorem: *TheoremContext,
@@ -148,13 +148,18 @@ pub fn checkTheoremBlock(
             line,
         );
         if (dummies.get(rule_id)) |rule_dummies| {
-            try applyDummyBindings(
+            try applyAnnotatedBindings(
                 self,
                 parser,
+                env,
                 theorem,
+                &theorem_vars,
+                sort_vars,
                 assertion.name,
                 rule,
                 line,
+                line_expr,
+                ref_exprs,
                 partial_bindings,
                 rule_dummies,
             );
@@ -227,7 +232,6 @@ pub fn checkTheoremBlock(
 
         const norm_spec = registry.getNormalizeSpec(rule_id);
 
-        // Check hypotheses (with optional normalization)
         for (ref_exprs, line.refs, 0..) |actual, ref, idx| {
             const expected = try theorem.instantiateTemplate(
                 rule.hyps[idx],
@@ -370,7 +374,7 @@ fn parseLineAssertion(
     parser: *MM0Parser,
     theorem: *TheoremContext,
     theorem_vars: *NameExprMap,
-    sort_vars: *const std.StringHashMap(SortVarDecl),
+    sort_vars: *const SortVarRegistry,
     line: ProofLine,
 ) !ExprId {
     try CompilerVars.ensureMathTextVars(
@@ -390,7 +394,7 @@ fn parseBindings(
     parser: *MM0Parser,
     theorem: *TheoremContext,
     theorem_vars: *NameExprMap,
-    sort_vars: *const std.StringHashMap(SortVarDecl),
+    sort_vars: *const SortVarRegistry,
     theorem_name: []const u8,
     rule: *const RuleDecl,
     line: ProofLine,
@@ -469,35 +473,173 @@ fn parseBindings(
     return bindings;
 }
 
-fn applyDummyBindings(
+fn applyAnnotatedBindings(
     self: anytype,
     parser: *MM0Parser,
+    env: *const GlobalEnv,
     theorem: *TheoremContext,
+    theorem_vars: *NameExprMap,
+    sort_vars: *const SortVarRegistry,
     theorem_name: []const u8,
     rule: *const RuleDecl,
     line: ProofLine,
+    line_expr: ExprId,
+    ref_exprs: []const ExprId,
     bindings: []?ExprId,
     dummies_list: []const DummyDecl,
 ) !void {
-    // Explicit source allocation: user-written @dummy annotations in proof lines.
+    const used_deps = try collectUsedDeps(
+        env,
+        theorem,
+        line_expr,
+        ref_exprs,
+        bindings,
+    );
+    var reserved_deps: u55 = 0;
+
     for (dummies_list) |dummy| {
         if (bindings[dummy.target_arg_idx] != null) continue;
-        bindings[dummy.target_arg_idx] = theorem.addDummyVar(
-            parser,
-            rule.args[dummy.target_arg_idx],
-        ) catch |err| {
-            self.setDiagnostic(.{
-                .kind = .parse_dummy,
-                .err = err,
-                .theorem_name = theorem_name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .name = rule.arg_names[dummy.target_arg_idx].?,
-                .span = line.span,
-            });
-            return err;
-        };
+
+        switch (dummy.mode) {
+            .dummy => {
+                bindings[dummy.target_arg_idx] = theorem.addDummyVar(
+                    parser,
+                    rule.args[dummy.target_arg_idx],
+                ) catch |err| {
+                    self.setDiagnostic(.{
+                        .kind = .parse_dummy,
+                        .err = err,
+                        .theorem_name = theorem_name,
+                        .line_label = line.label,
+                        .rule_name = line.rule_name,
+                        .name = rule.arg_names[dummy.target_arg_idx].?,
+                        .span = line.span,
+                    });
+                    return err;
+                };
+            },
+            .fresh => {
+                const selection = chooseFreshBinding(
+                    parser,
+                    theorem,
+                    theorem_vars,
+                    sort_vars,
+                    rule.args[dummy.target_arg_idx].sort_name,
+                    used_deps,
+                    reserved_deps,
+                ) catch |err| {
+                    self.setDiagnostic(.{
+                        .kind = .parse_fresh,
+                        .err = err,
+                        .theorem_name = theorem_name,
+                        .line_label = line.label,
+                        .rule_name = line.rule_name,
+                        .name = rule.arg_names[dummy.target_arg_idx].?,
+                        .span = line.span,
+                    });
+                    return err;
+                };
+                bindings[dummy.target_arg_idx] = selection.expr_id;
+                reserved_deps |= selection.deps;
+            },
+        }
     }
+}
+
+const FreshSelection = struct {
+    expr_id: ExprId,
+    deps: u55,
+};
+
+fn chooseFreshBinding(
+    parser: *MM0Parser,
+    theorem: *TheoremContext,
+    theorem_vars: *NameExprMap,
+    sort_vars: *const SortVarRegistry,
+    sort_name: []const u8,
+    used_deps: u55,
+    reserved_deps: u55,
+) !FreshSelection {
+    const pool = sort_vars.getPool(sort_name) orelse {
+        return error.FreshNoAvailableVar;
+    };
+    var first_unallocated: ?[]const u8 = null;
+
+    for (pool.tokens.items) |token| {
+        if (theorem_vars.get(token)) |parser_expr| {
+            const var_id = theorem.parser_vars.get(parser_expr) orelse {
+                return error.UnknownTheoremVariable;
+            };
+            switch (var_id) {
+                .dummy_var => |dummy_id| {
+                    const dummy_info = theorem.theorem_dummies.items[dummy_id];
+                    if ((used_deps & dummy_info.deps) != 0) continue;
+                    if ((reserved_deps & dummy_info.deps) != 0) continue;
+                    return .{
+                        .expr_id = try theorem.interner.internVar(var_id),
+                        .deps = dummy_info.deps,
+                    };
+                },
+                .theorem_var => continue,
+            }
+        } else if (first_unallocated == null) {
+            first_unallocated = token;
+        }
+    }
+
+    const token = first_unallocated orelse return error.FreshNoAvailableVar;
+    try theorem.ensureNamedDummyParserVar(
+        parser.allocator,
+        theorem_vars,
+        token,
+        pool.sort_name,
+        pool.sort_id,
+    );
+    const parser_expr = theorem_vars.get(token) orelse {
+        return error.UnknownTheoremVariable;
+    };
+    const var_id = theorem.parser_vars.get(parser_expr) orelse {
+        return error.UnknownTheoremVariable;
+    };
+    return switch (var_id) {
+        .dummy_var => |dummy_id| .{
+            .expr_id = try theorem.interner.internVar(var_id),
+            .deps = theorem.theorem_dummies.items[dummy_id].deps,
+        },
+        .theorem_var => error.FreshNoAvailableVar,
+    };
+}
+
+fn collectUsedDeps(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    line_expr: ExprId,
+    ref_exprs: []const ExprId,
+    bindings: []const ?ExprId,
+) !u55 {
+    var deps = try exprDeps(env, theorem, line_expr);
+    for (ref_exprs) |expr_id| {
+        deps |= try exprDeps(env, theorem, expr_id);
+    }
+    for (bindings) |maybe_expr_id| {
+        if (maybe_expr_id) |expr_id| {
+            deps |= try exprDeps(env, theorem, expr_id);
+        }
+    }
+    return deps;
+}
+
+fn exprDeps(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    expr_id: ExprId,
+) !u55 {
+    return (try Inference.exprInfo(
+        env,
+        theorem,
+        theorem.arg_infos,
+        expr_id,
+    )).deps;
 }
 
 fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {

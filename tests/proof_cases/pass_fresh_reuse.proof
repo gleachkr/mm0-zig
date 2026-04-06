@@ -1,0 +1,4 @@
+fresh_reuse
+-----------
+l1: $ top $ by use_fresh []
+l2: $ top $ by use_fresh []

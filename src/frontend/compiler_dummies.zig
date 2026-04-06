@@ -4,8 +4,14 @@ const RuleDecl = @import("./compiler_env.zig").RuleDecl;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
 
+pub const DummyMode = enum {
+    dummy,
+    fresh,
+};
+
 pub const DummyDecl = struct {
     target_arg_idx: usize,
+    mode: DummyMode,
 };
 
 pub fn processDummyAnnotations(
@@ -13,27 +19,42 @@ pub fn processDummyAnnotations(
     parser: *const MM0Parser,
     env: *const GlobalEnv,
     assertion: AssertionStmt,
-    annotations: []const []const u8,
     dummies: *std.AutoHashMap(u32, []const DummyDecl),
+    annotations: []const []const u8,
 ) !void {
     const rule_id = env.getRuleId(assertion.name) orelse return;
     const rule = &env.rules.items[rule_id];
-    const dummy_prefix = "@dummy ";
 
     var decls = std.ArrayListUnmanaged(DummyDecl){};
     defer decls.deinit(allocator);
 
     for (annotations) |ann| {
-        if (!std.mem.startsWith(u8, ann, dummy_prefix)) continue;
-        const decl = try parseDummyAnnotation(
-            parser,
-            rule,
-            ann[dummy_prefix.len..],
-        );
+        const decl = if (annotationMatchesTag(ann, "@dummy"))
+            try parseBinderAnnotation(
+                parser,
+                rule,
+                ann["@dummy".len..],
+                .dummy,
+            )
+        else if (annotationMatchesTag(ann, "@fresh"))
+            try parseBinderAnnotation(
+                parser,
+                rule,
+                ann["@fresh".len..],
+                .fresh,
+            )
+        else
+            continue;
+
         for (decls.items) |existing| {
-            if (existing.target_arg_idx == decl.target_arg_idx) {
-                return error.DuplicateDummyBinder;
+            if (existing.target_arg_idx != decl.target_arg_idx) continue;
+            if (existing.mode == decl.mode) {
+                return switch (decl.mode) {
+                    .dummy => error.DuplicateDummyBinder,
+                    .fresh => error.DuplicateFreshBinder,
+                };
             }
+            return error.ConflictingDummyStrategy;
         }
         try decls.append(allocator, decl);
     }
@@ -42,29 +63,30 @@ pub fn processDummyAnnotations(
     try dummies.put(rule_id, try decls.toOwnedSlice(allocator));
 }
 
-fn parseDummyAnnotation(
+fn parseBinderAnnotation(
     parser: *const MM0Parser,
     rule: *const RuleDecl,
     text: []const u8,
+    mode: DummyMode,
 ) !DummyDecl {
     const trimmed = std.mem.trim(u8, text, " \t\r\n;");
-    if (trimmed.len == 0) return error.InvalidDummyAnnotation;
-    if (!isIdentStart(trimmed[0])) return error.InvalidDummyAnnotation;
+    if (trimmed.len == 0) return invalidAnnotation(mode);
+    if (!isIdentStart(trimmed[0])) return invalidAnnotation(mode);
 
     var name_end: usize = 1;
     while (name_end < trimmed.len and isIdentChar(trimmed[name_end])) {
         name_end += 1;
     }
     if (std.mem.trim(u8, trimmed[name_end..], " \t\r\n").len != 0) {
-        return error.InvalidDummyAnnotation;
+        return invalidAnnotation(mode);
     }
 
     const name = trimmed[0..name_end];
     const target_arg_idx = findRuleArgIndex(rule, name) orelse {
-        return error.UnknownDummyBinder;
+        return unknownBinder(mode);
     };
     if (!rule.args[target_arg_idx].bound) {
-        return error.DummyRequiresBoundBinder;
+        return requiresBoundBinder(mode);
     }
 
     const sort_name = rule.args[target_arg_idx].sort_name;
@@ -72,10 +94,54 @@ fn parseDummyAnnotation(
         return error.UnknownSort;
     };
     const sort = parser.sort_infos.items[sort_id];
-    if (sort.strict) return error.DummyStrictSort;
-    if (sort.free) return error.DummyFreeSort;
+    if (sort.strict) return strictSort(mode);
+    if (sort.free) return freeSort(mode);
 
-    return .{ .target_arg_idx = target_arg_idx };
+    return .{
+        .target_arg_idx = target_arg_idx,
+        .mode = mode,
+    };
+}
+
+fn annotationMatchesTag(ann: []const u8, tag: []const u8) bool {
+    if (!std.mem.startsWith(u8, ann, tag)) return false;
+    if (ann.len == tag.len) return true;
+    return isAsciiWhitespace(ann[tag.len]);
+}
+
+fn invalidAnnotation(mode: DummyMode) anyerror {
+    return switch (mode) {
+        .dummy => error.InvalidDummyAnnotation,
+        .fresh => error.InvalidFreshAnnotation,
+    };
+}
+
+fn unknownBinder(mode: DummyMode) anyerror {
+    return switch (mode) {
+        .dummy => error.UnknownDummyBinder,
+        .fresh => error.UnknownFreshBinder,
+    };
+}
+
+fn requiresBoundBinder(mode: DummyMode) anyerror {
+    return switch (mode) {
+        .dummy => error.DummyRequiresBoundBinder,
+        .fresh => error.FreshRequiresBoundBinder,
+    };
+}
+
+fn strictSort(mode: DummyMode) anyerror {
+    return switch (mode) {
+        .dummy => error.DummyStrictSort,
+        .fresh => error.FreshStrictSort,
+    };
+}
+
+fn freeSort(mode: DummyMode) anyerror {
+    return switch (mode) {
+        .dummy => error.DummyFreeSort,
+        .fresh => error.FreshFreeSort,
+    };
 }
 
 fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
@@ -85,6 +151,10 @@ fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
         }
     }
     return null;
+}
+
+fn isAsciiWhitespace(ch: u8) bool {
+    return ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r';
 }
 
 fn isIdentStart(ch: u8) bool {

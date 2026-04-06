@@ -24,6 +24,7 @@ const CompilerVars = @import("./compiler_vars.zig");
 pub const ViewDecl = Metadata.ViewDecl;
 pub const DummyDecl = Metadata.DummyDecl;
 pub const SortVarDecl = Metadata.SortVarDecl;
+pub const SortVarRegistry = Metadata.SortVarRegistry;
 pub const Diagnostic = CompilerDiag.Diagnostic;
 pub const CheckedRef = CheckedIr.CheckedRef;
 pub const CheckedLine = CheckedIr.CheckedLine;
@@ -77,7 +78,7 @@ pub const Compiler = struct {
             arena.allocator(),
         );
         var views = std.AutoHashMap(u32, ViewDecl).init(arena.allocator());
-        var sort_vars = std.StringHashMap(SortVarDecl).init(arena.allocator());
+        var sort_vars = SortVarRegistry.init(arena.allocator());
         var proof_parser = if (self.proof_source) |proof|
             ProofScriptParser.init(arena.allocator(), proof)
         else
@@ -206,7 +207,7 @@ pub const Compiler = struct {
             allocator,
         );
         var views = std.AutoHashMap(u32, ViewDecl).init(allocator);
-        var sort_vars = std.StringHashMap(SortVarDecl).init(allocator);
+        var sort_vars = SortVarRegistry.init(allocator);
 
         var sort_names = std.ArrayListUnmanaged([]const u8){};
         var sorts = std.ArrayListUnmanaged(@import("../trusted/sorts.zig").Sort){};

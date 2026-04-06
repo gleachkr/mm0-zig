@@ -13,12 +13,13 @@ const TermStmt = @import("../../trusted/parse.zig").TermStmt;
 pub const ViewDecl = CompilerViews.ViewDecl;
 pub const DummyDecl = CompilerDummies.DummyDecl;
 pub const SortVarDecl = CompilerVars.SortVarDecl;
+pub const SortVarRegistry = CompilerVars.SortVarRegistry;
 
 pub fn processSortMetadata(
     parser: *const MM0Parser,
     sort_stmt: SortStmt,
     annotations: []const []const u8,
-    sort_vars: *std.StringHashMap(SortVarDecl),
+    sort_vars: *SortVarRegistry,
 ) !void {
     try CompilerVars.processSortVarAnnotations(
         parser,
@@ -59,8 +60,8 @@ pub fn processAssertionMetadata(
         parser,
         env,
         assertion,
-        annotations,
         dummies,
+        annotations,
     );
     try CompilerViews.processViewAnnotations(
         allocator,

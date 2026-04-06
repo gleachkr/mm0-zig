@@ -1,0 +1,7 @@
+--| @vars x
+provable sort wff;
+term top: wff;
+--| @fresh a
+--| @fresh b
+axiom use_fresh_pair {a b: wff}: $ top $;
+theorem fresh_exhausted: $ top $;

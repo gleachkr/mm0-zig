@@ -1,7 +1,7 @@
-# `@dummy` and `@vars`
+# `@dummy`, `@fresh`, and `@vars`
 
 These annotations help the proof compiler fill in bound binder arguments
-that serve as fresh local variables. Both are frontend features: the trusted
+that serve as local variables. They are frontend features: the trusted
 verifier sees only ordinary theorem applications with concrete dummy
 variables already in place.
 
@@ -11,11 +11,12 @@ variables already in place.
 
 ### Purpose
 
-Some rules have bound binders that serve only as a structural placeholder —
-a fresh local variable introduced to mark a hole — with no value that
+Some rules have bound binders that serve only as a structural placeholder
+— a local variable introduced to mark a hole — with no value that
 inference or view matching could discover. `@dummy` tells the compiler to
-fill such a binder with a fresh theorem-local dummy variable automatically,
-rather than requiring the user to name one on every proof line.
+fill such a binder with a fresh theorem-local dummy variable
+automatically, rather than requiring the user to name one on every proof
+line.
 
 ### Syntax
 ```
@@ -23,9 +24,11 @@ rather than requiring the user to name one on every proof line.
 ```
 
 The named binder must be a real bound rule binder in a sort that permits
-dummy variables (not strict, not free).
+local theorem dummies: not `strict` and not `free`.
+
 ```
---| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
+--| @view {x: wff} (a b: wff) (r: wff x) (p q: wff):
+--|   $ a <-> b $ > $ p $ > $ q $
 --| @abstract r p q x a b
 --| @dummy x
 --| @normalize hyp1 conc
@@ -34,18 +37,27 @@ axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
 ```
 
 Here `x` is the hole variable in the substitution context. The user never
-needs to name it; `@dummy` allocates a fresh one for each rule application.
+needs to name it; `@dummy` allocates a fresh one for each rule
+application.
 
 ### Precedence
 
 An explicit binding on the proof line overrides `@dummy`. If no explicit
-binding is given, `@dummy` fills the binder before inference runs. Each rule
-application gets its own fresh dummy; they are never shared across lines.
+binding is given, `@dummy` fills the binder before inference runs. Each
+rule application gets its own fresh dummy; they are never shared across
+lines.
 
 ### Sort restrictions
 
 `@dummy` rejects binders whose sort is `strict` or `free`, since those
 sorts do not permit theorem-local dummy variables.
+
+### Status
+
+`@dummy` still works, but it is expensive in long proofs: every rule
+application allocates a new theorem-local dummy and therefore burns a
+tracked bound-variable dependency slot. In many situations `@fresh` is a
+better fit.
 
 ---
 
@@ -54,12 +66,11 @@ sorts do not permit theorem-local dummy variables.
 ### Purpose
 
 `@vars` is a sort-level annotation that registers math tokens as automatic
-dummy variable names. When a registered token appears in proof math (line
-assertions or binder assignments) and is not otherwise known, the compiler
-lazily creates a theorem-local dummy of the annotated sort, as if the user
-had declared a bound binder in the theorem statement.
+variable names. When a registered token appears in proof math and is not
+otherwise known, the compiler lazily creates a theorem-local dummy of the
+annotated sort and adds it to the theorem variable map.
 
-This is useful for systems with a "variable convention" — a set of tokens
+This is useful for systems with a variable convention: a set of tokens
 that readers understand to be variables of a particular sort, without
 needing each theorem to redeclare them.
 
@@ -80,39 +91,40 @@ one or more space-separated tokens.
 sort obj;
 ```
 
-Tokens are raw math tokens (as split by the math-string tokenizer), not
-identifiers. This means unicode tokens like `α` work naturally, even though
-they are not valid declaration-syntax identifiers.
+Tokens are raw math tokens, as split by the math-string tokenizer, not
+identifiers. So unicode tokens like `α` work naturally even though they
+are not valid declaration-syntax identifiers.
 
 ### Behavior
 
 When the compiler processes a proof line, it scans the raw math text of
-each assertion and binding formula before handing it to the trusted parser.
-For each token:
+each assertion and binding formula before handing it to the trusted
+parser. For each token:
 
 1. If it is already in the theorem variable map, skip it.
-2. If it is a known formula marker, notation token, or term name, skip it.
-3. If it matches a `@vars` entry, create a theorem-local bound dummy of
-   that sort and add it to the theorem variable map.
-4. Otherwise, leave it for the existing parser to handle (or reject).
+2. If it is a known formula marker, notation token, or term name, skip
+   it.
+3. If it matches a `@vars` entry, create or reuse a theorem-local bound
+   dummy of that sort and add it to the theorem variable map.
+4. Otherwise, leave it for the existing parser to handle or reject.
 
-The dummy is created lazily — only when the token actually appears in proof
-math for the current theorem. Unused `@vars` tokens consume no dependency
-slots.
+Creation is lazy: the dummy appears only when the token is actually used
+in proof math for the current theorem. Unused `@vars` tokens consume no
+dependency slots.
 
 ### Scope
 
 `@vars` tokens are available in proof-body math only. They do not affect
-theorem statement parsing in the `.mm0` file. A `@vars` token cannot appear
-in a theorem conclusion or hypothesis in the source `.mm0` file — it can
-only appear in the `.proof` file's line assertions and binder assignments.
+statement parsing in the `.mm0` file. A `@vars` token cannot appear in a
+source theorem conclusion or hypothesis unless it was declared there by
+ordinary theorem binders.
 
 ### Sort restrictions
 
 `@vars` may only be used on sorts that permit theorem-local dummies:
 
-- **strict** sorts are rejected
-- **free** sorts are rejected
+- `strict` sorts are rejected
+- `free` sorts are rejected
 
 ### Collision rules
 
@@ -120,18 +132,18 @@ The compiler rejects a `@vars` token at sort-annotation time if:
 
 - the same token is already claimed by a different sort's `@vars`
 - the token collides with an existing term name, formula marker, or
-  notation token (prefix or infix)
+  notation token
 
-This prevents silent shadowing: in `parsePrefixExpr`, variables are checked
-before notations and terms, so a `@vars` token that matched a notation
-would silently win. The collision check makes this an explicit error.
+This prevents silent shadowing. In `parsePrefixExpr`, variables are
+checked before notations and terms, so a colliding `@vars` token would
+otherwise win unexpectedly.
 
 ### Dependency budget
 
-Theorem-local dummies consume tracked bound-variable dependency slots (55
-maximum). Because allocation is lazy, declaring many `@vars` tokens is
-harmless as long as each theorem's proof only uses a modest number of them.
-If a proof triggers too many dummy allocations, the existing
+Theorem-local dummies consume tracked bound-variable dependency slots, 55
+maximum. Because allocation is lazy, declaring many `@vars` tokens is
+harmless as long as each theorem's proof only uses a modest number of
+them. If a proof triggers too many dummy allocations, the existing
 `DependencySlotExhausted` error fires.
 
 ### Example
@@ -160,14 +172,14 @@ l2: $ t = t $ by eq_refl (a := $ t $)
 ```
 
 Here `x` is not declared in the theorem statement. When the compiler
-encounters `x` in line l1's assertion text, it finds `x` in the `@vars`
-registry for sort `nat`, creates a theorem-local dummy, and adds it to the
-variable map. The trusted parser then accepts `x` as a bound variable.
+encounters `x` in line `l1`, it finds `x` in the `@vars` registry for
+sort `nat`, creates a theorem-local dummy, and adds it to the variable
+map. The trusted parser then accepts `x` as a bound variable.
 
 ### Unicode tokens
 
-Because `@vars` uses math-string tokenization (not identifier parsing),
-unicode tokens work:
+Because `@vars` uses math-string tokenization rather than identifier
+parsing, unicode tokens work:
 
 ```mm0
 --| @vars α β γ
@@ -178,12 +190,140 @@ A proof line mentioning `α` will auto-create a dummy of sort `obj`.
 
 ---
 
-## How `@dummy` and `@vars` differ
+## `@fresh`
 
-| | `@dummy` | `@vars` |
-|---|---|---|
-| **Annotation target** | Rule (axiom/theorem) binder | Sort declaration |
-| **Scope** | One rule's applications | All proof lines |
-| **Naming** | Anonymous (fresh each application) | Named by the token |
-| **Reuse across lines** | No — each application gets a fresh dummy | Yes — same token reuses the same theorem-local dummy |
-| **Typical use** | Hole variables in substitution-based rules | "Variable convention" tokens (`x`, `y`, `α`, `β`) |
+### Purpose
+
+`@fresh` is a rule-level annotation that fills an omitted bound binder by
+choosing a variable from that binder's sort's `@vars` pool.
+
+Unlike `@dummy`, `@fresh` tries to reuse an already-allocated theorem-
+local dummy when that dummy does not appear in the concrete inputs to the
+current rule application. This avoids burning a new dependency slot when a
+suitable pool variable is already available.
+
+### Syntax
+
+```
+--| @fresh <binder-name>
+```
+
+The named binder must be a real bound rule binder in a sort that permits
+local theorem dummies.
+
+### Selection rule
+
+For one rule application, the compiler looks at the current concrete
+inputs:
+
+- the proof line assertion
+- the cited references
+- the explicit binder assignments on the line
+
+Then it examines the binder's sort's `@vars` pool in declaration order.
+
+1. If a pool token already names a theorem-local dummy and that dummy does
+   not occur in the current concrete inputs, reuse it.
+2. Otherwise, allocate the first unallocated pool token.
+3. If no pool token is available, report an error.
+
+Multiple `@fresh` binders on one rule application reserve distinct pool
+variables. They never alias one another.
+
+### Precedence
+
+An explicit binding on the proof line overrides `@fresh`, just as it does
+for `@dummy`.
+
+### Sort restrictions
+
+`@fresh` rejects binders whose sort is `strict` or `free`.
+
+### Relationship to `@vars`
+
+`@fresh` depends on `@vars`. If a binder's sort has no `@vars` pool, or if
+all pool tokens are already present in the current concrete inputs, the
+rule application fails.
+
+So `@fresh` is a bounded, pool-based strategy, while `@dummy` is an
+unbounded, always-allocate strategy.
+
+### Example
+
+```mm0
+delimiter $ ( ) $;
+provable sort wff;
+
+--| @vars x y z
+sort obj;
+
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 50;
+term top: obj;
+
+axiom eq_refl (a: obj): $ a = a $;
+--| @fresh x
+axiom use_fresh {x: obj}: $ x = x $;
+
+theorem demo: $ top = top $;
+```
+
+```proof
+demo
+----
+
+l1: $ x = x $ by eq_refl (a := $ x $)
+l2: $ y = y $ by use_fresh []
+l3: $ top = top $ by eq_refl (a := $ top $)
+```
+
+On line `l2`, the binder `x` of `use_fresh` is omitted. The compiler
+looks at the `obj` pool `x y z`. Token `x` is already present in the
+current theorem and also appears in the concrete inputs to line `l2`, so
+it cannot be reused. Token `y` is available, so the compiler binds the
+rule's omitted binder to `y`.
+
+If a later line uses `@fresh` again and `y` is absent from that line's
+inputs, `y` can be reused instead of allocating a new dummy.
+
+---
+
+## How the three features differ
+
+- **Annotation target**
+  - `@dummy`: rule binder
+  - `@fresh`: rule binder
+  - `@vars`: sort
+- **Role**
+  - `@dummy`: always allocate a fresh dummy
+  - `@fresh`: reuse or allocate from a pool
+  - `@vars`: declare the pool tokens
+- **Scope**
+  - `@dummy`: one rule application
+  - `@fresh`: one rule application
+  - `@vars`: whole theorem proof body
+- **Naming**
+  - `@dummy`: anonymous
+  - `@fresh`: named by the chosen pool token
+  - `@vars`: named by the token
+- **Reuse across lines**
+  - `@dummy`: never
+  - `@fresh`: yes, when absent from current inputs
+  - `@vars`: yes
+- **Failure mode**
+  - `@dummy`: only the 55-slot limit
+  - `@fresh`: may fail if the pool is exhausted
+  - `@vars`: not applicable
+- **Typical use**
+  - `@dummy`: hole variables that must be globally fresh
+  - `@fresh`: hole variables that only need to be fresh relative to the
+    current line
+  - `@vars`: variable-convention tokens
+
+A useful rule of thumb is:
+
+- use `@vars` to define the token pool
+- use `@fresh` when a rule wants a local variable that should avoid
+  burning new slots when possible
+- use `@dummy` only when the rule really needs a globally new theorem-
+  local dummy every time
