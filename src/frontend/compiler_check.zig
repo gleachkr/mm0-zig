@@ -11,10 +11,9 @@ const Span = @import("./proof_script.zig").Span;
 const TheoremBlock = @import("./proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const CompilerViews = @import("./compiler_views.zig");
-const CompilerDummies = @import("./compiler_dummies.zig");
+const CompilerFresh = @import("./compiler_fresh.zig");
 const ViewDecl = CompilerViews.ViewDecl;
-const DummyDecl = CompilerDummies.DummyDecl;
-const DummyMode = CompilerDummies.DummyMode;
+const FreshDecl = CompilerFresh.FreshDecl;
 const CompilerDiag = @import("./compiler_diag.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
 const CheckedIr = @import("./compiler/checked_ir.zig");
@@ -35,7 +34,7 @@ pub fn checkTheoremBlock(
     parser: *MM0Parser,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
-    dummies: *const std.AutoHashMap(u32, []const DummyDecl),
+    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
     assertion: AssertionStmt,
@@ -147,8 +146,8 @@ pub fn checkTheoremBlock(
             rule,
             line,
         );
-        if (dummies.get(rule_id)) |rule_dummies| {
-            try applyAnnotatedBindings(
+        if (fresh_bindings.get(rule_id)) |rule_fresh| {
+            try applyFreshBindings(
                 self,
                 parser,
                 env,
@@ -161,7 +160,7 @@ pub fn checkTheoremBlock(
                 line_expr,
                 ref_exprs,
                 partial_bindings,
-                rule_dummies,
+                rule_fresh,
             );
         }
         const maybe_view = views.get(rule_id);
@@ -473,7 +472,7 @@ fn parseBindings(
     return bindings;
 }
 
-fn applyAnnotatedBindings(
+fn applyFreshBindings(
     self: anytype,
     parser: *MM0Parser,
     env: *const GlobalEnv,
@@ -486,7 +485,7 @@ fn applyAnnotatedBindings(
     line_expr: ExprId,
     ref_exprs: []const ExprId,
     bindings: []?ExprId,
-    dummies_list: []const DummyDecl,
+    fresh_list: []const FreshDecl,
 ) !void {
     const used_deps = try collectUsedDeps(
         env,
@@ -497,52 +496,31 @@ fn applyAnnotatedBindings(
     );
     var reserved_deps: u55 = 0;
 
-    for (dummies_list) |dummy| {
-        if (bindings[dummy.target_arg_idx] != null) continue;
+    for (fresh_list) |fresh| {
+        if (bindings[fresh.target_arg_idx] != null) continue;
 
-        switch (dummy.mode) {
-            .dummy => {
-                bindings[dummy.target_arg_idx] = theorem.addDummyVar(
-                    parser,
-                    rule.args[dummy.target_arg_idx],
-                ) catch |err| {
-                    self.setDiagnostic(.{
-                        .kind = .parse_dummy,
-                        .err = err,
-                        .theorem_name = theorem_name,
-                        .line_label = line.label,
-                        .rule_name = line.rule_name,
-                        .name = rule.arg_names[dummy.target_arg_idx].?,
-                        .span = line.span,
-                    });
-                    return err;
-                };
-            },
-            .fresh => {
-                const selection = chooseFreshBinding(
-                    parser,
-                    theorem,
-                    theorem_vars,
-                    sort_vars,
-                    rule.args[dummy.target_arg_idx].sort_name,
-                    used_deps,
-                    reserved_deps,
-                ) catch |err| {
-                    self.setDiagnostic(.{
-                        .kind = .parse_fresh,
-                        .err = err,
-                        .theorem_name = theorem_name,
-                        .line_label = line.label,
-                        .rule_name = line.rule_name,
-                        .name = rule.arg_names[dummy.target_arg_idx].?,
-                        .span = line.span,
-                    });
-                    return err;
-                };
-                bindings[dummy.target_arg_idx] = selection.expr_id;
-                reserved_deps |= selection.deps;
-            },
-        }
+        const selection = chooseFreshBinding(
+            parser,
+            theorem,
+            theorem_vars,
+            sort_vars,
+            rule.args[fresh.target_arg_idx].sort_name,
+            used_deps,
+            reserved_deps,
+        ) catch |err| {
+            self.setDiagnostic(.{
+                .kind = .parse_fresh,
+                .err = err,
+                .theorem_name = theorem_name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = rule.arg_names[fresh.target_arg_idx].?,
+                .span = line.span,
+            });
+            return err;
+        };
+        bindings[fresh.target_arg_idx] = selection.expr_id;
+        reserved_deps |= selection.deps;
     }
 }
 

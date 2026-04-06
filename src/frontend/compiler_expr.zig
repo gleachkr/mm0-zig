@@ -242,8 +242,9 @@ pub const TheoremContext = struct {
     /// API that all dummy allocation routes through. It is intentionally kept
     /// for legitimate use cases:
     ///
-    /// - Explicit source/user dummies: seedTerm (compiler_expr.zig) and
-    ///   applyDummyBindings (compiler_check.zig) for user-written @dummy.
+    /// - Explicit source/user dummies: seedTerm (compiler_expr.zig) for
+    ///   dot binders declared in .mm0, plus named theorem-local vars created
+    ///   through @vars / @fresh when a proof line needs them.
     /// - Temporary mirror-context dummies in def_ops, including normalized
     ///   matching placeholders, which do not consume real theorem dependency
     ///   slots.

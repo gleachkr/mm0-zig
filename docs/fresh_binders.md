@@ -1,0 +1,300 @@
+# `@fresh` and `@vars`
+
+These annotations help the proof compiler fill in bound binder arguments
+that serve as local variables. They are frontend features: the trusted
+verifier sees only ordinary theorem applications with concrete dummy
+variables already in place.
+
+---
+
+## `@vars`
+
+### Purpose
+
+`@vars` is a sort-level annotation that registers math tokens as automatic
+variable names. When a registered token appears in proof math and is not
+otherwise known, the compiler lazily creates a theorem-local dummy of the
+annotated sort and adds it to the theorem variable map.
+
+This is useful for systems with a variable convention: a set of tokens
+that readers understand to be variables of a particular sort, without
+needing each theorem to redeclare them.
+
+### Syntax
+
+```
+--| @vars <token> <token> ...
+sort nat;
+```
+
+Annotations are attached to sort declarations via `--|` comment lines.
+Multiple `@vars` annotations may appear on the same sort. Each one lists
+one or more space-separated tokens.
+
+```
+--| @vars x y z
+--| @vars α β γ
+sort obj;
+```
+
+Tokens are raw math tokens, as split by the math-string tokenizer, not
+identifiers. So unicode tokens like `α` work naturally even though they
+are not valid declaration-syntax identifiers.
+
+### Behavior
+
+When the compiler processes a proof line, it scans the raw math text of
+each assertion and binding formula before handing it to the trusted
+parser. For each token:
+
+1. If it is already in the theorem variable map, skip it.
+2. If it is a known formula marker, notation token, or term name, skip
+   it.
+3. If it matches a `@vars` entry, create or reuse a theorem-local bound
+   dummy of that sort and add it to the theorem variable map.
+4. Otherwise, leave it for the existing parser to handle or reject.
+
+Creation is lazy: the dummy appears only when the token is actually used
+in proof math for the current theorem. Unused `@vars` tokens consume no
+dependency slots.
+
+### Scope
+
+`@vars` tokens are available in proof-body math only. They do not affect
+statement parsing in the `.mm0` file. A `@vars` token cannot appear in a
+source theorem conclusion or hypothesis unless it was declared there by
+ordinary theorem binders.
+
+### Sort restrictions
+
+`@vars` may only be used on sorts that permit theorem-local dummies:
+
+- `strict` sorts are rejected
+- `free` sorts are rejected
+
+### Collision rules
+
+The compiler rejects a `@vars` token at sort-annotation time if:
+
+- the same token is already claimed by a different sort's `@vars`
+- the token collides with an existing term name, formula marker, or
+  notation token
+
+This prevents silent shadowing. In `parsePrefixExpr`, variables are
+checked before notations and terms, so a colliding `@vars` token would
+otherwise win unexpectedly.
+
+### Dependency budget
+
+Theorem-local dummies consume tracked bound-variable dependency slots, 55
+maximum. Because allocation is lazy, declaring many `@vars` tokens is
+harmless as long as each theorem's proof only uses a modest number of
+them. If a proof triggers too many dummy allocations, the existing
+`DependencySlotExhausted` error fires.
+
+### Example
+
+```mm0
+delimiter $ ( ) $;
+provable sort wff;
+
+--| @vars x y z
+sort nat;
+
+term eq (a b: nat): wff;
+infixl eq: $=$ prec 50;
+
+axiom eq_refl (a: nat): $ a = a $;
+
+theorem example (t: nat): $ t = t $;
+```
+
+```proof
+example
+-------
+
+l1: $ x = x $ by eq_refl
+l2: $ t = t $ by eq_refl
+```
+
+Line `l1` is the `@vars` case: `x` is not declared in the theorem
+statement, so when the compiler encounters it in proof math it looks up
+`x` in the `nat` pool, creates a theorem-local dummy, and adds it to the
+variable map before parsing the line.
+
+Line `l2` is the ordinary case: `t` is already a theorem binder, so no
+`@vars` allocation happens.
+
+In both lines, the omitted binder `a` of `eq_refl` is inferred from the
+written assertion — `@vars` only makes a name available in proof math; it does 
+not itself force a rule binder to be filled.
+
+### Unicode tokens
+
+Because `@vars` uses math-string tokenization rather than identifier
+parsing, unicode tokens work:
+
+```mm0
+--| @vars α β γ
+sort obj;
+```
+
+A proof line mentioning `α` will auto-create a dummy of sort `obj`.
+
+---
+
+## `@fresh`
+
+### Purpose
+
+`@fresh` is a rule-level annotation for the opposite situation from the
+`eq_refl` example above.
+
+If an omitted binder still appears in the user-written proof line, then
+ordinary inference can usually recover it directly from the line and the
+cited references. `@fresh` is useful when the omitted binder is a bound
+local variable that does not appear anywhere in the proof text the user
+writes.
+
+This comes up most often with substitution-style rules. The raw rule may
+have a binder like `{x: ...}` because it literally talks about
+substituting for `x`, but the user-facing line mentions only the fully
+normalized result, with the substitution operator and its bound variable
+already gone.
+
+In that situation there is nothing for ordinary inference to read off the
+surface syntax, so `@fresh` fills the hidden bound binder by choosing a
+variable from that sort's `@vars` pool.
+
+The compiler tries to reuse an already-allocated theorem-local dummy when
+that dummy does not appear in the concrete inputs to the current rule
+application. This avoids burning a new dependency slot when a suitable
+pool variable is already available.
+
+### Syntax
+
+```
+--| @fresh <binder-name>
+```
+
+The named binder must be a real bound rule binder in a sort that permits
+local theorem dummies.
+
+### Selection rule
+
+For one rule application, the compiler looks at the current concrete
+inputs:
+
+- the proof line assertion
+- the cited references
+- the explicit binder assignments on the line
+
+Then it examines the binder's sort's `@vars` pool in declaration order.
+
+1. If a pool token already names a theorem-local dummy and that dummy does
+   not occur in the current concrete inputs, reuse it.
+2. Otherwise, if a pool token has not yet been allocated in the current
+   theorem, allocate it and use it.
+3. If every pool token is already present in the current concrete inputs,
+   report an error.
+
+Multiple `@fresh` binders on one rule application reserve distinct pool
+variables. They never alias one another.
+
+### Precedence
+
+An explicit binding on the proof line overrides `@fresh`.
+
+### Sort restrictions
+
+`@fresh` rejects binders whose sort is `strict` or `free`.
+
+### Relationship to `@vars`
+
+`@fresh` depends on `@vars`. If a binder's sort has no `@vars` pool, the
+rule application fails. If the pool exists, `@fresh` first tries to reuse
+an already-allocated token and otherwise allocates the first unused token
+in declaration order.
+
+Failure happens only when there is a pool but every token in it is already
+allocated and also appears in the current concrete inputs, so none of them
+is fresh for this application.
+
+### Example: CNF demo
+
+A real use appears in `tests/proof_cases/demo_prop_cnf.mm0`.
+
+```mm0
+--| @vars X
+provable sort wff;
+
+term iff (a b: wff): wff;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+
+--| @view {x: wff} (a b: wff) (r: wff x) (p q: wff):
+--|   $ a ↔ b $ > $ p ↔ q $
+--| @abstract r p q x a b
+--| @fresh x
+--| @normalize conc
+axiom iff_subst {x: wff} (a b: wff) (r: wff x):
+  $ a ↔ b $ > $ [x/a] r ↔ [x/b] r $;
+```
+
+And the proof uses it like this:
+
+```proof
+l1: $ (P → (Q ∧ ¬ R)) ↔ (¬ P ∨ (Q ∧ ¬ R)) $ by imp_as_or
+l2: $ S ∨ ¬ (P → (Q ∧ ¬ R)) ↔ S ∨ ¬ (¬ P ∨ (Q ∧ ¬ R)) $
+      by iff_subst [l1]
+```
+
+The important point is that line `l2` does not mention the raw
+substitution binder `x` anywhere. The user writes only the before-and-
+after formulas. The visible information is enough for `@view` and
+`@abstract` to recover:
+
+- `a` and `b`, the expressions being substituted
+- `r`, the surrounding context
+
+But the raw rule still has the hidden bound binder `{x: wff}` because its
+conclusion is stated as `[x/a] r ↔ [x/b] r`. After normalization, that raw
+substitution syntax disappears from the user-facing line, so ordinary
+inference has no surface occurrence from which to recover `x`.
+
+`@fresh x` fills that gap. The compiler chooses `X` from the `wff`
+`@vars` pool, instantiates the raw rule with `x := X`, and then
+normalizes the substitution expressions away.
+
+Without `@fresh`, the rule application would still be missing a concrete
+value for `x` even though the user-facing formulas and the cited equality
+already determine everything else.
+
+### Another real use: calculus demo
+
+The same pattern appears in `tests/proof_cases/demo_calculus_product_rule`
+for equality substitution:
+
+```mm0
+--| @vars r v w
+sort real;
+
+--| @view {x: real} (a b: real) (r: real x) (p q: real):
+--|   $ a = b $ > $ p = q $
+--| @abstract r p q x a b
+--| @fresh x
+--| @normalize conc
+axiom eq_subst {x: real} (a b: real) (r: real x):
+  $ a = b $ > $ [x | a] r = [x | b] r $;
+```
+
+With proof lines such as:
+
+```proof
+l8: $ lim h ((fh - f) / h) + lim h ((gh - g) / h) =
+      df + lim h ((gh - g) / h) $ by eq_subst [#1]
+```
+
+Again, the line does not mention the raw binder `x`. It mentions only the
+concrete equality before and after substitution. `@fresh` supplies the
+hidden bound variable needed by the raw substitution rule, while
+`@view`/`@abstract` recover the visible parts.

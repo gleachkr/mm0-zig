@@ -48,13 +48,12 @@ normalization":
   subtree but a *one-hole context* — a shared surrounding structure that
   explains the difference between two solved expressions.
 
-**`@dummy`** and **`@fresh`** are simpler companions documented in
-`docs/dummy_binders.md`. They handle omitted *bound* binders that serve
+**`@fresh`** is a simpler companion documented in
+`docs/fresh_binders.md`. It handles omitted *bound* binders that serve
 only as local variables and cannot be recovered by any matching strategy.
-`@dummy` always allocates a new theorem-local dummy; `@fresh` instead
-chooses from the binder sort's `@vars` pool, reusing an existing theorem-
-local dummy when one is available and absent from the current concrete
-inputs.
+`@fresh` chooses from the binder sort's `@vars` pool, reusing an
+existing theorem-local dummy when one is available and absent from the
+current concrete inputs.
 
 ### Elaboration pipeline
 
@@ -63,11 +62,10 @@ arguments in the following order:
 
 1. **Explicit bindings** from the proof line are recorded first and cannot
    be overridden by later steps.
-2. **`@dummy` and `@fresh` annotations** fill omitted bound binders
-   before inference begins. `@dummy` allocates a fresh theorem-local
-   dummy. `@fresh` selects a suitable variable from the binder sort's
-   `@vars` pool, preferring reuse when the chosen variable is absent from
-   the current concrete inputs.
+2. **`@fresh` annotations** fill omitted bound binders before
+   inference begins. `@fresh` selects a suitable variable from the binder
+   sort's `@vars` pool, preferring reuse when the chosen variable is
+   absent from the current concrete inputs.
 3. **`@view` matching** unifies the view's conclusion and hypotheses against
    the user's line and cited references, solving view binders. If a view
    binder maps to a real rule binder, the solution is copied across. When
@@ -365,11 +363,11 @@ annotations is:
 1. **Parse explicit bindings.** Any `(name := $ expr $)` assignments are
    recorded. These are final and cannot be overridden.
 
-2. **Seed `@dummy` / `@fresh` binders.** For each bound binder with one
-   of these annotations and no explicit assignment, fill it before view
-   matching. `@dummy` allocates a fresh theorem-local dummy. `@fresh`
-   chooses from the binder sort's `@vars` pool, preferring reuse when the
-   chosen variable is absent from the current concrete inputs.
+2. **Seed `@fresh` binders.** For each bound binder with this
+   annotation and no explicit assignment, fill it before view matching.
+   `@fresh` chooses from the binder sort's `@vars` pool, preferring
+   reuse when the chosen variable is absent from the current concrete
+   inputs.
 
 3. **Match the `@view`.** Unify the view's conclusion and hypotheses against
    the user's line and cited references. Map solved view binders to their
@@ -410,9 +408,9 @@ more specific.
 
 ### 1. `@view` seeding happens before ordinary omitted-binder inference
 
-When a proof line omits some rule binders, the compiler first tries to seed as
-many of them as it can from the view. This happens in a def-aware matching
-session, before the general omitted-binder solver runs.
+When a proof line omits some rule binders, the compiler first
+tries to seed as many of them as it can from the view. This happens in a
+def-aware matching session, before the general omitted-binder solver runs.
 
 The important consequence is that `@view`, `@recover`, and `@abstract` are not
 an optional postprocessing step. They are part of how the solver gets its
@@ -639,8 +637,6 @@ These annotations are deliberately narrow in scope. They are well suited for:
 They are **not** a general higher-order inference mechanism:
 
 - `@view` only matches the proof line assertion and cited references.
-- `@dummy` only fills omitted *bound* binders with fresh local dummy
-  variables.
 - `@fresh` only fills omitted *bound* binders from a finite `@vars`
   pool, reusing theorem-local dummies when they are absent from the
   current concrete inputs.

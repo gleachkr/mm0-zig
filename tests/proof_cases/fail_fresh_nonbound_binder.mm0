@@ -1,0 +1,4 @@
+delimiter $ ( ) $;
+provable sort wff;
+--| @fresh x
+axiom bad_fresh (x: wff): $ x $;

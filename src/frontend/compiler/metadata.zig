@@ -1,7 +1,7 @@
 const std = @import("std");
 const GlobalEnv = @import("../compiler_env.zig").GlobalEnv;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
-const CompilerDummies = @import("../compiler_dummies.zig");
+const CompilerFresh = @import("../compiler_fresh.zig");
 const CompilerViews = @import("../compiler_views.zig");
 const CompilerVars = @import("../compiler_vars.zig");
 const TermAnnotations = @import("../term_annotations.zig");
@@ -11,7 +11,7 @@ const SortStmt = @import("../../trusted/parse.zig").SortStmt;
 const TermStmt = @import("../../trusted/parse.zig").TermStmt;
 
 pub const ViewDecl = CompilerViews.ViewDecl;
-pub const DummyDecl = CompilerDummies.DummyDecl;
+pub const FreshDecl = CompilerFresh.FreshDecl;
 pub const SortVarDecl = CompilerVars.SortVarDecl;
 pub const SortVarRegistry = CompilerVars.SortVarRegistry;
 
@@ -49,18 +49,18 @@ pub fn processAssertionMetadata(
     parser: *MM0Parser,
     env: *GlobalEnv,
     registry: *RewriteRegistry,
-    dummies: *std.AutoHashMap(u32, []const DummyDecl),
+    fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
     views: *std.AutoHashMap(u32, ViewDecl),
     assertion: AssertionStmt,
     annotations: []const []const u8,
 ) !void {
     try registry.processAnnotations(env, assertion.name, annotations);
-    try CompilerDummies.processDummyAnnotations(
+    try CompilerFresh.processFreshAnnotations(
         allocator,
         parser,
         env,
         assertion,
-        dummies,
+        fresh_bindings,
         annotations,
     );
     try CompilerViews.processViewAnnotations(

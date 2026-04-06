@@ -2463,10 +2463,11 @@ test "compiler reports dependency slot exhaustion clearly" {
     var mm0_buf = std.ArrayListUnmanaged(u8){};
     defer mm0_buf.deinit(allocator);
     try mm0_buf.appendSlice(allocator,
+        \\--| @vars y
         \\provable sort wff;
         \\term top: wff;
-        \\--| @dummy y
-        \\axiom use_dummy {y: wff}: $ top $;
+        \\--| @fresh y
+        \\axiom use_fresh {y: wff}: $ top $;
         \\theorem overflow
     );
     for (0..CompilerExpr.tracked_bound_dep_limit) |idx| {
@@ -2477,7 +2478,7 @@ test "compiler reports dependency slot exhaustion clearly" {
     const proof_src =
         \\overflow
         \\--------
-        \\l1: $ top $ by use_dummy []
+        \\l1: $ top $ by use_fresh []
     ;
 
     var compiler = Compiler.initWithProof(
@@ -2494,7 +2495,7 @@ test "compiler reports dependency slot exhaustion clearly" {
     try std.testing.expectEqual(error.DependencySlotExhausted, diag.err);
     try std.testing.expectEqualStrings("overflow", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
-    try std.testing.expectEqualStrings("use_dummy", diag.rule_name.?);
+    try std.testing.expectEqualStrings("use_fresh", diag.rule_name.?);
     try std.testing.expectEqualStrings("y", diag.name.?);
     try std.testing.expectEqualStrings(
         "theorem exceeded the 55 tracked bound-variable dependency slots",
@@ -2955,8 +2956,8 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_abstract_explicit_target", .outcome = .pass },
     .{ .stem = "pass_abstract_chain_recover", .outcome = .pass },
     .{ .stem = "pass_abstract_normalize", .outcome = .pass },
-    .{ .stem = "pass_dummy_hole", .outcome = .pass },
-    .{ .stem = "pass_dummy_explicit_override", .outcome = .pass },
+    .{ .stem = "pass_fresh_hole", .outcome = .pass },
+    .{ .stem = "pass_fresh_explicit_override", .outcome = .pass },
     .{ .stem = "pass_fresh_reuse", .outcome = .pass },
     .{ .stem = "demo_prop_cnf", .outcome = .pass },
     .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
@@ -3077,20 +3078,20 @@ const proof_cases = [_]ProofCase{
         .outcome = .{ .fail = error.AbstractWithoutView },
     },
     .{
-        .stem = "fail_dummy_unknown_binder",
-        .outcome = .{ .fail = error.UnknownDummyBinder },
+        .stem = "fail_fresh_unknown_binder",
+        .outcome = .{ .fail = error.UnknownFreshBinder },
     },
     .{
-        .stem = "fail_dummy_duplicate",
-        .outcome = .{ .fail = error.DuplicateDummyBinder },
+        .stem = "fail_fresh_duplicate",
+        .outcome = .{ .fail = error.DuplicateFreshBinder },
     },
     .{
-        .stem = "fail_dummy_nonbound_binder",
-        .outcome = .{ .fail = error.DummyRequiresBoundBinder },
+        .stem = "fail_fresh_nonbound_binder",
+        .outcome = .{ .fail = error.FreshRequiresBoundBinder },
     },
     .{
-        .stem = "fail_dummy_sort_restriction",
-        .outcome = .{ .fail = error.DummyFreeSort },
+        .stem = "fail_fresh_sort_restriction",
+        .outcome = .{ .fail = error.FreshFreeSort },
     },
     .{
         .stem = "fail_fresh_exhausted",
@@ -3408,13 +3409,13 @@ test "compiler emits name, var, and hyp index tables" {
     try std.testing.expectEqualStrings("#2", (try hs_hyps.get(1)).?);
 }
 
-test "compiler records theorem-local dummy vars in theorem var table" {
+test "compiler records theorem-local fresh vars in theorem var table" {
     const allocator = std.testing.allocator;
-    const mm0_src = try readProofCaseFile(allocator, "pass_dummy_hole", "mm0");
+    const mm0_src = try readProofCaseFile(allocator, "pass_fresh_hole", "mm0");
     defer allocator.free(mm0_src);
     const proof_src = try readProofCaseFile(
         allocator,
-        "pass_dummy_hole",
+        "pass_fresh_hole",
         "proof",
     );
     defer allocator.free(proof_src);
@@ -3429,15 +3430,15 @@ test "compiler records theorem-local dummy vars in theorem var table" {
     while (idx < mmb.header.num_thms) : (idx += 1) {
         const maybe_name = try mmb.theoremName(idx);
         if (maybe_name) |name| {
-            if (std.mem.eql(u8, name, "dummy_hole")) {
+            if (std.mem.eql(u8, name, "fresh_hole")) {
                 theorem_id = idx;
                 break;
             }
         }
     }
 
-    const dummy_hole_id = theorem_id orelse return error.MissingTheorem;
-    const vars = (try mmb.theoremVarNames(dummy_hole_id)).?;
+    const fresh_hole_id = theorem_id orelse return error.MissingTheorem;
+    const vars = (try mmb.theoremVarNames(fresh_hole_id)).?;
     try std.testing.expectEqual(@as(usize, 3), vars.len());
     try std.testing.expectEqualStrings("a", (try vars.get(0)).?);
     try std.testing.expectEqualStrings("b", (try vars.get(1)).?);

@@ -2,5 +2,5 @@ delimiter $ ( ) $;
 free sort set;
 provable sort wff;
 term P (x: set): wff;
---| @dummy x
-axiom bad_dummy {x: set}: $ P x $;
+--| @fresh x
+axiom bad_fresh {x: set}: $ P x $;

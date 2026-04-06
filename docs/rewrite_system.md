@@ -35,10 +35,10 @@ There are four mechanisms that can supply these arguments, and they compose:
    solved binders back to the underlying rule's argument list. `@recover` and
    `@abstract` can further derive additional binders from the view solution.
 
-4. **`@dummy` annotations.** For omitted bound binders that serve only as
-   fresh local variables (no inference can solve them), `@dummy` tells the
-   compiler to allocate a fresh theorem-local dummy variable of the right sort
-   rather than requiring the user to name one.
+4. **`@fresh` annotations.** For omitted bound binders that serve only as
+   fresh local variables (no inference can solve them), `@fresh` tells the
+   compiler to choose a theorem-local variable from the binder sort's `@vars`
+   pool rather than requiring the user to name one.
 
 Once all arguments are known, the compiler *instantiates* the rule: it
 substitutes the concrete expressions for each binder throughout the rule's

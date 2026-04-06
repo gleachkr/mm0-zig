@@ -1,4 +1,5 @@
 delimiter $ ( ) $;
+--| @vars x y z
 provable sort wff;
 term imp (a b: wff): wff; infixr imp: $->$ prec 25;
 term iff (a b: wff): wff; infixr iff: $<->$ prec 20;
@@ -21,9 +22,9 @@ axiom imp_congr (a b c d: wff):
   $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
 --| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
 --| @abstract r p q x a b
---| @dummy x
+--| @fresh x
 --| @normalize hyp1 conc
 axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
-theorem dummy_hole (a b: wff):
+theorem fresh_hole (a b: wff):
   $ a <-> b $ > $ a -> top $ > $ b -> top $;

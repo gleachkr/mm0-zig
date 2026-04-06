@@ -22,7 +22,7 @@ const Check = @import("./compiler_check.zig");
 const CompilerVars = @import("./compiler_vars.zig");
 
 pub const ViewDecl = Metadata.ViewDecl;
-pub const DummyDecl = Metadata.DummyDecl;
+pub const FreshDecl = Metadata.FreshDecl;
 pub const SortVarDecl = Metadata.SortVarDecl;
 pub const SortVarRegistry = Metadata.SortVarRegistry;
 pub const Diagnostic = CompilerDiag.Diagnostic;
@@ -74,7 +74,7 @@ pub const Compiler = struct {
         var parser = MM0Parser.init(self.source, arena.allocator());
         var env = GlobalEnv.init(arena.allocator());
         var registry = RewriteRegistry.init(arena.allocator());
-        var dummies = std.AutoHashMap(u32, []const DummyDecl).init(
+        var fresh_bindings = std.AutoHashMap(u32, []const FreshDecl).init(
             arena.allocator(),
         );
         var views = std.AutoHashMap(u32, ViewDecl).init(arena.allocator());
@@ -95,7 +95,7 @@ pub const Compiler = struct {
                             &parser,
                             &env,
                             &registry,
-                            &dummies,
+                            &fresh_bindings,
                             &views,
                             assertion,
                             parser.last_annotations,
@@ -122,7 +122,7 @@ pub const Compiler = struct {
                             &parser,
                             &env,
                             &registry,
-                            &dummies,
+                            &fresh_bindings,
                             &views,
                             &sort_vars,
                             assertion,
@@ -145,7 +145,7 @@ pub const Compiler = struct {
                         &parser,
                         &env,
                         &registry,
-                        &dummies,
+                        &fresh_bindings,
                         &views,
                         assertion,
                         parser.last_annotations,
@@ -203,7 +203,7 @@ pub const Compiler = struct {
         var proof_parser = ProofScriptParser.init(allocator, proof_source);
         var env = GlobalEnv.init(allocator);
         var registry = RewriteRegistry.init(allocator);
-        var dummies = std.AutoHashMap(u32, []const DummyDecl).init(
+        var fresh_bindings = std.AutoHashMap(u32, []const FreshDecl).init(
             allocator,
         );
         var views = std.AutoHashMap(u32, ViewDecl).init(allocator);
@@ -301,7 +301,7 @@ pub const Compiler = struct {
                                 &parser,
                                 &env,
                                 &registry,
-                                &dummies,
+                                &fresh_bindings,
                                 &views,
                                 assertion,
                                 parser.last_annotations,
@@ -318,7 +318,7 @@ pub const Compiler = struct {
                                 &parser,
                                 &env,
                                 &registry,
-                                &dummies,
+                                &fresh_bindings,
                                 &views,
                                 &sort_vars,
                                 assertion,
@@ -367,7 +367,7 @@ pub const Compiler = struct {
                                 &parser,
                                 &env,
                                 &registry,
-                                &dummies,
+                                &fresh_bindings,
                                 &views,
                                 assertion,
                                 parser.last_annotations,

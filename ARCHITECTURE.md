@@ -91,7 +91,7 @@ Compiler-side data models:
 - `compiler_expr.zig`
 - `compiler_rules.zig`
 - `compiler_views.zig`
-- `compiler_dummies.zig`
+- `compiler_fresh.zig`
 - `derived_bindings.zig`
 
 Elaboration engines and shared helpers:
@@ -294,7 +294,7 @@ For each proof line it does roughly this:
 1. parse the asserted expression into the theorem-local DAG
 2. resolve the cited rule and referenced hypotheses
 3. parse explicit bindings
-4. apply dummy annotations and, when relevant, view annotations
+4. apply `@fresh` annotations and, when relevant, view annotations
 5. infer omitted binders if needed
 6. instantiate the rule's expected hypotheses and conclusion
 7. insert transport or normalization lines when metadata permits a
@@ -567,9 +567,9 @@ It packages the common checker operations:
 This keeps `compiler_check.zig` smaller and avoids mixing proof
 construction details directly into the line checker.
 
-## Views, dummies, and derived bindings
+## Views, fresh binders, and derived bindings
 
-`compiler_views.zig`, `compiler_dummies.zig`, and
+`compiler_views.zig`, `compiler_fresh.zig`, and
 `derived_bindings.zig` handle source-level annotations that sit on top of
 ordinary theorem application.
 
