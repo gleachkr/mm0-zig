@@ -1,0 +1,5 @@
+vars_unicode
+------------
+
+l1: $ α = α $ by eq_refl (a := $ α $)
+l2: $ t = t $ by eq_refl (a := $ t $)

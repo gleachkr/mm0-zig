@@ -1,0 +1,5 @@
+vars_tab_ws
+-----------
+
+l1: $ x = x $ by eq_refl (a := $ x $)
+l2: $ t = t $ by eq_refl (a := $ t $)

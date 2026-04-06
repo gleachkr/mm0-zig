@@ -265,6 +265,37 @@ pub const TheoremContext = struct {
         return try self.interner.internVar(.{ .dummy_var = dummy_id });
     }
 
+    pub fn ensureNamedDummyParserVar(
+        self: *TheoremContext,
+        parser_allocator: std.mem.Allocator,
+        theorem_vars: anytype,
+        token: []const u8,
+        sort_name: []const u8,
+        sort_id: u8,
+    ) !void {
+        if (theorem_vars.contains(token)) return;
+
+        const dummy_expr_id = try self.addDummyVarResolved(sort_name, sort_id);
+        const var_id = self.interner.node(dummy_expr_id).*.variable;
+        const dummy_id = switch (var_id) {
+            .dummy_var => |id| id,
+            else => unreachable,
+        };
+        const dummy_info = self.theorem_dummies.items[dummy_id];
+
+        const expr = try parser_allocator.create(Expr);
+        expr.* = .{
+            .variable = .{
+                .sort = @intCast(sort_id),
+                .bound = true,
+                .deps = dummy_info.deps,
+            },
+        };
+
+        try self.parser_vars.put(self.allocator, expr, var_id);
+        try theorem_vars.put(token, expr);
+    }
+
     pub fn internParsedExpr(
         self: *TheoremContext,
         expr: *const Expr,

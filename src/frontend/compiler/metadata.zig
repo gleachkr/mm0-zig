@@ -3,13 +3,31 @@ const GlobalEnv = @import("../compiler_env.zig").GlobalEnv;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerDummies = @import("../compiler_dummies.zig");
 const CompilerViews = @import("../compiler_views.zig");
+const CompilerVars = @import("../compiler_vars.zig");
 const TermAnnotations = @import("../term_annotations.zig");
 const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const SortStmt = @import("../../trusted/parse.zig").SortStmt;
 const TermStmt = @import("../../trusted/parse.zig").TermStmt;
 
 pub const ViewDecl = CompilerViews.ViewDecl;
 pub const DummyDecl = CompilerDummies.DummyDecl;
+pub const SortVarDecl = CompilerVars.SortVarDecl;
+
+pub fn processSortMetadata(
+    parser: *const MM0Parser,
+    sort_stmt: SortStmt,
+    annotations: []const []const u8,
+    sort_vars: *std.StringHashMap(SortVarDecl),
+) !void {
+    try CompilerVars.processSortVarAnnotations(
+        parser,
+        sort_stmt.name,
+        sort_stmt.modifiers,
+        annotations,
+        sort_vars,
+    );
+}
 
 pub fn processTermMetadata(
     env: *GlobalEnv,

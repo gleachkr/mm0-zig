@@ -1,0 +1,12 @@
+delimiter $ ( ) $;
+provable sort wff;
+
+--| @vars α β γ
+sort nat;
+
+term eq (a b: nat): wff;
+infixl eq: $=$ prec 50;
+
+axiom eq_refl (a: nat): $ a = a $;
+
+theorem vars_unicode (t: nat): $ t = t $;

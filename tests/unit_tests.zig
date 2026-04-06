@@ -2856,7 +2856,7 @@ const ProofCaseMetadata = struct {
     reason: []const u8,
 };
 
-const known_proof_case_failures = [_]ProofCaseMetadata{ };
+const known_proof_case_failures = [_]ProofCaseMetadata{};
 
 const unsupported_proof_cases = [_]ProofCaseMetadata{
     .{
@@ -3129,6 +3129,34 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_comment_trailing", .outcome = .pass },
     .{ .stem = "pass_comment_standalone", .outcome = .pass },
     .{ .stem = "pass_comment_only_lines", .outcome = .pass },
+    .{ .stem = "pass_vars_basic", .outcome = .pass },
+    .{ .stem = "pass_vars_unicode", .outcome = .pass },
+    .{ .stem = "pass_vars_lazy", .outcome = .pass },
+    .{ .stem = "pass_vars_tab_ws", .outcome = .pass },
+    .{
+        .stem = "fail_vars_duplicate_token",
+        .outcome = .{ .fail = error.DuplicateVarsToken },
+    },
+    .{
+        .stem = "fail_vars_collision",
+        .outcome = .{ .fail = error.VarsTokenCollision },
+    },
+    .{
+        .stem = "fail_vars_later_collision",
+        .outcome = .{ .fail = error.VarsTokenCollision },
+    },
+    .{
+        .stem = "fail_vars_invalid_annotation",
+        .outcome = .{ .fail = error.InvalidVarsAnnotation },
+    },
+    .{
+        .stem = "fail_vars_strict_sort",
+        .outcome = .{ .fail = error.VarsStrictSort },
+    },
+    .{
+        .stem = "fail_vars_free_sort",
+        .outcome = .{ .fail = error.VarsFreeSort },
+    },
 };
 
 fn readProofCaseFile(

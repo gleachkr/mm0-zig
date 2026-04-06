@@ -23,6 +23,8 @@ const CheckedRef = CheckedIr.CheckedRef;
 const Inference = @import("./compiler_inference.zig");
 const Matching = @import("./compiler_check/matching.zig");
 const Emit = @import("./compiler_emit.zig");
+const CompilerVars = @import("./compiler_vars.zig");
+const SortVarDecl = CompilerVars.SortVarDecl;
 
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
@@ -35,6 +37,7 @@ pub fn checkTheoremBlock(
     registry: *RewriteRegistry,
     dummies: *const std.AutoHashMap(u32, []const DummyDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
+    sort_vars: *const std.StringHashMap(SortVarDecl),
     assertion: AssertionStmt,
     block: TheoremBlock,
     theorem: *TheoremContext,
@@ -57,6 +60,7 @@ pub fn checkTheoremBlock(
             parser,
             theorem,
             &theorem_vars,
+            sort_vars,
             line,
         ) catch |err| {
             self.setDiagnostic(.{
@@ -138,6 +142,7 @@ pub fn checkTheoremBlock(
             parser,
             theorem,
             &theorem_vars,
+            sort_vars,
             assertion.name,
             rule,
             line,
@@ -364,9 +369,17 @@ fn buildTheoremVarMap(
 fn parseLineAssertion(
     parser: *MM0Parser,
     theorem: *TheoremContext,
-    theorem_vars: *const NameExprMap,
+    theorem_vars: *NameExprMap,
+    sort_vars: *const std.StringHashMap(SortVarDecl),
     line: ProofLine,
 ) !ExprId {
+    try CompilerVars.ensureMathTextVars(
+        parser,
+        theorem,
+        theorem_vars,
+        sort_vars,
+        line.assertion.text,
+    );
     const expr = try parser.parseFormulaText(line.assertion.text, theorem_vars);
     return try theorem.internParsedExpr(expr);
 }
@@ -376,7 +389,8 @@ fn parseBindings(
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     theorem: *TheoremContext,
-    theorem_vars: *const NameExprMap,
+    theorem_vars: *NameExprMap,
+    sort_vars: *const std.StringHashMap(SortVarDecl),
     theorem_name: []const u8,
     rule: *const RuleDecl,
     line: ProofLine,
@@ -424,11 +438,20 @@ fn parseBindings(
             return error.DuplicateBinderAssignment;
         }
 
-        const expr = parser.parseArgText(
-            binding.formula.text,
-            theorem_vars,
-            rule.args[arg_index],
-        ) catch |err| {
+        const expr = blk: {
+            try CompilerVars.ensureMathTextVars(
+                parser,
+                theorem,
+                theorem_vars,
+                sort_vars,
+                binding.formula.text,
+            );
+            break :blk parser.parseArgText(
+                binding.formula.text,
+                theorem_vars,
+                rule.args[arg_index],
+            );
+        } catch |err| {
             self.setDiagnostic(.{
                 .kind = .parse_binding,
                 .err = err,

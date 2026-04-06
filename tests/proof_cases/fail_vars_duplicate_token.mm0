@@ -1,0 +1,14 @@
+delimiter $ ( ) $;
+provable sort wff;
+
+--| @vars x
+sort nat;
+
+--| @vars x
+sort obj;
+
+term eq (a b: nat): wff;
+infixl eq: $=$ prec 50;
+
+axiom eq_refl (a: nat): $ a = a $;
+theorem fail_test (t: nat): $ t = t $;

@@ -11,6 +11,7 @@ pub const CompilerEnv = @import("./frontend/compiler_env.zig");
 pub const CompilerExpr = @import("./frontend/compiler_expr.zig");
 pub const CompilerRules = @import("./frontend/compiler_rules.zig");
 pub const CompilerInference = @import("./frontend/compiler_inference.zig");
+pub const CompilerVars = @import("./frontend/compiler_vars.zig");
 pub const CompilerViews = @import("./frontend/compiler_views.zig");
 pub const CompilerNormalize = @import("./frontend/compiler_normalize.zig");
 pub const DefOps = @import("./frontend/def_ops.zig");

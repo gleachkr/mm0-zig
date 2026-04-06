@@ -100,6 +100,11 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.DummyRequiresBoundBinder => "@dummy target must be a bound rule binder",
         error.DummyStrictSort => "@dummy cannot target a binder in a strict sort",
         error.DummyFreeSort => "@dummy cannot target a binder in a free sort",
+        error.InvalidVarsAnnotation => "@vars expects one or more raw math tokens",
+        error.VarsStrictSort => "@vars cannot be used on a strict sort",
+        error.VarsFreeSort => "@vars cannot be used on a free sort",
+        error.DuplicateVarsToken => "duplicate @vars token across sorts",
+        error.VarsTokenCollision => "@vars token collides with an existing term, notation, or formula marker",
         error.DependencySlotExhausted => "theorem exceeded the 55 tracked bound-variable dependency slots",
         error.UnresolvedDummyWitness => "matched rule through hidden def structure, but omitted " ++
             "binders contain unresolved hidden-dummy witnesses",

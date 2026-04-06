@@ -1,0 +1,12 @@
+delimiter $ ( ) $;
+provable sort wff;
+
+term top: wff;
+axiom top_i: $ top $;
+
+--| @vars x
+sort nat;
+
+term x: nat;
+
+theorem fail_test: $ top $;

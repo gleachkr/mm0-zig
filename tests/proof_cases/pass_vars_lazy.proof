@@ -1,0 +1,5 @@
+vars_lazy
+---------
+
+l1: $ a1 = a1 $ by eq_refl (a := $ a1 $)
+l2: $ t = t $ by eq_refl (a := $ t $)

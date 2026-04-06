@@ -1,0 +1,18 @@
+delimiter $ ( ) $;
+provable sort wff;
+
+--| @vars x y z
+sort nat;
+
+term eq (a b: nat): wff;
+infixl eq: $=$ prec 50;
+term imp (a b: wff): wff;
+infixr imp: $->$ prec 25;
+
+axiom eq_refl (a: nat): $ a = a $;
+axiom ax1 (a b: wff): $ a -> b -> a $;
+axiom mp (a b: wff): $ a $ > $ a -> b $ > $ b $;
+
+-- Conclusion uses only theorem binder `t`. Proof uses `x` (a @vars dummy)
+-- in an intermediate step.
+theorem vars_test (t: nat): $ t = t $;

@@ -1,0 +1,4 @@
+fail_test
+---------
+
+l1: $ t = t $ by eq_refl (a := $ t $)

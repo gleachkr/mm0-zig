@@ -1,4 +1,4 @@
-# `@view`, `@recover`, `@abstract`, and `@dummy`
+# `@view`, `@recover`, and `@abstract`
 
 These annotations let the proof compiler recover rule arguments from the
 shape of a proof line, even when ordinary unification is not a good fit.
@@ -48,10 +48,9 @@ normalization":
   subtree but a *one-hole context* — a shared surrounding structure that
   explains the difference between two solved expressions.
 
-**`@dummy`** is a simpler companion that handles a different problem: omitted
-*bound* binders that serve only as fresh local variables and cannot be
-recovered by any matching strategy. It tells the compiler to allocate a
-fresh dummy variable rather than requiring the user to name one.
+**`@dummy`** is a simpler companion documented in `docs/dummy_binders.md`.
+It handles omitted *bound* binders that serve only as fresh local variables
+and cannot be recovered by any matching strategy.
 
 ### Elaboration pipeline
 
@@ -159,43 +158,6 @@ axiom ax_gen {x: nat} (p: wff x): $ p $ > $ A. x p $;
 
 A proof line writing `A. n p` (where `n` is a regular variable, not bound)
 will fail the boundness check even though the view matched `x` to `n`.
-
----
-
-## `@dummy`
-
-### Purpose
-
-Some rules have bound binders that serve only as a structural placeholder —
-a fresh local variable introduced to mark a hole — with no value that
-inference or view matching could discover. `@dummy` tells the compiler to
-fill such a binder with a fresh theorem-local dummy variable automatically,
-rather than requiring the user to name one on every proof line.
-
-### Syntax
-```
---| @dummy <binder-name>
-```
-
-The named binder must be a real bound rule binder in a sort that permits
-dummy variables (not strict, not free).
-```
---| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
---| @abstract r p q x a b
---| @dummy x
---| @normalize hyp1 conc
-axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
-  $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
-```
-
-Here `x` is the hole variable in the substitution context. The user never
-needs to name it; `@dummy` allocates a fresh one for each rule application.
-
-### Precedence
-
-An explicit binding on the proof line overrides `@dummy`. If no explicit
-binding is given, `@dummy` fills the binder before inference runs. Each rule
-application gets its own fresh dummy; they are never shared across lines.
 
 ---
 
