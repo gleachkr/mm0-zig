@@ -1,6 +1,8 @@
 delimiter $ ( ) [ / ] $;
 provable sort wff;
 sort ctx;
+
+--| @vars x y z
 sort mor;
 
 term imp (a b: wff): wff;
@@ -142,8 +144,6 @@ def mono {.a .b: mor} (f: mor): wff =
 -- 2. Recognizing that (g o f) o a rewrites to g o (f o a) via comp_assoc
 -- Neither mechanism alone handles both steps; this needs witness-driven
 -- def exposure integrated with rewriting.
---| @dummy x
---| @dummy y
 theorem unsupported_def_unfold_then_rewrite_hyp
-    {alpha beta x y: mor} (f g: mor):
+    {alpha beta : mor} (f g: mor):
   $ mono (g o f) , (f o alpha ~ f o beta) |- alpha ~ beta $;

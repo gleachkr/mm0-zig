@@ -115,10 +115,11 @@ const NormalizedView = struct {
             ) orelse return error.UnknownSort;
             // Mirror-only allocation: placeholder in temporary mirror context,
             // not the real theorem. Does not consume real dependency slots.
-            const placeholder = try self.mirror.theorem.addDummyVarResolved(
-                session.rule_args[idx].sort_name,
-                sort_id,
-            );
+            const placeholder = try self.mirror.theorem
+                .addPlaceholderDummyVarResolved(
+                    session.rule_args[idx].sort_name,
+                    sort_id,
+                );
             try self.placeholder_targets.put(
                 session.shared.allocator,
                 placeholder,
@@ -162,10 +163,11 @@ const NormalizedView = struct {
         const sort_id = session.shared.env.sort_names.get(info.sort_name) orelse return error.UnknownSort;
         // Mirror-only allocation: placeholder for symbolic dummy in temporary
         // mirror context, not the real theorem. Does not consume real dependency slots.
-        const placeholder = try self.mirror.theorem.addDummyVarResolved(
-            info.sort_name,
-            sort_id,
-        );
+        const placeholder = try self.mirror.theorem
+            .addPlaceholderDummyVarResolved(
+                info.sort_name,
+                sort_id,
+            );
         try self.placeholder_targets.put(
             session.shared.allocator,
             placeholder,

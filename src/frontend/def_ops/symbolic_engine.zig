@@ -3770,6 +3770,7 @@ pub const SymbolicEngine = struct {
                         return error.UnknownDummyVar;
                     }
                     const dummy = self.shared.theorem.theorem_dummies.items[idx];
+                    if (dummy.kind != .placeholder) break :blk null;
                     break :blk .{
                         .sort_name = dummy.sort_name,
                         .bound = true,

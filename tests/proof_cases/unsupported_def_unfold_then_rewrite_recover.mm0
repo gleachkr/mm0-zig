@@ -121,7 +121,6 @@ def mono {.a .b: mor} (f: mor): wff =
 -- matching the line against all_left's conclusion must expose mono (g o f),
 -- and then matching the cited ref against hyp0 needs comp_assoc after the
 -- recovered witness t := alpha has been threaded through that exposure.
---| @dummy y
 theorem unsupported_def_unfold_then_rewrite_recover
     {alpha y: mor} (f g: mor) (c: wff):
   $ emp , A. y ((g o (f o alpha) ~ (g o f) o y) -> (alpha ~ y)) |- c $

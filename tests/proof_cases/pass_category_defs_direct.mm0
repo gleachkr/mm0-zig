@@ -2,6 +2,7 @@ delimiter $ ( ) [ / ] $;
 provable sort wff;
 sort ctx;
 strict sort obj;
+--| @vars x y z a b u alpha beta
 sort mor;
 
 term imp (a b: wff): wff;
@@ -199,24 +200,19 @@ def pullback {.a .b .u: mor} (f g h k: mor): wff =
           ((k ∘ u ~ b) →
             (u ~ pb_med f g h k a b)))) $;
 
---| @dummy y
-theorem mono_direct {alpha beta y x : mor} (f: mor):
+theorem mono_direct {alpha beta : mor} (f: mor):
   $ mono f , (f ∘ alpha ~ f ∘ beta) ⊢ alpha ~ beta $;
 
 theorem pullback_eq_direct { a b u : mor } (f g h k: mor):
   $ pullback f g h k ⊢ f ∘ h ~ g ∘ k $;
 
---| @dummy x
---| @dummy y
---| @dummy z
-theorem pullback_use_direct {x y z: mor} (f g h k a b u: mor):
+theorem pullback_use_direct (f g h k a b u: mor):
   $ pullback f g h k ⊢
       (f ∘ a ~ g ∘ b) →
         ((h ∘ u ~ a) →
           ((k ∘ u ~ b) →
             (u ~ pb_med f g h k a b))) $;
 
---| @dummy y
-theorem mono_pullback_step {alpha beta y x a b u : mor} (f g h k: mor):
+theorem mono_pullback_step {alpha beta : mor} (f g h k: mor):
   $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢
       h ∘ alpha ~ h ∘ beta $;

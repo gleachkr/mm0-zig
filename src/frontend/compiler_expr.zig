@@ -26,10 +26,16 @@ pub const ExprNode = union(enum) {
     };
 };
 
+pub const DummyKind = enum {
+    concrete,
+    placeholder,
+};
+
 pub const DummyInfo = struct {
     sort_name: []const u8,
     sort_id: u8,
     deps: u55,
+    kind: DummyKind,
 };
 
 const ExprNodeContext = struct {
@@ -238,9 +244,9 @@ pub const TheoremContext = struct {
     ///
     /// - Explicit source/user dummies: seedTerm (compiler_expr.zig) and
     ///   applyDummyBindings (compiler_check.zig) for user-written @dummy.
-    /// - Mirror-only placeholders: mirror_support.zig and normalized_match.zig,
-    ///   which allocate into temporary MirroredTheoremContext instances that do
-    ///   not consume real theorem dependency slots.
+    /// - Temporary mirror-context dummies in def_ops, including normalized
+    ///   matching placeholders, which do not consume real theorem dependency
+    ///   slots.
     ///
     /// The *accidental* allocation site — materializeEscapingWitnessForDummySlot
     /// in symbolic_engine.zig — is the footgun targeted for removal (see PLAN.md).
@@ -249,6 +255,31 @@ pub const TheoremContext = struct {
         self: *TheoremContext,
         sort_name: []const u8,
         sort_id: u8,
+    ) !ExprId {
+        return try self.addDummyVarResolvedWithKind(
+            sort_name,
+            sort_id,
+            .concrete,
+        );
+    }
+
+    pub fn addPlaceholderDummyVarResolved(
+        self: *TheoremContext,
+        sort_name: []const u8,
+        sort_id: u8,
+    ) !ExprId {
+        return try self.addDummyVarResolvedWithKind(
+            sort_name,
+            sort_id,
+            .placeholder,
+        );
+    }
+
+    fn addDummyVarResolvedWithKind(
+        self: *TheoremContext,
+        sort_name: []const u8,
+        sort_id: u8,
+        kind: DummyKind,
     ) !ExprId {
         if (self.next_dummy_dep >= tracked_bound_dep_limit) {
             return error.DependencySlotExhausted;
@@ -260,6 +291,7 @@ pub const TheoremContext = struct {
             .sort_name = sort_name,
             .sort_id = sort_id,
             .deps = @as(u55, 1) << @intCast(self.next_dummy_dep),
+            .kind = kind,
         });
         self.next_dummy_dep = try std.math.add(u32, self.next_dummy_dep, 1);
         return try self.interner.internVar(.{ .dummy_var = dummy_id });

@@ -2,6 +2,8 @@ delimiter $ ( ) [ / ] $;
 provable sort wff;
 sort ctx;
 strict sort obj;
+
+--| @vars x y z alpha beta
 sort mor;
 
 term imp (a b: wff): wff;
@@ -230,11 +232,8 @@ axiom pullback_eq (g0: ctx) (f g h k: mor):
   $ g0 ⊢ pullback f g h k $ > $ g0 ⊢ f ∘ h ~ g ∘ k $;
 
 
---| @dummy x
---| @dummy y
---| @dummy z
-theorem pb_preserves_mono_step {alpha beta x y z: mor} (f g h k: mor):
+theorem pb_preserves_mono_step {alpha beta: mor} (f g h k: mor):
   $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ alpha ~ beta $;
 
-theorem pb_preserves_mono {alpha beta: mor} (f g h k: mor):
+theorem pb_preserves_mono (f g h k: mor):
   $ mono f , pullback f g h k ⊢ mono k $;

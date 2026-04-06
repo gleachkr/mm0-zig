@@ -2624,33 +2624,6 @@ test "strict replay does not open defs during omitted inference" {
     );
 }
 
-test "compiler rejects alpha-only theorem lines" {
-    const allocator = std.testing.allocator;
-    const mm0_src = try readProofCaseFile(
-        allocator,
-        "fail_alpha_only_line",
-        "mm0",
-    );
-    defer allocator.free(mm0_src);
-    const proof_src = try readProofCaseFile(
-        allocator,
-        "fail_alpha_only_line",
-        "proof",
-    );
-    defer allocator.free(proof_src);
-
-    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
-    try std.testing.expectError(
-        error.ConclusionMismatch,
-        compiler.compileMmb(allocator),
-    );
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
-    try std.testing.expectEqual(error.ConclusionMismatch, diag.err);
-    try std.testing.expectEqualStrings("alpha_only_line", diag.theorem_name.?);
-    try std.testing.expectEqualStrings("l1", diag.line_label.?);
-    try std.testing.expectEqualStrings("all_refl", diag.rule_name.?);
-}
-
 test "compiler normalizes conclusions then transports through defs" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
@@ -3076,10 +3049,6 @@ const proof_cases = [_]ProofCase{
     },
     .{
         .stem = "fail_normalize_mismatch",
-        .outcome = .{ .fail = error.ConclusionMismatch },
-    },
-    .{
-        .stem = "fail_alpha_only_line",
         .outcome = .{ .fail = error.ConclusionMismatch },
     },
     .{

@@ -125,7 +125,6 @@ def mono {.a .b: mor} (f: mor): wff =
 -- 2. recover picks t := alpha from the user-written conclusion
 -- 3. the exposed witness then needs comp_assoc to match the line
 -- Today the view path cannot interleave those steps.
---| @dummy y
 theorem unsupported_def_unfold_then_rewrite_view
     {alpha y x : mor} (f g: mor):
   $ mono (g o f) |- A. y ((g o (f o alpha) ~ (g o f) o y) -> (alpha ~ y)) $;
