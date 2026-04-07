@@ -73,3 +73,17 @@ l7: $ mono (g ∘ f) ⊢ (f ∘ alpha ~ f ∘ beta) → (alpha ~ beta) $ by imp_
 l8: $ mono (g ∘ f) ⊢ ∀ beta ((f ∘ alpha ~ f ∘ beta) → (alpha ~ beta)) $ by all_intro [l7]
 l9: $ mono (g ∘ f) ⊢ ∀ alpha ∀ beta ((f ∘ alpha ~ f ∘ beta) → (alpha ~ beta)) $ by all_intro [l8]
 
+epi_cancel_right
+----------------
+
+l1: $ epi (g ∘ f) , (alpha ∘ g ~ beta ∘ g) ⊢ epi (g ∘ f) $ by ax
+l2: $ epi (g ∘ f) , (alpha ∘ g ~ beta ∘ g) ⊢ ∀ x ((alpha ∘ (g ∘ f) ~ x ∘ (g ∘ f)) → (alpha ~ x)) $ by all_elim(x := $ y $) [l1]
+l3: $ epi (g ∘ f) , (alpha ∘ g ~ beta ∘ g) ⊢ (alpha ∘ (g ∘ f) ~ beta ∘ (g ∘ f)) → (alpha ~ beta) $ by all_elim [l2]
+l4: $ epi (g ∘ f) , (alpha ∘ g ~ beta ∘ g) ⊢ alpha ∘ g ~ beta ∘ g $ by ax
+l5: $ epi (g ∘ f) , (alpha ∘ g ~ beta ∘ g) ⊢ (alpha ∘ g) ∘ f ~ (beta ∘ g) ∘ f $ by comp_right [l4]
+l6: $ epi (g ∘ f) , (alpha ∘ g ~ beta ∘ g) ⊢ alpha ~ beta $ by imp_elim [l3, l5]
+l7: $ epi (g ∘ f) ⊢ (alpha ∘ g ~ beta ∘ g) → (alpha ~ beta) $ by imp_intro [l6]
+l8: $ epi (g ∘ f) ⊢ ∀ beta ((alpha ∘ g ~ beta ∘ g) → (alpha ~ beta)) $ by all_intro [l7]
+l9: $ epi (g ∘ f) ⊢ ∀ alpha ∀ beta ((alpha ∘ g ~ beta ∘ g) → (alpha ~ beta)) $ by all_intro [l8]
+
+

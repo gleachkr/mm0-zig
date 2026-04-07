@@ -1,0 +1,15 @@
+comp_epi
+--------
+
+l1: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ epi g $ by ax
+l2: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ ∀ x (((alpha ∘ f) ∘ g ~ x ∘ g) → (alpha ∘ f ~ x)) $ by all_elim(x := $ y $) [l1]
+l3: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ ((alpha ∘ f) ∘ g ~ (beta ∘ f) ∘ g) → (alpha ∘ f ~ beta ∘ f) $ by all_elim [l2]
+l4: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g) $ by ax
+l5: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ alpha ∘ f ~ beta ∘ f $ by imp_elim [l3, l4]
+l6: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ epi f $ by ax
+l7: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ ∀ x ((alpha ∘ f ~ x ∘ f) → (alpha ~ x)) $ by all_elim(x := $ y $) [l6]
+l8: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ (alpha ∘ f ~ beta ∘ f) → (alpha ~ beta) $ by all_elim [l7]
+l9: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ alpha ~ beta $ by imp_elim [l8, l5]
+l10: $ epi f , epi g ⊢ (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) → (alpha ~ beta) $ by imp_intro [l9]
+l11: $ epi f , epi g ⊢ ∀ beta ((alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) → (alpha ~ beta)) $ by all_intro [l10]
+l12: $ epi f , epi g ⊢ ∀ alpha ∀ beta ((alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) → (alpha ~ beta)) $ by all_intro [l11]

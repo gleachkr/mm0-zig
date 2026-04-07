@@ -2500,7 +2500,12 @@ pub const SymbolicEngine = struct {
         actual: ExprId,
         dummy_bindings: *std.ArrayListUnmanaged(DummyBinding),
     ) anyerror!bool {
-        const actual_info = try self.getConcreteVarInfo(actual);
+        // Matching a symbolic dummy against a non-variable is a plain mismatch,
+        // not a fatal error.
+        const actual_info = self.getConcreteVarInfo(actual) catch |err| switch (err) {
+            error.ExpectedVariable => return false,
+            else => return err,
+        };
         if (info.bound and !actual_info.bound) return false;
         if (!std.mem.eql(u8, info.sort_name, actual_info.sort_name)) {
             return false;
@@ -3434,7 +3439,12 @@ pub const SymbolicEngine = struct {
         actual: ExprId,
         state: *MatchSession,
     ) anyerror!bool {
-        const actual_info = try self.getConcreteVarInfo(actual);
+        // Matching a symbolic dummy against a non-variable is a plain mismatch,
+        // not a fatal error.
+        const actual_info = self.getConcreteVarInfo(actual) catch |err| switch (err) {
+            error.ExpectedVariable => return false,
+            else => return err,
+        };
         if (info.bound and !actual_info.bound) return false;
         if (!std.mem.eql(u8, info.sort_name, actual_info.sort_name)) {
             return false;

@@ -2838,6 +2838,10 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
         .reason = "requires inventing an erased hidden def witness after " ++
             "unfold then rewrite; treating that as out of scope",
     },
+    .{
+        .stem = "unsupported_epi_comp",
+        .reason = "requires @view to extract terms *before* normalization"
+    },
 };
 
 fn lookupProofCaseReason(
@@ -2905,38 +2909,24 @@ const proof_cases = [_]ProofCase{
         .stem = "unsupported_def_unfold_then_rewrite_concl",
         .outcome = .unsupported,
     },
-    .{ .stem = "unsupported_def_unfold_then_rewrite_hyp", .outcome = .pass },
-    .{ .stem = "unsupported_def_unfold_then_rewrite_view", .outcome = .pass },
     .{
-        .stem = "unsupported_def_unfold_then_rewrite_recover",
-        .outcome = .pass,
+        .stem = "unsupported_epi_comp",
+        .outcome = .unsupported,
     },
-    .{ .stem = "unsupported_def_unfold_then_acui_concl", .outcome = .pass },
-    .{ .stem = "unsupported_def_unfold_then_acui_hyp", .outcome = .pass },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_abstract",
-        .outcome = .pass,
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_rewrite_abstract_hyp",
-        .outcome = .pass,
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_full_acui_concl",
-        .outcome = .pass,
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_full_acui_hyp",
-        .outcome = .pass,
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_full_acui_abstract",
-        .outcome = .pass,
-    },
-    .{
-        .stem = "unsupported_def_unfold_then_full_acui_abstract_hyp",
-        .outcome = .pass,
-    },
+    .{ .stem = "pass_epi_cancel_right", .outcome = .pass },
+    .{ .stem = "pass_epi_mono_cancel_right", .outcome = .pass },
+    .{ .stem = "pass_epi_comp_assign", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_then_rewrite_hyp", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_then_rewrite_view", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_then_rewrite_recover", .outcome = .pass, },
+    .{ .stem = "pass_def_unfold_then_acui_concl", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_then_acui_hyp", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_then_rewrite_abstract", .outcome = .pass, },
+    .{ .stem = "pass_def_unfold_then_rewrite_abstract_hyp", .outcome = .pass, },
+    .{ .stem = "pass_def_unfold_then_full_acui_concl", .outcome = .pass, },
+    .{ .stem = "pass_def_unfold_then_full_acui_hyp", .outcome = .pass, },
+    .{ .stem = "pass_def_unfold_then_full_acui_abstract", .outcome = .pass, },
+    .{ .stem = "pass_def_unfold_then_full_acui_abstract_hyp", .outcome = .pass, },
     .{ .stem = "pass_normalize", .outcome = .pass },
     .{ .stem = "pass_normalize_nested", .outcome = .pass },
     .{ .stem = "pass_normalize_identity", .outcome = .pass },
