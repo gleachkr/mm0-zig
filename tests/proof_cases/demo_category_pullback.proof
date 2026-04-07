@@ -59,3 +59,17 @@ l9: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ alpha ~ b
 l10: $ mono f , mono g ⊢ (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) → (alpha ~ beta) $ by imp_intro [l9]
 l11: $ mono f , mono g ⊢ ∀ beta ((f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) → (alpha ~ beta)) $ by all_intro [l10]
 l12: $ mono f , mono g ⊢ ∀ alpha ∀ beta (((f ∘ g) ∘ alpha ~ (f ∘ g) ∘ beta) → (alpha ~ beta)) $ by all_intro [l11]
+
+mono_cancel_left
+----------------
+
+l1: $ mono (g ∘ f) , (f ∘ alpha ~ f ∘ beta) ⊢ mono (g ∘ f) $ by ax
+l2: $ mono (g ∘ f) , (f ∘ alpha ~ f ∘ beta) ⊢ ∀ x (((g ∘ f) ∘ alpha ~ (g ∘ f) ∘ x) → (alpha ~ x)) $ by all_elim(x := $ y $) [l1]
+l3: $ mono (g ∘ f) , (f ∘ alpha ~ f ∘ beta) ⊢ ((g ∘ f) ∘ alpha ~ (g ∘ f) ∘ beta) → (alpha ~ beta) $ by all_elim [l2]
+l4: $ mono (g ∘ f) , (f ∘ alpha ~ f ∘ beta) ⊢ f ∘ alpha ~ f ∘ beta $ by ax
+l5: $ mono (g ∘ f) , (f ∘ alpha ~ f ∘ beta) ⊢ g ∘ (f ∘ alpha) ~ g ∘ (f ∘ beta) $ by comp_left [l4]
+l6: $ mono (g ∘ f) , (f ∘ alpha ~ f ∘ beta) ⊢ alpha ~ beta $ by imp_elim [l3, l5]
+l7: $ mono (g ∘ f) ⊢ (f ∘ alpha ~ f ∘ beta) → (alpha ~ beta) $ by imp_intro [l6]
+l8: $ mono (g ∘ f) ⊢ ∀ beta ((f ∘ alpha ~ f ∘ beta) → (alpha ~ beta)) $ by all_intro [l7]
+l9: $ mono (g ∘ f) ⊢ ∀ alpha ∀ beta ((f ∘ alpha ~ f ∘ beta) → (alpha ~ beta)) $ by all_intro [l8]
+

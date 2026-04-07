@@ -130,6 +130,10 @@ axiom sb_m_pb_med {x: mor} (t: mor x) (f g h k a b: mor x):
     pb_med (subst x / t f) (subst x / t g) (subst x / t h)
       (subst x / t k) (subst x / t a) (subst x / t b) $;
 
+--| @congr
+axiom sb_f_congr {x: mor} (t1 t2: mor x) (p1 p2: wff x):
+  $ t1 ~ t2 $ > $ p1 ↔ p2 $ > $ [x/t1] p1 ↔ [x/t2] p2 $;
+
 --| @rewrite
 axiom sb_f_mor_eq {x: mor} (t: mor x) (a b: mor x):
   $ [x/t] (a ~ b) ↔ (subst x / t a ~ subst x / t b) $;
@@ -237,3 +241,6 @@ theorem pb_preserves_mono (f g h k: mor):
 
 theorem comp_mono (f g: mor):
   $ mono f , mono g  ⊢ mono (f ∘ g) $;
+
+theorem mono_cancel_left (f g: mor):
+  $ mono (g ∘ f) ⊢ mono f $;
