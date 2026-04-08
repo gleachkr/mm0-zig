@@ -6,6 +6,7 @@ pub const MatchSession = struct {
     witnesses: Types.WitnessMap = .{},
     materialized_witnesses: Types.WitnessMap = .{},
     materialized_witness_slots: Types.WitnessSlotMap = .empty,
+    dummy_aliases: Types.DummyAliasMap = .empty,
     provisional_witness_infos: Types.ProvisionalWitnessInfoMap = .empty,
     materialized_witness_infos: Types.MaterializedWitnessInfoMap = .empty,
     transparent_representatives: Types.RepresentativeCache = .empty,
@@ -31,6 +32,7 @@ pub const MatchSession = struct {
         self.witnesses.deinit(allocator);
         self.materialized_witnesses.deinit(allocator);
         self.materialized_witness_slots.deinit(allocator);
+        self.dummy_aliases.deinit(allocator);
         self.provisional_witness_infos.deinit(allocator);
         self.materialized_witness_infos.deinit(allocator);
         self.transparent_representatives.deinit(allocator);
@@ -44,6 +46,7 @@ pub const MatchSnapshot = struct {
     witnesses: Types.WitnessMap,
     materialized_witnesses: Types.WitnessMap,
     materialized_witness_slots: Types.WitnessSlotMap,
+    dummy_aliases: Types.DummyAliasMap,
     provisional_witness_infos: Types.ProvisionalWitnessInfoMap,
     materialized_witness_infos: Types.MaterializedWitnessInfoMap,
     transparent_representatives: Types.RepresentativeCache,

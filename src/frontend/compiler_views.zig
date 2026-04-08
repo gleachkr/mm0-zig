@@ -11,6 +11,7 @@ const Expr = @import("../trusted/expressions.zig").Expr;
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
+const ViewTrace = @import("./view_trace.zig");
 
 const recover_guidance_match_budget: usize = 8;
 
@@ -30,6 +31,7 @@ pub const ViewDecl = struct {
     hyps: []const TemplateExpr,
     concl: TemplateExpr,
     num_binders: usize,
+    arg_names: []const ?[]const u8,
     arg_infos: []const ArgInfo,
     /// Maps view binder index -> rule arg index, null for phantom binders.
     binder_map: []const ?usize,
@@ -94,6 +96,7 @@ pub fn processViewAnnotations(
                 .hyps = view_hyps,
                 .concl = view_concl,
                 .num_binders = sig.arg_names.len,
+                .arg_names = sig.arg_names,
                 .arg_infos = sig.arg_infos,
                 .binder_map = binder_map,
                 .derived_bindings = &.{},
@@ -146,6 +149,7 @@ pub fn applyViewBindings(
     ref_exprs: []const ExprId,
     partial_bindings: []?ExprId,
     exported_state: ?*?DefOps.MatchSeedState,
+    debug_views: bool,
 ) !void {
     const seeds = try allocator.alloc(DefOps.BindingSeed, view.num_binders);
     defer allocator.free(seeds);
@@ -170,72 +174,221 @@ pub fn applyViewBindings(
     var session = try def_ops.beginRuleMatch(view.arg_infos, seeds);
     defer session.deinit();
 
-    try matchViewAgainstConcreteExprs(
-        &session,
-        view,
-        line_expr,
-        ref_exprs,
-    );
+    if (debug_views) {
+        try matchViewAgainstConcreteExprsDebug(
+            allocator,
+            theorem,
+            env,
+            &session,
+            view,
+            line_expr,
+            ref_exprs,
+        );
+    } else {
+        try matchViewAgainstConcreteExprs(
+            &session,
+            view,
+            line_expr,
+            ref_exprs,
+        );
+    }
+    if (debug_views) {
+        const initial_bindings = try session.materializeOptionalBindings();
+        defer allocator.free(initial_bindings);
+        const initial_seeds = try session.resolveBindingSeeds();
+        defer allocator.free(initial_seeds);
+        try ViewTrace.printViewBindings(
+            allocator,
+            theorem,
+            env,
+            view.arg_names,
+            "after initial view match",
+            initial_bindings,
+            initial_seeds,
+        );
+    }
 
     // Keep view reuse on the resolved path, then replay only the cited refs
     // once more so symbolic witnesses prefer the concrete proof shapes
     // before @recover / @abstract try to read them back out.
-    try matchViewHypsAgainstConcreteExprs(
-        &session,
-        view,
-        ref_exprs,
-    );
+    if (debug_views) {
+        try matchViewHypsAgainstConcreteExprsDebug(
+            allocator,
+            theorem,
+            env,
+            &session,
+            view,
+            ref_exprs,
+            "ref replay",
+        );
+    } else {
+        try matchViewHypsAgainstConcreteExprs(
+            &session,
+            view,
+            ref_exprs,
+        );
+    }
+    if (debug_views) {
+        const replay_bindings = try session.materializeOptionalBindings();
+        defer allocator.free(replay_bindings);
+        const replay_seeds = try session.resolveBindingSeeds();
+        defer allocator.free(replay_seeds);
+        try ViewTrace.printViewBindings(
+            allocator,
+            theorem,
+            env,
+            view.arg_names,
+            "after ref replay",
+            replay_bindings,
+            replay_seeds,
+        );
+    }
 
-    var view_bindings = try session.resolveOptionalBindings();
+    // Derived bindings must inspect the current resolved structure before any
+    // representative projection rewrites or canonicalizes it. Symbolic
+    // recover also needs the live dummy witnesses from this same state.
+    var view_snapshot = DerivedBindings.MatchSnapshot{
+        .view_bindings = try session.materializeOptionalBindings(),
+        .view_seeds = try session.resolveBindingSeeds(),
+        .dummy_witnesses = try session.materializeDummyWitnesses(),
+    };
+    defer allocator.free(view_snapshot.view_bindings);
+    defer allocator.free(view_snapshot.view_seeds.?);
+    defer allocator.free(view_snapshot.dummy_witnesses.?);
 
     var guide_passes: usize = 0;
     while (true) {
+        if (debug_views) {
+            const label = try std.fmt.allocPrint(
+                allocator,
+                "before derived pass {d}",
+                .{guide_passes},
+            );
+            defer allocator.free(label);
+            try ViewTrace.printViewBindings(
+                allocator,
+                theorem,
+                env,
+                view.arg_names,
+                label,
+                view_snapshot.view_bindings,
+                view_snapshot.view_seeds,
+            );
+        }
         try DerivedBindings.applyDerivedBindings(
             theorem,
             env,
             registry,
-            view_bindings,
+            view_snapshot,
             view.derived_bindings,
+            view.arg_names,
+            debug_views,
         );
         if (guide_passes >= view.derived_bindings.len) break;
         if (!try guideRecoverBindingsTowardSources(
+            allocator,
+            theorem,
+            env,
             &session,
             view,
-            view_bindings,
+            view_snapshot.view_bindings,
+            view_snapshot.view_seeds.?,
+            debug_views,
         )) break;
 
-        const next_view_bindings = try session.resolveOptionalBindings();
-        allocator.free(view_bindings);
-        view_bindings = next_view_bindings;
+        const next_view_bindings = try session.materializeOptionalBindings();
+        errdefer allocator.free(next_view_bindings);
+        const next_view_seeds = try session.resolveBindingSeeds();
+        errdefer allocator.free(next_view_seeds);
+        const next_dummy_witnesses = try session.materializeDummyWitnesses();
+        errdefer allocator.free(next_dummy_witnesses);
+
+        allocator.free(view_snapshot.view_bindings);
+        allocator.free(view_snapshot.view_seeds.?);
+        allocator.free(view_snapshot.dummy_witnesses.?);
+        view_snapshot = .{
+            .view_bindings = next_view_bindings,
+            .view_seeds = next_view_seeds,
+            .dummy_witnesses = next_dummy_witnesses,
+        };
         guide_passes += 1;
     }
-    defer allocator.free(view_bindings);
+    if (debug_views) {
+        try ViewTrace.printViewBindings(
+            allocator,
+            theorem,
+            env,
+            view.arg_names,
+            "after derived loop",
+            view_snapshot.view_bindings,
+            view_snapshot.view_seeds,
+        );
+    }
+    const materialized_projected_bindings =
+        try session.materializeOptionalBindings();
+    defer allocator.free(materialized_projected_bindings);
+    const projected_view_bindings =
+        try session.representOptionalBindings(materialized_projected_bindings);
+    defer allocator.free(projected_view_bindings);
+
+    for (view.derived_bindings) |binding| {
+        const target_view_idx = switch (binding) {
+            .recover => |recover| recover.target_view_idx,
+            .abstract => |abstract| abstract.target_view_idx,
+        };
+        if (view_snapshot.view_bindings[target_view_idx]) |binding_expr| {
+            projected_view_bindings[target_view_idx] = binding_expr;
+        }
+    }
 
     // Export symbolic-preserving state in rule-binder space if requested.
+    // Only derived targets need symbolic carry-through. Non-derived view
+    // binders should be re-inferred by ordinary rule matching unless they
+    // already became concrete in partial_bindings.
     if (exported_state) |out_state| {
+        const derived_targets = try allocator.alloc(bool, view.num_binders);
+        defer allocator.free(derived_targets);
+        @memset(derived_targets, false);
+        for (view.derived_bindings) |binding| {
+            const target_view_idx = switch (binding) {
+                .recover => |recover| recover.target_view_idx,
+                .abstract => |abstract| abstract.target_view_idx,
+            };
+            derived_targets[target_view_idx] = true;
+        }
+
         const rule_seeds = try allocator.alloc(
             DefOps.BindingSeed,
             partial_bindings.len,
         );
         @memset(rule_seeds, .none);
+        errdefer allocator.free(rule_seeds);
 
-        const view_seeds = try session.resolveBindingSeeds();
-        defer allocator.free(view_seeds);
+        const export_view_seeds = try session.resolveBindingSeeds();
+        defer allocator.free(export_view_seeds);
+        var has_symbolic_seed = false;
         for (view.binder_map, 0..) |mapping, vi| {
             const rule_idx = mapping orelse continue;
-            switch (view_seeds[vi]) {
+            if (!derived_targets[vi]) continue;
+            switch (export_view_seeds[vi]) {
                 .bound => {
-                    rule_seeds[rule_idx] = view_seeds[vi];
+                    rule_seeds[rule_idx] = export_view_seeds[vi];
+                    has_symbolic_seed = true;
                 },
                 else => {},
             }
         }
-        out_state.* = try session.exportMatchSeedState(rule_seeds);
+        if (has_symbolic_seed) {
+            out_state.* = try session.exportMatchSeedState(rule_seeds);
+        } else {
+            allocator.free(rule_seeds);
+            out_state.* = null;
+        }
     }
 
     for (view.binder_map, 0..) |mapping, vi| {
         const rule_idx = mapping orelse continue;
-        const binding = view_bindings[vi] orelse continue;
+        const binding = projected_view_bindings[vi] orelse continue;
         if (partial_bindings[rule_idx]) |existing| {
             if (existing != binding) return error.ViewBindingConflict;
         } else {
@@ -245,9 +398,14 @@ pub fn applyViewBindings(
 }
 
 fn guideRecoverBindingsTowardSources(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
     session: *DefOps.RuleMatchSession,
     view: *const ViewDecl,
     view_bindings: []const ?ExprId,
+    view_seeds: []const DefOps.BindingSeed,
+    debug_views: bool,
 ) !bool {
     var guided = false;
     for (view.derived_bindings) |binding| {
@@ -259,12 +417,49 @@ fn guideRecoverBindingsTowardSources(
         const source_expr = view_bindings[recover.source_view_idx] orelse {
             continue;
         };
+        if (debug_views) {
+            try ViewTrace.printRecoverState(
+                allocator,
+                theorem,
+                env,
+                view.arg_names,
+                recover.target_view_idx,
+                recover.source_view_idx,
+                recover.pattern_view_idx,
+                recover.hole_view_idx,
+                view_bindings,
+                view_seeds,
+            );
+        }
         if (try session.guideBindingTowardExpr(
             recover.pattern_view_idx,
             source_expr,
             recover_guidance_match_budget,
         )) {
+            if (debug_views) {
+                ViewTrace.printMessage(
+                    "guidance for {s}#{d} succeeded",
+                    .{
+                        ViewTrace.binderLabel(
+                            view.arg_names,
+                            recover.pattern_view_idx,
+                        ),
+                        recover.pattern_view_idx,
+                    },
+                );
+            }
             guided = true;
+        } else if (debug_views) {
+            ViewTrace.printMessage(
+                "guidance for {s}#{d} made no progress",
+                .{
+                    ViewTrace.binderLabel(
+                        view.arg_names,
+                        recover.pattern_view_idx,
+                    ),
+                    recover.pattern_view_idx,
+                },
+            );
         }
     }
     return guided;
@@ -293,6 +488,54 @@ fn matchViewAgainstConcreteExprs(
     );
 }
 
+fn matchViewAgainstConcreteExprsDebug(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    session: *DefOps.RuleMatchSession,
+    view: *const ViewDecl,
+    line_expr: ExprId,
+    ref_exprs: []const ExprId,
+) !void {
+    const concl_text = try ViewTrace.formatExpr(
+        allocator,
+        theorem,
+        env,
+        line_expr,
+    );
+    defer allocator.free(concl_text);
+    if (try session.matchTransparent(view.concl, line_expr)) {
+        ViewTrace.printMessage(
+            "view conclusion matched transparently: {s}",
+            .{concl_text},
+        );
+    } else if (try session.matchSemantic(
+        view.concl,
+        line_expr,
+        DefOps.default_semantic_match_budget,
+    )) {
+        ViewTrace.printMessage(
+            "view conclusion matched semantically: {s}",
+            .{concl_text},
+        );
+    } else {
+        ViewTrace.printMessage(
+            "view conclusion mismatch: {s}",
+            .{concl_text},
+        );
+        return error.ViewConclusionMismatch;
+    }
+    try matchViewHypsAgainstConcreteExprsDebug(
+        allocator,
+        theorem,
+        env,
+        session,
+        view,
+        ref_exprs,
+        "initial hypothesis match",
+    );
+}
+
 fn matchViewHypsAgainstConcreteExprs(
     session: *DefOps.RuleMatchSession,
     view: *const ViewDecl,
@@ -309,6 +552,49 @@ fn matchViewHypsAgainstConcreteExprs(
         )) {
             return error.ViewHypothesisMismatch;
         }
+    }
+}
+
+fn matchViewHypsAgainstConcreteExprsDebug(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    session: *DefOps.RuleMatchSession,
+    view: *const ViewDecl,
+    ref_exprs: []const ExprId,
+    phase: []const u8,
+) !void {
+    for (view.hyps, ref_exprs, 0..) |hyp_template, ref_expr, hyp_idx| {
+        const ref_text = try ViewTrace.formatExpr(
+            allocator,
+            theorem,
+            env,
+            ref_expr,
+        );
+        defer allocator.free(ref_text);
+        if (try session.matchTransparent(hyp_template, ref_expr)) {
+            ViewTrace.printMessage(
+                "{s}: hyp {d} matched transparently: {s}",
+                .{ phase, hyp_idx, ref_text },
+            );
+            continue;
+        }
+        if (try session.matchSemantic(
+            hyp_template,
+            ref_expr,
+            DefOps.default_semantic_match_budget,
+        )) {
+            ViewTrace.printMessage(
+                "{s}: hyp {d} matched semantically: {s}",
+                .{ phase, hyp_idx, ref_text },
+            );
+            continue;
+        }
+        ViewTrace.printMessage(
+            "{s}: hyp {d} mismatch: {s}",
+            .{ phase, hyp_idx, ref_text },
+        );
+        return error.ViewHypothesisMismatch;
     }
 }
 

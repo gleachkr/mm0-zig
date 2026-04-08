@@ -180,6 +180,7 @@ pub fn checkTheoremBlock(
                     ref_exprs,
                     partial_bindings,
                     null,
+                    self.debug.views,
                 ) catch |err| {
                     self.setDiagnostic(.{
                         .kind = .generic,

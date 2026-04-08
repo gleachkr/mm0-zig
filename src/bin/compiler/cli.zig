@@ -36,7 +36,7 @@ pub fn usage() !void {
             "  mm0-zigc join INPUT.mm0 OUTPUT.mm0\n" ++
             "\nOptions:\n" ++
             "  --debug SYSTEMS  Enable debug output (comma-separated:\n" ++
-            "                   inference,unfolding,normalization,emission,check,all)\n",
+            "                   inference,views,unfolding,normalization,emission,check,all)\n",
     );
     try stdout.flush();
 }

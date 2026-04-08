@@ -25,6 +25,7 @@ const ConcreteBinding = Types.ConcreteBinding;
 const BoundValue = Types.BoundValue;
 const WitnessMap = Types.WitnessMap;
 const WitnessSlotMap = Types.WitnessSlotMap;
+const DummyAliasMap = Types.DummyAliasMap;
 const ProvisionalWitnessInfoMap = Types.ProvisionalWitnessInfoMap;
 const MaterializedWitnessInfoMap = Types.MaterializedWitnessInfoMap;
 const RepresentativeCache = Types.RepresentativeCache;
@@ -1071,6 +1072,10 @@ pub const SymbolicEngine = struct {
             state.materialized_witness_slots,
             &hasher,
         );
+        try self.hashDummyAliasMapForSearch(
+            state.dummy_aliases,
+            &hasher,
+        );
         return hasher.final();
     }
 
@@ -1143,6 +1148,32 @@ pub const SymbolicEngine = struct {
             sum_acc +%= entry_hash;
         }
         const tag: u8 = 9;
+        hasher.update(std.mem.asBytes(&tag));
+        hasher.update(std.mem.asBytes(&count));
+        hasher.update(std.mem.asBytes(&xor_acc));
+        hasher.update(std.mem.asBytes(&sum_acc));
+        _ = self;
+    }
+
+    fn hashDummyAliasMapForSearch(
+        self: *SymbolicEngine,
+        map: DummyAliasMap,
+        hasher: *std.hash.Wyhash,
+    ) anyerror!void {
+        var count: usize = 0;
+        var xor_acc: u64 = 0;
+        var sum_acc: u64 = 0;
+        var it = map.iterator();
+        while (it.next()) |entry| {
+            var entry_hasher = std.hash.Wyhash.init(0x3f4bb85ca84d2b13);
+            entry_hasher.update(std.mem.asBytes(entry.key_ptr));
+            entry_hasher.update(std.mem.asBytes(entry.value_ptr));
+            const entry_hash = entry_hasher.final();
+            count += 1;
+            xor_acc ^= entry_hash;
+            sum_acc +%= entry_hash;
+        }
+        const tag: u8 = 10;
         hasher.update(std.mem.asBytes(&tag));
         hasher.update(std.mem.asBytes(&count));
         hasher.update(std.mem.asBytes(&xor_acc));
@@ -3097,6 +3128,10 @@ pub const SymbolicEngine = struct {
         state: *MatchSession,
         witness_slots: *std.AutoHashMapUnmanaged(ExprId, usize),
     ) anyerror!?*const SymbolicExpr {
+        if (try self.symbolicForExistingConcreteBinding(expr_id, state)) |binding| {
+            return binding;
+        }
+
         if (try self.getResymbolizableWitnessInfo(expr_id)) |info| {
             const slot = try self.slotForWitness(
                 expr_id,
@@ -3141,6 +3176,24 @@ pub const SymbolicEngine = struct {
         };
     }
 
+    fn symbolicForExistingConcreteBinding(
+        self: *SymbolicEngine,
+        expr_id: ExprId,
+        state: *const MatchSession,
+    ) anyerror!?*const SymbolicExpr {
+        for (state.bindings, 0..) |binding_opt, idx| {
+            const binding = binding_opt orelse continue;
+            switch (binding) {
+                .concrete => |concrete| {
+                    if (concrete.raw != expr_id) continue;
+                    return try self.allocSymbolic(.{ .binder = idx });
+                },
+                .symbolic => {},
+            }
+        }
+        return null;
+    }
+
     fn slotForWitness(
         self: *SymbolicEngine,
         witness: ExprId,
@@ -3166,6 +3219,107 @@ pub const SymbolicEngine = struct {
         return slot;
     }
 
+    fn resolveDummySlot(
+        self: *SymbolicEngine,
+        slot: usize,
+        state: *const MatchSession,
+    ) anyerror!usize {
+        if (slot >= state.symbolic_dummy_infos.items.len) {
+            return error.UnknownDummyVar;
+        }
+        var current = slot;
+        var steps: usize = 0;
+        while (state.dummy_aliases.get(current)) |next| {
+            if (next >= state.symbolic_dummy_infos.items.len) {
+                return error.UnknownDummyVar;
+            }
+            current = next;
+            steps += 1;
+            if (steps > state.symbolic_dummy_infos.items.len) {
+                return error.CyclicSymbolicDummyAlias;
+            }
+        }
+        _ = self;
+        return current;
+    }
+
+    fn putWitnessForDummySlot(
+        self: *SymbolicEngine,
+        slot: usize,
+        actual: ExprId,
+        state: *MatchSession,
+    ) anyerror!void {
+        const root = try self.resolveDummySlot(slot, state);
+        try state.witnesses.put(self.shared.allocator, root, actual);
+    }
+
+    fn alignDummySlots(
+        self: *SymbolicEngine,
+        lhs_slot: usize,
+        rhs_slot: usize,
+        state: *MatchSession,
+    ) anyerror!bool {
+        const lhs_root = try self.resolveDummySlot(lhs_slot, state);
+        const rhs_root = try self.resolveDummySlot(rhs_slot, state);
+        if (lhs_root == rhs_root) return true;
+
+        const lhs_info = state.symbolic_dummy_infos.items[lhs_root];
+        const rhs_info = state.symbolic_dummy_infos.items[rhs_root];
+        if (!std.mem.eql(u8, lhs_info.sort_name, rhs_info.sort_name)) {
+            return false;
+        }
+        if (lhs_info.bound != rhs_info.bound) {
+            return false;
+        }
+
+        const lhs_witness = self.currentWitnessExpr(lhs_root, state);
+        const rhs_witness = self.currentWitnessExpr(rhs_root, state);
+        if (lhs_witness != null and rhs_witness != null and
+            lhs_witness.? != rhs_witness.?)
+        {
+            return false;
+        }
+
+        const winner = if (lhs_witness != null)
+            lhs_root
+        else if (rhs_witness != null)
+            rhs_root
+        else if (lhs_root <= rhs_root)
+            lhs_root
+        else
+            rhs_root;
+        const loser = if (winner == lhs_root) rhs_root else lhs_root;
+
+        if (state.witnesses.get(loser)) |existing| {
+            if (state.witnesses.get(winner)) |winner_existing| {
+                if (winner_existing != existing) return false;
+            } else {
+                try state.witnesses.put(self.shared.allocator, winner, existing);
+            }
+            _ = state.witnesses.remove(loser);
+        }
+        if (state.materialized_witnesses.get(loser)) |existing| {
+            if (state.materialized_witnesses.get(winner)) |winner_existing| {
+                if (winner_existing != existing) return false;
+            } else {
+                try state.materialized_witnesses.put(
+                    self.shared.allocator,
+                    winner,
+                    existing,
+                );
+                try state.materialized_witness_slots.put(
+                    self.shared.allocator,
+                    existing,
+                    winner,
+                );
+            }
+            _ = state.materialized_witnesses.remove(loser);
+        }
+
+        try state.dummy_aliases.put(self.shared.allocator, loser, winner);
+        return true;
+    }
+
     fn saveMatchSnapshot(
         self: *SymbolicEngine,
         state: *const MatchSession,
@@ -3175,6 +3329,7 @@ pub const SymbolicEngine = struct {
             .witnesses = try self.cloneWitnessMap(state.witnesses),
             .materialized_witnesses = try self.cloneWitnessMap(state.materialized_witnesses),
             .materialized_witness_slots = try self.cloneWitnessSlotMap(state.materialized_witness_slots),
+            .dummy_aliases = try self.cloneDummyAliasMap(state.dummy_aliases),
             .provisional_witness_infos = try self.cloneProvisionalWitnessInfoMap(
                 state.provisional_witness_infos,
             ),
@@ -3205,6 +3360,10 @@ pub const SymbolicEngine = struct {
         state.materialized_witness_slots.deinit(self.shared.allocator);
         state.materialized_witness_slots = try self.cloneWitnessSlotMap(
             snapshot.materialized_witness_slots,
+        );
+        state.dummy_aliases.deinit(self.shared.allocator);
+        state.dummy_aliases = try self.cloneDummyAliasMap(
+            snapshot.dummy_aliases,
         );
         state.provisional_witness_infos.deinit(self.shared.allocator);
         state.provisional_witness_infos =
@@ -3239,6 +3398,7 @@ pub const SymbolicEngine = struct {
         snapshot.witnesses.deinit(self.shared.allocator);
         snapshot.materialized_witnesses.deinit(self.shared.allocator);
         snapshot.materialized_witness_slots.deinit(self.shared.allocator);
+        snapshot.dummy_aliases.deinit(self.shared.allocator);
         snapshot.provisional_witness_infos.deinit(self.shared.allocator);
         snapshot.materialized_witness_infos.deinit(self.shared.allocator);
         snapshot.transparent_representatives.deinit(self.shared.allocator);
@@ -3263,6 +3423,22 @@ pub const SymbolicEngine = struct {
         map: WitnessSlotMap,
     ) anyerror!WitnessSlotMap {
         var clone: WitnessSlotMap = .{};
+        var it = map.iterator();
+        while (it.next()) |entry| {
+            try clone.put(
+                self.shared.allocator,
+                entry.key_ptr.*,
+                entry.value_ptr.*,
+            );
+        }
+        return clone;
+    }
+
+    fn cloneDummyAliasMap(
+        self: *SymbolicEngine,
+        map: DummyAliasMap,
+    ) anyerror!DummyAliasMap {
+        var clone: DummyAliasMap = .{};
         var it = map.iterator();
         while (it.next()) |entry| {
             try clone.put(
@@ -3335,6 +3511,7 @@ pub const SymbolicEngine = struct {
             try self.cloneWitnessMap(source.materialized_witnesses);
         clone.materialized_witness_slots =
             try self.cloneWitnessSlotMap(source.materialized_witness_slots);
+        clone.dummy_aliases = try self.cloneDummyAliasMap(source.dummy_aliases);
         clone.provisional_witness_infos =
             try self.cloneProvisionalWitnessInfoMap(
                 source.provisional_witness_infos,
@@ -3439,26 +3616,30 @@ pub const SymbolicEngine = struct {
         actual: ExprId,
         state: *MatchSession,
     ) anyerror!bool {
+        const root = try self.resolveDummySlot(slot, state);
+        const root_info = state.symbolic_dummy_infos.items[root];
+
         // Matching a symbolic dummy against a non-variable is a plain mismatch,
         // not a fatal error.
         const actual_info = self.getConcreteVarInfo(actual) catch |err| switch (err) {
             error.ExpectedVariable => return false,
             else => return err,
         };
-        if (info.bound and !actual_info.bound) return false;
-        if (!std.mem.eql(u8, info.sort_name, actual_info.sort_name)) {
+        if (root_info.bound and !actual_info.bound) return false;
+        if (!std.mem.eql(u8, root_info.sort_name, actual_info.sort_name)) {
             return false;
         }
+        _ = info;
 
-        if (self.currentWitnessExpr(slot, state)) |existing| {
+        if (self.currentWitnessExpr(root, state)) |existing| {
             if (existing == actual) return true;
             if (self.isProvisionalWitnessExpr(existing, state)) {
-                try state.witnesses.put(self.shared.allocator, slot, actual);
+                try self.putWitnessForDummySlot(root, actual, state);
                 return true;
             }
             return false;
         }
-        try state.witnesses.put(self.shared.allocator, slot, actual);
+        try self.putWitnessForDummySlot(root, actual, state);
         return true;
     }
 
@@ -3488,35 +3669,7 @@ pub const SymbolicEngine = struct {
                 );
             },
             .dummy => |rhs_slot| {
-                const lhs_info = state.symbolic_dummy_infos.items[slot];
-                const rhs_info = state.symbolic_dummy_infos.items[rhs_slot];
-                if (!std.mem.eql(u8, lhs_info.sort_name, rhs_info.sort_name)) {
-                    return false;
-                }
-                if (lhs_info.bound != rhs_info.bound) {
-                    return false;
-                }
-                if (slot == rhs_slot) return true;
-                if (self.currentWitnessExpr(slot, state)) |lhs_witness| {
-                    if (self.currentWitnessExpr(rhs_slot, state)) |rhs_witness| {
-                        return lhs_witness == rhs_witness;
-                    }
-                    try state.witnesses.put(
-                        self.shared.allocator,
-                        rhs_slot,
-                        lhs_witness,
-                    );
-                    return true;
-                }
-                if (self.currentWitnessExpr(rhs_slot, state)) |rhs_witness| {
-                    try state.witnesses.put(
-                        self.shared.allocator,
-                        slot,
-                        rhs_witness,
-                    );
-                    return true;
-                }
-                return false;
+                return try self.alignDummySlots(slot, rhs_slot, state);
             },
             .app => {
                 const rhs_expr = try self.materializeAssignedSymbolic(
@@ -3762,9 +3915,9 @@ pub const SymbolicEngine = struct {
         slot: usize,
         state: *const MatchSession,
     ) ?ExprId {
-        _ = self;
-        return state.witnesses.get(slot) orelse
-            state.materialized_witnesses.get(slot);
+        const root = self.resolveDummySlot(slot, state) catch return null;
+        return state.witnesses.get(root) orelse
+            state.materialized_witnesses.get(root);
     }
 
     pub fn isProvisionalWitnessExpr(
@@ -3783,12 +3936,13 @@ pub const SymbolicEngine = struct {
     /// the user must provide explicit bindings that cover the hidden
     /// def structure.
     fn resolveWitnessForDummySlot(
-        _: *SymbolicEngine,
+        self: *SymbolicEngine,
         slot: usize,
         state: *MatchSession,
     ) anyerror!ExprId {
-        if (state.witnesses.get(slot)) |existing| return existing;
-        if (state.materialized_witnesses.get(slot)) |existing| return existing;
+        const root = try self.resolveDummySlot(slot, state);
+        if (state.witnesses.get(root)) |existing| return existing;
+        if (state.materialized_witnesses.get(root)) |existing| return existing;
         return error.UnresolvedDummyWitness;
     }
 

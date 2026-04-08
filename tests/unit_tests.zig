@@ -2838,10 +2838,6 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
         .reason = "requires inventing an erased hidden def witness after " ++
             "unfold then rewrite; treating that as out of scope",
     },
-    .{
-        .stem = "unsupported_epi_comp",
-        .reason = "requires @view to extract terms *before* normalization"
-    },
 };
 
 fn lookupProofCaseReason(
@@ -2909,10 +2905,7 @@ const proof_cases = [_]ProofCase{
         .stem = "unsupported_def_unfold_then_rewrite_concl",
         .outcome = .unsupported,
     },
-    .{
-        .stem = "unsupported_epi_comp",
-        .outcome = .unsupported,
-    },
+    .{ .stem = "unsupported_epi_comp", .outcome = .pass },
     .{ .stem = "pass_epi_cancel_right", .outcome = .pass },
     .{ .stem = "pass_epi_mono_cancel_right", .outcome = .pass },
     .{ .stem = "pass_epi_comp_assign", .outcome = .pass },
@@ -3608,6 +3601,70 @@ test "finalization rejects unresolved hidden-dummy witnesses" {
 
     // No dummies should have been allocated.
     try std.testing.expectEqual(dummies_before, theorem.theorem_dummies.items.len);
+}
+
+test "exact hidden-binder seeds match repeated def expansions" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\term all {x: obj} (p: wff x): wff; prefix all: $A.$ prec 41;
+        \\term eq (a b: obj): wff; infixl eq: $=$ prec 35;
+        \\term pair (a b: obj): obj;
+        \\axiom keep_all {x: obj} (p: wff x): $ A. x p $ > $ A. x p $;
+        \\def mono {.a .b: obj} (f: obj): wff =
+        \\  $ A. a A. b ((pair f a = pair f b) -> (a = b)) $;
+        \\theorem test (f: obj): $ mono f $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const actual = try theorem.internParsedExpr(
+        try parser.parseFormulaText(" mono f ", &theorem_vars),
+    );
+    const exact_x = try theorem.addDummyVarResolved("obj", 0);
+
+    const rule_id = env.getRuleId("keep_all") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(
+        rule.args,
+        &.{ .{ .exact = exact_x }, .none },
+    );
+    defer session.deinit();
+
+    try std.testing.expect(try session.matchTransparent(rule.hyps[0], actual));
 }
 
 test "resolveBindingSeeds preserves symbolic state through view reuse" {

@@ -69,6 +69,7 @@ pub const BoundValue = union(enum) {
 
 pub const WitnessMap = std.AutoHashMapUnmanaged(usize, ExprId);
 pub const WitnessSlotMap = std.AutoHashMapUnmanaged(ExprId, usize);
+pub const DummyAliasMap = std.AutoHashMapUnmanaged(usize, usize);
 pub const ProvisionalWitnessInfoMap = std.AutoHashMapUnmanaged(
     ExprId,
     SymbolicDummyInfo,
@@ -88,6 +89,7 @@ pub const MatchSeedState = struct {
     witnesses: WitnessMap = .{},
     materialized_witnesses: WitnessMap = .{},
     materialized_witness_slots: WitnessSlotMap = .{},
+    dummy_aliases: DummyAliasMap = .{},
     provisional_witness_infos: ProvisionalWitnessInfoMap = .{},
     materialized_witness_infos: MaterializedWitnessInfoMap = .{},
 
@@ -97,6 +99,7 @@ pub const MatchSeedState = struct {
         self.witnesses.deinit(allocator);
         self.materialized_witnesses.deinit(allocator);
         self.materialized_witness_slots.deinit(allocator);
+        self.dummy_aliases.deinit(allocator);
         self.provisional_witness_infos.deinit(allocator);
         self.materialized_witness_infos.deinit(allocator);
     }

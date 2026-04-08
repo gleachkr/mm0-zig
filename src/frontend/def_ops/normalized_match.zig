@@ -18,6 +18,7 @@ const SymbolicExpr = Types.SymbolicExpr;
 const MatchSeedState = Types.MatchSeedState;
 const WitnessMap = Types.WitnessMap;
 const WitnessSlotMap = Types.WitnessSlotMap;
+const DummyAliasMap = Types.DummyAliasMap;
 const ProvisionalWitnessInfoMap = Types.ProvisionalWitnessInfoMap;
 const MaterializedWitnessInfoMap = Types.MaterializedWitnessInfoMap;
 const MatchSession = MatchState.MatchSession;
@@ -117,9 +118,9 @@ const NormalizedView = struct {
             // not the real theorem. Does not consume real dependency slots.
             const placeholder = try self.mirror.theorem
                 .addPlaceholderDummyVarResolved(
-                    session.rule_args[idx].sort_name,
-                    sort_id,
-                );
+                session.rule_args[idx].sort_name,
+                sort_id,
+            );
             try self.placeholder_targets.put(
                 session.shared.allocator,
                 placeholder,
@@ -165,9 +166,9 @@ const NormalizedView = struct {
         // mirror context, not the real theorem. Does not consume real dependency slots.
         const placeholder = try self.mirror.theorem
             .addPlaceholderDummyVarResolved(
-                info.sort_name,
-                sort_id,
-            );
+            info.sort_name,
+            sort_id,
+        );
         try self.placeholder_targets.put(
             session.shared.allocator,
             placeholder,
@@ -199,6 +200,22 @@ fn cloneWitnessSlotMap(
     map: WitnessSlotMap,
 ) !WitnessSlotMap {
     var clone: WitnessSlotMap = .{};
+    var it = map.iterator();
+    while (it.next()) |entry| {
+        try clone.put(
+            allocator,
+            entry.key_ptr.*,
+            entry.value_ptr.*,
+        );
+    }
+    return clone;
+}
+
+fn cloneDummyAliasMap(
+    allocator: std.mem.Allocator,
+    map: DummyAliasMap,
+) !DummyAliasMap {
+    var clone: DummyAliasMap = .{};
     var it = map.iterator();
     while (it.next()) |entry| {
         try clone.put(
@@ -297,6 +314,10 @@ pub const RuleMatchSession = struct {
             state.materialized_witness_slots = try cloneWitnessSlotMap(
                 shared.allocator,
                 saved.materialized_witness_slots,
+            );
+            state.dummy_aliases = try cloneDummyAliasMap(
+                shared.allocator,
+                saved.dummy_aliases,
             );
             state.provisional_witness_infos =
                 try cloneProvisionalWitnessInfoMap(
@@ -408,7 +429,9 @@ pub const RuleMatchSession = struct {
         };
     }
 
-    pub fn resolveOptionalBindings(self: *RuleMatchSession) ![]?ExprId {
+    /// Materialize the concrete expressions justified by the current match
+    /// state without applying representative selection.
+    pub fn materializeOptionalBindings(self: *RuleMatchSession) ![]?ExprId {
         var symbolic_engine = self.engine();
         const bindings = try self.shared.allocator.alloc(
             ?ExprId,
@@ -416,7 +439,7 @@ pub const RuleMatchSession = struct {
         );
         for (self.state.bindings, 0..) |binding, idx| {
             bindings[idx] = if (binding) |bound|
-                try symbolic_engine.resolveBoundValue(
+                try symbolic_engine.materializeResolvedBoundValue(
                     bound,
                     &self.state,
                 )
@@ -426,7 +449,45 @@ pub const RuleMatchSession = struct {
         return bindings;
     }
 
-    /// Like resolveOptionalBindings, but returns BindingSeeds that preserve
+    /// Project materialized bindings through each binding's representative
+    /// selection mode.
+    pub fn representOptionalBindings(
+        self: *RuleMatchSession,
+        materialized_bindings: []const ?ExprId,
+    ) ![]?ExprId {
+        std.debug.assert(materialized_bindings.len == self.state.bindings.len);
+
+        var symbolic_engine = self.engine();
+        const bindings = try self.shared.allocator.alloc(
+            ?ExprId,
+            self.state.bindings.len,
+        );
+        for (self.state.bindings, materialized_bindings, 0..) |
+            binding,
+            materialized,
+            idx,
+        | {
+            bindings[idx] = if (binding) |bound|
+                try symbolic_engine.projectMaterializedExpr(
+                    materialized,
+                    boundValueMode(bound),
+                )
+            else
+                null;
+        }
+        return bindings;
+    }
+
+    /// Temporary compatibility wrapper. This will go away once callers choose
+    /// materialization or representative projection explicitly.
+    pub fn resolveOptionalBindings(self: *RuleMatchSession) ![]?ExprId {
+        const materialized = try self.materializeOptionalBindings();
+        defer self.shared.allocator.free(materialized);
+        return try self.representOptionalBindings(materialized);
+    }
+
+    /// Like represented optional bindings, but returns BindingSeeds that
+    /// preserve
     /// symbolic BoundValues instead of collapsing them to concrete ExprIds.
     /// Concrete bindings become .exact seeds; symbolic bindings become
     /// .bound seeds carrying the full BoundValue.
@@ -473,6 +534,10 @@ pub const RuleMatchSession = struct {
                 self.shared.allocator,
                 self.state.materialized_witness_slots,
             ),
+            .dummy_aliases = try cloneDummyAliasMap(
+                self.shared.allocator,
+                self.state.dummy_aliases,
+            ),
             .provisional_witness_infos = try cloneProvisionalWitnessInfoMap(
                 self.shared.allocator,
                 self.state.provisional_witness_infos,
@@ -482,6 +547,21 @@ pub const RuleMatchSession = struct {
                 self.state.materialized_witness_infos,
             ),
         };
+    }
+
+    /// Snapshot the current resolved witness, if any, for each symbolic
+    /// dummy slot in this session. This lets callers inspect live hidden
+    /// binder assignments without depending on the mutable match session.
+    pub fn materializeDummyWitnesses(self: *RuleMatchSession) ![]?ExprId {
+        var symbolic_engine = self.engine();
+        const witnesses = try self.shared.allocator.alloc(
+            ?ExprId,
+            self.state.symbolic_dummy_infos.items.len,
+        );
+        for (witnesses, 0..) |*witness, slot| {
+            witness.* = symbolic_engine.currentWitnessExpr(slot, &self.state);
+        }
+        return witnesses;
     }
 
     pub fn guideBindingTowardExpr(
@@ -896,6 +976,13 @@ pub const NormalizedComparison = struct {
         );
     }
 };
+
+fn boundValueMode(bound: BoundValue) Types.BindingMode {
+    return switch (bound) {
+        .concrete => |concrete| concrete.mode,
+        .symbolic => |symbolic| symbolic.mode,
+    };
+}
 
 fn samePlaceholderTarget(
     lhs: NormalizedPlaceholderTarget,

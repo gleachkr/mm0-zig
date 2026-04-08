@@ -204,8 +204,10 @@ pub const Solver = struct {
                 self.theorem,
                 self.env,
                 self.registry,
-                view_bindings,
+                .{ .view_bindings = view_bindings },
                 derived_bindings,
+                self.view.?.arg_names,
+                false,
             ) catch |err| {
                 if (first_err == null) first_err = err;
                 continue;

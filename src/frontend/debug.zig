@@ -7,6 +7,7 @@ const std = @import("std");
 /// In code, check `if (debug.inference) std.debug.print(...)`.
 pub const DebugConfig = struct {
     inference: bool = false,
+    views: bool = false,
     unfolding: bool = false,
     normalization: bool = false,
     emission: bool = false,
@@ -22,6 +23,8 @@ pub const DebugConfig = struct {
             if (flag.len == 0) continue;
             if (std.mem.eql(u8, flag, "inference")) {
                 config.inference = true;
+            } else if (std.mem.eql(u8, flag, "views")) {
+                config.views = true;
             } else if (std.mem.eql(u8, flag, "unfolding")) {
                 config.unfolding = true;
             } else if (std.mem.eql(u8, flag, "normalization")) {
@@ -33,6 +36,7 @@ pub const DebugConfig = struct {
             } else if (std.mem.eql(u8, flag, "all")) {
                 return .{
                     .inference = true,
+                    .views = true,
                     .unfolding = true,
                     .normalization = true,
                     .emission = true,
@@ -46,8 +50,8 @@ pub const DebugConfig = struct {
     }
 
     pub fn any(self: DebugConfig) bool {
-        return self.inference or self.unfolding or self.normalization or
-            self.emission or self.check;
+        return self.inference or self.views or self.unfolding or
+            self.normalization or self.emission or self.check;
     }
 };
 

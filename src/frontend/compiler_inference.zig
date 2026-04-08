@@ -200,6 +200,39 @@ fn derivedViewRuleSeedMask(
     return mask;
 }
 
+fn bindingSeedsForViewReuse(
+    allocator: std.mem.Allocator,
+    explicit_bindings: []const ?ExprId,
+    seeded_bindings: []const ?ExprId,
+    derived_seed_mask: []const bool,
+    mode: DefOps.BindingMode,
+) ![]DefOps.BindingSeed {
+    std.debug.assert(explicit_bindings.len == seeded_bindings.len);
+    std.debug.assert(explicit_bindings.len == derived_seed_mask.len);
+
+    const seeds = try allocator.alloc(
+        DefOps.BindingSeed,
+        seeded_bindings.len,
+    );
+    for (explicit_bindings, seeded_bindings, derived_seed_mask, 0..) |
+        explicit,
+        seeded,
+        allow_view_seed,
+        idx,
+    | {
+        seeds[idx] = if (explicit) |expr_id|
+            .{ .exact = expr_id }
+        else if (seeded) |expr_id|
+            if (allow_view_seed)
+                .{ .semantic = .{ .expr_id = expr_id, .mode = mode } }
+            else
+                .none
+        else
+            .none;
+    }
+    return seeds;
+}
+
 pub fn inferBindingsTransparent(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
@@ -494,7 +527,14 @@ pub fn inferBindings(
                 ref_exprs,
                 seeded,
                 &view_seed_state,
-            ) catch {
+                self.debug.views,
+            ) catch |err| {
+                if (self.debug.views) {
+                    std.debug.print(
+                        "[debug:views] applyViewBindings failed: {s}\n",
+                        .{@errorName(err)},
+                    );
+                }
                 allocator.free(seeded);
                 session_seeds = try exactBindingSeeds(
                     allocator,
@@ -524,8 +564,9 @@ pub fn inferBindings(
                 );
                 defer allocator.free(semantic_mask);
 
-                const concrete_seeds = try bindingSeedsFromSeededBindings(
+                const concrete_seeds = try bindingSeedsForViewReuse(
                     allocator,
+                    partial_bindings,
                     seeded,
                     semantic_mask,
                     .transparent,
