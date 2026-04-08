@@ -825,6 +825,25 @@ pub const MM0Parser = struct {
         try self.registerCoercion(src, dst, term_id);
     }
 
+    pub fn parseAssertionText(
+        self: *const MM0Parser,
+        src: []const u8,
+        kind: AssertionKind,
+        is_local: bool,
+    ) !AssertionStmt {
+        var parser = self.*;
+        parser.src = src;
+        parser.pos = 0;
+        parser.pending_annotations = .{};
+        parser.last_annotations = &.{};
+        const stmt = try parser.parseAssertionStmt(kind, is_local);
+        parser.skipWhitespaceAndComments();
+        if (parser.pos != parser.src.len) {
+            return error.UnexpectedTrailingInput;
+        }
+        return stmt;
+    }
+
     pub fn parseFormulaText(
         self: *MM0Parser,
         math: []const u8,

@@ -40,13 +40,23 @@ pub const ProofLine = struct {
     span: Span,
 };
 
-pub const TheoremBlock = struct {
+pub const BlockKind = enum {
+    theorem,
+    lemma,
+};
+
+pub const ProofBlock = struct {
+    kind: BlockKind,
     name: []const u8,
     name_span: Span,
+    header_span: Span,
+    header_tail: []const u8 = "",
     underline_span: ?Span,
     lines: []const ProofLine,
     span: Span,
 };
+
+pub const TheoremBlock = ProofBlock;
 
 pub const Parser = struct {
     allocator: std.mem.Allocator,
@@ -60,22 +70,89 @@ pub const Parser = struct {
         };
     }
 
-    pub fn nextBlock(self: *Parser) !?TheoremBlock {
+    pub fn nextBlock(self: *Parser) !?ProofBlock {
         self.skipBlankLines();
         if (self.pos >= self.src.len) return null;
 
         const block_start = self.pos;
+        const ident_start = self.pos;
+        const ident = try self.parseIdentifier();
+        if (std.mem.eql(u8, ident, "lemma") and self.startsLemmaHeader()) {
+            return try self.parseLemmaBlock(block_start);
+        }
+        return try self.parseTheoremBlock(block_start, ident, ident_start);
+    }
+
+    fn startsLemmaHeader(self: *Parser) bool {
+        var i = self.pos;
+        while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
+        return i < self.src.len and isIdentStart(self.src[i]);
+    }
+
+    fn parseTheoremBlock(
+        self: *Parser,
+        block_start: usize,
+        name: []const u8,
+        name_start: usize,
+    ) !ProofBlock {
+        try self.expectLineEnd();
+        const header_span = Span{
+            .start = block_start,
+            .end = self.pos,
+        };
+        const underline_span = self.parseUnderlineLine();
+        const lines = try self.parseProofLines();
+        return .{
+            .kind = .theorem,
+            .name = name,
+            .name_span = .{
+                .start = name_start,
+                .end = name_start + name.len,
+            },
+            .header_span = header_span,
+            .underline_span = underline_span,
+            .lines = lines,
+            .span = .{
+                .start = block_start,
+                .end = self.pos,
+            },
+        };
+    }
+
+    fn parseLemmaBlock(
+        self: *Parser,
+        block_start: usize,
+    ) !ProofBlock {
         const name_start = self.pos;
         const name = try self.parseIdentifier();
-        const name_span = Span{
-            .start = name_start,
-            .end = name_start + name.len,
-        };
+        const tail = try self.parseLemmaHeaderTail();
         try self.expectLineEnd();
-
+        const header_span = Span{
+            .start = block_start,
+            .end = self.pos,
+        };
         const underline_span = self.parseUnderlineLine();
-        self.skipBlankLines();
+        const lines = try self.parseProofLines();
+        return .{
+            .kind = .lemma,
+            .name = name,
+            .name_span = .{
+                .start = name_start,
+                .end = name_start + name.len,
+            },
+            .header_span = header_span,
+            .header_tail = tail,
+            .underline_span = underline_span,
+            .lines = lines,
+            .span = .{
+                .start = block_start,
+                .end = self.pos,
+            },
+        };
+    }
 
+    fn parseProofLines(self: *Parser) ![]const ProofLine {
+        self.skipBlankLines();
         var lines = std.ArrayListUnmanaged(ProofLine){};
         while (true) {
             const line_start = self.skipBlankLinesFrom(self.pos);
@@ -84,17 +161,7 @@ pub const Parser = struct {
             if (!self.lineStartsProofLine()) break;
             try lines.append(self.allocator, try self.parseProofLine());
         }
-
-        return .{
-            .name = name,
-            .name_span = name_span,
-            .underline_span = underline_span,
-            .lines = try lines.toOwnedSlice(self.allocator),
-            .span = .{
-                .start = block_start,
-                .end = self.pos,
-            },
-        };
+        return try lines.toOwnedSlice(self.allocator);
     }
 
     fn parseProofLine(self: *Parser) !ProofLine {
@@ -224,6 +291,36 @@ pub const Parser = struct {
         };
     }
 
+    fn parseLemmaHeaderTail(self: *Parser) ![]const u8 {
+        self.skipHorizontalSpace();
+        const start = self.pos;
+        while (self.pos < self.src.len and self.src[self.pos] != '\n') {
+            if (self.src[self.pos] == '$') {
+                self.pos += 1;
+                while (self.pos < self.src.len and self.src[self.pos] != '$') {
+                    self.pos += 1;
+                }
+                if (self.pos >= self.src.len) {
+                    return error.UnterminatedMathString;
+                }
+                self.pos += 1;
+                continue;
+            }
+            if (self.pos + 1 < self.src.len and
+                self.src[self.pos] == '-' and
+                self.src[self.pos + 1] == '-')
+            {
+                break;
+            }
+            self.pos += 1;
+        }
+        var end = self.pos;
+        while (end > start and isHorizontalSpace(self.src[end - 1])) {
+            end -= 1;
+        }
+        return self.src[start..end];
+    }
+
     fn parseUnderlineLine(self: *Parser) ?Span {
         const saved = self.pos;
         var line_start = saved;
@@ -330,7 +427,10 @@ pub const Parser = struct {
     }
 
     fn skipLineComment(self: *Parser) void {
-        if (self.pos + 1 < self.src.len and self.src[self.pos] == '-' and self.src[self.pos + 1] == '-') {
+        if (self.pos + 1 < self.src.len and
+            self.src[self.pos] == '-' and
+            self.src[self.pos + 1] == '-')
+        {
             while (self.pos < self.src.len and self.src[self.pos] != '\n') : (self.pos += 1) {}
         }
     }
@@ -355,10 +455,12 @@ pub const Parser = struct {
                 i += 1;
             }
             if (i >= self.src.len) return i;
-            // Treat comment-only lines as blank
-            if (i + 1 < self.src.len and self.src[i] == '-' and self.src[i + 1] == '-') {
+            if (i + 1 < self.src.len and
+                self.src[i] == '-' and
+                self.src[i + 1] == '-')
+            {
                 while (i < self.src.len and self.src[i] != '\n') : (i += 1) {}
-                if (i < self.src.len) i += 1; // skip the newline
+                if (i < self.src.len) i += 1;
                 continue;
             }
             if (self.src[i] != '\n') return line_start;

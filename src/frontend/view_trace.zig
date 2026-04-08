@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
 const ExprId = @import("./compiler_expr.zig").ExprId;
@@ -16,18 +17,18 @@ pub fn printViewBindings(
     bindings: []const ?ExprId,
     seeds: ?[]const BindingSeed,
 ) anyerror!void {
-    std.debug.print("[debug:views] {s}\n", .{label});
+    debugPrint("[debug:views] {s}\n", .{label});
     for (bindings, 0..) |binding, idx| {
         const name = binderLabel(view_arg_names, idx);
         if (binding) |expr_id| {
             const text = try formatExpr(allocator, theorem, env, expr_id);
             defer allocator.free(text);
-            std.debug.print(
+            debugPrint(
                 "[debug:views]   {s}#{d} = {s}\n",
                 .{ name, idx, text },
             );
         } else {
-            std.debug.print(
+            debugPrint(
                 "[debug:views]   {s}#{d} = <null>\n",
                 .{ name, idx },
             );
@@ -43,7 +44,7 @@ pub fn printViewBindings(
                     all_seeds[idx],
                 );
                 defer allocator.free(seed_text);
-                std.debug.print(
+                debugPrint(
                     "[debug:views]     seed: {s}\n",
                     .{seed_text},
                 );
@@ -64,7 +65,7 @@ pub fn printRecoverState(
     bindings: []const ?ExprId,
     seeds: ?[]const BindingSeed,
 ) anyerror!void {
-    std.debug.print(
+    debugPrint(
         "[debug:views] recover {s}#{d} from {s}#{d} via {s}#{d} hole {s}#{d}\n",
         .{
             binderLabel(view_arg_names, target_idx),
@@ -120,7 +121,7 @@ pub fn printRecoverState(
 }
 
 pub fn printMessage(comptime fmt: []const u8, args: anytype) void {
-    std.debug.print("[debug:views] " ++ fmt ++ "\n", args);
+    debugPrint("[debug:views] " ++ fmt ++ "\n", args);
 }
 
 pub fn formatExpr(
@@ -175,18 +176,18 @@ fn printSingleBinding(
         if (bindings[idx]) |expr_id| {
         const text = try formatExpr(allocator, theorem, env, expr_id);
         defer allocator.free(text);
-        std.debug.print(
+        debugPrint(
             "[debug:views]   {s} {s}#{d} = {s}\n",
             .{ role, name, idx, text },
         );
         } else {
-            std.debug.print(
+            debugPrint(
                 "[debug:views]   {s} {s}#{d} = <null>\n",
                 .{ role, name, idx },
             );
         }
     } else {
-        std.debug.print(
+        debugPrint(
             "[debug:views]   {s} {s}#{d} = <null>\n",
             .{ role, name, idx },
         );
@@ -202,12 +203,17 @@ fn printSingleBinding(
                 all_seeds[idx],
             );
             defer allocator.free(seed_text);
-            std.debug.print(
+            debugPrint(
                 "[debug:views]     {s} seed: {s}\n",
                 .{ role, seed_text },
             );
         }
     }
+}
+
+fn debugPrint(comptime fmt: []const u8, args: anytype) void {
+    if (comptime builtin.target.os.tag == .freestanding) return;
+    std.debug.print(fmt, args);
 }
 
 fn appendExpr(

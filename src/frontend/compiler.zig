@@ -89,7 +89,12 @@ pub const Compiler = struct {
             switch (stmt) {
                 .assertion => |assertion| {
                     if (assertion.kind != .theorem) {
-                        try env.addStmt(stmt);
+                        try self.addAssertionToEnv(
+                            &env,
+                            assertion,
+                            assertion.name,
+                            null,
+                        );
                         try Metadata.processAssertionMetadata(
                             arena.allocator(),
                             &parser,
@@ -112,34 +117,70 @@ pub const Compiler = struct {
                     );
 
                     if (proof_parser) |*proofs| {
-                        const block = try self.expectProofBlock(
-                            proofs,
-                            assertion.name,
-                        );
-                        _ = Check.checkTheoremBlock(
-                            self,
-                            arena.allocator(),
-                            &parser,
-                            &env,
-                            &registry,
-                            &fresh_bindings,
-                            &views,
-                            &sort_vars,
-                            assertion,
-                            block,
-                            &theorem,
-                            theorem_concl,
-                        ) catch |err| {
-                            self.setTheoremDiagnosticIfMissing(
-                                assertion.name,
-                                block.name_span,
-                                err,
-                            );
-                            return err;
-                        };
+                        while (true) {
+                            const block = try proofs.nextBlock() orelse {
+                                self.setDiagnostic(.{
+                                    .kind = .missing_proof_block,
+                                    .err = error.MissingProofBlock,
+                                    .theorem_name = assertion.name,
+                                });
+                                return error.MissingProofBlock;
+                            };
+                            if (block.kind == .lemma) {
+                                try self.checkLocalProofBlock(
+                                    arena.allocator(),
+                                    &parser,
+                                    &env,
+                                    &registry,
+                                    &fresh_bindings,
+                                    &views,
+                                    &sort_vars,
+                                    block,
+                                );
+                                continue;
+                            }
+                            if (!std.mem.eql(u8, block.name, assertion.name)) {
+                                self.setDiagnostic(.{
+                                    .kind = .theorem_name_mismatch,
+                                    .err = error.TheoremNameMismatch,
+                                    .theorem_name = assertion.name,
+                                    .block_name = block.name,
+                                    .expected_name = assertion.name,
+                                    .span = block.name_span,
+                                });
+                                return error.TheoremNameMismatch;
+                            }
+                            _ = Check.checkTheoremBlock(
+                                self,
+                                arena.allocator(),
+                                &parser,
+                                &env,
+                                &registry,
+                                &fresh_bindings,
+                                &views,
+                                &sort_vars,
+                                assertion,
+                                block,
+                                &theorem,
+                                theorem_concl,
+                            ) catch |err| {
+                                self.setTheoremDiagnosticIfMissing(
+                                    assertion.name,
+                                    block.name_span,
+                                    err,
+                                );
+                                return err;
+                            };
+                            break;
+                        }
                     }
 
-                    try env.addStmt(stmt);
+                    try self.addAssertionToEnv(
+                        &env,
+                        assertion,
+                        assertion.name,
+                        null,
+                    );
                     try Metadata.processAssertionMetadata(
                         arena.allocator(),
                         &parser,
@@ -295,7 +336,12 @@ pub const Compiler = struct {
                                 .cmd = .Axiom,
                                 .body = body,
                             });
-                            try env.addStmt(stmt);
+                            try self.addAssertionToEnv(
+                                &env,
+                                assertion,
+                                assertion.name,
+                                null,
+                            );
                             try Metadata.processAssertionMetadata(
                                 allocator,
                                 &parser,
@@ -308,10 +354,50 @@ pub const Compiler = struct {
                             );
                         },
                         .theorem => {
-                            const block = try self.expectProofBlock(
-                                &proof_parser,
-                                assertion.name,
-                            );
+                            const block = blk: {
+                                while (true) {
+                                    const next_block =
+                                        try proof_parser.nextBlock() orelse {
+                                            self.setDiagnostic(.{
+                                                .kind = .missing_proof_block,
+                                                .err = error.MissingProofBlock,
+                                                .theorem_name = assertion.name,
+                                            });
+                                            return error.MissingProofBlock;
+                                        };
+                                    if (next_block.kind == .lemma) {
+                                        try self.compileLocalProofBlock(
+                                            allocator,
+                                            &parser,
+                                            &env,
+                                            &registry,
+                                            &fresh_bindings,
+                                            &views,
+                                            &sort_vars,
+                                            next_block,
+                                            &theorems,
+                                            &statements,
+                                        );
+                                        continue;
+                                    }
+                                    if (!std.mem.eql(
+                                        u8,
+                                        next_block.name,
+                                        assertion.name,
+                                    )) {
+                                        self.setDiagnostic(.{
+                                            .kind = .theorem_name_mismatch,
+                                            .err = error.TheoremNameMismatch,
+                                            .theorem_name = assertion.name,
+                                            .block_name = next_block.name,
+                                            .expected_name = assertion.name,
+                                            .span = next_block.name_span,
+                                        });
+                                        return error.TheoremNameMismatch;
+                                    }
+                                    break :blk next_block;
+                                }
+                            };
                             const checked = Check.checkTheoremBlock(
                                 self,
                                 allocator,
@@ -361,7 +447,12 @@ pub const Compiler = struct {
                                 .cmd = .Thm,
                                 .body = body,
                             });
-                            try env.addStmt(stmt);
+                            try self.addAssertionToEnv(
+                                &env,
+                                assertion,
+                                assertion.name,
+                                null,
+                            );
                             try Metadata.processAssertionMetadata(
                                 allocator,
                                 &parser,
@@ -478,6 +569,182 @@ pub const Compiler = struct {
         self.last_diagnostic = diag;
     }
 
+    fn parseLemmaAssertion(
+        self: *Compiler,
+        allocator: std.mem.Allocator,
+        parser: *const MM0Parser,
+        block: TheoremBlock,
+    ) !AssertionStmt {
+        const src = try std.fmt.allocPrint(
+            allocator,
+            "theorem {s}{s};",
+            .{ block.name, block.header_tail },
+        );
+        return parser.parseAssertionText(src, .theorem, true) catch |err| {
+            self.setDiagnostic(.{
+                .kind = .generic,
+                .err = err,
+                .theorem_name = block.name,
+                .block_name = block.name,
+                .span = block.header_span,
+            });
+            return err;
+        };
+    }
+
+    fn checkLocalProofBlock(
+        self: *Compiler,
+        allocator: std.mem.Allocator,
+        parser: *MM0Parser,
+        env: *GlobalEnv,
+        registry: *RewriteRegistry,
+        fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+        views: *const std.AutoHashMap(u32, ViewDecl),
+        sort_vars: *const SortVarRegistry,
+        block: TheoremBlock,
+    ) !void {
+        const assertion = try self.parseLemmaAssertion(allocator, parser, block);
+
+        var theorem = TheoremContext.init(allocator);
+        defer theorem.deinit();
+        try theorem.seedAssertion(assertion);
+        const theorem_concl = try theorem.internParsedExpr(assertion.concl);
+
+        _ = Check.checkTheoremBlock(
+            self,
+            allocator,
+            parser,
+            env,
+            registry,
+            fresh_bindings,
+            views,
+            sort_vars,
+            assertion,
+            block,
+            &theorem,
+            theorem_concl,
+        ) catch |err| {
+            self.setTheoremDiagnosticIfMissing(
+                assertion.name,
+                block.header_span,
+                err,
+            );
+            return err;
+        };
+
+        try self.addAssertionToEnv(
+            env,
+            assertion,
+            block.name,
+            block.name_span,
+        );
+    }
+
+    fn compileLocalProofBlock(
+        self: *Compiler,
+        allocator: std.mem.Allocator,
+        parser: *MM0Parser,
+        env: *GlobalEnv,
+        registry: *RewriteRegistry,
+        fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+        views: *const std.AutoHashMap(u32, ViewDecl),
+        sort_vars: *const SortVarRegistry,
+        block: TheoremBlock,
+        theorems: *std.ArrayListUnmanaged(TheoremRecord),
+        statements: *std.ArrayListUnmanaged(Statement),
+    ) !void {
+        const assertion = try self.parseLemmaAssertion(allocator, parser, block);
+
+        var theorem = TheoremContext.init(allocator);
+        defer theorem.deinit();
+        try theorem.seedAssertion(assertion);
+        const theorem_concl = try theorem.internParsedExpr(assertion.concl);
+        const unify = try Emit.buildAssertionUnifyStream(
+            allocator,
+            &theorem,
+            theorem_concl,
+        );
+        const args = try Emit.buildArgArray(parser, assertion.args);
+        const hyp_names = try Emit.buildHypNames(allocator, assertion.hyps.len);
+
+        const checked = Check.checkTheoremBlock(
+            self,
+            allocator,
+            parser,
+            env,
+            registry,
+            fresh_bindings,
+            views,
+            sort_vars,
+            assertion,
+            block,
+            &theorem,
+            theorem_concl,
+        ) catch |err| {
+            self.setTheoremDiagnosticIfMissing(
+                assertion.name,
+                block.header_span,
+                err,
+            );
+            return err;
+        };
+        const body = Emit.buildTheoremProofBody(
+            allocator,
+            &theorem,
+            env,
+            checked,
+        ) catch |err| {
+            self.setTheoremDiagnosticIfMissing(
+                assertion.name,
+                block.header_span,
+                err,
+            );
+            return err;
+        };
+
+        try theorems.append(allocator, .{
+            .args = args,
+            .unify = unify,
+            .name = assertion.name,
+            .var_names = try Emit.buildTheoremVarNames(
+                allocator,
+                assertion.arg_names,
+                theorem.theorem_dummies.items.len,
+            ),
+            .hyp_names = hyp_names,
+        });
+        try statements.append(allocator, .{
+            .cmd = .LocalThm,
+            .body = body,
+        });
+        try self.addAssertionToEnv(
+            env,
+            assertion,
+            block.name,
+            block.name_span,
+        );
+    }
+
+    fn addAssertionToEnv(
+        self: *Compiler,
+        env: *GlobalEnv,
+        assertion: AssertionStmt,
+        diag_name: []const u8,
+        span: ?Span,
+    ) !void {
+        env.addStmt(.{ .assertion = assertion }) catch |err| {
+            if (err == error.DuplicateRuleName) {
+                self.setDiagnostic(.{
+                    .kind = .duplicate_rule_name,
+                    .err = err,
+                    .name = diag_name,
+                    .span = span,
+                });
+            }
+            return err;
+        };
+    }
+
     fn setTheoremDiagnosticIfMissing(
         self: *Compiler,
         theorem_name: []const u8,
@@ -491,33 +758,6 @@ pub const Compiler = struct {
             .theorem_name = theorem_name,
             .span = span,
         });
-    }
-
-    fn expectProofBlock(
-        self: *Compiler,
-        proof_parser: *ProofScriptParser,
-        theorem_name: []const u8,
-    ) !TheoremBlock {
-        const block = try proof_parser.nextBlock() orelse {
-            self.setDiagnostic(.{
-                .kind = .missing_proof_block,
-                .err = error.MissingProofBlock,
-                .theorem_name = theorem_name,
-            });
-            return error.MissingProofBlock;
-        };
-        if (!std.mem.eql(u8, block.name, theorem_name)) {
-            self.setDiagnostic(.{
-                .kind = .theorem_name_mismatch,
-                .err = error.TheoremNameMismatch,
-                .theorem_name = theorem_name,
-                .block_name = block.name,
-                .expected_name = theorem_name,
-                .span = block.name_span,
-            });
-            return error.TheoremNameMismatch;
-        }
-        return block;
     }
 };
 

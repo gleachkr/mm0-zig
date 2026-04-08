@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const ExprId = @import("./compiler_expr.zig").ExprId;
 const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
@@ -530,7 +531,7 @@ pub fn inferBindings(
                 self.debug.views,
             ) catch |err| {
                 if (self.debug.views) {
-                    std.debug.print(
+                    debugPrint(
                         "[debug:views] applyViewBindings failed: {s}\n",
                         .{@errorName(err)},
                     );
@@ -938,6 +939,11 @@ pub fn exprInfo(
             };
         },
     };
+}
+
+fn debugPrint(comptime fmt: []const u8, args: anytype) void {
+    if (comptime builtin.target.os.tag == .freestanding) return;
+    std.debug.print(fmt, args);
 }
 
 pub fn hasOmittedBindings(bindings: []const ?ExprId) bool {

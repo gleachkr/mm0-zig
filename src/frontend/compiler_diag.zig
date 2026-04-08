@@ -5,6 +5,7 @@ pub const DiagnosticKind = enum {
     missing_proof_block,
     extra_proof_block,
     theorem_name_mismatch,
+    duplicate_rule_name,
     parse_assertion,
     parse_binding,
     parse_fresh,
@@ -41,6 +42,7 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
         .missing_proof_block => "missing proof block for theorem",
         .extra_proof_block => "extra proof block with no matching theorem",
         .theorem_name_mismatch => "proof block name does not match the theorem",
+        .duplicate_rule_name => "duplicate rule name",
         .parse_assertion => "could not parse proof line assertion",
         .parse_binding => "could not parse binder assignment",
         .parse_fresh => compilerErrorSummary(diag.err),
@@ -74,6 +76,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.AmbiguousAcuiMatch => "omitted rule arguments are ambiguous after structural " ++
             "or def-aware matching",
         error.UnknownTheoremVariable => "binding refers to a theorem variable that is not in scope",
+        error.DuplicateRuleName => "duplicate rule name",
         error.DuplicateViewAnnotation => "multiple @view annotations were attached to one rule",
         error.InvalidViewAnnotation => "could not parse @view annotation",
         error.ViewHypCountMismatch => "@view hypothesis count does not match the rule",

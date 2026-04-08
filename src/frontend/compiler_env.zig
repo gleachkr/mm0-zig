@@ -90,6 +90,9 @@ pub const GlobalEnv = struct {
     }
 
     pub fn addRule(self: *GlobalEnv, stmt: AssertionStmt) !void {
+        if (self.rule_names.contains(stmt.name)) {
+            return error.DuplicateRuleName;
+        }
         const rule_id = std.math.cast(u32, self.rules.items.len) orelse {
             return error.TooManyCompilerRules;
         };

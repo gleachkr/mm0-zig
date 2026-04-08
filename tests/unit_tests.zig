@@ -253,6 +253,30 @@ fn buildSingleStmtProof(stmt_op: u8, body: []const u8) [32]u8 {
     return bytes;
 }
 
+fn collectStatementCmds(
+    allocator: std.mem.Allocator,
+    mmb: Mmb,
+) ![]Proof.StmtCmd {
+    var cmds = std.ArrayListUnmanaged(Proof.StmtCmd){};
+    var pos: usize = @intCast(mmb.header.p_proof);
+
+    while (true) {
+        const stmt_start = pos;
+        const cmd = try Proof.Cmd.read(
+            mmb.file_bytes,
+            pos,
+            mmb.file_bytes.len,
+        );
+        const stmt_cmd: Proof.StmtCmd = @enumFromInt(cmd.op);
+        try cmds.append(allocator, stmt_cmd);
+        if (stmt_cmd == .End) break;
+        if (cmd.data == 0) return error.BadStatementLength;
+        pos = stmt_start + cmd.data;
+    }
+
+    return try cmds.toOwnedSlice(allocator);
+}
+
 fn buildAssertionFixture(
     stmt_op: u8,
     args: []const Arg,
@@ -1744,6 +1768,7 @@ test "proof script parser reads theorem blocks and proof lines" {
 
     var parser = ProofScript.Parser.init(arena.allocator(), src);
     const first = (try parser.nextBlock()).?;
+    try std.testing.expect(first.kind == .theorem);
     try std.testing.expectEqualStrings("id", first.name);
     try std.testing.expect(first.underline_span != null);
     try std.testing.expectEqual(@as(usize, 2), first.lines.len);
@@ -1766,6 +1791,7 @@ test "proof script parser reads theorem blocks and proof lines" {
     }
 
     const second = (try parser.nextBlock()).?;
+    try std.testing.expect(second.kind == .theorem);
     try std.testing.expectEqualStrings("other", second.name);
     try std.testing.expect(second.underline_span == null);
     try std.testing.expectEqual(@as(usize, 1), second.lines.len);
@@ -1774,6 +1800,63 @@ test "proof script parser reads theorem blocks and proof lines" {
         second.lines[0].arg_bindings.len,
     );
     try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser reads lemma blocks" {
+    const src =
+        \\lemma id (a: wff): $ a -> a $
+        \\---------------------------
+        \\l1: $ a -> a $ by ax_id (a := $ a $) []
+        \\
+        \\main
+        \\----
+        \\l1: $ a -> a $ by id (a := $ a $) []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const lemma = (try parser.nextBlock()).?;
+    try std.testing.expect(lemma.kind == .lemma);
+    try std.testing.expectEqualStrings("id", lemma.name);
+    try std.testing.expectEqualStrings(
+        "(a: wff): $ a -> a $",
+        lemma.header_tail,
+    );
+    try std.testing.expectEqual(@as(usize, 1), lemma.lines.len);
+
+    const theorem = (try parser.nextBlock()).?;
+    try std.testing.expect(theorem.kind == .theorem);
+    try std.testing.expectEqualStrings("main", theorem.name);
+    try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser allows newlines inside math strings" {
+    const src =
+        \\demo
+        \\----
+        \\l1: $ a ->
+        \\  a $ by ax_id (a := $ a ->
+        \\  a $) []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expect(block.kind == .theorem);
+    try std.testing.expectEqual(@as(usize, 1), block.lines.len);
+    try std.testing.expectEqualStrings(
+        " a ->\n  a ",
+        block.lines[0].assertion.text,
+    );
+    try std.testing.expectEqual(@as(usize, 1), block.lines[0].arg_bindings.len);
+    try std.testing.expectEqualStrings(
+        " a ->\n  a ",
+        block.lines[0].arg_bindings[0].formula.text,
+    );
 }
 
 test "compiler env retains def dummy metadata" {
@@ -2366,6 +2449,167 @@ test "compiler checks proof blocks in theorem order" {
         proof_src,
     );
     try compiler.check();
+}
+
+test "compiler compiles lemma proof blocks" {
+    const allocator = std.testing.allocator;
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\axiom ax_1 (a b: wff): $ a -> b -> a $;
+        \\axiom ax_2 (a b c: wff):
+        \\$ (a -> b -> c) -> (a -> b) -> a -> c $;
+        \\axiom ax_mp (a b: wff): $ a -> b $ > $ a $ > $ b $;
+        \\theorem main (a: wff): $ a -> a $;
+    ;
+    const proof_src =
+        \\lemma id (a: wff): $ a -> a $
+        \\---------------------------
+        \\l1: $ a -> ((a -> a) -> a) $ by ax_1 []
+        \\l2: $ a -> (a -> a) $ by ax_1 []
+        \\l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by ax_2 []
+        \\l4: $ (a -> (a -> a)) -> (a -> a) $ by ax_mp (a := $ a -> ((a -> a) -> a) $, b := $ (a -> (a -> a)) -> (a -> a) $) [l3, l1]
+        \\l5: $ a -> a $ by ax_mp (a := $ a -> (a -> a) $, b := $ a -> a $) [l4, l2]
+        \\
+        \\main
+        \\----
+        \\l1: $ a -> a $ by id (a := $ a $) []
+    ;
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+}
+
+test "compiler interleaves LocalThm and Thm statements in MMB order" {
+    const allocator = std.testing.allocator;
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem first: $ top $;
+        \\theorem second: $ top $;
+        \\theorem third: $ top $;
+    ;
+    const proof_src =
+        \\first
+        \\-----
+        \\l1: $ top $ by top_i []
+        \\
+        \\lemma helper0: $ top $
+        \\--------------------
+        \\l1: $ top $ by top_i []
+        \\
+        \\second
+        \\------
+        \\l1: $ top $ by helper0 []
+        \\
+        \\lemma helper1: $ top $
+        \\--------------------
+        \\l1: $ top $ by helper0 []
+        \\
+        \\third
+        \\-----
+        \\l1: $ top $ by helper1 []
+    ;
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb_bytes = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb_bytes);
+
+    try mm0.verifyPair(allocator, mm0_src, mmb_bytes);
+
+    const mmb = try Mmb.parse(allocator, mmb_bytes);
+    const cmds = try collectStatementCmds(allocator, mmb);
+    defer allocator.free(cmds);
+
+    const expected_cmds = [_]Proof.StmtCmd{
+        .Sort,
+        .TermDef,
+        .Axiom,
+        .Thm,
+        .LocalThm,
+        .Thm,
+        .LocalThm,
+        .Thm,
+        .End,
+    };
+    try std.testing.expectEqual(expected_cmds.len, cmds.len);
+    for (expected_cmds, cmds) |expected, actual| {
+        try std.testing.expectEqual(expected, actual);
+    }
+
+    try std.testing.expectEqualStrings("top_i", (try mmb.theoremName(0)).?);
+    try std.testing.expectEqualStrings("first", (try mmb.theoremName(1)).?);
+    try std.testing.expectEqualStrings("helper0", (try mmb.theoremName(2)).?);
+    try std.testing.expectEqualStrings("second", (try mmb.theoremName(3)).?);
+    try std.testing.expectEqualStrings("helper1", (try mmb.theoremName(4)).?);
+    try std.testing.expectEqualStrings("third", (try mmb.theoremName(5)).?);
+}
+
+test "compiler rejects lemma names that collide with earlier rules" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem first: $ top $;
+        \\theorem second: $ top $;
+    ;
+    const proof_src =
+        \\first
+        \\-----
+        \\l1: $ top $ by top_i []
+        \\
+        \\lemma first: $ top $
+        \\------------------
+        \\l1: $ top $ by top_i []
+        \\
+        \\second
+        \\------
+        \\l1: $ top $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.DuplicateRuleName, compiler.check());
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DuplicateRuleName, diag.err);
+    try std.testing.expectEqualStrings("first", diag.name.?);
+    try std.testing.expect(diag.span != null);
+}
+
+test "compiler rejects theorem names that collide with earlier lemmas" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem helper: $ top $;
+    ;
+    const proof_src =
+        \\lemma helper: $ top $
+        \\-------------------
+        \\l1: $ top $ by top_i []
+        \\
+        \\helper
+        \\------
+        \\l1: $ top $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.DuplicateRuleName, compiler.check());
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DuplicateRuleName, diag.err);
+    try std.testing.expectEqualStrings("helper", diag.name.?);
 }
 
 test "compiler rejects out-of-order and extra proof blocks" {
