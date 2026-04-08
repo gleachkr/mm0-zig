@@ -3548,26 +3548,50 @@ pub const SymbolicEngine = struct {
         }
     }
 
+    /// Materialize the concrete expression justified by the current match
+    /// state without applying representative selection.
+    pub fn materializeResolvedBoundValue(
+        self: *SymbolicEngine,
+        bound: BoundValue,
+        state: *MatchSession,
+    ) anyerror!?ExprId {
+        return switch (bound) {
+            .concrete => |concrete| concrete.raw,
+            .symbolic => |symbolic| try self.materializeResolvedSymbolic(
+                symbolic.expr,
+                state,
+            ),
+        };
+    }
+
+    /// Project a materialized expression through the binding mode's
+    /// representative-selection semantics.
+    pub fn projectMaterializedExpr(
+        self: *SymbolicEngine,
+        expr_id: ?ExprId,
+        mode: BindingMode,
+    ) anyerror!?ExprId {
+        const materialized = expr_id orelse return null;
+        return try self.chooseRepresentative(materialized, mode);
+    }
+
+    /// Temporary compatibility wrapper. This preserves the old represented
+    /// behavior and will go away once callers choose materialization or
+    /// projection explicitly.
     pub fn resolveBoundValue(
         self: *SymbolicEngine,
         bound: BoundValue,
         state: *MatchSession,
     ) anyerror!?ExprId {
         return switch (bound) {
-            .concrete => |concrete| try self.concreteBindingMatchExpr(
-                concrete,
-                state,
+            .concrete => |concrete| try self.projectMaterializedExpr(
+                try self.materializeResolvedBoundValue(bound, state),
+                concrete.mode,
             ),
-            .symbolic => |symbolic| blk: {
-                const expr_id = (try self.materializeResolvedSymbolic(
-                    symbolic.expr,
-                    state,
-                )) orelse break :blk null;
-                break :blk try self.chooseRepresentative(
-                    expr_id,
-                    symbolic.mode,
-                );
-            },
+            .symbolic => |symbolic| try self.projectMaterializedExpr(
+                try self.materializeResolvedBoundValue(bound, state),
+                symbolic.mode,
+            ),
         };
     }
 
@@ -3673,7 +3697,10 @@ pub const SymbolicEngine = struct {
                     return error.TemplateBinderOutOfRange;
                 }
                 const bound = state.bindings[idx] orelse break :blk null;
-                break :blk try self.resolveBoundValue(bound, state);
+                break :blk try self.materializeResolvedBoundValue(
+                    bound,
+                    state,
+                );
             },
             .fixed => |expr_id| expr_id,
             .dummy => |slot| self.currentWitnessExpr(slot, state),
@@ -3764,7 +3791,6 @@ pub const SymbolicEngine = struct {
         if (state.materialized_witnesses.get(slot)) |existing| return existing;
         return error.UnresolvedDummyWitness;
     }
-
 
     fn getResymbolizableWitnessInfo(
         self: *SymbolicEngine,
