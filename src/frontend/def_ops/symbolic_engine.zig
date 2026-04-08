@@ -1558,7 +1558,7 @@ pub const SymbolicEngine = struct {
         if (!try self.matchTemplateRecState(template, actual, &state)) {
             return false;
         }
-        try self.resolveBindings(&state, bindings);
+        try self.representResolvedBindings(&state, bindings);
         return true;
     }
 
@@ -1594,7 +1594,7 @@ pub const SymbolicEngine = struct {
         )) {
             return false;
         }
-        try self.resolveBindings(&state, bindings);
+        try self.representResolvedBindings(&state, bindings);
         return true;
     }
 
@@ -3688,16 +3688,27 @@ pub const SymbolicEngine = struct {
         };
     }
 
-    fn resolveBindings(
+    /// Materialize the current binding state, then project each binding
+    /// through its representative-selection mode.
+    fn representResolvedBindings(
         self: *SymbolicEngine,
         state: *MatchSession,
         bindings: []?ExprId,
     ) anyerror!void {
         for (state.bindings, 0..) |binding, idx| {
-            bindings[idx] = if (binding) |value|
-                try self.resolveBoundValue(value, state)
-            else
-                null;
+            bindings[idx] = if (binding) |bound| blk: {
+                const materialized = try self.materializeResolvedBoundValue(
+                    bound,
+                    state,
+                );
+                break :blk try self.projectMaterializedExpr(
+                    materialized,
+                    switch (bound) {
+                        .concrete => |concrete| concrete.mode,
+                        .symbolic => |symbolic| symbolic.mode,
+                    },
+                );
+            } else null;
         }
     }
 
@@ -3726,26 +3737,6 @@ pub const SymbolicEngine = struct {
     ) anyerror!?ExprId {
         const materialized = expr_id orelse return null;
         return try self.chooseRepresentative(materialized, mode);
-    }
-
-    /// Temporary compatibility wrapper. This preserves the old represented
-    /// behavior and will go away once callers choose materialization or
-    /// projection explicitly.
-    pub fn resolveBoundValue(
-        self: *SymbolicEngine,
-        bound: BoundValue,
-        state: *MatchSession,
-    ) anyerror!?ExprId {
-        return switch (bound) {
-            .concrete => |concrete| try self.projectMaterializedExpr(
-                try self.materializeResolvedBoundValue(bound, state),
-                concrete.mode,
-            ),
-            .symbolic => |symbolic| try self.projectMaterializedExpr(
-                try self.materializeResolvedBoundValue(bound, state),
-                symbolic.mode,
-            ),
-        };
     }
 
     // This is the only escape path that turns symbolic match state back into

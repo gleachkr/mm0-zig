@@ -478,19 +478,9 @@ pub const RuleMatchSession = struct {
         return bindings;
     }
 
-    /// Temporary compatibility wrapper. This will go away once callers choose
-    /// materialization or representative projection explicitly.
-    pub fn resolveOptionalBindings(self: *RuleMatchSession) ![]?ExprId {
-        const materialized = try self.materializeOptionalBindings();
-        defer self.shared.allocator.free(materialized);
-        return try self.representOptionalBindings(materialized);
-    }
-
-    /// Like represented optional bindings, but returns BindingSeeds that
-    /// preserve
-    /// symbolic BoundValues instead of collapsing them to concrete ExprIds.
-    /// Concrete bindings become .exact seeds; symbolic bindings become
-    /// .bound seeds carrying the full BoundValue.
+    /// Snapshot binding state without collapsing symbolic BoundValues to
+    /// concrete ExprIds. Concrete bindings become .exact seeds; symbolic
+    /// bindings become .bound seeds carrying the full BoundValue.
     pub fn resolveBindingSeeds(self: *RuleMatchSession) ![]BindingSeed {
         var symbolic_engine = self.engine();
         const seeds = try self.shared.allocator.alloc(

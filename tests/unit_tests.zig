@@ -3730,9 +3730,9 @@ test "resolveBindingSeeds preserves symbolic state through view reuse" {
     // Match hyp (∀ x p) against "mono f" — produces symbolic bindings.
     try std.testing.expect(try session.matchTransparent(rule.hyps[0], actual));
 
-    // resolveOptionalBindings collapses symbolic bindings to null where
+    // materializeOptionalBindings collapses symbolic bindings to null where
     // the symbolic structure contains unresolved hidden dummies.
-    const optional = try session.resolveOptionalBindings();
+    const optional = try session.materializeOptionalBindings();
     defer arena.allocator().free(optional);
 
     // resolveBindingSeeds should preserve symbolic state as .bound seeds.
