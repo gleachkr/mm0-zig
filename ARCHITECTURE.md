@@ -353,14 +353,18 @@ The key abstraction exposed upward is `RuleMatchSession`.
 A rule-match session can:
 
 - match rule templates against concrete theorem expressions
-- look through transparent defs while matching
+- do def-aware matching when the caller asks for it, including hidden-
+  dummy defs through witness-driven symbolic state rather than eager
+  theorem-dummy creation
 - keep hidden-dummy witnesses (i.e. witnesses for the "dot variables"
   that occur in certain definitions) symbolic until the whole match
   succeeds
 - compare normalized forms for rule parts that are explicitly marked by
   `@normalize`
 
-This is the current semantic center for binder-aware, def-aware matching.
+This is the current semantic center for binder-aware, def-aware
+matching. It is intentionally stronger than exact unify replay, but it
+is still not a global "open defs everywhere" policy.
 
 #### Match-local symbolic state
 
@@ -389,16 +393,27 @@ Internally, the symbolic engine distinguishes:
 - transparent bindings
 - normalized bindings
 
-For semantic bindings, the session keeps both the raw matched expression
-and a chosen representative. Representative choice is deterministic and
-may use:
+The important split is between two stages:
+
+- **materialization**, which asks "what concrete expression does the
+  current match state already justify?" and keeps the raw resolved
+  structure
+- **representative projection**, which asks "given that materialized
+  expression and this binding mode, what expression should count as its
+  representative for semantic comparison?"
+
+For semantic bindings, the session therefore keeps access to both the raw
+matched expression and a chosen representative. Representative choice is
+deterministic and may use:
 
 - recursive representative rebuilding
 - canonicalization via `canonicalizer.zig`
 - compression back to a def-headed form when possible
 
-This is what keeps semantically matched binders stable enough to survive
-later dependency checks without falling back to post-hoc repair passes.
+That split matters because derived-binding logic such as `@recover` and
+`@abstract` needs the materialized structure, while semantic comparison
+paths still want representatives. Keeping those stages separate avoids
+leaking comparison-oriented canonicalization into structural recovery.
 
 #### Finalization stays concrete
 
@@ -459,8 +474,12 @@ The central design principles here are:
 
 - there is no general frontend API that means "open this def body with no
   target"
+- theorem-application boundary checks and view matching may be def-aware,
+  but strict omitted-binder replay remains exact
 - hidden-dummy defs (i.e. defs with "dot variables") are only exposed
   toward a concrete witness problem
+- plain normalization does not unfold defs merely to create new rewrite
+  redexes
 
 In practice, the def-ops subsystem provides three related services:
 
@@ -576,6 +595,22 @@ ordinary theorem application.
 Views are stored as their own binder-indexed templates, together with a
 map from view binders back to rule binders and any `@recover` or
 `@abstract` derived-binding instructions.
+
+Operationally, the view pipeline now has a few important invariants:
+
+- view matching runs in a def-aware rule-match session before the general
+  omitted-binder solver
+- after the first full view match, the compiler replays only the cited
+  refs, not the conclusion, so repeated def exposure does not destabilize
+  hidden-dummy witness identity
+- `@recover` and `@abstract` consume an immutable snapshot of the current
+  resolved view state, including hidden-dummy witness information when it
+  exists
+- derived bindings first try raw structural recovery, then get one narrow
+  retry that unfolds concrete defs without hidden dummy args and
+  canonicalizes
+- none of this is allowed to force theorem-local dummy creation early;
+  witness escape is deferred to final rule instantiation
 
 This is all frontend elaboration only. Successful elaboration still has
 to reduce to an ordinary theorem application plus any needed transport or

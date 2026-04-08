@@ -86,6 +86,26 @@ arguments in the following order:
 If any real rule binder is still unresolved after all of these steps, the
 compiler reports an inference failure.
 
+### What users can rely on
+
+The practical contract for these annotations is:
+
+- explicit bindings still win; `@view`, `@recover`, and `@abstract` do not
+  override a user-written `(name := ...)` assignment;
+- `@view` only sees the proof line assertion and the cited references for that
+  application;
+- `@recover` and `@abstract` only run after `@view` has solved the binders they
+  depend on;
+- derived bindings work from the current resolved view state before any final
+  representative projection or theorem-local dummy creation;
+- raw structural matching is tried first, with one narrow unfold /
+  canonicalize retry when that is needed to line up concrete structure; and
+- if a real rule binder is still not determined after the full pipeline, the
+  line is rejected.
+
+So these annotations extend ordinary theorem application, but they do not turn
+it into open-ended proof search.
+
 ---
 
 ## `@view`
@@ -207,11 +227,12 @@ binder. The target and hole must have the same sort.
 
 ### Structural algorithm
 
-The compiler walks the concrete expressions for `source` and `pattern` in
-parallel:
+The compiler walks the current resolved expressions for `source` and
+`pattern` in parallel:
 
-1. Whenever the pattern expression reaches the concrete value of `hole`,
-   record the corresponding subtree of the source as a candidate for `target`.
+1. Whenever the pattern expression reaches the current resolved value of
+   `hole`, record the corresponding subtree of the source as a candidate for
+   `target`.
 2. If `hole` occurs more than once, all candidates must agree.
 3. If the structures diverge (different head terms, different arities), the
    recovery fails.
@@ -219,6 +240,21 @@ parallel:
 
 If `target` already has an explicit binding, recovery is skipped for that
 binder.
+
+### What `@recover` can and cannot do
+
+A few behavioral details are worth keeping in mind:
+
+- `@recover` only runs once `source`, `pattern`, and `hole` are already solved
+  in the view state.
+- It works from the current resolved view expressions, not from eagerly-
+  finalized theorem expressions.
+- It first tries direct structural comparison. If that fails, it retries after
+  narrowly preprocessing the compared expressions by unfolding concrete defs
+  without hidden dummy args and canonicalizing the result.
+- It does not invent fresh theorem-local dummies just to make a hidden witness
+  concrete. Hidden-dummy witnesses stay match-local until the final
+  rule-instantiation path decides they really need to escape.
 
 ### Worked example
 ```
@@ -299,11 +335,11 @@ binders must also have the same sort.
 
 ### Structural algorithm
 
-The compiler walks the concrete expressions for `left` and `right` in
-parallel:
+The compiler walks the current resolved expressions for `left` and `right`
+in parallel:
 
 1. If the current pair is exactly `(left_plug, right_plug)`, return the
-   concrete value of `hole`. This is the abstracted position.
+   current resolved value of `hole`. This is the abstracted position.
 2. If the current pair is the same variable on both sides, keep it as-is.
 3. If the current pair has the same term constructor and arity on both sides,
    recurse on the arguments and rebuild.
@@ -313,6 +349,20 @@ parallel:
 At least one occurrence of the plug pair must be found. Multiple occurrences
 are allowed; each becomes a separate use of the hole binder in the recovered
 context, which is the correct behavior for multi-hole substitution.
+
+### What `@abstract` can and cannot do
+
+The same operational limits apply here:
+
+- `@abstract` only runs once `left`, `right`, `hole`, and both plug binders
+  are already solved in the view state.
+- It works from the current resolved view expressions, not from eagerly-
+  finalized theorem expressions.
+- It first tries direct structural comparison. If that fails, it retries after
+  the same narrow preprocess step used by `@recover`: unfold concrete defs
+  without hidden dummy args, then canonicalize.
+- It does not allocate theorem-local dummies merely to expose hidden witness
+  structure.
 
 ### Example
 ```
@@ -469,6 +519,13 @@ out of view matching, not on eagerly-finalized witnesses.
 
 That keeps the derived-binding step from inventing fresh theorem dummies just
 because a hidden witness has not been pinned down yet.
+
+For hidden-dummy defs, the recover pattern may still contain symbolic dummy
+slots rather than ordinary theorem expressions. In that case the derived-
+binding step follows the current dummy-witness snapshot from the same match
+session, not just the raw dummy-slot numbers. This matters because repeated def
+exposure can allocate fresh slot numbers for the same hidden binder; the
+resolved witness is the stable thing, not the temporary slot id.
 
 ### 5. Derived bindings get an unfold / canonicalize retry path
 

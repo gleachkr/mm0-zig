@@ -44,23 +44,29 @@ user-facing expressions.
 
 ---
 
-## What is transparent by default?
+## Where transparent def support applies
 
-Transparent def unfolding is used in all of the places where the compiler has
-previously compared expressions directly during theorem application:
+"Transparent" does not mean that every frontend phase opens defs in the same
+way. Different subsystems ask for different strengths of comparison:
 
-- the proof line's asserted conclusion against the cited rule's instantiated
-  conclusion
-- each cited reference against the cited rule's instantiated hypotheses
-- `@view` matching
-- final theorem checking, where the last line is compared with the theorem's
-  declared conclusion
-- normalization-aware omitted-binder inference when the frontend solver needs
-  a def-aware equality test
-- strict unify replay for ordinary omitted-binder inference is a separate,
-  exact path and does not open defs
+- **Theorem-application boundary checks:** yes. The compiler can bridge
+  defined and expanded forms when comparing a proof line against the cited
+  rule's instantiated conclusion or hypotheses, and when comparing the final
+  proof line against the theorem statement.
+- **`@view` matching:** yes. View matching is def-aware and may also use the
+  same semantic comparison machinery that higher-level inference uses.
+- **`@recover` / `@abstract`:** partially. They first compare the resolved
+  view expressions structurally. If that fails, they get one narrow retry that
+  unfolds concrete defs without hidden dummy args and then canonicalizes.
+- **Normalization-aware higher-level inference:** yes, when the frontend
+  solver explicitly asks for a def-aware comparison.
+- **Strict omitted-binder replay:** no. Replay stays exact and does not open
+  defs.
+- **Plain `@normalize`:** no eager def exposure. Normalization still does not
+  unfold defs merely to create new rewrite redexes.
 
-This applies to **all** defs.
+This still applies to **all** defs at theorem-application boundaries, but the
+hidden-dummy cases remain witness-driven rather than eager or global.
 
 ### Basic conclusion example
 
@@ -119,7 +125,8 @@ one with the expected shape before applying `use_id`.
 
 ### Definitions with dummy binders
 
-Defs with hidden dummy binders also work as expected.
+Defs with hidden dummy binders also work, but the mechanism is more specific
+than ordinary concrete def unfolding.
 
 ```
 def exists_preimage (f y: obj) {.x: obj}: wff
@@ -136,22 +143,33 @@ Proof:
 l1: $ A. x (((g f x) = y) -> (x = x)) $ by ax_pre []
 ```
 
-Each unfolding automatically fills in variables for the bound dummies, based on
-the concrete comparison problem being solved. This is still targeted,
-witness-driven exposure rather than a general-purpose "open this hidden-dummy
-def" operation.
+When the compiler compares a hidden-dummy def against a concrete target, it
+solves those hidden binders relative to that comparison problem. During
+matching, the witnesses stay match-local and symbolic for as long as possible;
+they are not forced back into theorem-local expressions merely because a def
+was opened. This is still targeted, witness-driven exposure rather than a
+general-purpose "open this hidden-dummy def" operation.
 
 ---
 
 ## Omitted-binder inference
 
-Strict omitted-binder replay is now exact.
+There are two different omitted-binder paths now, and this distinction is
+important:
 
-When the compiler replays the cited rule's unify stream against the line
-assertion and cited references, it requires the same concrete heads that the
-rule expects. Replay does not open defs in order to recover omitted binders.
+- **Exact replay fast path.** For ordinary rules, the compiler replays the
+  cited rule's unify stream against the line assertion and cited references.
+  This path is exact: it requires the same concrete heads that the rule
+  expects, and it does not open defs.
+- **Advanced inference paths.** Rules with `@view` or `@normalize`, and some
+  harder solver-driven cases, go through the frontend's def-aware matching
+  machinery instead of relying only on raw replay.
 
-### Defined and expanded forms no longer infer through replay
+So the old broad statement "omitted-binder inference is transparent" is no
+longer true, but neither is "all omitted-binder inference is exact". What is
+exact is the replay path itself.
+
+### Defined and expanded forms no longer infer through exact replay
 
 ```
 def id (a: wff): wff = $ a -> a $;
@@ -202,12 +220,15 @@ still bridge the def boundary afterwards.
 
 ### Higher-level solver paths are separate
 
-This only changes strict replay.
+The examples above are about the exact replay fast path only.
 
 Higher-level solver paths such as `@view`-guided matching,
 normalization-aware inference, and ACUI-aware inference may still use
 separate def-aware logic when they are solving a different kind of
-comparison problem.
+comparison problem. In particular, a rule with `@view` or `@normalize` does
+not have to live or die by raw unify replay: the compiler may switch to a
+`RuleMatchSession`-based path that can compare through defs when that is part
+of the intended rule behavior.
 
 ### Ambiguity is still an error
 
@@ -221,9 +242,9 @@ arbitrarily.
 
 ---
 
-## Interaction with `@view`
+## Interaction with `@view`, `@recover`, and `@abstract`
 
-`@view` matching is now def-aware as well.
+`@view` matching is def-aware as well.
 
 ```
 def id (a: wff): wff = $ a -> a $;
@@ -246,6 +267,19 @@ This is useful because view annotations are often the user-facing shape of a
 rule. If defs were opaque there, you would still end up needing explicit
 bindings in places where the theorem application itself was otherwise obvious.
 
+After the initial view match, `@recover` and `@abstract` work from the
+resolved view state rather than from eagerly-finalized theorem expressions.
+That matters for hidden-dummy defs: matching across an unfolded def may create
+match-local symbolic witnesses, and derived bindings are allowed to inspect the
+resolved structure those witnesses justify without forcing them to escape early
+into theorem space.
+
+If raw structural comparison is not enough, derived bindings get one narrow
+retry path that unfolds concrete defs without hidden dummy args and then
+canonicalizes. This is enough for many unfold-then-rewrite recovery cases, but
+it is still not a general "rewrite through defs everywhere" mechanism. See
+`docs/view_recover.md` for the full pipeline.
+
 ---
 
 ## Interaction with `@normalize`
@@ -261,6 +295,10 @@ and can still bridge a def gap afterwards when ordinary transparent conversion
 is enough. But the normalizer does **not** generally unfold defs first in order
 to discover more rewrites. Rewriting still works on the visible instantiated
 expression.
+
+If you need witness recovery only after an unfold / rewrite alignment, that is
+usually a job for `@view` plus `@recover` or `@abstract`, not for plain
+`@normalize` alone.
 
 ### Def-aware normalized conclusion
 

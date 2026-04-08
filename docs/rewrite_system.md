@@ -27,13 +27,15 @@ There are four mechanisms that can supply these arguments, and they compose:
    the expressions they cited as references. This is the standard MM0
    unification mechanism: the compiler walks the rule's conclusion and
    hypotheses in parallel with the user's line and refs, solving for any
-   unspecified binders.
+   unspecified binders. This path is exact: it does not open defs or do
+   rewrite / canonicalization search.
 
 3. **`@view` matching.** A `@view` annotation provides an alternative surface
    shape for the same rule. The compiler matches this alternate shape against
-   the user's line and refs via the same unify-stream mechanism, then maps the
+   the user's line and refs in a def-aware rule-match session, then maps the
    solved binders back to the underlying rule's argument list. `@recover` and
-   `@abstract` can further derive additional binders from the view solution.
+   `@abstract` run on that resolved view state and can derive additional
+   binders from it. See `docs/view_recover.md` for the details.
 
 4. **`@fresh` annotations.** For omitted bound binders that serve only as
    fresh local variables (no inference can solve them), `@fresh` tells the
@@ -94,7 +96,8 @@ form. The two normalized forms agree, so the line is accepted.
 | `@normalize`    | `axiom` / `theorem` | Specifies which positions should be auto-normalized |
 
 Transparent def unfolding at theorem-application boundaries is covered
-in `docs/transparent_defs.md`.
+in `docs/transparent_defs.md`. `@view`, `@recover`, and `@abstract` are
+covered in `docs/view_recover.md`.
 
 ---
 
