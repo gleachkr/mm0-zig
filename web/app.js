@@ -34,6 +34,11 @@ const examples = {
     mm0: "./fixtures/demo_seq_peirce.mm0",
     proof: "./fixtures/demo_seq_peirce.proof",
   },
+  demo_lk_exists_mono: {
+    label: "lk exists mono",
+    mm0: "./fixtures/demo_lk_exists_mono.mm0",
+    proof: "./fixtures/demo_lk_exists_mono.proof",
+  },
   quant_nd: {
     label: "quant nd",
     mm0: "./fixtures/quant_nd.mm0",

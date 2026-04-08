@@ -2952,6 +2952,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "demo_prop_cnf", .outcome = .pass },
     .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
     .{ .stem = "demo_seq_peirce", .outcome = .pass },
+    .{ .stem = "demo_lk_exists_mono", .outcome = .pass },
     .{ .stem = "demo_calculus_product_rule", .outcome = .pass },
     .{ .stem = "demo_category_pullback", .outcome = .pass },
     .{ .stem = "demo_category_pullback_legacy_abbrev_mono", .outcome = .pass },

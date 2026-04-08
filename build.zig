@@ -135,6 +135,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/demo_seq_peirce.proof"),
         "web-demo/fixtures/demo_seq_peirce.proof",
     );
+    const install_lk_exists_mono_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/demo_lk_exists_mono.mm0"),
+        "web-demo/fixtures/demo_lk_exists_mono.mm0",
+    );
+    const install_lk_exists_mono_proof = b.addInstallFile(
+        b.path("tests/proof_cases/demo_lk_exists_mono.proof"),
+        "web-demo/fixtures/demo_lk_exists_mono.proof",
+    );
     const install_quant_nd_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/quant_nd.mm0"),
         "web-demo/fixtures/quant_nd.mm0",
@@ -173,6 +181,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_nd_em_proof.step);
     web_demo_step.dependOn(&install_seq_peirce_mm0.step);
     web_demo_step.dependOn(&install_seq_peirce_proof.step);
+    web_demo_step.dependOn(&install_lk_exists_mono_mm0.step);
+    web_demo_step.dependOn(&install_lk_exists_mono_proof.step);
     web_demo_step.dependOn(&install_quant_nd_mm0.step);
     web_demo_step.dependOn(&install_quant_nd_proof.step);
     web_demo_step.dependOn(&install_calculus_product_rule_mm0.step);
