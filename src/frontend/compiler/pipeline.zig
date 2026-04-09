@@ -16,6 +16,7 @@ const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerEmit = @import("./emit.zig");
 const Check = @import("./check.zig");
 const CompilerVars = @import("./vars.zig");
+const DiagnosticSource = @import("./diag.zig").DiagnosticSource;
 
 const ViewDecl = Metadata.ViewDecl;
 const FreshDecl = Metadata.FreshDecl;
@@ -120,6 +121,7 @@ pub fn run(
             self.setDiagnostic(.{
                 .kind = .extra_proof_block,
                 .err = error.ExtraProofBlock,
+                .source = .proof,
                 .block_name = block.name,
                 .span = block.name_span,
             });
@@ -192,6 +194,7 @@ fn processAssertion(
                 self,
                 assertion.name,
                 block.name_span,
+                .proof,
                 err,
             );
             return err;
@@ -217,6 +220,7 @@ fn processAssertion(
                     self,
                     assertion.name,
                     block.name_span,
+                    .proof,
                     err,
                 );
                 return err;
@@ -245,6 +249,7 @@ fn processAssertion(
         assertion,
         assertion.name,
         null,
+        .mm0,
     );
     try Metadata.processAssertionMetadata(
         allocator,
@@ -312,6 +317,7 @@ fn processNonTheoremAssertion(
         assertion,
         assertion.name,
         null,
+        .mm0,
     );
     try Metadata.processAssertionMetadata(
         allocator,
@@ -343,6 +349,7 @@ fn nextTheoremBlock(
             self.setDiagnostic(.{
                 .kind = .missing_proof_block,
                 .err = error.MissingProofBlock,
+                .source = .mm0,
                 .theorem_name = theorem_name,
             });
             return error.MissingProofBlock;
@@ -366,6 +373,7 @@ fn nextTheoremBlock(
             self.setDiagnostic(.{
                 .kind = .theorem_name_mismatch,
                 .err = error.TheoremNameMismatch,
+                .source = .proof,
                 .theorem_name = theorem_name,
                 .block_name = block.name,
                 .expected_name = theorem_name,
@@ -392,6 +400,7 @@ fn parseLemmaAssertion(
         self.setDiagnostic(.{
             .kind = .generic,
             .err = err,
+            .source = .proof,
             .theorem_name = block.name,
             .block_name = block.name,
             .span = block.header_span,
@@ -437,6 +446,7 @@ fn processLocalProofBlock(
             self,
             assertion.name,
             block.header_span,
+            .proof,
             err,
         );
         return err;
@@ -463,6 +473,7 @@ fn processLocalProofBlock(
                 self,
                 assertion.name,
                 block.header_span,
+                .proof,
                 err,
             );
             return err;
@@ -490,6 +501,7 @@ fn processLocalProofBlock(
         assertion,
         block.name,
         block.name_span,
+        .proof,
     );
 }
 
@@ -499,12 +511,14 @@ fn addAssertionToEnv(
     assertion: AssertionStmt,
     diag_name: []const u8,
     span: ?Span,
+    source: DiagnosticSource,
 ) !void {
     env.addStmt(.{ .assertion = assertion }) catch |err| {
         if (err == error.DuplicateRuleName) {
             self.setDiagnostic(.{
                 .kind = .duplicate_rule_name,
                 .err = err,
+                .source = source,
                 .name = diag_name,
                 .span = span,
             });
@@ -517,12 +531,14 @@ fn setTheoremDiagnosticIfMissing(
     self: anytype,
     theorem_name: []const u8,
     span: Span,
+    source: DiagnosticSource,
     err: anyerror,
 ) void {
     if (self.last_diagnostic != null) return;
     self.setDiagnostic(.{
         .kind = .generic,
         .err = err,
+        .source = source,
         .theorem_name = theorem_name,
         .span = span,
     });

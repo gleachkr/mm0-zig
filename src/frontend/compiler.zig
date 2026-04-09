@@ -13,6 +13,7 @@ pub const FreshDecl = Metadata.FreshDecl;
 pub const SortVarDecl = CompilerVars.SortVarDecl;
 pub const SortVarRegistry = CompilerVars.SortVarRegistry;
 pub const Diagnostic = CompilerDiag.Diagnostic;
+pub const DiagnosticSource = CompilerDiag.DiagnosticSource;
 pub const CheckedRef = CheckedIr.CheckedRef;
 pub const CheckedLine = CheckedIr.CheckedLine;
 pub const appendRuleLine = CheckedIr.appendRuleLine;
@@ -130,13 +131,22 @@ pub const Compiler = struct {
         diag: Diagnostic,
     ) void {
         const span = diag.span orelse return;
-        const src = self.proof_source orelse return;
-        const info = lineCol(src, span.start);
-        const line = src[info.line_start..info.line_end];
+        const source_info = switch (diag.source) {
+            .mm0 => SourceInfo{
+                .label = "source",
+                .text = self.source,
+            },
+            .proof => SourceInfo{
+                .label = "proof",
+                .text = self.proof_source orelse return,
+            },
+        };
+        const info = lineCol(source_info.text, span.start);
+        const line = source_info.text[info.line_start..info.line_end];
 
         std.debug.print(
-            "  --> proof:{d}:{d}\n",
-            .{ info.line, info.column },
+            "  --> {s}:{d}:{d}\n",
+            .{ source_info.label, info.line, info.column },
         );
         std.debug.print("  | {s}\n", .{line});
         std.debug.print("  | ", .{});
@@ -190,6 +200,11 @@ fn reportDiagnosticDetail(detail: DiagnosticDetail) void {
         },
     }
 }
+
+const SourceInfo = struct {
+    label: []const u8,
+    text: []const u8,
+};
 
 const LineCol = struct {
     line: usize,

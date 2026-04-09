@@ -1,5 +1,6 @@
 const std = @import("std");
 const mm0 = @import("mm0");
+const compiler_lsp = @import("./lsp.zig");
 const DebugConfig = mm0.DebugConfig;
 
 const UsageError = error{InvalidUsage};
@@ -10,9 +11,14 @@ const CompilePaths = struct {
     output: []const u8,
 };
 
-const ParsedArgs = struct {
+const CompileCommand = struct {
     paths: CompilePaths,
     debug: DebugConfig,
+};
+
+const Command = union(enum) {
+    compile: CompileCommand,
+    lsp,
 };
 
 pub fn usage() !void {
@@ -22,7 +28,8 @@ pub fn usage() !void {
 
     try stdout.writeAll(
         "Usage:\n" ++
-            "  abc compile INPUT.mm0 INPUT.auf OUTPUT.mmb\n" ++
+            "  abc compile INPUT.mm0 INPUT.auf OUTPUT.mmb [--debug SYSTEMS]\n" ++
+            "  abc lsp\n" ++
             "\nOptions:\n" ++
             "  --debug SYSTEMS  Enable debug output (comma-separated:\n" ++
             "                   inference,views,unfolding,normalization,emission,check,all)\n",
@@ -30,10 +37,9 @@ pub fn usage() !void {
     try stdout.flush();
 }
 
-fn parseArgs(argv: []const []const u8) !ParsedArgs {
+fn parseCompileArgs(argv: []const []const u8) !Command {
     var debug = DebugConfig.none;
     var positional = std.ArrayListUnmanaged([]const u8){};
-    // Use a small fixed buffer; we won't allocate.
     var buf: [64][]const u8 = undefined;
     positional.items = buf[0..0];
     positional.capacity = buf.len;
@@ -43,7 +49,9 @@ fn parseArgs(argv: []const []const u8) !ParsedArgs {
         if (std.mem.eql(u8, argv[i], "--debug")) {
             i += 1;
             if (i >= argv.len) return UsageError.InvalidUsage;
-            debug = DebugConfig.parse(argv[i]) catch return UsageError.InvalidUsage;
+            debug = DebugConfig.parse(argv[i]) catch {
+                return UsageError.InvalidUsage;
+            };
         } else {
             positional.appendAssumeCapacity(argv[i]);
         }
@@ -54,14 +62,21 @@ fn parseArgs(argv: []const []const u8) !ParsedArgs {
         return UsageError.InvalidUsage;
     }
 
-    return .{
+    return .{ .compile = .{
         .paths = .{
             .input = pos[1],
             .proof = pos[2],
             .output = pos[3],
         },
         .debug = debug,
-    };
+    } };
+}
+
+fn parseArgs(argv: []const []const u8) !Command {
+    if (argv.len == 1 and std.mem.eql(u8, argv[0], "lsp")) {
+        return .lsp;
+    }
+    return parseCompileArgs(argv);
 }
 
 fn loadSource(
@@ -75,17 +90,14 @@ fn loadSource(
     );
 }
 
-pub fn run(
+fn runCompile(
     allocator: std.mem.Allocator,
-    argv: []const []const u8,
+    cmd: CompileCommand,
 ) !void {
-    const parsed = try parseArgs(argv);
-    const cmd = parsed.paths;
-
-    const source = try loadSource(allocator, cmd.input);
+    const source = try loadSource(allocator, cmd.paths.input);
     defer allocator.free(source);
 
-    const proof = try loadSource(allocator, cmd.proof);
+    const proof = try loadSource(allocator, cmd.paths.proof);
     defer allocator.free(proof);
 
     var compiler = mm0.Compiler.initWithProof(
@@ -93,18 +105,29 @@ pub fn run(
         source,
         proof,
     );
-    compiler.debug = parsed.debug;
+    compiler.debug = cmd.debug;
     const mmb = compiler.compileMmb(allocator) catch |err| {
-        std.debug.print("Failed to compile {s}\n", .{cmd.input});
+        std.debug.print("Failed to compile {s}\n", .{cmd.paths.input});
         compiler.reportError(err);
         return err;
     };
     defer allocator.free(mmb);
 
     try std.fs.cwd().writeFile(.{
-        .sub_path = cmd.output,
+        .sub_path = cmd.paths.output,
         .data = mmb,
     });
+}
+
+pub fn run(
+    allocator: std.mem.Allocator,
+    argv: []const []const u8,
+) !void {
+    const cmd = try parseArgs(argv);
+    switch (cmd) {
+        .compile => |compile| try runCompile(allocator, compile),
+        .lsp => try compiler_lsp.run(allocator),
+    }
 }
 
 pub fn main() !void {

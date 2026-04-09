@@ -25,6 +25,12 @@ const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const Emit = @import("./emit.zig");
 
+fn setProofDiagnostic(self: anytype, diag: Diagnostic) void {
+    var proof_diag = diag;
+    proof_diag.source = .proof;
+    self.setDiagnostic(proof_diag);
+}
+
 /// Result of an advanced rule match attempt.
 pub const RuleMatchResult = union(enum) {
     /// Match succeeded and all bindings are concrete ExprIds.
@@ -547,7 +553,7 @@ pub fn inferBindings(
 ) ![]const ExprId {
     if (use_advanced_inference) {
         const rule_id = env.getRuleId(line.rule_name) orelse {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .unknown_rule,
                 .err = error.UnknownRule,
                 .theorem_name = assertion.name,
@@ -694,7 +700,7 @@ pub fn inferBindings(
             },
             .no_match => {},
             .unresolved_dummy_witness => {
-                self.setDiagnostic(.{
+                setProofDiagnostic(self, .{
                     .kind = .inference_failed,
                     .err = error.UnresolvedDummyWitness,
                     .theorem_name = assertion.name,
@@ -723,7 +729,7 @@ pub fn inferBindings(
             ref_exprs,
             line_expr,
         ) catch |err| {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .inference_failed,
                 .err = err,
                 .theorem_name = assertion.name,
@@ -772,7 +778,7 @@ pub fn inferBindings(
                 line_expr,
             ) catch |transparent_err| blk: {
                 if (transparent_err == error.UnresolvedDummyWitness) {
-                    self.setDiagnostic(.{
+                    setProofDiagnostic(self, .{
                         .kind = .inference_failed,
                         .err = transparent_err,
                         .theorem_name = assertion.name,
@@ -797,7 +803,7 @@ pub fn inferBindings(
                 );
             }
         }
-        self.setDiagnostic(.{
+        setProofDiagnostic(self, .{
             .kind = .inference_failed,
             .err = err,
             .theorem_name = assertion.name,
@@ -887,12 +893,12 @@ fn maybeSetDiagnostic(self: anytype, diag: Diagnostic) void {
     switch (@typeInfo(T)) {
         .pointer => |ptr| {
             if (@hasDecl(ptr.child, "setDiagnostic")) {
-                self.setDiagnostic(diag);
+                setProofDiagnostic(self, diag);
             }
         },
         .@"struct" => {
             if (@hasDecl(T, "setDiagnostic")) {
-                self.setDiagnostic(diag);
+                setProofDiagnostic(self, diag);
             }
         },
         else => {},
@@ -916,7 +922,7 @@ pub fn validateResolvedBindings(
             rule.args[idx],
             binding,
         ) catch |err| {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .generic,
                 .err = err,
                 .theorem_name = assertion.name,
@@ -935,7 +941,7 @@ pub fn validateResolvedBindings(
         rule.args,
         bindings,
     )) {
-        self.setDiagnostic(.{
+        setProofDiagnostic(self, .{
             .kind = .generic,
             .err = error.DepViolation,
             .theorem_name = assertion.name,

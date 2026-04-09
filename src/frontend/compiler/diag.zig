@@ -50,9 +50,15 @@ pub const DiagnosticDetail = union(enum) {
     },
 };
 
+pub const DiagnosticSource = enum {
+    mm0,
+    proof,
+};
+
 pub const Diagnostic = struct {
     kind: DiagnosticKind,
     err: anyerror,
+    source: DiagnosticSource = .mm0,
     theorem_name: ?[]const u8 = null,
     block_name: ?[]const u8 = null,
     line_label: ?[]const u8 = null,

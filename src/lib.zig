@@ -9,6 +9,8 @@ pub const DefOpsTests = if (@import("builtin").is_test)
 else
     struct {};
 pub const CompilerDiagnostic = @import("./frontend/compiler.zig").Diagnostic;
+pub const CompilerDiagnosticSource =
+    @import("./frontend/compiler.zig").DiagnosticSource;
 pub const compilerDiagnosticSummary =
     @import("./frontend/compiler.zig").diagnosticSummary;
 pub const writeCompilerMissingCongruenceRuleSummary =

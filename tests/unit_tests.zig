@@ -2645,6 +2645,23 @@ test "compiler records proof diagnostics for failing proof lines" {
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("missing", diag.name.?);
     try std.testing.expect(diag.span != null);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
+}
+
+test "compiler check diagnostics are marked as mm0 source" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term foo: wff;
+        \\axiom dup: $ foo $;
+        \\axiom dup: $ foo $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(error.DuplicateRuleName, compiler.check());
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DuplicateRuleName, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
 }
 
 test "compiler records inference diagnostics for omitted arguments" {
@@ -2706,6 +2723,7 @@ test "compiler pinpoints unknown math tokens in proof assertions" {
 
     const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownMathToken, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
     try std.testing.expectEqualStrings("bad_token", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     const span = diag.span orelse return error.ExpectedDiagnosticSpan;

@@ -27,6 +27,12 @@ const CompilerVars = @import("./vars.zig");
 const SortVarRegistry = CompilerVars.SortVarRegistry;
 
 const NameExprMap = std.StringHashMap(*const Expr);
+
+fn setProofDiagnostic(self: anytype, diag: Diagnostic) void {
+    var proof_diag = diag;
+    proof_diag.source = .proof;
+    self.setDiagnostic(proof_diag);
+}
 const LabelIndexMap = std.StringHashMap(usize);
 
 fn setScratchDiagnosticIfPresent(
@@ -48,7 +54,7 @@ fn setScratchDiagnosticIfPresent(
     ) orelse {
         return false;
     };
-    self.setDiagnostic(.{
+    setProofDiagnostic(self, .{
         .kind = .generic,
         .err = err,
         .theorem_name = theorem_name,
@@ -96,7 +102,7 @@ pub fn checkTheoremBlock(
             sort_vars,
             line,
         ) catch |err| {
-            self.setDiagnostic(buildMathParseDiagnostic(
+            setProofDiagnostic(self, buildMathParseDiagnostic(
                 parser,
                 .parse_assertion,
                 err,
@@ -109,7 +115,7 @@ pub fn checkTheoremBlock(
             return err;
         };
         const rule_id = env.getRuleId(line.rule_name) orelse {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .unknown_rule,
                 .err = error.UnknownRule,
                 .theorem_name = assertion.name,
@@ -121,7 +127,7 @@ pub fn checkTheoremBlock(
         };
         const rule = &env.rules.items[rule_id];
         if (line.refs.len != rule.hyps.len) {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .ref_count_mismatch,
                 .err = error.RefCountMismatch,
                 .theorem_name = assertion.name,
@@ -140,7 +146,7 @@ pub fn checkTheoremBlock(
                     if (hyp.index == 0 or
                         hyp.index > theorem.theorem_hyps.items.len)
                     {
-                        self.setDiagnostic(.{
+                        setProofDiagnostic(self, .{
                             .kind = .unknown_hypothesis_ref,
                             .err = error.UnknownHypothesisRef,
                             .theorem_name = assertion.name,
@@ -159,7 +165,7 @@ pub fn checkTheoremBlock(
                 },
                 .line => |label| blk: {
                     const line_idx = labels.get(label.label) orelse {
-                        self.setDiagnostic(.{
+                        setProofDiagnostic(self, .{
                             .kind = .unknown_label,
                             .err = error.UnknownLabel,
                             .theorem_name = assertion.name,
@@ -222,7 +228,7 @@ pub fn checkTheoremBlock(
                     null,
                     self.debug.views,
                 ) catch |err| {
-                    self.setDiagnostic(.{
+                    setProofDiagnostic(self, .{
                         .kind = .generic,
                         .err = err,
                         .theorem_name = assertion.name,
@@ -317,7 +323,7 @@ pub fn checkTheoremBlock(
                 .hyp => |hyp| hyp.span,
                 .line => |label| label.span,
             };
-            self.setDiagnostic(switch (ref) {
+            setProofDiagnostic(self, switch (ref) {
                 .hyp => |hyp| Diagnostic{
                     .kind = .hypothesis_mismatch,
                     .err = error.HypothesisMismatch,
@@ -381,7 +387,7 @@ pub fn checkTheoremBlock(
             return err;
         }) orelse {
             diag_scratch.discard(concl_mark);
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .conclusion_mismatch,
                 .err = error.ConclusionMismatch,
                 .theorem_name = assertion.name,
@@ -395,7 +401,7 @@ pub fn checkTheoremBlock(
 
         const gop = try labels.getOrPut(line.label);
         if (gop.found_existing) {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .duplicate_label,
                 .err = error.DuplicateLabel,
                 .theorem_name = assertion.name,
@@ -413,7 +419,7 @@ pub fn checkTheoremBlock(
     }
 
     const final_line = last_line orelse {
-        self.setDiagnostic(.{
+        setProofDiagnostic(self, .{
             .kind = .empty_proof_block,
             .err = error.EmptyProofBlock,
             .theorem_name = assertion.name,
@@ -457,7 +463,7 @@ pub fn checkTheoremBlock(
             }
             diag_scratch.discard(final_mark);
         }
-        self.setDiagnostic(.{
+        setProofDiagnostic(self, .{
             .kind = .final_line_mismatch,
             .err = error.FinalLineMismatch,
             .theorem_name = assertion.name,
@@ -513,7 +519,7 @@ fn parseBindings(
 ) ![]?ExprId {
     for (rule.arg_names) |arg_name| {
         if (arg_name == null) {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .generic,
                 .err = error.UnnamedRuleBinder,
                 .theorem_name = theorem_name,
@@ -530,7 +536,7 @@ fn parseBindings(
 
     for (line.arg_bindings) |binding| {
         const arg_index = findRuleArgIndex(rule, binding.name) orelse {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .unknown_binder_name,
                 .err = error.UnknownBinderName,
                 .theorem_name = theorem_name,
@@ -542,7 +548,7 @@ fn parseBindings(
             return error.UnknownBinderName;
         };
         if (bindings[arg_index] != null) {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .duplicate_binder_assignment,
                 .err = error.DuplicateBinderAssignment,
                 .theorem_name = theorem_name,
@@ -568,7 +574,7 @@ fn parseBindings(
                 rule.args[arg_index],
             );
         } catch |err| {
-            self.setDiagnostic(buildMathParseDiagnostic(
+            setProofDiagnostic(self, buildMathParseDiagnostic(
                 parser,
                 .parse_binding,
                 err,
@@ -665,7 +671,7 @@ fn applyFreshBindings(
             used_deps,
             reserved_deps,
         ) catch |err| {
-            self.setDiagnostic(.{
+            setProofDiagnostic(self, .{
                 .kind = .parse_fresh,
                 .err = err,
                 .theorem_name = theorem_name,
