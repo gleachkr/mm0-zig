@@ -1,18 +1,18 @@
 const std = @import("std");
-const ExprId = @import("./compiler_expr.zig").ExprId;
-const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
-const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
-const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
-const ResolvedRelation = @import("./rewrite_registry.zig").ResolvedRelation;
-const NormalizeSpec = @import("./rewrite_registry.zig").NormalizeSpec;
-const Normalizer = @import("./normalizer.zig").Normalizer;
-const CommonTargetResult = @import("./normalizer.zig").CommonTargetResult;
-const CheckedIr = @import("./compiler/checked_ir.zig");
+const ExprId = @import("../expr.zig").ExprId;
+const TheoremContext = @import("../expr.zig").TheoremContext;
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
+const ResolvedRelation = @import("../rewrite_registry.zig").ResolvedRelation;
+const NormalizeSpec = @import("../rewrite_registry.zig").NormalizeSpec;
+const Normalizer = @import("../normalizer.zig").Normalizer;
+const CommonTargetResult = @import("../normalizer.zig").CommonTargetResult;
+const CheckedIr = @import("./checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const appendTransportLine = CheckedIr.appendTransportLine;
 const appendRuleLine = CheckedIr.appendRuleLine;
-const Inference = @import("./compiler_inference.zig");
+const Inference = @import("./inference.zig");
 
 pub const NormalizedConversion = struct {
     relation: ResolvedRelation,

@@ -1,5 +1,5 @@
 const std = @import("std");
-const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
+const GlobalEnv = @import("./env.zig").GlobalEnv;
 const TermStmt = @import("../trusted/parse.zig").TermStmt;
 
 pub fn processTermAnnotations(

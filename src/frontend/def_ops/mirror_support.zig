@@ -1,6 +1,6 @@
 const std = @import("std");
-const ExprId = @import("../compiler_expr.zig").ExprId;
-const TheoremContext = @import("../compiler_expr.zig").TheoremContext;
+const ExprId = @import("../expr.zig").ExprId;
+const TheoremContext = @import("../expr.zig").TheoremContext;
 const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
 
 pub const MirroredTheoremContext = struct {

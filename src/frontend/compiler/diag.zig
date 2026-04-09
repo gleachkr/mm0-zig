@@ -1,4 +1,4 @@
-const Span = @import("./proof_script.zig").Span;
+const Span = @import("../proof_script.zig").Span;
 
 pub const DiagnosticKind = enum {
     generic,

@@ -6,7 +6,7 @@ const Expr = @import("../trusted/expressions.zig").Expr;
 const MM0Stmt = @import("../trusted/parse.zig").MM0Stmt;
 const SortStmt = @import("../trusted/parse.zig").SortStmt;
 const TermStmt = @import("../trusted/parse.zig").TermStmt;
-const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
+const TemplateExpr = @import("./rules.zig").TemplateExpr;
 
 pub const TermDecl = struct {
     name: []const u8,

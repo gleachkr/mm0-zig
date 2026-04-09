@@ -1,6 +1,6 @@
 const std = @import("std");
-const GlobalEnv = @import("../compiler_env.zig").GlobalEnv;
-const TheoremContext = @import("../compiler_expr.zig").TheoremContext;
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const TheoremContext = @import("../expr.zig").TheoremContext;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 
 pub const SharedContext = struct {

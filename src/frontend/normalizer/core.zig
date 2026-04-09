@@ -1,4 +1,4 @@
-const ExprId = @import("../compiler_expr.zig").ExprId;
+const ExprId = @import("../expr.zig").ExprId;
 const ChildNorm = @import("./child_norm.zig");
 const Support = @import("./support.zig");
 const Acui = @import("./acui.zig");

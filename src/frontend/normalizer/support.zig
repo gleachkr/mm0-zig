@@ -1,4 +1,4 @@
-const ExprId = @import("../compiler_expr.zig").ExprId;
+const ExprId = @import("../expr.zig").ExprId;
 const AcuiSupport = @import("../acui_support.zig");
 const ResolvedRelation = @import("../rewrite_registry.zig").ResolvedRelation;
 

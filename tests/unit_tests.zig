@@ -3,8 +3,8 @@ const mm0 = @import("mm0");
 
 const Arg = mm0.Arg;
 const Compiler = mm0.Compiler;
-const CompilerEnv = mm0.CompilerEnv;
-const CompilerExpr = mm0.CompilerExpr;
+const FrontendEnv = mm0.Frontend.Env;
+const FrontendExpr = mm0.Frontend.Expr;
 const Expr = mm0.Expr;
 const Header = mm0.Header;
 const MAGIC = mm0.MAGIC;
@@ -12,7 +12,7 @@ const Heap = mm0.Heap;
 const MM0Parser = mm0.MM0Parser;
 const Mmb = mm0.Mmb;
 const DefOps = mm0.DefOps;
-const CompilerInference = mm0.CompilerInference;
+const CompilerInference = mm0.CompilerSupport.Inference;
 const CrossChecker = mm0.CrossChecker;
 const Proof = mm0.Proof;
 const ProofScript = mm0.ProofScript;
@@ -1870,7 +1870,7 @@ test "compiler env retains def dummy metadata" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
     while (try parser.next()) |stmt| {
         try env.addStmt(stmt);
     }
@@ -1894,8 +1894,8 @@ fn expectCompareTransparent(
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
     defer theorem_vars.deinit();
@@ -1939,9 +1939,9 @@ test "targeted def module has no standalone opening API" {
 }
 
 fn exprContainsExprId(
-    theorem: *const CompilerExpr.TheoremContext,
-    root: CompilerExpr.ExprId,
-    needle: CompilerExpr.ExprId,
+    theorem: *const FrontendExpr.TheoremContext,
+    root: FrontendExpr.ExprId,
+    needle: FrontendExpr.ExprId,
 ) bool {
     if (root == needle) return true;
     return switch (theorem.interner.node(root).*) {
@@ -1970,8 +1970,8 @@ test "def matcher binds quantified templates through hidden dummies" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
     defer theorem_vars.deinit();
@@ -2001,7 +2001,7 @@ test "def matcher binds quantified templates through hidden dummies" {
     const parsed_actual = try parser.parseFormulaText(" mono f ", &theorem_vars);
     const actual = try theorem.internParsedExpr(parsed_actual);
 
-    const bindings = try allocator.alloc(?CompilerExpr.ExprId, rule.args.len);
+    const bindings = try allocator.alloc(?FrontendExpr.ExprId, rule.args.len);
     defer allocator.free(bindings);
     @memset(bindings, null);
 
@@ -2092,8 +2092,8 @@ test "def conversion plan unfolds to an exact target" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
     defer theorem_vars.deinit();
@@ -2153,8 +2153,8 @@ test "semantic seeds finalize to representatives while exact seeds stay raw" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(
         arena.allocator(),
@@ -2226,8 +2226,8 @@ test "semantic seeds reuse representative-aware matches" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(
         arena.allocator(),
@@ -2368,7 +2368,7 @@ test "compiler env converts rules into binder-indexed templates" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
     while (try parser.next()) |stmt| {
         try env.addStmt(stmt);
     }
@@ -2694,7 +2694,7 @@ test "compiler reports dependency slot exhaustion clearly" {
         \\axiom use_fresh {y: wff}: $ top $;
         \\theorem overflow
     );
-    for (0..CompilerExpr.tracked_bound_dep_limit) |idx| {
+    for (0..FrontendExpr.tracked_bound_dep_limit) |idx| {
         try mm0_buf.writer(allocator).print(" {{x{d}: wff}}", .{idx});
     }
     try mm0_buf.appendSlice(allocator, ": $ top $;\n");
@@ -2780,8 +2780,8 @@ test "strict replay does not open defs during omitted inference" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(mm0_src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(
         arena.allocator(),
@@ -2818,8 +2818,8 @@ test "strict replay does not open defs during omitted inference" {
 
     const parsed_line = try parser.parseFormulaText(" a -> a ", &theorem_vars);
     const line_expr = try theorem.internParsedExpr(parsed_line);
-    const partial_bindings = [_]?CompilerExpr.ExprId{null};
-    const ref_exprs = [_]CompilerExpr.ExprId{};
+    const partial_bindings = [_]?FrontendExpr.ExprId{null};
+    const ref_exprs = [_]FrontendExpr.ExprId{};
     const line = ProofScript.ProofLine{
         .label = "l1",
         .assertion = .{
@@ -2888,7 +2888,7 @@ test "theorem context preserves theorem var identity" {
         else => return error.UnexpectedStatementKind,
     };
 
-    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer ctx.deinit();
 
     try ctx.seedAssertion(assertion);
@@ -2924,10 +2924,10 @@ test "theorem context preserves theorem var identity" {
 }
 
 test "theorem context rejects dummy dependency slot overflow" {
-    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer ctx.deinit();
 
-    const limit = CompilerExpr.tracked_bound_dep_limit;
+    const limit = FrontendExpr.tracked_bound_dep_limit;
     try ctx.seedBinderCount(limit - 1);
     ctx.next_dummy_dep = limit - 1;
 
@@ -2975,7 +2975,7 @@ test "theorem context interns parsed expressions with sharing" {
         else => return error.UnexpectedStatementKind,
     };
 
-    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer ctx.deinit();
 
     try ctx.seedAssertion(assertion);
@@ -2998,7 +2998,7 @@ test "template instantiation shares repeated substitutions" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
 
     const sort_stmt = (try parser.next()).?;
     try env.addStmt(sort_stmt);
@@ -3015,7 +3015,7 @@ test "template instantiation shares repeated substitutions" {
     };
     const rule = env.rules.items[0];
 
-    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer ctx.deinit();
 
     try ctx.seedAssertion(host);
@@ -3714,7 +3714,7 @@ test "explicit source dummy allocation is allowed and tracks dependency slots" {
     // Explicit user/source dummies (seedTerm, applyDummyBindings) are
     // legitimate and must keep working. This test verifies the low-level
     // addDummyVarResolved API that those paths use.
-    var ctx = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer ctx.deinit();
 
     // Allocate two explicit dummies — simulates what seedTerm does for
@@ -3740,7 +3740,7 @@ test "mirror-only dummy allocation does not affect source theorem context" {
     // create dummies in a temporary TheoremContext. This test verifies that
     // allocating dummies in a separate "mirror" context leaves the original
     // source context's dummy count untouched.
-    var source = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    var source = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer source.deinit();
 
     // Allocate one explicit dummy in the source context.
@@ -3749,7 +3749,7 @@ test "mirror-only dummy allocation does not affect source theorem context" {
     const source_dep_after = source.next_dummy_dep;
 
     // Create a separate "mirror" context (simulates MirroredTheoremContext).
-    var mirror = CompilerExpr.TheoremContext.init(std.testing.allocator);
+    var mirror = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer mirror.deinit();
 
     // Allocate several dummies in the mirror context.
@@ -3788,8 +3788,8 @@ test "finalization rejects unresolved hidden-dummy witnesses" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
     defer theorem_vars.deinit();
@@ -3863,8 +3863,8 @@ test "exact hidden-binder seeds match repeated def expansions" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
     defer theorem_vars.deinit();
@@ -3931,8 +3931,8 @@ test "resolveBindingSeeds preserves symbolic state through view reuse" {
     defer arena.deinit();
 
     var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    var theorem = CompilerExpr.TheoremContext.init(arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
     defer theorem.deinit();
     var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
     defer theorem_vars.deinit();

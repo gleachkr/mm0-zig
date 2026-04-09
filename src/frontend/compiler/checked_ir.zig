@@ -1,5 +1,5 @@
 const std = @import("std");
-const ExprId = @import("../compiler_expr.zig").ExprId;
+const ExprId = @import("../expr.zig").ExprId;
 
 pub const CheckedRef = union(enum) {
     hyp: usize,

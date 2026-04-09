@@ -1,8 +1,8 @@
 const std = @import("std");
 const MmbWriter = @import("./mmb_writer.zig");
-const CompilerDiag = @import("./compiler_diag.zig");
+const CompilerDiag = @import("./compiler/diag.zig");
 const Metadata = @import("./compiler/metadata.zig");
-const CompilerVars = @import("./compiler_vars.zig");
+const CompilerVars = @import("./compiler/vars.zig");
 const CheckedIr = @import("./compiler/checked_ir.zig");
 const Pipeline = @import("./compiler/pipeline.zig");
 pub const DebugConfig = @import("./debug.zig").DebugConfig;

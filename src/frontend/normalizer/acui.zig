@@ -1,4 +1,4 @@
-const ExprId = @import("../compiler_expr.zig").ExprId;
+const ExprId = @import("../expr.zig").ExprId;
 const ResolvedRelation = @import("../rewrite_registry.zig").ResolvedRelation;
 const ResolvedStructuralCombiner =
     @import("../rewrite_registry.zig").ResolvedStructuralCombiner;

@@ -1,17 +1,17 @@
 const std = @import("std");
-const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
-const RuleDecl = @import("./compiler_env.zig").RuleDecl;
-const ExprId = @import("./compiler_expr.zig").ExprId;
-const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
-const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
-const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
-const DefOps = @import("./def_ops.zig");
-const DerivedBindings = @import("./derived_bindings.zig");
-const Expr = @import("../trusted/expressions.zig").Expr;
-const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
-const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
-const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
-const ViewTrace = @import("./view_trace.zig");
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const RuleDecl = @import("../env.zig").RuleDecl;
+const ExprId = @import("../expr.zig").ExprId;
+const TheoremContext = @import("../expr.zig").TheoremContext;
+const TemplateExpr = @import("../rules.zig").TemplateExpr;
+const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
+const DefOps = @import("../def_ops.zig");
+const DerivedBindings = @import("../derived_bindings.zig");
+const Expr = @import("../../trusted/expressions.zig").Expr;
+const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
+const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
+const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const ViewTrace = @import("../view_trace.zig");
 
 const recover_guidance_match_budget: usize = 8;
 

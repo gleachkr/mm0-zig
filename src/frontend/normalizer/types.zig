@@ -1,4 +1,4 @@
-const ExprId = @import("../compiler_expr.zig").ExprId;
+const ExprId = @import("../expr.zig").ExprId;
 
 pub const NormalizeResult = struct {
     result_expr: ExprId,

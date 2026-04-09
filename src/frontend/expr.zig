@@ -1,5 +1,5 @@
 const std = @import("std");
-const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
+const TemplateExpr = @import("./rules.zig").TemplateExpr;
 const Expr = @import("../trusted/expressions.zig").Expr;
 const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
@@ -242,15 +242,17 @@ pub const TheoremContext = struct {
     /// API that all dummy allocation routes through. It is intentionally kept
     /// for legitimate use cases:
     ///
-    /// - Explicit source/user dummies: seedTerm (compiler_expr.zig) for
-    ///   dot binders declared in .mm0, plus named theorem-local vars created
-    ///   through @vars / @fresh when a proof line needs them.
+    /// - Explicit source/user dummies: seedTerm in this file for dot binders
+    ///   declared in .mm0, plus named theorem-local vars created through
+    ///   @vars / @fresh when a proof line needs them.
     /// - Temporary mirror-context dummies in def_ops, including normalized
     ///   matching placeholders, which do not consume real theorem dependency
     ///   slots.
     ///
-    /// The *accidental* allocation site — materializeEscapingWitnessForDummySlot
-    /// in symbolic_engine.zig — is the footgun targeted for removal (see PLAN.md).
+    /// The accidental allocation site,
+    /// materializeEscapingWitnessForDummySlot in
+    /// def_ops/symbolic_engine.zig, is the footgun targeted for removal
+    /// (see PLAN.md).
     /// Do NOT remove this API; only remove the accidental caller.
     pub fn addDummyVarResolved(
         self: *TheoremContext,

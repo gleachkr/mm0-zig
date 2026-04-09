@@ -1,7 +1,7 @@
 const std = @import("std");
-const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
-const RuleDecl = @import("./compiler_env.zig").RuleDecl;
-const TemplateExpr = @import("./compiler_rules.zig").TemplateExpr;
+const GlobalEnv = @import("./env.zig").GlobalEnv;
+const RuleDecl = @import("./env.zig").RuleDecl;
+const TemplateExpr = @import("./rules.zig").TemplateExpr;
 
 /// Which positions of a rule should be normalized after instantiation.
 pub const NormalizeSpec = struct {

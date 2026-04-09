@@ -1,6 +1,6 @@
 const std = @import("std");
-const ExprId = @import("../../compiler_expr.zig").ExprId;
-const TemplateExpr = @import("../../compiler_rules.zig").TemplateExpr;
+const ExprId = @import("../../expr.zig").ExprId;
+const TemplateExpr = @import("../../rules.zig").TemplateExpr;
 const AcuiSupport = @import("../../acui_support.zig");
 const RewriteRule = @import("../../rewrite_registry.zig").RewriteRule;
 const ResolvedStructuralCombiner =

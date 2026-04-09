@@ -1,8 +1,8 @@
 const std = @import("std");
-const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
-const RuleDecl = @import("./compiler_env.zig").RuleDecl;
-const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
-const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const RuleDecl = @import("../env.zig").RuleDecl;
+const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
+const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
 
 pub const FreshDecl = struct {
     target_arg_idx: usize,

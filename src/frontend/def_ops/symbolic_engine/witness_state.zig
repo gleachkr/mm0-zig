@@ -1,5 +1,5 @@
 const std = @import("std");
-const ExprId = @import("../../compiler_expr.zig").ExprId;
+const ExprId = @import("../../expr.zig").ExprId;
 const Canonicalizer = @import("../../canonicalizer.zig").Canonicalizer;
 const Types = @import("../types.zig");
 const MatchState = @import("../match_state.zig");

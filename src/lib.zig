@@ -11,13 +11,18 @@ else
 pub const CompilerDiagnostic = @import("./frontend/compiler.zig").Diagnostic;
 pub const compilerDiagnosticSummary =
     @import("./frontend/compiler.zig").diagnosticSummary;
-pub const CompilerEnv = @import("./frontend/compiler_env.zig");
-pub const CompilerExpr = @import("./frontend/compiler_expr.zig");
-pub const CompilerRules = @import("./frontend/compiler_rules.zig");
-pub const CompilerInference = @import("./frontend/compiler_inference.zig");
-pub const CompilerVars = @import("./frontend/compiler_vars.zig");
-pub const CompilerViews = @import("./frontend/compiler_views.zig");
-pub const CompilerNormalize = @import("./frontend/compiler_normalize.zig");
+pub const Frontend = struct {
+    pub const Env = @import("./frontend/env.zig");
+    pub const Expr = @import("./frontend/expr.zig");
+    pub const Rules = @import("./frontend/rules.zig");
+};
+
+pub const CompilerSupport = struct {
+    pub const Inference = @import("./frontend/compiler/inference.zig");
+    pub const Vars = @import("./frontend/compiler/vars.zig");
+    pub const Views = @import("./frontend/compiler/views.zig");
+    pub const Normalize = @import("./frontend/compiler/normalize.zig");
+};
 pub const DefOps = @import("./frontend/def_ops.zig");
 pub const TermAnnotations = @import("./frontend/term_annotations.zig");
 pub const Normalizer = @import("./frontend/normalizer.zig");

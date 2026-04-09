@@ -1,6 +1,6 @@
 const std = @import("std");
-const GlobalEnv = @import("../compiler_env.zig").GlobalEnv;
-const TheoremContext = @import("../compiler_expr.zig").TheoremContext;
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const TheoremContext = @import("../expr.zig").TheoremContext;
 const MmbWriter = @import("../mmb_writer.zig");
 const TermRecord = MmbWriter.TermRecord;
 const TheoremRecord = MmbWriter.TheoremRecord;
@@ -13,9 +13,9 @@ const ProofScriptParser = @import("../proof_script.zig").Parser;
 const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
 const Span = @import("../proof_script.zig").Span;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
-const CompilerEmit = @import("../compiler_emit.zig");
-const Check = @import("../compiler_check.zig");
-const CompilerVars = @import("../compiler_vars.zig");
+const CompilerEmit = @import("./emit.zig");
+const Check = @import("./check.zig");
+const CompilerVars = @import("./vars.zig");
 
 const ViewDecl = Metadata.ViewDecl;
 const FreshDecl = Metadata.FreshDecl;

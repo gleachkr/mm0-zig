@@ -1,8 +1,8 @@
 const std = @import("std");
-const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
-const Expr = @import("../trusted/expressions.zig").Expr;
-const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
-const Sort = @import("../trusted/sorts.zig").Sort;
+const TheoremContext = @import("../expr.zig").TheoremContext;
+const Expr = @import("../../trusted/expressions.zig").Expr;
+const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const Sort = @import("../../trusted/sorts.zig").Sort;
 
 const NameExprMap = std.StringHashMap(*const Expr);
 

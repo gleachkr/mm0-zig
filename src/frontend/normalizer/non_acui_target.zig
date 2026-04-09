@@ -1,4 +1,4 @@
-const ExprId = @import("../compiler_expr.zig").ExprId;
+const ExprId = @import("../expr.zig").ExprId;
 const ProofEmit = @import("./proof_emit.zig");
 const Types = @import("./types.zig");
 

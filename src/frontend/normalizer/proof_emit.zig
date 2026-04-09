@@ -1,8 +1,8 @@
 const std = @import("std");
 const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
-const ExprId = @import("../compiler_expr.zig").ExprId;
-const TheoremContext = @import("../compiler_expr.zig").TheoremContext;
-const GlobalEnv = @import("../compiler_env.zig").GlobalEnv;
+const ExprId = @import("../expr.zig").ExprId;
+const TheoremContext = @import("../expr.zig").TheoremContext;
+const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RewriteRule = @import("../rewrite_registry.zig").RewriteRule;
 const ResolvedRelation = @import("../rewrite_registry.zig").ResolvedRelation;
 const ResolvedStructuralCombiner =

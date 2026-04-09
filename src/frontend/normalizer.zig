@@ -1,7 +1,7 @@
 const std = @import("std");
-const ExprId = @import("./compiler_expr.zig").ExprId;
-const TheoremContext = @import("./compiler_expr.zig").TheoremContext;
-const GlobalEnv = @import("./compiler_env.zig").GlobalEnv;
+const ExprId = @import("./expr.zig").ExprId;
+const TheoremContext = @import("./expr.zig").TheoremContext;
+const GlobalEnv = @import("./env.zig").GlobalEnv;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const ResolvedRelation =
     @import("./rewrite_registry.zig").ResolvedRelation;

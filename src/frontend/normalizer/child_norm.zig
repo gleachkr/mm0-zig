@@ -1,5 +1,5 @@
-const ExprId = @import("../compiler_expr.zig").ExprId;
-const ExprNode = @import("../compiler_expr.zig").ExprNode;
+const ExprId = @import("../expr.zig").ExprId;
+const ExprNode = @import("../expr.zig").ExprNode;
 const ProofEmit = @import("./proof_emit.zig");
 const Types = @import("./types.zig");
 
