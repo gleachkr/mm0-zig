@@ -4,6 +4,10 @@ pub const Arg = @import("./trusted/args.zig").Arg;
 pub const Compiler = @import("./frontend/compiler.zig").Compiler;
 pub const CheckedLine = @import("./frontend/compiler.zig").CheckedLine;
 pub const DebugConfig = @import("./frontend/debug.zig").DebugConfig;
+pub const DefOpsTests = if (@import("builtin").is_test)
+    @import("./frontend/def_ops/tests/root.zig")
+else
+    struct {};
 pub const CompilerDiagnostic = @import("./frontend/compiler.zig").Diagnostic;
 pub const compilerDiagnosticSummary =
     @import("./frontend/compiler.zig").diagnosticSummary;
