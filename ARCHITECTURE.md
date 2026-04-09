@@ -1,7 +1,7 @@
 # Architecture
 
 This project is a single Zig module, `src/lib.zig`, with several thin
-frontends built on top of it:
+entrypoints built on top of it:
 
 - native verifier: `mm0-zig`
 - native compiler: `mm0-zigc`
@@ -24,6 +24,33 @@ The verifier and compiler are intentionally not separate codebases. The
 compiler leans on the verifier's data model and on MMB's operational
 model so that generated files are checked by the same machinery we
 already trust.
+
+## Build products and top-level wiring
+
+`build.zig` produces four executables from the same shared module:
+
+- `src/bin/verifier/main.zig` → native `mm0-zig`
+- `src/bin/compiler/main.zig` → native `mm0-zigc`
+- `src/bin/verifier/wasm.zig` → web verifier wasm
+- `src/bin/compiler/wasm.zig` → web compiler wasm
+
+`src/lib.zig` is the public surface for the reusable module. It exports:
+
+- trusted types such as `Mmb`, `MM0Parser`, and `Verifier`
+- the `Compiler` frontend
+- `VerificationSession` and `verifyPair` convenience helpers
+- a few grouped frontend helper namespaces used by tests and tools
+
+The native CLIs are thin wrappers:
+
+- `src/bin/verifier/cli.zig` reads an aligned `.mmb` file, reads MM0
+  source from stdin, and runs `VerificationSession`
+- `src/bin/compiler/cli.zig` reads `.mm0` and `.proof`, runs the
+  frontend, and writes the resulting `.mmb`
+
+The wasm entrypoints export small C-style functions for buffer
+allocation, compilation / verification, and JSON result retrieval for the
+browser demo.
 
 ## Directory layout
 
@@ -72,51 +99,60 @@ verifier rejects.
 The current frontend is split by concern rather than by one file per
 phase.
 
-Orchestration and theorem checking:
+Compiler API and orchestration:
 
 - `compiler.zig`
-- `compiler/checked_ir.zig`
-- `compiler/metadata.zig`
-- `compiler_check.zig`
-- `compiler_check/matching.zig`
-- `compiler_inference.zig`
-- `compiler_normalize.zig`
-- `compiler_emit.zig`
-- `compiler_diag.zig`
+- `compiler/pipeline.zig`
+- `compiler/diag.zig`
 - `debug.zig`
 
-Compiler-side data models:
+Compiler data models and theorem-local state:
 
-- `compiler_env.zig`
-- `compiler_expr.zig`
-- `compiler_rules.zig`
-- `compiler_views.zig`
-- `compiler_fresh.zig`
+- `env.zig`
+- `expr.zig`
+- `rules.zig`
+- `compiler/checked_ir.zig`
+- `compiler/vars.zig`
+
+Theorem checking and emission:
+
+- `compiler/check.zig`
+- `compiler/check/matching.zig`
+- `compiler/inference.zig`
+- `compiler/normalize.zig`
+- `compiler/emit.zig`
+- `compiler/metadata.zig`
+- `compiler/views.zig`
+- `compiler/fresh.zig`
 - `derived_bindings.zig`
 
-Elaboration engines and shared helpers:
+Definition-aware matching and normalization support:
 
 - `def_ops.zig`
 - `def_ops/types.zig`
-- `def_ops/match_state.zig`
 - `def_ops/shared_context.zig`
+- `def_ops/match_state.zig`
 - `def_ops/symbolic_engine.zig`
+- `def_ops/symbolic_engine/`
 - `def_ops/normalized_match.zig`
 - `def_ops/mirror_support.zig`
+- `def_ops/tests/`
 - `inference_solver.zig`
-- `normalizer.zig`
 - `canonicalizer.zig`
 - `acui_support.zig`
 - `rewrite_registry.zig`
+- `normalizer.zig`
+- `normalizer/`
 
-Parsing and output:
+Parsing, output, and debug helpers:
 
 - `proof_script.zig`
 - `mmb_writer.zig`
+- `view_trace.zig`
 - `term_annotations.zig`
 
-`term_annotations.zig` is still a placeholder. Term-level annotations are
-not implemented yet.
+`term_annotations.zig` is still mostly a placeholder. Right now it only
+recognizes `@acui` and rejects unknown term-level annotations.
 
 ### Wiring: `src/lib.zig` and `src/bin/`
 
@@ -142,7 +178,8 @@ MM0 file.
 
 ### Untrusted layers
 
-The following layers are intentionally outside the kernel trust boundary:
+The following layers are intentionally outside the kernel trust
+boundary:
 
 - source proof parsing
 - theorem argument inference
@@ -153,9 +190,9 @@ The following layers are intentionally outside the kernel trust boundary:
 These layers are still useful and heavily tested, but they are not part
 of the small auditable core.
 
-One practical consequence is that `src/trusted/verifier.zig` still does
-not import the checker type directly. The proof-stream entrypoint accepts
-any checker object with the expected interface, which keeps the verifier
+One practical consequence is that `src/trusted/verifier.zig` does not
+import the checker type directly. The proof-stream entrypoint accepts any
+checker object with the expected interface, which keeps the verifier
 module boundary simple without changing the trust story.
 
 ## Core trusted components
@@ -185,12 +222,12 @@ alignment. That lets the parser and verifier recover natural alignment
 internally for ordinary file-backed verification.
 
 The public library API still accepts MMB input as `[]const u8`, though,
-so callers that bypass those loaders are not forced by the type system
-to provide an aligned backing buffer.
+so callers that bypass those loaders are not forced by the type system to
+provide an aligned backing buffer.
 
-If we later want to make this uniform, the right place to do it is at
-the file-loading boundary or in a stronger byte-slice API, not by
-silently assuming that an arbitrary `[]u8` already has the required base
+If we later want to make this uniform, the right place to do it is at the
+file-loading boundary or in a stronger byte-slice API, not by silently
+assuming that an arbitrary `[]u8` already has the required base
 alignment.
 
 ### Trusted MM0 parser
@@ -201,8 +238,9 @@ using the notation environment defined by the file.
 This parser is reused in several places:
 
 - MM0 / MMB cross-checking
-- compiler front-end processing
+- compiler frontend processing
 - theorem-local parsing of proof-line assertions and explicit bindings
+- metadata parsing that reuses MM0 syntax, such as view signatures
 
 The parser produces ordinary expression trees using `Expr` nodes in
 `src/trusted/expressions.zig`.
@@ -218,11 +256,11 @@ This split is still important:
 - `mmb.zig` and `verifier.zig` check internal MMB validity
 - `check.zig` checks that the MMB matches the MM0 source
 
-All of that is now part of the trusted story for pair verification.
+All of that is part of the trusted story for pair verification.
 `lib.verifyPair` wires these pieces together in one session for
 convenience.
 
-## Compiler front end
+## Compiler frontend
 
 ### Statement-order lockstep
 
@@ -234,18 +272,18 @@ reads the next proof block and compiles it right away.
 
 That statement-order lockstep model is a major simplifying choice.
 
-`Compiler.check` and `Compiler.compileMmb` share the same theorem-block
-checker. One path stops after validation; the other lowers the checked
-lines into an MMB proof stream.
+`Compiler.check` and `Compiler.compileMmb` both run
+`compiler/pipeline.zig`. One path stops after validation; the other also
+accumulates MMB records and serializes them with `mmb_writer.zig`.
 
 ### Global declarations
 
-`compiler_env.zig` stores compiler-side declarations for sorts, terms,
-and rules.
+`src/frontend/env.zig` stores compiler-side declarations for sorts,
+terms, and rules.
 
 Terms and rules are stored as binder-indexed templates, not as raw parser
-nodes. `compiler_rules.zig` defines `TemplateExpr`, which is the common
-shape used by:
+nodes. `src/frontend/rules.zig` defines `TemplateExpr`, which is the
+common shape used by:
 
 - rule hypotheses and conclusions
 - def bodies
@@ -257,7 +295,8 @@ machinery tied to the same source of truth.
 
 ### Theorem-local DAG
 
-`compiler_expr.zig` provides a theorem-local expression interner.
+`src/frontend/expr.zig` provides the theorem-local expression interner
+and `TheoremContext`.
 
 Parsed expressions from proof lines are converted into `ExprId`s in a
 local, hash-consed DAG. This matters because MMB equality in important
@@ -270,9 +309,40 @@ If two occurrences are supposed to be the same node for `URef` or
 `Refl`, the compiler must preserve that sharing. The theorem-local
 interner is the mechanism that makes this possible.
 
+`TheoremContext` also owns theorem-local dummy allocation, parser-variable
+mapping, hypothesis interning, and template instantiation / matching.
+That makes it the main bridge between trusted parser trees and frontend
+proof elaboration.
+
+### Pipeline orchestration
+
+`src/frontend/compiler/pipeline.zig` is the main streaming driver.
+
+It owns the statement-order loop over the MM0 parser, maintains the
+frontend environment and metadata registries, and optionally accumulates
+emission records.
+
+At a high level it does this:
+
+1. parse the next MM0 statement
+2. update the global environment
+3. process metadata annotations attached to that statement
+4. if the statement is a theorem, fetch the next proof block and check it
+5. if emission is enabled, append the corresponding MMB records
+6. reject leftover proof blocks after the MM0 stream finishes
+
+This file is the best place to start if you want to understand the
+compiler's control flow.
+
 ### Proof-script parsing
 
-`proof_script.zig` parses the textual proof format.
+`src/frontend/proof_script.zig` parses the textual proof format.
+
+A proof block is either:
+
+- a theorem block, named to match an MM0 theorem, or
+- a local lemma block, which carries a theorem-like header and becomes a
+  local MMB theorem during emission
 
 A proof line contains:
 
@@ -287,12 +357,13 @@ binders that can be inferred".
 
 ## Theorem checking pipeline
 
-`compiler_check.zig` is the center of theorem-block checking.
+`src/frontend/compiler/check.zig` is the center of theorem-block
+checking.
 
 For each proof line it does roughly this:
 
 1. parse the asserted expression into the theorem-local DAG
-2. resolve the cited rule and referenced hypotheses
+2. resolve the cited rule and referenced hypotheses / prior lines
 3. parse explicit bindings
 4. apply `@fresh` annotations and, when relevant, view annotations
 5. infer omitted binders if needed
@@ -302,11 +373,16 @@ For each proof line it does roughly this:
 8. store a `CheckedLine` representation that later emission can lower to
    MMB
 
+`compiler/check/matching.zig` holds the comparison helpers used once a
+candidate binding list exists.
+
 The checker does not adopt a general alpha-equivalence policy. Any extra
 flexibility is consumed earlier by symbolic matching or is turned into
 explicit transport proof lines.
 
 ### Checked-line IR and emission boundary
+
+`src/frontend/compiler/checked_ir.zig` defines the checked theorem IR.
 
 The theorem checker records two kinds of checked lines:
 
@@ -317,15 +393,16 @@ A transport line says that the source line proves an expression that can
 be converted to the needed target expression. This is the bridge between
 frontend elaboration and backend proof emission.
 
-`compiler_emit.zig` later lowers this IR to ordinary MMB commands. It
-uses the same theorem-local DAG, so emission is still identity-sensitive.
+`src/frontend/compiler/emit.zig` later lowers this IR to ordinary MMB
+commands. It uses the same theorem-local DAG, so emission is still
+identity-sensitive.
 
 ## Omitted binder inference
 
 ### Exact replay fast path
 
-`compiler_inference.zig` still has an exact replay path based on the
-trusted unify-stream walker in `unify_replay.zig`.
+`src/frontend/compiler/inference.zig` still has an exact replay path based
+on the trusted unify-stream walker in `unify_replay.zig`.
 
 `InferenceContext` behaves like verifier-style unify replay except for
 one deliberate difference: the first encounter with an omitted binder
@@ -336,17 +413,19 @@ ordinary rules that do not request the heavier machinery.
 
 ### Advanced rule matching for views and `@normalize`
 
-When a rule has a view or normalization metadata, omitted binder
-inference goes through `def_ops.zig` first, not through raw replay.
+When a rule has view or normalization metadata, omitted binder inference
+uses `def_ops.zig` before it falls back to search.
 
-`def_ops.zig` is now mostly a façade. The main internal pieces are:
+`def_ops.zig` is mostly a façade. The main internal pieces are:
 
-- `def_ops/shared_context.zig` for immutable theorem/environment services
+- `def_ops/shared_context.zig` for immutable theorem / environment
+  services
 - `def_ops/match_state.zig` for mutable per-match state and snapshots
-- `def_ops/symbolic_engine.zig` for def-aware symbolic matching and
-  representative logic
+- `def_ops/symbolic_engine.zig` plus `def_ops/symbolic_engine/` for
+  def-aware symbolic matching and representative logic
 - `def_ops/normalized_match.zig` for the mirrored-theorem normalization
   bridge
+- `def_ops/mirror_support.zig` for mirrored-context setup helpers
 
 The key abstraction exposed upward is `RuleMatchSession`.
 
@@ -356,9 +435,7 @@ A rule-match session can:
 - do def-aware matching when the caller asks for it, including hidden-
   dummy defs through witness-driven symbolic state rather than eager
   theorem-dummy creation
-- keep hidden-dummy witnesses (i.e. witnesses for the "dot variables"
-  that occur in certain definitions) symbolic until the whole match
-  succeeds
+- keep hidden-dummy witnesses symbolic until the whole match succeeds
 - compare normalized forms for rule parts that are explicitly marked by
   `@normalize`
 
@@ -375,7 +452,7 @@ Internally, the def-ops subsystem uses a `MatchSession` with:
 - binder assignments
 - symbolic hidden-dummy metadata
 - provisional and materialized witness maps
-- separate representative caches for transparent and normalized matching
+- representative caches for transparent and normalized matching
 - backtracking snapshots
 
 That state does not live as ambient mutable context on the solver or on
@@ -395,12 +472,10 @@ Internally, the symbolic engine distinguishes:
 
 The important split is between two stages:
 
-- **materialization**, which asks "what concrete expression does the
-  current match state already justify?" and keeps the raw resolved
-  structure
-- **representative projection**, which asks "given that materialized
-  expression and this binding mode, what expression should count as its
-  representative for semantic comparison?"
+- materialization, which asks what concrete expression the current match
+  state already justifies
+- representative projection, which asks what expression should count as
+  the semantic representative for comparison
 
 For semantic bindings, the session therefore keeps access to both the raw
 matched expression and a chosen representative. Representative choice is
@@ -425,8 +500,8 @@ boundness, and dependency checks run.
 
 That finalization step is also the only place where hidden-dummy
 witnesses are allowed to materialize as main-theorem dummy vars. If a
-match is abandoned before finalization, it should leave the main theorem
-context's dummy state unchanged.
+match is abandoned before finalization, it should leave the main
+`TheoremContext` unchanged.
 
 Nothing symbolic escapes into proof emission or into the trusted kernel.
 
@@ -451,15 +526,16 @@ while solving omitted binders.
 
 ### Advanced search solver
 
-`inference_solver.zig` is still the last-resort search engine for hard
-cases.
+`src/frontend/inference_solver.zig` is the last-resort search engine for
+hard cases.
 
 It is mainly responsible for cases where omitted-binder inference needs:
 
 - ACUI remainder reasoning
 - branching over multiple template matches
 - view-derived bindings
-- rewrite/canonicalization guidance beyond the direct rule-match session
+- rewrite / canonicalization guidance beyond the direct rule-match
+  session
 
 The solver keeps branch-local binding arrays plus ACUI interval
 constraints, uses `canonicalizer.zig` and `def_ops.zig` as helper
@@ -467,8 +543,9 @@ predicates, and then requires a unique concrete solution.
 
 ## Definition-aware comparison and conversion
 
-`def_ops.zig` is the public entry point for transparent defs, with most
-of the implementation now living in `def_ops/symbolic_engine.zig`.
+`src/frontend/def_ops.zig` is the public entry point for transparent
+defs, with most of the implementation now living under
+`src/frontend/def_ops/`.
 
 The central design principles here are:
 
@@ -476,8 +553,7 @@ The central design principles here are:
   target"
 - theorem-application boundary checks and view matching may be def-aware,
   but strict omitted-binder replay remains exact
-- hidden-dummy defs (i.e. defs with "dot variables") are only exposed
-  toward a concrete witness problem
+- hidden-dummy defs are only exposed toward a concrete witness problem
 - plain normalization does not unfold defs merely to create new rewrite
   redexes
 
@@ -505,15 +581,15 @@ reusing the verifier's native conversion machinery.
 
 ## Shared ACUI semantics
 
-`acui_support.zig` owns the non-proof-producing ACUI item semantics shared by:
+`src/frontend/acui_support.zig` owns the non-proof-producing ACUI item
+semantics shared by:
 
 - `canonicalizer.zig`
 - `normalizer.zig`
 - parts of omitted-binder inference that need canonical ACUI reasoning
 
-This shared module is important because the project previously had a real
-risk of drift between the canonicalizer and the proof-producing
-normalizer.
+This shared module matters because the project previously had a real risk
+of drift between the canonicalizer and the proof-producing normalizer.
 
 The current shared ACUI model includes:
 
@@ -529,7 +605,8 @@ instantiation for leaf coverage, but it still does not introduce a global
 
 ## Rewrite metadata, normalization, and transport
 
-`rewrite_registry.zig` parses `--|` annotations and records metadata for:
+`src/frontend/rewrite_registry.zig` parses `--|` annotations and records
+metadata for:
 
 - relation bundles, keyed by sort
 - oriented rewrite rules, indexed by LHS head term
@@ -539,16 +616,17 @@ instantiation for leaf coverage, but it still does not introduce a global
 
 ### Canonicalizer
 
-`canonicalizer.zig` computes symbolic canonical forms used by inference
-and representative selection. It is non-proof-producing.
+`src/frontend/canonicalizer.zig` computes symbolic canonical forms used
+by inference and representative selection. It is non-proof-producing.
 
 Its job is to answer questions like "which concrete representative should
 this semantically solved binder keep?", not to emit proof lines.
 
 ### Normalizer
 
-`normalizer.zig` is the proof-producing counterpart used during theorem
-checking.
+`src/frontend/normalizer.zig` is the façade for the proof-producing
+normalizer, with most implementation split across the
+`src/frontend/normalizer/` directory.
 
 It emits ordinary proof lines that justify normalization using:
 
@@ -572,8 +650,8 @@ The recent ACUI fixes matter here:
 
 ### Checker-facing normalization helpers
 
-`compiler_normalize.zig` is the thin layer between theorem checking and
-`normalizer.zig`.
+`src/frontend/compiler/normalize.zig` is the thin layer between theorem
+checking and `normalizer.zig`.
 
 It packages the common checker operations:
 
@@ -583,14 +661,14 @@ It packages the common checker operations:
 - normalize a rule conclusion and then transport the emitted theorem line
   back to the user-written line
 
-This keeps `compiler_check.zig` smaller and avoids mixing proof
+This keeps `compiler/check.zig` smaller and avoids mixing proof
 construction details directly into the line checker.
 
 ## Views, fresh binders, and derived bindings
 
-`compiler_views.zig`, `compiler_fresh.zig`, and
-`derived_bindings.zig` handle source-level annotations that sit on top of
-ordinary theorem application.
+`src/frontend/compiler/views.zig`, `src/frontend/compiler/fresh.zig`, and
+`src/frontend/derived_bindings.zig` handle source-level annotations that
+sit on top of ordinary theorem application.
 
 Views are stored as their own binder-indexed templates, together with a
 map from view binders back to rule binders and any `@recover` or
@@ -612,17 +690,22 @@ Operationally, the view pipeline now has a few important invariants:
 - none of this is allowed to force theorem-local dummy creation early;
   witness escape is deferred to final rule instantiation
 
+`view_trace.zig` is the debug-oriented formatter used when view tracing is
+turned on.
+
 This is all frontend elaboration only. Successful elaboration still has
 to reduce to an ordinary theorem application plus any needed transport or
 normalization proof lines.
 
 ## Backend emission
 
-`compiler_emit.zig` lowers checked frontend IR to actual MMB bytes.
+`src/frontend/compiler/emit.zig` lowers checked frontend IR to actual MMB
+bytes. `src/frontend/mmb_writer.zig` then serializes the final file
+layout.
 
 Important pieces are:
 
-- `UnifyEmitter` for theorem unify streams
+- `UnifyEmitter` for theorem and term unify streams
 - `ExprProofEmitter` for concrete expression construction
 - `TheoremProofEmitter` for theorem proof bodies
 
@@ -630,7 +713,7 @@ Theorem proof emission is recursive over checked-line dependencies.
 Transport lines become `Conv` proofs, and the conversion subproof is
 recovered from `def_ops.zig` as a concrete plan.
 
-This is the main architectural invariant of the frontend/backend split:
+This is the main architectural invariant of the frontend / backend split:
 
 - the frontend may search, normalize, and elaborate
 - the backend still emits only ordinary MMB proof commands
@@ -647,8 +730,8 @@ actual opcode meaning is provided by the context object.
 It is used by:
 
 - `verifier.zig` for real MMB unification
-- `check.zig` for trusted MM0/MMB cross-checking
-- `compiler_inference.zig` for exact omitted-binder replay
+- `check.zig` for trusted MM0 / MMB cross-checking
+- `compiler/inference.zig` for exact omitted-binder replay
 
 This reuse is deliberate. The traversal order is subtle enough that
 having multiple handwritten opcode loops would be a maintenance hazard.
