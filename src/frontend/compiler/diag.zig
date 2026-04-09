@@ -1,4 +1,6 @@
 const Span = @import("../proof_script.zig").Span;
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const DiagScratch = @import("../diag_scratch.zig");
 
 pub const DiagnosticKind = enum {
     generic,
@@ -24,6 +26,30 @@ pub const DiagnosticKind = enum {
     final_line_mismatch,
 };
 
+pub const Scratch = DiagScratch.Scratch;
+pub const MissingCongruenceReason = DiagScratch.MissingCongruenceReason;
+
+pub const MissingCongruenceRuleDetail = struct {
+    reason: MissingCongruenceReason,
+    term_name: ?[]const u8 = null,
+    sort_name: ?[]const u8 = null,
+    arg_index: ?usize = null,
+};
+
+pub const DiagnosticDetail = union(enum) {
+    none,
+    unknown_math_token: struct {
+        token: []const u8,
+    },
+    missing_binder_assignment: struct {
+        binder_name: []const u8,
+    },
+    missing_congruence_rule: MissingCongruenceRuleDetail,
+    hypothesis_ref: struct {
+        index: usize,
+    },
+};
+
 pub const Diagnostic = struct {
     kind: DiagnosticKind,
     err: anyerror,
@@ -34,6 +60,7 @@ pub const Diagnostic = struct {
     name: ?[]const u8 = null,
     expected_name: ?[]const u8 = null,
     span: ?Span = null,
+    detail: DiagnosticDetail = .none,
 };
 
 pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
@@ -121,6 +148,137 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.DependencySlotExhausted => "theorem exceeded the 55 tracked bound-variable dependency slots",
         error.UnresolvedDummyWitness => "matched rule through hidden def structure, but omitted " ++
             "binders contain unresolved hidden-dummy witnesses",
+        error.MissingCongruenceRule => "missing congruence rule needed for normalization",
         else => @errorName(err),
     };
+}
+
+pub fn writeMissingCongruenceRuleSummary(
+    writer: anytype,
+    info: MissingCongruenceRuleDetail,
+) !void {
+    switch (info.reason) {
+        .missing_rule => {
+            if (info.term_name) |term_name| {
+                try writer.print(
+                    "missing @congr for term {s}",
+                    .{term_name},
+                );
+            } else {
+                try writer.writeAll("missing @congr rule");
+            }
+        },
+        .changed_bound_arg => {
+            if (info.arg_index) |arg_index| {
+                if (info.term_name) |term_name| {
+                    try writer.print(
+                        "bound argument {d} of term {s} changed " ++
+                            "during normalization",
+                        .{ arg_index + 1, term_name },
+                    );
+                } else {
+                    try writer.print(
+                        "bound argument {d} changed during normalization",
+                        .{arg_index + 1},
+                    );
+                }
+            } else {
+                try writer.writeAll(
+                    "bound argument changed during normalization",
+                );
+            }
+        },
+        .missing_child_relation => {
+            if (info.arg_index) |arg_index| {
+                if (info.term_name) |term_name| {
+                    try writer.print(
+                        "missing relation for argument {d} of term {s}",
+                        .{ arg_index + 1, term_name },
+                    );
+                } else {
+                    try writer.print(
+                        "missing relation for argument {d}",
+                        .{arg_index + 1},
+                    );
+                }
+            } else {
+                try writer.writeAll("missing child relation");
+            }
+        },
+        .missing_child_proof => {
+            if (info.arg_index) |arg_index| {
+                if (info.term_name) |term_name| {
+                    try writer.print(
+                        "argument {d} of term {s} changed without " ++
+                            "a congruence proof",
+                        .{ arg_index + 1, term_name },
+                    );
+                } else {
+                    try writer.print(
+                        "argument {d} changed without a congruence proof",
+                        .{arg_index + 1},
+                    );
+                }
+            } else {
+                try writer.writeAll(
+                    "argument changed without a congruence proof",
+                );
+            }
+        },
+        .missing_parent_relation => {
+            if (info.term_name) |term_name| {
+                try writer.print(
+                    "missing parent relation for term {s}",
+                    .{term_name},
+                );
+            } else {
+                try writer.writeAll("missing parent relation");
+            }
+        },
+        .malformed_rule => {
+            if (info.term_name) |term_name| {
+                try writer.print(
+                    "malformed @congr rule for term {s}",
+                    .{term_name},
+                );
+            } else {
+                try writer.writeAll("malformed @congr rule");
+            }
+        },
+        .unknown_term => {
+            try writer.writeAll("normalization used an unknown term");
+        },
+    }
+}
+
+pub fn buildCapturedDiagnosticDetail(
+    env: *const GlobalEnv,
+    detail: DiagScratch.CapturedDetail,
+) DiagnosticDetail {
+    return switch (detail) {
+        .missing_congruence_rule => |info| .{
+            .missing_congruence_rule = .{
+                .reason = info.reason,
+                .term_name = if (info.term_id) |term_id|
+                    if (term_id < env.terms.items.len)
+                        env.terms.items[term_id].name
+                    else
+                        null
+                else
+                    null,
+                .sort_name = info.sort_name,
+                .arg_index = info.arg_index,
+            },
+        },
+    };
+}
+
+pub fn takeScratchDetail(
+    scratch: *Scratch,
+    mark: Scratch.Mark,
+    env: *const GlobalEnv,
+    err: anyerror,
+) ?DiagnosticDetail {
+    const detail = scratch.takeSince(mark, err) orelse return null;
+    return buildCapturedDiagnosticDetail(env, detail);
 }

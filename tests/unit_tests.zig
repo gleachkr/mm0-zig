@@ -2681,6 +2681,140 @@ test "compiler records inference diagnostics for omitted arguments" {
     try std.testing.expect(diag.span != null);
 }
 
+test "compiler pinpoints unknown math tokens in proof assertions" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem bad_token: $ top $;
+    ;
+    const proof_src =
+        \\bad_token
+        \\---------
+        \\l1: $ bogus $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.UnknownMathToken,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnknownMathToken, diag.err);
+    try std.testing.expectEqualStrings("bad_token", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("bogus", proof_src[span.start..span.end]);
+    switch (diag.detail) {
+        .unknown_math_token => |detail| {
+            try std.testing.expectEqualStrings("bogus", detail.token);
+        },
+        else => return error.ExpectedUnknownMathTokenDetail,
+    }
+}
+
+test "compiler reports which binder assignment is missing" {
+    const mm0_src =
+        \\provable sort wff;
+        \\axiom ax_vacuous (a b: wff): $ a $ > $ a $;
+        \\theorem vacuous (a b: wff): $ a $ > $ a $;
+    ;
+    const proof_src =
+        \\vacuous
+        \\--------
+        \\l1: $ a $ by ax_vacuous (a := $ a $) [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.MissingBinderAssignment,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.MissingBinderAssignment, diag.err);
+    try std.testing.expectEqual(.missing_binder_assignment, diag.kind);
+    try std.testing.expectEqualStrings("vacuous", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("ax_vacuous", diag.rule_name.?);
+    try std.testing.expectEqualStrings("b", diag.name.?);
+    switch (diag.detail) {
+        .missing_binder_assignment => |detail| {
+            try std.testing.expectEqualStrings("b", detail.binder_name);
+        },
+        else => return error.ExpectedMissingBinderDetail,
+    }
+}
+
+test "compiler reports missing congruence rules for normalization" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term im (a b: wff): wff; infixr im: $->$ prec 25;
+        \\term bi (a b: wff): wff; infixr bi: $<->$ prec 20;
+        \\term P: wff;
+        \\term Q: wff;
+        \\term sb (a b: wff): wff;
+        \\--| @relation wff bi biid bitr bisym mpbi
+        \\axiom biid (a: wff): $ a <-> a $;
+        \\axiom bitr (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+        \\axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
+        \\axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+        \\--| @rewrite
+        \\axiom sb_im (a b c: wff): $ sb a (b -> c) <-> (sb a b -> sb a c) $;
+        \\--| @rewrite
+        \\axiom sb_P (a: wff): $ sb a P <-> a $;
+        \\axiom im_congr (a b c d: wff):
+        \\  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+        \\--| @normalize conc
+        \\axiom all_elim (a b: wff): $ sb a b $;
+        \\theorem test_normalize: $ Q -> Q $;
+    ;
+    const proof_src =
+        \\test_normalize
+        \\--------------
+        \\l1: $ Q -> Q $ by all_elim (a := $ Q $, b := $ P -> P $)
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.MissingCongruenceRule,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.MissingCongruenceRule, diag.err);
+    try std.testing.expectEqual(.generic, diag.kind);
+    try std.testing.expectEqualStrings(
+        "test_normalize",
+        diag.theorem_name.?,
+    );
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("all_elim", diag.rule_name.?);
+    switch (diag.detail) {
+        .missing_congruence_rule => |detail| {
+            try std.testing.expectEqual(.missing_rule, detail.reason);
+            try std.testing.expectEqualStrings("im", detail.term_name.?);
+            try std.testing.expectEqualStrings("wff", detail.sort_name.?);
+            try std.testing.expect(detail.arg_index == null);
+        },
+        else => return error.ExpectedMissingCongruenceDetail,
+    }
+}
+
 test "compiler reports dependency slot exhaustion clearly" {
     const allocator = std.testing.allocator;
 

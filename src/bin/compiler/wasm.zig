@@ -144,6 +144,8 @@ fn writeCompileFailure(
             "spanEnd",
             if (diag.span) |span| span.end else null,
         );
+        try out.writer.writeByte(',');
+        try writeDiagnosticDetailField(&out.writer, diag);
         try out.writer.writeAll("}}");
     } else {
         try writeJsonStringField(&out.writer, "message", @errorName(err));
@@ -184,5 +186,66 @@ fn writeOptionalUsizeField(
         try writer.print("{d}", .{actual});
     } else {
         try writer.writeAll("null");
+    }
+}
+
+fn writeDiagnosticDetailField(
+    writer: anytype,
+    diag: mm0.CompilerDiagnostic,
+) !void {
+    try writer.writeAll("\"detail\":");
+    switch (diag.detail) {
+        .none => try writer.writeAll("null"),
+        .unknown_math_token => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(writer, "kind", "unknown_math_token");
+            try writer.writeByte(',');
+            try writeJsonStringField(writer, "token", info.token);
+            try writer.writeAll("}");
+        },
+        .missing_binder_assignment => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(
+                writer,
+                "kind",
+                "missing_binder_assignment",
+            );
+            try writer.writeByte(',');
+            try writeJsonStringField(writer, "binder", info.binder_name);
+            try writer.writeAll("}");
+        },
+        .missing_congruence_rule => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(
+                writer,
+                "kind",
+                "missing_congruence_rule",
+            );
+            try writer.writeByte(',');
+            try writeJsonStringField(
+                writer,
+                "reason",
+                @tagName(info.reason),
+            );
+            try writer.writeByte(',');
+            try writer.writeAll("\"summary\":\"");
+            try mm0.writeCompilerMissingCongruenceRuleSummary(writer, info);
+            try writer.writeByte('"');
+            try writer.writeByte(',');
+            try writeOptionalStringField(writer, "term", info.term_name);
+            try writer.writeByte(',');
+            try writeOptionalStringField(writer, "sort", info.sort_name);
+            try writer.writeByte(',');
+            try writeOptionalUsizeField(writer, "argIndex", info.arg_index);
+            try writer.writeAll("}");
+        },
+        .hypothesis_ref => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(writer, "kind", "hypothesis_ref");
+            try writer.writeByte(',');
+            try writer.writeAll("\"index\":");
+            try writer.print("{d}", .{info.index});
+            try writer.writeAll("}");
+        },
     }
 }

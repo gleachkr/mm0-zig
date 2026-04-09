@@ -4,6 +4,7 @@ const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RuleDecl = @import("../env.zig").RuleDecl;
 const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
+const MathSpan = @import("../../trusted/parse.zig").MathSpan;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
 const Expr = @import("../../trusted/expressions.zig").Expr;
 const ProofLine = @import("../proof_script.zig").ProofLine;
@@ -28,6 +29,37 @@ const SortVarRegistry = CompilerVars.SortVarRegistry;
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
 
+fn setScratchDiagnosticIfPresent(
+    self: anytype,
+    scratch: *CompilerDiag.Scratch,
+    mark: CompilerDiag.Scratch.Mark,
+    env: *const GlobalEnv,
+    err: anyerror,
+    theorem_name: []const u8,
+    line_label: ?[]const u8,
+    rule_name: ?[]const u8,
+    span: ?Span,
+) bool {
+    const detail = CompilerDiag.takeScratchDetail(
+        scratch,
+        mark,
+        env,
+        err,
+    ) orelse {
+        return false;
+    };
+    self.setDiagnostic(.{
+        .kind = .generic,
+        .err = err,
+        .theorem_name = theorem_name,
+        .line_label = line_label,
+        .rule_name = rule_name,
+        .span = span,
+        .detail = detail,
+    });
+    return true;
+}
+
 pub fn checkTheoremBlock(
     self: anytype,
     allocator: std.mem.Allocator,
@@ -49,6 +81,8 @@ pub fn checkTheoremBlock(
     defer labels.deinit();
 
     var checked = std.ArrayListUnmanaged(CheckedLine){};
+    var diag_scratch = CompilerDiag.Scratch.init(allocator);
+    defer diag_scratch.deinit();
     var last_line: ?ExprId = null;
     var last_line_idx: ?usize = null;
     var last_label: ?[]const u8 = null;
@@ -62,13 +96,16 @@ pub fn checkTheoremBlock(
             sort_vars,
             line,
         ) catch |err| {
-            self.setDiagnostic(.{
-                .kind = .parse_assertion,
-                .err = err,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .span = line.assertion.span,
-            });
+            self.setDiagnostic(buildMathParseDiagnostic(
+                parser,
+                .parse_assertion,
+                err,
+                assertion.name,
+                line.label,
+                line.rule_name,
+                null,
+                line.assertion.span,
+            ));
             return err;
         };
         const rule_id = env.getRuleId(line.rule_name) orelse {
@@ -103,14 +140,17 @@ pub fn checkTheoremBlock(
                     if (hyp.index == 0 or
                         hyp.index > theorem.theorem_hyps.items.len)
                     {
-                        const hyp_name = try Emit.hypText(allocator, hyp.index);
                         self.setDiagnostic(.{
                             .kind = .unknown_hypothesis_ref,
                             .err = error.UnknownHypothesisRef,
                             .theorem_name = assertion.name,
                             .line_label = line.label,
-                            .name = hyp_name,
                             .span = hyp.span,
+                            .detail = .{
+                                .hypothesis_ref = .{
+                                    .index = hyp.index,
+                                },
+                            },
                         });
                         return error.UnknownHypothesisRef;
                     }
@@ -201,6 +241,7 @@ pub fn checkTheoremBlock(
                 allocator,
                 env,
                 registry,
+                &diag_scratch,
                 theorem,
                 assertion,
                 rule,
@@ -237,37 +278,68 @@ pub fn checkTheoremBlock(
                 rule.hyps[idx],
                 bindings,
             );
-            if (try Matching.tryMatchHypothesis(
+            const match_mark = diag_scratch.mark();
+            if (Matching.tryMatchHypothesis(
                 allocator,
                 theorem,
                 registry,
                 env,
                 &checked,
+                &diag_scratch,
                 norm_spec,
                 idx,
                 refs[idx],
                 actual,
                 expected,
-            )) |matched_ref| {
+            ) catch |err| {
+                if (setScratchDiagnosticIfPresent(
+                    self,
+                    &diag_scratch,
+                    match_mark,
+                    env,
+                    err,
+                    assertion.name,
+                    line.label,
+                    line.rule_name,
+                    line.span,
+                )) {
+                    return err;
+                }
+                diag_scratch.discard(match_mark);
+                return err;
+            }) |matched_ref| {
+                diag_scratch.discard(match_mark);
                 refs[idx] = matched_ref;
                 continue;
             }
-            const name = switch (ref) {
-                .hyp => |hyp| try Emit.hypText(allocator, hyp.index),
-                .line => |label| label.label,
-            };
+            diag_scratch.discard(match_mark);
             const span = switch (ref) {
                 .hyp => |hyp| hyp.span,
                 .line => |label| label.span,
             };
-            self.setDiagnostic(.{
-                .kind = .hypothesis_mismatch,
-                .err = error.HypothesisMismatch,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .name = name,
-                .span = span,
+            self.setDiagnostic(switch (ref) {
+                .hyp => |hyp| Diagnostic{
+                    .kind = .hypothesis_mismatch,
+                    .err = error.HypothesisMismatch,
+                    .theorem_name = assertion.name,
+                    .line_label = line.label,
+                    .rule_name = line.rule_name,
+                    .span = span,
+                    .detail = .{
+                        .hypothesis_ref = .{
+                            .index = hyp.index,
+                        },
+                    },
+                },
+                .line => |label| Diagnostic{
+                    .kind = .hypothesis_mismatch,
+                    .err = error.HypothesisMismatch,
+                    .theorem_name = assertion.name,
+                    .line_label = line.label,
+                    .rule_name = line.rule_name,
+                    .name = label.label,
+                    .span = span,
+                },
             });
             return error.HypothesisMismatch;
         }
@@ -277,19 +349,38 @@ pub fn checkTheoremBlock(
             bindings,
         );
 
-        const line_idx = try Matching.tryBuildConclusionLine(
+        const concl_mark = diag_scratch.mark();
+        const line_idx = (Matching.tryBuildConclusionLine(
             allocator,
             theorem,
             registry,
             env,
             &checked,
+            &diag_scratch,
             norm_spec,
             line_expr,
             expected_line,
             rule_id,
             bindings,
             refs,
-        ) orelse {
+        ) catch |err| {
+            if (setScratchDiagnosticIfPresent(
+                self,
+                &diag_scratch,
+                concl_mark,
+                env,
+                err,
+                assertion.name,
+                line.label,
+                line.rule_name,
+                line.assertion.span,
+            )) {
+                return err;
+            }
+            diag_scratch.discard(concl_mark);
+            return err;
+        }) orelse {
+            diag_scratch.discard(concl_mark);
             self.setDiagnostic(.{
                 .kind = .conclusion_mismatch,
                 .err = error.ConclusionMismatch,
@@ -300,6 +391,7 @@ pub fn checkTheoremBlock(
             });
             return error.ConclusionMismatch;
         };
+        diag_scratch.discard(concl_mark);
 
         const gop = try labels.getOrPut(line.label);
         if (gop.found_existing) {
@@ -332,18 +424,38 @@ pub fn checkTheoremBlock(
     };
     if (final_line != theorem_concl) {
         if (last_line_idx) |line_idx| {
-            if (try Matching.tryMatchFinalLine(
+            const final_mark = diag_scratch.mark();
+            if ((Matching.tryMatchFinalLine(
                 allocator,
                 theorem,
                 registry,
                 env,
                 &checked,
+                &diag_scratch,
                 theorem_concl,
                 final_line,
                 line_idx,
-            )) {
+            ) catch |err| {
+                if (setScratchDiagnosticIfPresent(
+                    self,
+                    &diag_scratch,
+                    final_mark,
+                    env,
+                    err,
+                    assertion.name,
+                    last_label,
+                    null,
+                    last_span,
+                )) {
+                    return err;
+                }
+                diag_scratch.discard(final_mark);
+                return err;
+            })) {
+                diag_scratch.discard(final_mark);
                 return try checked.toOwnedSlice(allocator);
             }
+            diag_scratch.discard(final_mark);
         }
         self.setDiagnostic(.{
             .kind = .final_line_mismatch,
@@ -456,21 +568,65 @@ fn parseBindings(
                 rule.args[arg_index],
             );
         } catch |err| {
-            self.setDiagnostic(.{
-                .kind = .parse_binding,
-                .err = err,
-                .theorem_name = theorem_name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .name = binding.name,
-                .span = binding.formula.span,
-            });
+            self.setDiagnostic(buildMathParseDiagnostic(
+                parser,
+                .parse_binding,
+                err,
+                theorem_name,
+                line.label,
+                line.rule_name,
+                binding.name,
+                binding.formula.span,
+            ));
             return err;
         };
         bindings[arg_index] = try theorem.internParsedExpr(expr);
     }
 
     return bindings;
+}
+
+fn buildMathParseDiagnostic(
+    parser: *MM0Parser,
+    kind: CompilerDiag.DiagnosticKind,
+    err: anyerror,
+    theorem_name: []const u8,
+    line_label: []const u8,
+    rule_name: []const u8,
+    name: ?[]const u8,
+    math_span: Span,
+) Diagnostic {
+    var diag = Diagnostic{
+        .kind = kind,
+        .err = err,
+        .theorem_name = theorem_name,
+        .line_label = line_label,
+        .rule_name = rule_name,
+        .name = name,
+        .span = math_span,
+    };
+    if (err != error.UnknownMathToken) return diag;
+
+    const math_err = parser.last_math_error orelse return diag;
+    switch (math_err) {
+        .unknown_token => |token| {
+            diag.span = mathTokenSpan(math_span, token.span);
+            diag.detail = .{
+                .unknown_math_token = .{
+                    .token = token.text,
+                },
+            };
+        },
+    }
+    return diag;
+}
+
+fn mathTokenSpan(math_span: Span, token_span: MathSpan) Span {
+    const inner_start = math_span.start + 1;
+    return .{
+        .start = inner_start + token_span.start,
+        .end = inner_start + token_span.end,
+    };
 }
 
 fn applyFreshBindings(

@@ -94,6 +94,20 @@ const InfixEnv = struct {
 
 const BinderKind = enum { term, assertion };
 
+pub const MathSpan = struct {
+    start: usize,
+    end: usize,
+};
+
+pub const MathTokenInfo = struct {
+    text: []const u8,
+    span: MathSpan,
+};
+
+pub const MathParseError = union(enum) {
+    unknown_token: MathTokenInfo,
+};
+
 const BinderContext = struct {
     vars: std.StringHashMap(*const Expr),
     arg_infos: std.ArrayListUnmanaged(ArgInfo) = .{},
@@ -113,7 +127,7 @@ const MathCursor = struct {
     pos: usize = 0,
     left_delims: [256]bool,
     right_delims: [256]bool,
-    lookahead: ?[]const u8 = null,
+    lookahead: ?MathTokenInfo = null,
 
     fn skipWhitespace(self: *MathCursor) void {
         while (self.pos < self.src.len) {
@@ -124,7 +138,7 @@ const MathCursor = struct {
         }
     }
 
-    fn readToken(self: *MathCursor) ?[]const u8 {
+    fn readToken(self: *MathCursor) ?MathTokenInfo {
         self.skipWhitespace();
         if (self.pos >= self.src.len) return null;
 
@@ -144,17 +158,23 @@ const MathCursor = struct {
         }
         const end = self.pos;
         self.skipWhitespace();
-        return self.src[start..end];
+        return .{
+            .text = self.src[start..end],
+            .span = .{
+                .start = start,
+                .end = end,
+            },
+        };
     }
 
-    fn peek(self: *MathCursor) ?[]const u8 {
+    fn peek(self: *MathCursor) ?MathTokenInfo {
         if (self.lookahead == null) {
             self.lookahead = self.readToken();
         }
         return self.lookahead;
     }
 
-    fn next(self: *MathCursor) ?[]const u8 {
+    fn next(self: *MathCursor) ?MathTokenInfo {
         const token = self.peek();
         self.lookahead = null;
         return token;
@@ -186,6 +206,7 @@ pub const MM0Parser = struct {
     // statements and moved to `last_annotations` when a statement is yielded.
     pending_annotations: std.ArrayListUnmanaged([]const u8) = .{},
     last_annotations: []const []const u8 = &.{},
+    last_math_error: ?MathParseError = null,
 
     pub fn init(src: []const u8, allocator: std.mem.Allocator) MM0Parser {
         return .{
@@ -897,6 +918,7 @@ pub const MM0Parser = struct {
             .left_delims = self.left_delims,
             .right_delims = self.right_delims,
         };
+        self.last_math_error = null;
         const expr = try self.parseExpr(&cursor, vars, 0);
         if (cursor.peek() != null) return error.TrailingMathTokens;
         return expr;
@@ -911,7 +933,7 @@ pub const MM0Parser = struct {
         var lhs = try self.parsePrefixExpr(cursor, vars, min_prec);
         while (true) {
             const token = cursor.peek() orelse break;
-            const infix = self.infix_notations.get(token) orelse break;
+            const infix = self.infix_notations.get(token.text) orelse break;
             if (infix.prec < min_prec) break;
             _ = cursor.next();
             const rhs_prec = if (infix.right_assoc)
@@ -931,25 +953,27 @@ pub const MM0Parser = struct {
         min_prec: u16,
     ) anyerror!*const Expr {
         const token = cursor.next() orelse return error.ExpectedMathToken;
-        if (std.mem.eql(u8, token, "(")) {
+        if (std.mem.eql(u8, token.text, "(")) {
             const expr = try self.parseExpr(cursor, vars, 0);
             const close = cursor.next() orelse return error.ExpectedCloseParen;
-            if (!std.mem.eql(u8, close, ")")) return error.ExpectedCloseParen;
+            if (!std.mem.eql(u8, close.text, ")")) {
+                return error.ExpectedCloseParen;
+            }
             return expr;
         }
 
-        if (vars.get(token)) |expr| return expr;
+        if (vars.get(token.text)) |expr| return expr;
 
-        if (self.formula_markers.contains(token)) {
+        if (self.formula_markers.contains(token.text)) {
             return try self.parsePrefixExpr(cursor, vars, min_prec);
         }
 
-        if (self.prefix_notations.get(token)) |prefix| {
+        if (self.prefix_notations.get(token.text)) |prefix| {
             if (prefix.prec < min_prec) return error.PrecMismatch;
             return try self.parsePrefixNotation(cursor, vars, prefix);
         }
 
-        if (self.term_names.get(token)) |term_id| {
+        if (self.term_names.get(token.text)) |term_id| {
             const term = self.terms.items[term_id];
             if (term.args.len == 0) return try self.applyTerm(term_id, &.{});
             if (APP_PRECEDENCE < min_prec) return error.PrecMismatch;
@@ -961,6 +985,9 @@ pub const MM0Parser = struct {
             return try self.applyTerm(term_id, args.items);
         }
 
+        self.last_math_error = .{
+            .unknown_token = token,
+        };
         return error.UnknownMathToken;
     }
 
@@ -975,8 +1002,11 @@ pub const MM0Parser = struct {
         for (prefix.lits) |lit| {
             switch (lit) {
                 .constant => |expected| {
-                    const actual = cursor.next() orelse return error.ExpectedMathToken;
-                    if (!std.mem.eql(u8, actual, expected)) return error.NotationMismatch;
+                    const actual =
+                        cursor.next() orelse return error.ExpectedMathToken;
+                    if (!std.mem.eql(u8, actual.text, expected)) {
+                        return error.NotationMismatch;
+                    }
                 },
                 .variable => |info| {
                     const parsed = try self.parseExpr(cursor, vars, info.prec);

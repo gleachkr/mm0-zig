@@ -13,6 +13,7 @@ const CheckedRef = CheckedIr.CheckedRef;
 const appendTransportLine = CheckedIr.appendTransportLine;
 const appendRuleLine = CheckedIr.appendRuleLine;
 const Inference = @import("./inference.zig");
+const CompilerDiag = @import("./diag.zig");
 
 pub const NormalizedConversion = struct {
     relation: ResolvedRelation,
@@ -33,19 +34,29 @@ pub fn buildNormalizedConversion(
     registry: *RewriteRegistry,
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
     actual: ExprId,
     expected: ExprId,
 ) !?NormalizedConversion {
-    var normalizer = Normalizer.init(
+    var normalizer = Normalizer.initWithScratch(
         allocator,
         theorem,
         registry,
         env,
         checked,
+        scratch,
     );
     const relation = normalizer.resolveRelationForExpr(actual) orelse return null;
-    const norm_actual = try normalizer.normalize(actual);
-    const norm_expected = try normalizer.normalize(expected);
+    const actual_mark = scratch.mark();
+    const norm_actual = normalizer.normalize(actual) catch |err| {
+        return err;
+    };
+    scratch.discard(actual_mark);
+    const expected_mark = scratch.mark();
+    const norm_expected = normalizer.normalize(expected) catch |err| {
+        return err;
+    };
+    scratch.discard(expected_mark);
 
     const common_target: CommonTargetResult = if (norm_actual.result_expr ==
         norm_expected.result_expr)
@@ -117,19 +128,25 @@ pub fn buildExpectedNormalization(
     registry: *RewriteRegistry,
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
     expected: ExprId,
 ) !?ExpectedNormalization {
-    var normalizer = Normalizer.init(
+    var normalizer = Normalizer.initWithScratch(
         allocator,
         theorem,
         registry,
         env,
         checked,
+        scratch,
     );
     const relation = normalizer.resolveRelationForExpr(expected) orelse {
         return null;
     };
-    const normalized = try normalizer.normalize(expected);
+    const mark = scratch.mark();
+    const normalized = normalizer.normalize(expected) catch |err| {
+        return err;
+    };
+    scratch.discard(mark);
     if (normalized.result_expr == expected and normalized.conv_line_idx == null) {
         return null;
     }
@@ -147,6 +164,7 @@ pub fn buildTransparentNormalizedHypRef(
     registry: *RewriteRegistry,
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
     actual_ref: CheckedRef,
     actual: ExprId,
     expected: ExprId,
@@ -157,6 +175,7 @@ pub fn buildTransparentNormalizedHypRef(
         registry,
         env,
         checked,
+        scratch,
         expected,
     ) orelse return null;
     if (!try Inference.canConvertTransparent(
@@ -204,6 +223,7 @@ pub fn buildTransparentNormalizedConclusionLine(
     registry: *RewriteRegistry,
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
     line_expr: ExprId,
     expected_line: ExprId,
     rule_id: u32,
@@ -216,17 +236,23 @@ pub fn buildTransparentNormalizedConclusionLine(
         registry,
         env,
         checked,
+        scratch,
         expected_line,
     ) orelse return null;
 
-    var line_normalizer = Normalizer.init(
+    var line_normalizer = Normalizer.initWithScratch(
         allocator,
         theorem,
         registry,
         env,
         checked,
+        scratch,
     );
-    const normalized_line = try line_normalizer.normalize(line_expr);
+    const mark = scratch.mark();
+    const normalized_line = line_normalizer.normalize(line_expr) catch |err| {
+        return err;
+    };
+    scratch.discard(mark);
     if (normalized_line.result_expr != normalization.normalized_expr and
         !try Inference.canConvertTransparent(
             allocator,

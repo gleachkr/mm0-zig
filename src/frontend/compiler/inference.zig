@@ -277,10 +277,41 @@ fn hypMarkedForNormalize(norm_spec: ?NormalizeSpec, hyp_idx: usize) bool {
     return false;
 }
 
+fn setScratchDiagnosticIfPresent(
+    self: anytype,
+    scratch: *CompilerDiag.Scratch,
+    mark: CompilerDiag.Scratch.Mark,
+    env: *const GlobalEnv,
+    kind: CompilerDiag.DiagnosticKind,
+    err: anyerror,
+    assertion: AssertionStmt,
+    line: ProofLine,
+) bool {
+    const detail = CompilerDiag.takeScratchDetail(
+        scratch,
+        mark,
+        env,
+        err,
+    ) orelse {
+        return false;
+    };
+    maybeSetDiagnostic(self, .{
+        .kind = kind,
+        .err = err,
+        .theorem_name = assertion.name,
+        .line_label = line.label,
+        .rule_name = line.rule_name,
+        .span = line.span,
+        .detail = detail,
+    });
+    return true;
+}
+
 fn matchRulePartNormalized(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
     session: *DefOps.RuleMatchSession,
     template: TemplateExpr,
     actual: ExprId,
@@ -291,17 +322,26 @@ fn matchRulePartNormalized(
     var checked = std.ArrayListUnmanaged(CheckedLine){};
     defer checked.deinit(allocator);
 
-    var normalizer = Normalizer.init(
+    var normalizer = Normalizer.initWithScratch(
         allocator,
         comparison.mirrorTheorem(),
         registry,
         env,
         &checked,
+        scratch,
     );
+    const expected_mark = scratch.mark();
     const normalized_expected =
-        try normalizer.normalize(comparison.expected_expr);
+        normalizer.normalize(comparison.expected_expr) catch |err| {
+            return err;
+        };
+    scratch.discard(expected_mark);
+    const actual_mark = scratch.mark();
     const normalized_actual =
-        try normalizer.normalize(comparison.actual_expr);
+        normalizer.normalize(comparison.actual_expr) catch |err| {
+            return err;
+        };
+    scratch.discard(actual_mark);
 
     var canonicalizer = Canonicalizer.init(
         allocator,
@@ -325,6 +365,7 @@ fn finishRuleMatchSession(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
     rule_id: u32,
     rule: *const RuleDecl,
     session: *DefOps.RuleMatchSession,
@@ -340,6 +381,7 @@ fn finishRuleMatchSession(
                 allocator,
                 env,
                 registry,
+                scratch,
                 session,
                 hyp,
                 ref_expr,
@@ -355,6 +397,7 @@ fn finishRuleMatchSession(
             allocator,
             env,
             registry,
+            scratch,
             session,
             rule.concl,
             line_expr,
@@ -383,6 +426,7 @@ fn inferBindingsByRuleMatchSession(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
     theorem: *TheoremContext,
     rule_id: u32,
     rule: *const RuleDecl,
@@ -405,6 +449,7 @@ fn inferBindingsByRuleMatchSession(
         allocator,
         env,
         registry,
+        scratch,
         rule_id,
         rule,
         &session,
@@ -417,6 +462,7 @@ fn inferBindingsByMatchSeedState(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
     theorem: *TheoremContext,
     rule_id: u32,
     rule: *const RuleDecl,
@@ -442,6 +488,7 @@ fn inferBindingsByMatchSeedState(
         allocator,
         env,
         registry,
+        scratch,
         rule_id,
         rule,
         &session,
@@ -487,6 +534,7 @@ pub fn inferBindings(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
     theorem: *TheoremContext,
     assertion: AssertionStmt,
     rule: *const RuleDecl,
@@ -588,11 +636,13 @@ pub fn inferBindings(
             session_seeds = try exactBindingSeeds(allocator, partial_bindings);
         }
 
-        const match_result = if (view_seed_state) |*seed_state|
-            try inferBindingsByMatchSeedState(
+        const match_mark = scratch.mark();
+        const match_result = (if (view_seed_state) |*seed_state|
+            inferBindingsByMatchSeedState(
                 allocator,
                 env,
                 registry,
+                scratch,
                 theorem,
                 rule_id,
                 rule,
@@ -601,17 +651,34 @@ pub fn inferBindings(
                 line_expr,
             )
         else
-            try inferBindingsByRuleMatchSession(
+            inferBindingsByRuleMatchSession(
                 allocator,
                 env,
                 registry,
+                scratch,
                 theorem,
                 rule_id,
                 rule,
                 session_seeds.?,
                 ref_exprs,
                 line_expr,
-            );
+            )) catch |err| {
+            if (setScratchDiagnosticIfPresent(
+                self,
+                scratch,
+                match_mark,
+                env,
+                .inference_failed,
+                err,
+                assertion,
+                line,
+            )) {
+                return err;
+            }
+            scratch.discard(match_mark);
+            return err;
+        };
+        scratch.discard(match_mark);
         switch (match_result) {
             .concrete => |bindings| {
                 return try validateInferredBindings(
@@ -693,6 +760,7 @@ pub fn inferBindings(
     )) |b| {
         return b;
     } else |err| {
+        if (self.last_diagnostic != null) return err;
         if (maybe_view == null) {
             const transparent = inferBindingsTransparent(
                 allocator,
@@ -753,9 +821,6 @@ pub fn strictInferBindings(
     ref_exprs: []const ExprId,
     line_expr: ExprId,
 ) ![]const ExprId {
-    _ = self;
-    _ = line;
-
     const unify = try Emit.buildRuleUnifyStream(allocator, rule);
 
     var inference = try InferenceContext.init(
@@ -778,6 +843,21 @@ pub fn strictInferBindings(
     const bindings = try allocator.alloc(ExprId, rule.args.len);
     for (0..rule.args.len) |idx| {
         const binding = inference.uheap.items[idx] orelse {
+            const binder_name = rule.arg_names[idx] orelse "_";
+            maybeSetDiagnostic(self, .{
+                .kind = .missing_binder_assignment,
+                .err = error.MissingBinderAssignment,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = rule.arg_names[idx],
+                .span = line.span,
+                .detail = .{
+                    .missing_binder_assignment = .{
+                        .binder_name = binder_name,
+                    },
+                },
+            });
             return error.MissingBinderAssignment;
         };
         try validateBindingExpr(
@@ -800,6 +880,23 @@ pub fn strictInferBindings(
         return error.DepViolation;
     }
     return bindings;
+}
+
+fn maybeSetDiagnostic(self: anytype, diag: Diagnostic) void {
+    const T = @TypeOf(self);
+    switch (@typeInfo(T)) {
+        .pointer => |ptr| {
+            if (@hasDecl(ptr.child, "setDiagnostic")) {
+                self.setDiagnostic(diag);
+            }
+        },
+        .@"struct" => {
+            if (@hasDecl(T, "setDiagnostic")) {
+                self.setDiagnostic(diag);
+            }
+        },
+        else => {},
+    }
 }
 
 pub fn validateResolvedBindings(

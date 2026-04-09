@@ -1,6 +1,7 @@
 const std = @import("std");
 const MmbWriter = @import("./mmb_writer.zig");
 const CompilerDiag = @import("./compiler/diag.zig");
+const DiagnosticDetail = CompilerDiag.DiagnosticDetail;
 const Metadata = @import("./compiler/metadata.zig");
 const CompilerVars = @import("./compiler/vars.zig");
 const CheckedIr = @import("./compiler/checked_ir.zig");
@@ -116,6 +117,7 @@ pub const Compiler = struct {
                 if (diag.expected_name) |name| {
                     std.debug.print("  expected: {s}\n", .{name});
                 }
+                reportDiagnosticDetail(diag.detail);
                 self.reportDiagnosticLocation(diag);
                 return;
             }
@@ -161,6 +163,33 @@ pub const Compiler = struct {
 };
 
 pub const diagnosticSummary = CompilerDiag.diagnosticSummary;
+
+fn reportDiagnosticDetail(detail: DiagnosticDetail) void {
+    switch (detail) {
+        .none => {},
+        .unknown_math_token => |info| {
+            std.debug.print("  token: {s}\n", .{info.token});
+        },
+        .missing_binder_assignment => |info| {
+            std.debug.print("  missing binder: {s}\n", .{info.binder_name});
+        },
+        .missing_congruence_rule => |info| {
+            var stderr = std.fs.File.stderr().deprecatedWriter();
+            stderr.writeAll("  missing congruence: ") catch return;
+            CompilerDiag.writeMissingCongruenceRuleSummary(
+                stderr,
+                info,
+            ) catch return;
+            stderr.writeByte('\n') catch return;
+            if (info.sort_name) |sort_name| {
+                std.debug.print("  sort: {s}\n", .{sort_name});
+            }
+        },
+        .hypothesis_ref => |info| {
+            std.debug.print("  hypothesis ref: #{d}\n", .{info.index});
+        },
+    }
+}
 
 const LineCol = struct {
     line: usize,

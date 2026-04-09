@@ -472,6 +472,35 @@ function buildDiagnosticMessage(meta) {
   if (diag.rule) extra.push(`rule ${diag.rule}`);
   if (diag.name) extra.push(diag.name);
   if (diag.expected) extra.push(`expected ${diag.expected}`);
+
+  const detail = diag.detail;
+  if (detail?.kind === "unknown_math_token" && detail.token) {
+    extra.push(`token ${detail.token}`);
+  } else if (
+    detail?.kind === "missing_binder_assignment" &&
+    detail.binder
+  ) {
+    extra.push(`missing binder ${detail.binder}`);
+  } else if (detail?.kind === "missing_congruence_rule") {
+    if (detail.summary) {
+      extra.push(detail.summary);
+    } else {
+      const parts = [];
+      if (detail.reason) parts.push(`reason ${detail.reason}`);
+      if (detail.term) parts.push(`term ${detail.term}`);
+      if (detail.sort) parts.push(`sort ${detail.sort}`);
+      if (Number.isInteger(detail.argIndex)) {
+        parts.push(`arg ${detail.argIndex + 1}`);
+      }
+      if (parts.length) extra.push(parts.join(" · "));
+    }
+  } else if (
+    detail?.kind === "hypothesis_ref" &&
+    Number.isInteger(detail.index)
+  ) {
+    extra.push(`#${detail.index}`);
+  }
+
   if (extra.length) parts.push(extra.join(" \u00b7 "));
   return parts.join("\n");
 }

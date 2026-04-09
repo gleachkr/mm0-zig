@@ -11,6 +11,7 @@ const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const appendRuleLine = CheckedIr.appendRuleLine;
 const appendTransportLine = CheckedIr.appendTransportLine;
+const CompilerDiag = @import("../diag.zig");
 
 pub fn tryMatchHypothesis(
     allocator: std.mem.Allocator,
@@ -18,6 +19,7 @@ pub fn tryMatchHypothesis(
     registry: *RewriteRegistry,
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
     norm_spec: ?NormalizeSpec,
     hyp_idx: usize,
     actual_ref: CheckedRef,
@@ -51,6 +53,7 @@ pub fn tryMatchHypothesis(
         registry,
         env,
         checked,
+        scratch,
         actual,
         expected,
     )) |conversion| {
@@ -73,6 +76,7 @@ pub fn tryMatchHypothesis(
         registry,
         env,
         checked,
+        scratch,
         actual_ref,
         actual,
         expected,
@@ -85,6 +89,7 @@ pub fn tryBuildConclusionLine(
     registry: *RewriteRegistry,
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
     norm_spec: ?NormalizeSpec,
     line_expr: ExprId,
     expected_line: ExprId,
@@ -135,6 +140,7 @@ pub fn tryBuildConclusionLine(
                 registry,
                 env,
                 checked,
+                scratch,
                 expected_line,
                 line_expr,
             )) |conversion| {
@@ -165,6 +171,7 @@ pub fn tryBuildConclusionLine(
                 registry,
                 env,
                 checked,
+                scratch,
                 line_expr,
                 expected_line,
                 rule_id,
@@ -183,6 +190,7 @@ pub fn tryMatchFinalLine(
     registry: *RewriteRegistry,
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
     theorem_concl: ExprId,
     final_line: ExprId,
     line_idx: usize,
@@ -210,6 +218,7 @@ pub fn tryMatchFinalLine(
         registry,
         env,
         checked,
+        scratch,
         final_line,
         theorem_concl,
     )) |conversion| {

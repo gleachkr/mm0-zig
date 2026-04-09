@@ -11,6 +11,8 @@ else
 pub const CompilerDiagnostic = @import("./frontend/compiler.zig").Diagnostic;
 pub const compilerDiagnosticSummary =
     @import("./frontend/compiler.zig").diagnosticSummary;
+pub const writeCompilerMissingCongruenceRuleSummary =
+    @import("./frontend/compiler/diag.zig").writeMissingCongruenceRuleSummary;
 pub const Frontend = struct {
     pub const Env = @import("./frontend/env.zig");
     pub const Expr = @import("./frontend/expr.zig");

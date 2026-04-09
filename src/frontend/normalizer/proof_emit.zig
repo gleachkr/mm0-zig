@@ -3,7 +3,9 @@ const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
 const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
+const DiagScratch = @import("../diag_scratch.zig");
 const RewriteRule = @import("../rewrite_registry.zig").RewriteRule;
+const MissingCongruenceReason = DiagScratch.MissingCongruenceReason;
 const ResolvedRelation = @import("../rewrite_registry.zig").ResolvedRelation;
 const ResolvedStructuralCombiner =
     @import("../rewrite_registry.zig").ResolvedStructuralCombiner;
@@ -95,6 +97,35 @@ pub fn tryApplyRule(
     };
 }
 
+fn setMissingCongruenceDetail(
+    self: anytype,
+    term_id: ?u32,
+    reason: MissingCongruenceReason,
+    sort_name: ?[]const u8,
+    arg_index: ?usize,
+) void {
+    const scratch = self.diag_scratch orelse return;
+    scratch.record(error.MissingCongruenceRule, .{
+        .missing_congruence_rule = .{
+            .reason = reason,
+            .term_id = term_id,
+            .sort_name = sort_name,
+            .arg_index = arg_index,
+        },
+    });
+}
+
+fn failMissingCongruence(
+    self: anytype,
+    term_id: ?u32,
+    reason: MissingCongruenceReason,
+    sort_name: ?[]const u8,
+    arg_index: ?usize,
+) error{MissingCongruenceRule} {
+    setMissingCongruenceDetail(self, term_id, reason, sort_name, arg_index);
+    return error.MissingCongruenceRule;
+}
+
 pub fn emitCongruenceLine(
     self: anytype,
     term_id: u32,
@@ -111,9 +142,21 @@ pub fn emitCongruenceLine(
     const term_decl = if (term_id < self.env.terms.items.len)
         &self.env.terms.items[term_id]
     else
-        return error.MissingCongruenceRule;
+        return failMissingCongruence(
+            self,
+            null,
+            .unknown_term,
+            null,
+            null,
+        );
     const congr_rule = self.registry.getCongruenceRule(term_id) orelse {
-        return error.MissingCongruenceRule;
+        return failMissingCongruence(
+            self,
+            term_id,
+            .missing_rule,
+            term_decl.ret_sort_name,
+            null,
+        );
     };
 
     const bindings = try self.allocator.alloc(ExprId, congr_rule.num_binders);
@@ -132,7 +175,15 @@ pub fn emitCongruenceLine(
         idx,
     | {
         if (arg_decl.bound) {
-            if (old_arg != new_arg) return error.MissingCongruenceRule;
+            if (old_arg != new_arg) {
+                return failMissingCongruence(
+                    self,
+                    term_id,
+                    .changed_bound_arg,
+                    arg_decl.sort_name,
+                    idx,
+                );
+            }
             bindings[binding_idx] = old_arg;
             binding_idx += 1;
             continue;
@@ -151,22 +202,46 @@ pub fn emitCongruenceLine(
             const child_rel = self.registry.resolveRelation(
                 self.env,
                 arg_decl.sort_name,
-            ) orelse return error.MissingCongruenceRule;
+            ) orelse return failMissingCongruence(
+                self,
+                term_id,
+                .missing_child_relation,
+                arg_decl.sort_name,
+                idx,
+            );
             refs[ref_idx] = .{ .line = try emitRefl(self, child_rel, old_arg) };
             ref_idx += 1;
             continue;
         }
-        return error.MissingCongruenceRule;
+        return failMissingCongruence(
+            self,
+            term_id,
+            .missing_child_proof,
+            arg_decl.sort_name,
+            idx,
+        );
     }
 
     if (binding_idx != bindings.len or ref_idx != refs.len) {
-        return error.MissingCongruenceRule;
+        return failMissingCongruence(
+            self,
+            term_id,
+            .malformed_rule,
+            term_decl.ret_sort_name,
+            null,
+        );
     }
 
     const old_expr = try self.theorem.interner.internApp(term_id, old_args);
     const new_expr = try self.theorem.interner.internApp(term_id, new_args);
     const parent_relation = Support.resolveRelationForExpr(self, old_expr) orelse {
-        return error.MissingCongruenceRule;
+        return failMissingCongruence(
+            self,
+            term_id,
+            .missing_parent_relation,
+            term_decl.ret_sort_name,
+            null,
+        );
     };
     const expr = try buildRelExpr(self, parent_relation, old_expr, new_expr);
 
