@@ -1,5 +1,0 @@
-delimiter $ ( ) $;
-provable sort wff;
-
---| @abbrev
-term P: wff;

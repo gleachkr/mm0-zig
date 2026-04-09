@@ -496,11 +496,6 @@ pub const Compiler = struct {
         self.allocator.free(bytes);
     }
 
-    pub fn writeMm0(self: *Compiler) !void {
-        try self.check();
-        return error.Unimplemented;
-    }
-
     pub fn reportError(self: *const Compiler, err: anyerror) void {
         if (self.last_diagnostic) |diag| {
             if (diag.err == err) {

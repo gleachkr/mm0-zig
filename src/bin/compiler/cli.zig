@@ -4,24 +4,14 @@ const DebugConfig = mm0.DebugConfig;
 
 const UsageError = error{InvalidUsage};
 
-const Command = union(enum) {
-    compile: CompilePaths,
-    join: JoinPaths,
-};
-
 const CompilePaths = struct {
     input: []const u8,
     proof: []const u8,
     output: []const u8,
 };
 
-const JoinPaths = struct {
-    input: []const u8,
-    output: []const u8,
-};
-
 const ParsedArgs = struct {
-    command: Command,
+    paths: CompilePaths,
     debug: DebugConfig,
 };
 
@@ -33,7 +23,6 @@ pub fn usage() !void {
     try stdout.writeAll(
         "Usage:\n" ++
             "  mm0-zigc compile INPUT.mm0 INPUT.proof OUTPUT.mmb\n" ++
-            "  mm0-zigc join INPUT.mm0 OUTPUT.mm0\n" ++
             "\nOptions:\n" ++
             "  --debug SYSTEMS  Enable debug output (comma-separated:\n" ++
             "                   inference,views,unfolding,normalization,emission,check,all)\n",
@@ -61,26 +50,18 @@ fn parseArgs(argv: []const []const u8) !ParsedArgs {
     }
 
     const pos = positional.items;
-    if (pos.len == 4 and std.mem.eql(u8, pos[0], "compile")) {
-        return .{
-            .command = .{ .compile = .{
-                .input = pos[1],
-                .proof = pos[2],
-                .output = pos[3],
-            } },
-            .debug = debug,
-        };
+    if (pos.len != 4 or !std.mem.eql(u8, pos[0], "compile")) {
+        return UsageError.InvalidUsage;
     }
-    if (pos.len == 3 and std.mem.eql(u8, pos[0], "join")) {
-        return .{
-            .command = .{ .join = .{
-                .input = pos[1],
-                .output = pos[2],
-            } },
-            .debug = debug,
-        };
-    }
-    return UsageError.InvalidUsage;
+
+    return .{
+        .paths = .{
+            .input = pos[1],
+            .proof = pos[2],
+            .output = pos[3],
+        },
+        .debug = debug,
+    };
 }
 
 fn loadSource(
@@ -99,55 +80,31 @@ pub fn run(
     argv: []const []const u8,
 ) !void {
     const parsed = try parseArgs(argv);
+    const cmd = parsed.paths;
 
-    switch (parsed.command) {
-        .compile => |cmd| {
-            const source = try loadSource(allocator, cmd.input);
-            defer allocator.free(source);
+    const source = try loadSource(allocator, cmd.input);
+    defer allocator.free(source);
 
-            const proof = try loadSource(allocator, cmd.proof);
-            defer allocator.free(proof);
+    const proof = try loadSource(allocator, cmd.proof);
+    defer allocator.free(proof);
 
-            var compiler = mm0.Compiler.initWithProof(
-                allocator,
-                source,
-                proof,
-            );
-            compiler.debug = parsed.debug;
-            const mmb = compiler.compileMmb(allocator) catch |err| {
-                std.debug.print("Failed to compile {s}\n", .{cmd.input});
-                compiler.reportError(err);
-                return err;
-            };
-            defer allocator.free(mmb);
+    var compiler = mm0.Compiler.initWithProof(
+        allocator,
+        source,
+        proof,
+    );
+    compiler.debug = parsed.debug;
+    const mmb = compiler.compileMmb(allocator) catch |err| {
+        std.debug.print("Failed to compile {s}\n", .{cmd.input});
+        compiler.reportError(err);
+        return err;
+    };
+    defer allocator.free(mmb);
 
-            try std.fs.cwd().writeFile(.{
-                .sub_path = cmd.output,
-                .data = mmb,
-            });
-        },
-        .join => |cmd| {
-            const source = try loadSource(allocator, cmd.input);
-            defer allocator.free(source);
-
-            var compiler = mm0.Compiler.init(allocator, source);
-            compiler.debug = parsed.debug;
-            compiler.writeMm0() catch |err| switch (err) {
-                error.Unimplemented => {
-                    std.debug.print(
-                        "join {s} -> {s}: emission is not implemented yet\n",
-                        .{ cmd.input, cmd.output },
-                    );
-                    return err;
-                },
-                else => {
-                    std.debug.print("Failed to join {s}\n", .{cmd.input});
-                    compiler.reportError(err);
-                    return err;
-                },
-            };
-        },
-    }
+    try std.fs.cwd().writeFile(.{
+        .sub_path = cmd.output,
+        .data = mmb,
+    });
 }
 
 pub fn main() !void {

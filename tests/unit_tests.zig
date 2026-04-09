@@ -5,7 +5,6 @@ const Arg = mm0.Arg;
 const Compiler = mm0.Compiler;
 const CompilerEnv = mm0.CompilerEnv;
 const CompilerExpr = mm0.CompilerExpr;
-const TermAnnotations = mm0.TermAnnotations;
 const Expr = mm0.Expr;
 const Header = mm0.Header;
 const MAGIC = mm0.MAGIC;
@@ -1886,36 +1885,6 @@ test "compiler env retains def dummy metadata" {
     try std.testing.expectEqualStrings("obj", term.dummy_args[1].sort_name);
 }
 
-test "compiler ignores legacy @abbrev annotations on defs" {
-    const src =
-        \\sort nat;
-        \\term plus (a b: nat): nat;
-        \\--| @abbrev
-        \\def double (a: nat): nat = $ plus a a $;
-    ;
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-
-    var parser = MM0Parser.init(src, arena.allocator());
-    var env = CompilerEnv.GlobalEnv.init(arena.allocator());
-    while (try parser.next()) |stmt| {
-        try env.addStmt(stmt);
-        switch (stmt) {
-            .term => |term| try TermAnnotations.processTermAnnotations(
-                &env,
-                term,
-                parser.last_annotations,
-            ),
-            else => {},
-        }
-    }
-
-    try std.testing.expectEqual(@as(usize, 2), env.terms.items.len);
-    try std.testing.expect(env.terms.items[1].is_def);
-    try std.testing.expect(env.terms.items[1].body != null);
-}
-
 fn expectCompareTransparent(
     src: []const u8,
     lhs_text: []const u8,
@@ -2366,15 +2335,26 @@ test "compiler handles normalize-plus-unfold hidden-dummy proof" {
     try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
-test "compiler ignores legacy @abbrev on non-def terms" {
+test "compiler ignores plain doc comments on terms" {
     const mm0_src =
         \\sort nat;
-        \\--| @abbrev
+        \\--| zero is the base natural number constructor
         \\term zero: nat;
     ;
 
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try compiler.check();
+}
+
+test "compiler rejects unknown term annotations" {
+    const mm0_src =
+        \\sort nat;
+        \\--| @bogus
+        \\term zero: nat;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(error.UnknownTermAnnotation, compiler.check());
 }
 
 test "compiler env converts rules into binder-indexed templates" {
@@ -3155,15 +3135,36 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_epi_comp_assign", .outcome = .pass },
     .{ .stem = "pass_def_unfold_then_rewrite_hyp", .outcome = .pass },
     .{ .stem = "pass_def_unfold_then_rewrite_view", .outcome = .pass },
-    .{ .stem = "pass_def_unfold_then_rewrite_recover", .outcome = .pass, },
+    .{
+        .stem = "pass_def_unfold_then_rewrite_recover",
+        .outcome = .pass,
+    },
     .{ .stem = "pass_def_unfold_then_acui_concl", .outcome = .pass },
     .{ .stem = "pass_def_unfold_then_acui_hyp", .outcome = .pass },
-    .{ .stem = "pass_def_unfold_then_rewrite_abstract", .outcome = .pass, },
-    .{ .stem = "pass_def_unfold_then_rewrite_abstract_hyp", .outcome = .pass, },
-    .{ .stem = "pass_def_unfold_then_full_acui_concl", .outcome = .pass, },
-    .{ .stem = "pass_def_unfold_then_full_acui_hyp", .outcome = .pass, },
-    .{ .stem = "pass_def_unfold_then_full_acui_abstract", .outcome = .pass, },
-    .{ .stem = "pass_def_unfold_then_full_acui_abstract_hyp", .outcome = .pass, },
+    .{
+        .stem = "pass_def_unfold_then_rewrite_abstract",
+        .outcome = .pass,
+    },
+    .{
+        .stem = "pass_def_unfold_then_rewrite_abstract_hyp",
+        .outcome = .pass,
+    },
+    .{
+        .stem = "pass_def_unfold_then_full_acui_concl",
+        .outcome = .pass,
+    },
+    .{
+        .stem = "pass_def_unfold_then_full_acui_hyp",
+        .outcome = .pass,
+    },
+    .{
+        .stem = "pass_def_unfold_then_full_acui_abstract",
+        .outcome = .pass,
+    },
+    .{
+        .stem = "pass_def_unfold_then_full_acui_abstract_hyp",
+        .outcome = .pass,
+    },
     .{ .stem = "pass_normalize", .outcome = .pass },
     .{ .stem = "pass_normalize_nested", .outcome = .pass },
     .{ .stem = "pass_normalize_identity", .outcome = .pass },
@@ -3192,9 +3193,6 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "demo_lk_exists_mono", .outcome = .pass },
     .{ .stem = "demo_calculus_product_rule", .outcome = .pass },
     .{ .stem = "demo_category_pullback", .outcome = .pass },
-    .{ .stem = "demo_category_pullback_legacy_abbrev_mono", .outcome = .pass },
-    .{ .stem = "demo_category_pullback_legacy_abbrev_pullback", .outcome = .pass },
-    .{ .stem = "demo_category_pullback_legacy_abbrev_both", .outcome = .pass },
     .{ .stem = "demo_category_pullback_unfold", .outcome = .pass },
     .{ .stem = "demo_category_pullback_unfold_2", .outcome = .pass },
     .{ .stem = "demo_category_pullback_unfold_3", .outcome = .pass },
@@ -3252,7 +3250,6 @@ const proof_cases = [_]ProofCase{
     },
     .{ .stem = "fail_acui_cross_side_leftover_def", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_ax", .outcome = .pass },
-    .{ .stem = "pass_legacy_abbrev_on_nondef", .outcome = .pass },
     .{
         .stem = "fail_infer_mismatch",
         .outcome = .{ .fail = error.UnifyMismatch },

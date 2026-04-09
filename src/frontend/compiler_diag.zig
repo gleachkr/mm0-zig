@@ -103,6 +103,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.AbstractNoPlugOccurrence => "@abstract could not find the plug pair in the source exprs",
         error.AbstractConflict => "@abstract found a context that conflicts with the target binder",
         error.AbstractStructureMismatch => "@abstract source exprs do not match outside the plug pair",
+        error.UnknownTermAnnotation => "unknown term-level annotation",
         error.DummyAnnotationRemoved => "@dummy was removed; use @fresh instead",
         error.InvalidFreshAnnotation => "@fresh expects exactly one real rule binder name",
         error.UnknownFreshBinder => "@fresh target must be a real rule binder",
