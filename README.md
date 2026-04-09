@@ -1,6 +1,6 @@
-# mm0-zig
+# Aufbau
 
-A Metamath Zero (MM0/MMB) toolkit written in Zig.
+Aufbau is a Metamath Zero (MM0/MMB) toolkit written in Zig.
 
 ## Usage
 
@@ -10,7 +10,7 @@ Verifier:
 
 Compiler:
 
-`mm0-zigc compile INPUT.mm0 INPUT.proof OUTPUT.mmb`
+`abc compile INPUT.mm0 INPUT.auf OUTPUT.mmb`
 
 ## Building
 
@@ -18,7 +18,7 @@ The shared logic lives in the reusable Zig module in `src/lib.zig`.
 There are two binaries built on top of it:
 
 - `mm0-zig` in `src/bin/verifier/`
-- `mm0-zigc` in `src/bin/compiler/`
+- `abc` in `src/bin/compiler/`
 
 Build both with:
 
@@ -70,7 +70,7 @@ The harness builds with repo-local Zig caches:
 ## Status
 
 - Verifier: working against the current MM0/MMB specs.
-- Compiler: supports the source proof format in `specs/proof.md`,
+- Compiler: supports the Aufbau script format in `specs/proof.md`,
   omitted-binder inference, `@view` / `@recover` / `@abstract` /
   `@fresh`, and mixed rewrite / structural normalization.
 - Web demo: ships several proof-case fixtures from `tests/proof_cases`.

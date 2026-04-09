@@ -10,11 +10,11 @@ applications that the verifier checks in the usual way.
 
 ### Axiom instantiation
 
-Every proof line in the proof script applies a named rule — an axiom or a
-previously proved theorem — to produce a new assertion. Before the rewrite
-system enters the picture, the compiler needs to determine the *concrete
-arguments* to that rule application: what expressions to substitute for each
-binder declared by the rule.
+Every proof line in the Aufbau script applies a named rule — an axiom
+or a previously proved theorem — to produce a new assertion. Before
+the rewrite system enters the picture, the compiler needs to determine
+the *concrete arguments* to that rule application: what expressions to
+substitute for each binder declared by the rule.
 
 There are four mechanisms that can supply these arguments, and they compose:
 

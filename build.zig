@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
     compiler_module.addImport("mm0", mm0_lib);
 
     const compiler_exe = b.addExecutable(.{
-        .name = "mm0-zigc",
+        .name = "abc",
         .root_module = compiler_module,
     });
     b.installArtifact(compiler_exe);
@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) void {
     compiler_wasm_module.addImport("mm0", mm0_wasm_lib);
 
     const compiler_wasm = b.addExecutable(.{
-        .name = "mm0-zigc-web",
+        .name = "abc-web",
         .root_module = compiler_wasm_module,
     });
     compiler_wasm.entry = .disabled;
@@ -100,72 +100,72 @@ pub fn build(b: *std.Build) void {
         "web-demo/fixtures/hilbert.mm0",
     );
     const install_hilbert_proof = b.addInstallFile(
-        b.path("tests/proof_cases/hilbert.proof"),
-        "web-demo/fixtures/hilbert.proof",
+        b.path("tests/proof_cases/hilbert.auf"),
+        "web-demo/fixtures/hilbert.auf",
     );
     const install_hilbert_russell_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/hilbert_russell.mm0"),
         "web-demo/fixtures/hilbert_russell.mm0",
     );
     const install_hilbert_russell_proof = b.addInstallFile(
-        b.path("tests/proof_cases/hilbert_russell.proof"),
-        "web-demo/fixtures/hilbert_russell.proof",
+        b.path("tests/proof_cases/hilbert_russell.auf"),
+        "web-demo/fixtures/hilbert_russell.auf",
     );
     const install_prop_cnf_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/demo_prop_cnf.mm0"),
         "web-demo/fixtures/demo_prop_cnf.mm0",
     );
     const install_prop_cnf_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_prop_cnf.proof"),
-        "web-demo/fixtures/demo_prop_cnf.proof",
+        b.path("tests/proof_cases/demo_prop_cnf.auf"),
+        "web-demo/fixtures/demo_prop_cnf.auf",
     );
     const install_nd_em_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/demo_nd_excluded_middle.mm0"),
         "web-demo/fixtures/demo_nd_excluded_middle.mm0",
     );
     const install_nd_em_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_nd_excluded_middle.proof"),
-        "web-demo/fixtures/demo_nd_excluded_middle.proof",
+        b.path("tests/proof_cases/demo_nd_excluded_middle.auf"),
+        "web-demo/fixtures/demo_nd_excluded_middle.auf",
     );
     const install_seq_peirce_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/demo_seq_peirce.mm0"),
         "web-demo/fixtures/demo_seq_peirce.mm0",
     );
     const install_seq_peirce_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_seq_peirce.proof"),
-        "web-demo/fixtures/demo_seq_peirce.proof",
+        b.path("tests/proof_cases/demo_seq_peirce.auf"),
+        "web-demo/fixtures/demo_seq_peirce.auf",
     );
     const install_lk_exists_mono_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/demo_lk_exists_mono.mm0"),
         "web-demo/fixtures/demo_lk_exists_mono.mm0",
     );
     const install_lk_exists_mono_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_lk_exists_mono.proof"),
-        "web-demo/fixtures/demo_lk_exists_mono.proof",
+        b.path("tests/proof_cases/demo_lk_exists_mono.auf"),
+        "web-demo/fixtures/demo_lk_exists_mono.auf",
     );
     const install_quant_nd_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/quant_nd.mm0"),
         "web-demo/fixtures/quant_nd.mm0",
     );
     const install_quant_nd_proof = b.addInstallFile(
-        b.path("tests/proof_cases/quant_nd.proof"),
-        "web-demo/fixtures/quant_nd.proof",
+        b.path("tests/proof_cases/quant_nd.auf"),
+        "web-demo/fixtures/quant_nd.auf",
     );
     const install_calculus_product_rule_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/demo_calculus_product_rule.mm0"),
         "web-demo/fixtures/demo_calculus_product_rule.mm0",
     );
     const install_calculus_product_rule_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_calculus_product_rule.proof"),
-        "web-demo/fixtures/demo_calculus_product_rule.proof",
+        b.path("tests/proof_cases/demo_calculus_product_rule.auf"),
+        "web-demo/fixtures/demo_calculus_product_rule.auf",
     );
     const install_category_pullback_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/demo_category_pullback.mm0"),
         "web-demo/fixtures/demo_category_pullback.mm0",
     );
     const install_category_pullback_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_category_pullback.proof"),
-        "web-demo/fixtures/demo_category_pullback.proof",
+        b.path("tests/proof_cases/demo_category_pullback.auf"),
+        "web-demo/fixtures/demo_category_pullback.auf",
     );
     web_demo_step.dependOn(&install_compiler_wasm.step);
     web_demo_step.dependOn(&install_verifier_wasm.step);
@@ -197,7 +197,7 @@ pub fn build(b: *std.Build) void {
 
     const run_compiler_step = b.step(
         "run-compiler",
-        "Run the mm0-zig compiler",
+        "Run the abc compiler",
     );
     const run_compiler_cmd = b.addRunArtifact(compiler_exe);
     run_compiler_step.dependOn(&run_compiler_cmd.step);

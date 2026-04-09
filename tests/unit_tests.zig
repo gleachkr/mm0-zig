@@ -2302,7 +2302,7 @@ test "compiler emits a valid hidden-dummy targeted unfold proof" {
     const proof_src = try readProofCaseFile(
         allocator,
         "pass_def_unfold_dummy",
-        "proof",
+        proof_case_ext,
     );
     defer allocator.free(proof_src);
 
@@ -2324,7 +2324,7 @@ test "compiler handles normalize-plus-unfold hidden-dummy proof" {
     const proof_src = try readProofCaseFile(
         allocator,
         "pass_def_hidden_dummy_all_elim_ctx_unfold",
-        "proof",
+        proof_case_ext,
     );
     defer allocator.free(proof_src);
 
@@ -2994,7 +2994,7 @@ test "compiler normalizes conclusions then transports through defs" {
     const proof_src = try readProofCaseFile(
         allocator,
         "pass_normalize_def_transport_concl",
-        "proof",
+        proof_case_ext,
     );
     defer allocator.free(proof_src);
 
@@ -3215,6 +3215,8 @@ fn knownFailReason(stem: []const u8) ?[]const u8 {
 fn unsupportedReason(stem: []const u8) ?[]const u8 {
     return lookupProofCaseReason(&unsupported_proof_cases, stem);
 }
+
+const proof_case_ext = "auf";
 
 const proof_cases = [_]ProofCase{
     .{ .stem = "pass_keep", .outcome = .pass },
@@ -3640,7 +3642,11 @@ test "compiler proof cases from files" {
         const mm0_src = try readProofCaseFile(allocator, case.stem, "mm0");
         defer allocator.free(mm0_src);
 
-        const proof_src = try readProofCaseFile(allocator, case.stem, "proof");
+        const proof_src = try readProofCaseFile(
+            allocator,
+            case.stem,
+            proof_case_ext,
+        );
         defer allocator.free(proof_src);
 
         var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
@@ -3727,7 +3733,11 @@ test "compiler emits name, var, and hyp index tables" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(allocator, "hilbert", "mm0");
     defer allocator.free(mm0_src);
-    const proof_src = try readProofCaseFile(allocator, "hilbert", "proof");
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "hilbert",
+        proof_case_ext,
+    );
     defer allocator.free(proof_src);
 
     var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
@@ -3775,7 +3785,7 @@ test "compiler records theorem-local fresh vars in theorem var table" {
     const proof_src = try readProofCaseFile(
         allocator,
         "pass_fresh_hole",
-        "proof",
+        proof_case_ext,
     );
     defer allocator.free(proof_src);
 
@@ -3815,7 +3825,7 @@ test "compiler reuses @fresh pool vars across proof lines" {
     const proof_src = try readProofCaseFile(
         allocator,
         "pass_fresh_reuse",
-        "proof",
+        proof_case_ext,
     );
     defer allocator.free(proof_src);
 

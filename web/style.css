@@ -127,7 +127,6 @@ button:focus-visible {
 .brand {
   color: var(--muted);
   letter-spacing: 0.08em;
-  text-transform: lowercase;
 }
 
 .tab-bar {

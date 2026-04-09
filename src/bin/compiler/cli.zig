@@ -22,7 +22,7 @@ pub fn usage() !void {
 
     try stdout.writeAll(
         "Usage:\n" ++
-            "  mm0-zigc compile INPUT.mm0 INPUT.proof OUTPUT.mmb\n" ++
+            "  abc compile INPUT.mm0 INPUT.auf OUTPUT.mmb\n" ++
             "\nOptions:\n" ++
             "  --debug SYSTEMS  Enable debug output (comma-separated:\n" ++
             "                   inference,views,unfolding,normalization,emission,check,all)\n",

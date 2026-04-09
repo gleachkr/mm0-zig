@@ -6,53 +6,53 @@ import { linter, setDiagnostics } from "@codemirror/lint";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const themeKey = "mm0-zig-theme";
+const themeKey = "aufbau-theme";
 
 const examples = {
   hilbert: {
     label: "hilbert",
     mm0: "./fixtures/hilbert.mm0",
-    proof: "./fixtures/hilbert.proof",
+    proof: "./fixtures/hilbert.auf",
   },
   hilbert_russell: {
     label: "russell",
     mm0: "./fixtures/hilbert_russell.mm0",
-    proof: "./fixtures/hilbert_russell.proof",
+    proof: "./fixtures/hilbert_russell.auf",
   },
   demo_prop_cnf: {
     label: "prop cnf",
     mm0: "./fixtures/demo_prop_cnf.mm0",
-    proof: "./fixtures/demo_prop_cnf.proof",
+    proof: "./fixtures/demo_prop_cnf.auf",
   },
   demo_nd_excluded_middle: {
     label: "nd excluded middle",
     mm0: "./fixtures/demo_nd_excluded_middle.mm0",
-    proof: "./fixtures/demo_nd_excluded_middle.proof",
+    proof: "./fixtures/demo_nd_excluded_middle.auf",
   },
   demo_seq_peirce: {
     label: "seq peirce",
     mm0: "./fixtures/demo_seq_peirce.mm0",
-    proof: "./fixtures/demo_seq_peirce.proof",
+    proof: "./fixtures/demo_seq_peirce.auf",
   },
   demo_lk_exists_mono: {
     label: "lk exists mono",
     mm0: "./fixtures/demo_lk_exists_mono.mm0",
-    proof: "./fixtures/demo_lk_exists_mono.proof",
+    proof: "./fixtures/demo_lk_exists_mono.auf",
   },
   quant_nd: {
     label: "quant nd",
     mm0: "./fixtures/quant_nd.mm0",
-    proof: "./fixtures/quant_nd.proof",
+    proof: "./fixtures/quant_nd.auf",
   },
   demo_calculus_product_rule: {
     label: "calculus product rule",
     mm0: "./fixtures/demo_calculus_product_rule.mm0",
-    proof: "./fixtures/demo_calculus_product_rule.proof",
+    proof: "./fixtures/demo_calculus_product_rule.auf",
   },
   demo_category_pullback: {
     label: "category pullback",
     mm0: "./fixtures/demo_category_pullback.mm0",
-    proof: "./fixtures/demo_category_pullback.proof",
+    proof: "./fixtures/demo_category_pullback.auf",
   },
 };
 
@@ -214,7 +214,7 @@ async function main() {
     parent: ui.proofEditor,
     state: EditorState.create({
       doc: proofText,
-      extensions: makeExtensions("Proof script", true),
+      extensions: makeExtensions("Aufbau script", true),
     }),
   });
 

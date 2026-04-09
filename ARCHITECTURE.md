@@ -4,7 +4,7 @@ This project is a single Zig module, `src/lib.zig`, with several thin
 entrypoints built on top of it:
 
 - native verifier: `mm0-zig`
-- native compiler: `mm0-zigc`
+- native compiler: `abc`
 - wasm verifier for the web demo
 - wasm compiler for the web demo
 
@@ -18,7 +18,7 @@ There are three closely related subsystems:
 
 1. MMB parsing
 2. MMB verification
-3. MM0 + proof-script compilation to MMB
+3. MM0 + Aufbau-script compilation to MMB
 
 The verifier and compiler are intentionally not separate codebases. The
 compiler leans on the verifier's data model and on MMB's operational
@@ -30,7 +30,7 @@ already trust.
 `build.zig` produces four executables from the same shared module:
 
 - `src/bin/verifier/main.zig` → native `mm0-zig`
-- `src/bin/compiler/main.zig` → native `mm0-zigc`
+- `src/bin/compiler/main.zig` → native `abc`
 - `src/bin/verifier/wasm.zig` → web verifier wasm
 - `src/bin/compiler/wasm.zig` → web compiler wasm
 
@@ -45,7 +45,7 @@ The native CLIs are thin wrappers:
 
 - `src/bin/verifier/cli.zig` reads an aligned `.mmb` file, reads MM0
   source from stdin, and runs `VerificationSession`
-- `src/bin/compiler/cli.zig` reads `.mm0` and `.proof`, runs the
+- `src/bin/compiler/cli.zig` reads `.mm0` and `.auf`, runs the
   frontend, and writes the resulting `.mmb`
 
 The wasm entrypoints export small C-style functions for buffer
@@ -181,11 +181,11 @@ MM0 file.
 The following layers are intentionally outside the kernel trust
 boundary:
 
-- source proof parsing
+- Aufbau script parsing
 - theorem argument inference
 - rewrite automation and normalization
 - view recovery and derived bindings
-- MMB generation from source proofs
+- MMB generation from Aufbau scripts
 
 These layers are still useful and heavily tested, but they are not part
 of the small auditable core.
@@ -264,7 +264,7 @@ convenience.
 
 ### Statement-order lockstep
 
-The compiler processes the `.mm0` file and the source proof file in
+The compiler processes the `.mm0` file and the Aufbau script in
 statement order. It does not build a separate global proof database.
 Instead, it streams through declarations, and when it encounters a
 statement it either records metadata immediately or, for a theorem,
@@ -334,9 +334,10 @@ At a high level it does this:
 This file is the best place to start if you want to understand the
 compiler's control flow.
 
-### Proof-script parsing
+### Aufbau-script parsing
 
-`src/frontend/proof_script.zig` parses the textual proof format.
+`src/frontend/proof_script.zig` parses the textual Aufbau script
+format.
 
 A proof block is either:
 
