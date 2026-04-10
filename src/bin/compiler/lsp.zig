@@ -699,6 +699,7 @@ test "uri path roundtrip" {
     defer allocator.free(uri);
 
     const roundtrip = try uriToPath(allocator, uri);
+    defer allocator.free(roundtrip);
     try std.testing.expectEqualStrings(path, roundtrip);
 }
 

@@ -224,6 +224,19 @@ pub fn build(b: *std.Build) void {
     });
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
+    const lsp_test_module = b.createModule(.{
+        .root_source_file = b.path("src/bin/compiler/lsp.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lsp_test_module.addImport("mm0", mm0_lib);
+    lsp_test_module.addImport("lsp", lsp_module);
+
+    const lsp_tests = b.addTest(.{
+        .root_module = lsp_test_module,
+    });
+    const run_lsp_tests = b.addRunArtifact(lsp_tests);
+
     const integration_test_module = b.createModule(.{
         .root_source_file = b.path("tests/integration_examples.zig"),
         .target = target,
@@ -238,6 +251,7 @@ pub fn build(b: *std.Build) void {
 
     const unit_step = b.step("test-unit", "Run unit tests");
     unit_step.dependOn(&run_unit_tests.step);
+    unit_step.dependOn(&run_lsp_tests.step);
 
     const integration_step = b.step(
         "test-integration",
@@ -247,5 +261,6 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run all tests");
     test_step.dependOn(&run_unit_tests.step);
+    test_step.dependOn(&run_lsp_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 }
