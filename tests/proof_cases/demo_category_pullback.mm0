@@ -248,6 +248,9 @@ theorem comp_mono (f g: mor):
 theorem mono_cancel_left (f g: mor):
   $ mono (g ∘ f) ⊢ mono f $;
 
+theorem comp_epi (f g: mor):
+  $ epi f , epi g ⊢ epi (f ∘ g) $;
+
 theorem epi_cancel_right (f g: mor):
   $ epi (g ∘ f) ⊢ epi g $;
 
