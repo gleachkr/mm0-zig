@@ -1,6 +1,13 @@
+const std = @import("std");
 const Span = @import("../proof_script.zig").Span;
+const ProofScriptParser = @import("../proof_script.zig").Parser;
+const ProofLine = @import("../proof_script.zig").ProofLine;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const DiagScratch = @import("../diag_scratch.zig");
+const MathParseError = @import("../../trusted/parse.zig").MathParseError;
+const MathSpan = @import("../../trusted/parse.zig").MathSpan;
+const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const MM0Stmt = @import("../../trusted/parse.zig").MM0Stmt;
 
 pub const DiagnosticKind = enum {
     generic,
@@ -68,6 +75,344 @@ pub const Diagnostic = struct {
     span: ?Span = null,
     detail: DiagnosticDetail = .none,
 };
+
+pub fn setIfMissing(self: anytype, diag: Diagnostic) void {
+    if (self.last_diagnostic != null) return;
+    self.setDiagnostic(diag);
+}
+
+pub fn setProof(self: anytype, diag: Diagnostic) void {
+    var proof_diag = diag;
+    proof_diag.source = .proof;
+    self.setDiagnostic(proof_diag);
+}
+
+pub fn maybeSetProof(self: anytype, diag: Diagnostic) void {
+    const T = @TypeOf(self);
+    switch (@typeInfo(T)) {
+        .pointer => |ptr| {
+            if (@hasDecl(ptr.child, "setDiagnostic")) {
+                setProof(self, diag);
+            }
+        },
+        .@"struct" => {
+            if (@hasDecl(T, "setDiagnostic")) {
+                setProof(self, diag);
+            }
+        },
+        else => {},
+    }
+}
+
+pub fn mathSpanToSpan(span: MathSpan) Span {
+    return .{ .start = span.start, .end = span.end };
+}
+
+pub fn mathSpanToSpanOpt(span: ?MathSpan) ?Span {
+    return if (span) |value| mathSpanToSpan(value) else null;
+}
+
+pub fn mm0ParserDiagnostic(
+    parser: *const MM0Parser,
+    err: anyerror,
+) Diagnostic {
+    return .{
+        .kind = .generic,
+        .err = err,
+        .source = .mm0,
+        .name = parser.diagnosticName(),
+        .span = mathSpanToSpanOpt(parser.diagnosticSpan()),
+    };
+}
+
+pub fn mm0StatementDiagnostic(
+    parser: *const MM0Parser,
+    stmt: MM0Stmt,
+    err: anyerror,
+) Diagnostic {
+    return .{
+        .kind = .generic,
+        .err = err,
+        .source = .mm0,
+        .name = mm0StmtName(stmt),
+        .span = annotationDiagnosticSpan(parser, stmt, err) orelse
+            mm0StmtNameSpan(stmt),
+    };
+}
+
+pub fn proofParserDiagnostic(
+    proofs: *const ProofScriptParser,
+    fallback_theorem_name: ?[]const u8,
+    err: anyerror,
+) Diagnostic {
+    return .{
+        .kind = .generic,
+        .err = err,
+        .source = .proof,
+        .theorem_name = proofs.diagnosticBlockName() orelse
+            fallback_theorem_name,
+        .block_name = proofs.diagnosticBlockName(),
+        .span = proofs.diagnosticSpan(),
+    };
+}
+
+pub fn extraProofBlockDiagnostic(
+    block_name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .extra_proof_block,
+        .err = error.ExtraProofBlock,
+        .source = .proof,
+        .block_name = block_name,
+        .span = span,
+    };
+}
+
+pub fn missingProofBlockDiagnostic(
+    theorem_name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .missing_proof_block,
+        .err = error.MissingProofBlock,
+        .source = .mm0,
+        .theorem_name = theorem_name,
+        .span = span,
+    };
+}
+
+pub fn theoremNameMismatchDiagnostic(
+    theorem_name: []const u8,
+    block_name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .theorem_name_mismatch,
+        .err = error.TheoremNameMismatch,
+        .source = .proof,
+        .theorem_name = theorem_name,
+        .block_name = block_name,
+        .expected_name = theorem_name,
+        .span = span,
+    };
+}
+
+pub fn duplicateRuleNameDiagnostic(
+    name: []const u8,
+    span: ?Span,
+    source: DiagnosticSource,
+) Diagnostic {
+    return .{
+        .kind = .duplicate_rule_name,
+        .err = error.DuplicateRuleName,
+        .source = source,
+        .name = name,
+        .span = span,
+    };
+}
+
+pub fn theoremDiagnostic(
+    theorem_name: []const u8,
+    span: Span,
+    source: DiagnosticSource,
+    err: anyerror,
+) Diagnostic {
+    return .{
+        .kind = .generic,
+        .err = err,
+        .source = source,
+        .theorem_name = theorem_name,
+        .span = span,
+    };
+}
+
+pub fn proofBlockDiagnostic(
+    block_name: []const u8,
+    span: Span,
+    err: anyerror,
+) Diagnostic {
+    return .{
+        .kind = .generic,
+        .err = err,
+        .source = .proof,
+        .theorem_name = block_name,
+        .block_name = block_name,
+        .span = span,
+    };
+}
+
+pub fn proofMathTokenSpan(math_span: Span, token_span: MathSpan) Span {
+    const inner_start = math_span.start + 1;
+    return .{
+        .start = inner_start + token_span.start,
+        .end = inner_start + token_span.end,
+    };
+}
+
+pub fn proofMathParseDiagnostic(
+    parser: *MM0Parser,
+    kind: DiagnosticKind,
+    err: anyerror,
+    theorem_name: []const u8,
+    line_label: []const u8,
+    rule_name: []const u8,
+    name: ?[]const u8,
+    math_span: Span,
+) Diagnostic {
+    const diag = Diagnostic{
+        .kind = kind,
+        .err = err,
+        .source = .proof,
+        .theorem_name = theorem_name,
+        .line_label = line_label,
+        .rule_name = rule_name,
+        .name = name,
+        .span = math_span,
+    };
+    if (err != error.UnknownMathToken) return diag;
+
+    const math_err = parser.last_math_error orelse return diag;
+    return proofMathErrorDiagnostic(diag, math_err, math_span);
+}
+
+pub fn proofBindingDiagnosticSpan(
+    line: ProofLine,
+    binder_name: ?[]const u8,
+) Span {
+    return line.bindingSpan(binder_name) orelse line.ruleApplicationSpan();
+}
+
+pub fn setProofScratchDiagnosticIfPresent(
+    self: anytype,
+    scratch: *Scratch,
+    mark: Scratch.Mark,
+    env: *const GlobalEnv,
+    kind: DiagnosticKind,
+    err: anyerror,
+    theorem_name: []const u8,
+    line_label: ?[]const u8,
+    rule_name: ?[]const u8,
+    span: ?Span,
+) bool {
+    const detail = takeScratchDetail(
+        scratch,
+        mark,
+        env,
+        err,
+    ) orelse {
+        return false;
+    };
+    maybeSetProof(self, .{
+        .kind = kind,
+        .err = err,
+        .theorem_name = theorem_name,
+        .line_label = line_label,
+        .rule_name = rule_name,
+        .span = span,
+        .detail = detail,
+    });
+    return true;
+}
+
+fn proofMathErrorDiagnostic(
+    diag: Diagnostic,
+    math_err: MathParseError,
+    math_span: Span,
+) Diagnostic {
+    var result = diag;
+    switch (math_err) {
+        .unknown_token => |token| {
+            result.span = proofMathTokenSpan(math_span, token.span);
+            result.detail = .{
+                .unknown_math_token = .{
+                    .token = token.text,
+                },
+            };
+        },
+    }
+    return result;
+}
+
+fn mm0StmtName(stmt: MM0Stmt) ?[]const u8 {
+    return switch (stmt) {
+        .sort => |sort_stmt| sort_stmt.name,
+        .term => |term_stmt| term_stmt.name,
+        .assertion => |assertion| assertion.name,
+    };
+}
+
+fn mm0StmtNameSpan(stmt: MM0Stmt) Span {
+    return switch (stmt) {
+        .sort => |sort_stmt| mathSpanToSpan(sort_stmt.name_span),
+        .term => |term_stmt| mathSpanToSpan(term_stmt.name_span),
+        .assertion => |assertion| mathSpanToSpan(assertion.name_span),
+    };
+}
+
+fn firstAnnotationSpan(parser: *const MM0Parser) ?Span {
+    if (parser.last_annotation_spans.len == 0) return null;
+    return mathSpanToSpan(parser.last_annotation_spans[0]);
+}
+
+fn annotationDirective(ann: []const u8) ?[]const u8 {
+    if (ann.len == 0 or ann[0] != '@') return null;
+
+    var iter = std.mem.tokenizeAny(u8, ann, " \t\r\n");
+    return iter.next();
+}
+
+fn unknownTermAnnotationSpan(parser: *const MM0Parser) ?Span {
+    for (parser.last_annotations, parser.last_annotation_spans) |ann, span| {
+        const directive = annotationDirective(ann) orelse continue;
+        if (std.mem.eql(u8, directive, "@acui")) continue;
+        return mathSpanToSpan(span);
+    }
+    return firstAnnotationSpan(parser);
+}
+
+fn annotationDiagnosticSpan(
+    parser: *const MM0Parser,
+    stmt: MM0Stmt,
+    err: anyerror,
+) ?Span {
+    return switch (err) {
+        error.UnknownTermAnnotation => switch (stmt) {
+            .term => unknownTermAnnotationSpan(parser),
+            else => firstAnnotationSpan(parser),
+        },
+        error.DummyAnnotationRemoved,
+        error.InvalidFreshAnnotation,
+        error.UnknownFreshBinder,
+        error.DuplicateFreshBinder,
+        error.FreshRequiresBoundBinder,
+        error.FreshStrictSort,
+        error.FreshFreeSort,
+        error.FreshNoAvailableVar,
+        error.HiddenWitnessNoAvailableVar,
+        error.DuplicateViewAnnotation,
+        error.InvalidViewAnnotation,
+        error.ViewHypCountMismatch,
+        error.RecoverWithoutView,
+        error.InvalidRecoverAnnotation,
+        error.UnknownRecoverBinder,
+        error.RecoverTargetNotRuleBinder,
+        error.RecoverSortMismatch,
+        error.AbstractWithoutView,
+        error.InvalidAbstractAnnotation,
+        error.UnknownAbstractBinder,
+        error.AbstractTargetNotRuleBinder,
+        error.AbstractHoleSortMismatch,
+        error.AbstractPlugSortMismatch,
+        error.InvalidVarsAnnotation,
+        error.VarsStrictSort,
+        error.VarsFreeSort,
+        error.DuplicateVarsToken,
+        error.VarsTokenCollision,
+        => firstAnnotationSpan(parser),
+        else => null,
+    };
+}
 
 pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
     return switch (diag.kind) {
@@ -145,8 +490,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.FreshStrictSort => "@fresh cannot target a binder in a strict sort",
         error.FreshFreeSort => "@fresh cannot target a binder in a free sort",
         error.FreshNoAvailableVar => "@fresh could not find an available @vars token",
-        error.HiddenWitnessNoAvailableVar =>
-            "hidden def witness needed a fresh @vars token, but none was " ++
+        error.HiddenWitnessNoAvailableVar => "hidden def witness needed a fresh @vars token, but none was " ++
             "available",
         error.InvalidVarsAnnotation => "@vars expects one or more raw math tokens",
         error.VarsStrictSort => "@vars cannot be used on a strict sort",
@@ -158,6 +502,23 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.UnresolvedDummyWitness => "matched rule through hidden def structure, but omitted " ++
             "binders contain unresolved hidden-dummy witnesses",
         error.MissingCongruenceRule => "missing congruence rule needed for normalization",
+        error.ExpectedIdentifier,
+        error.ExpectedIdent,
+        => "expected identifier",
+        error.ExpectedNumber => "expected number",
+        error.ExpectedMathString,
+        error.ExpectedMathStr,
+        => "expected $...$ math string",
+        error.ExpectedKeyword => "expected keyword",
+        error.ExpectedString => "expected quoted string",
+        error.UnexpectedCharacter,
+        error.UnexpectedChar,
+        => "unexpected character",
+        error.ExpectedLineEnd => "expected end of line",
+        error.UnterminatedMathString,
+        error.UnterminatedMathStr,
+        => "unterminated $...$ math string",
+        error.UnterminatedString => "unterminated string",
         else => @errorName(err),
     };
 }

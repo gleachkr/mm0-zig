@@ -100,6 +100,13 @@ test "compiler rejects unknown term annotations" {
 
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.UnknownTermAnnotation, compiler.check());
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnknownTermAnnotation, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("zero", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("@bogus", mm0_src[span.start..span.end]);
 }
 
 test "compiler env converts rules into binder-indexed templates" {
@@ -294,6 +301,134 @@ test "compiler records proof diagnostics for failing proof lines" {
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
 }
 
+test "compiler pinpoints wrong reference count at the ref list" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom keep (a: wff): $ a $ > $ a $;
+        \\theorem bad_refs (a: wff): $ a $ > $ a $;
+    ;
+    const proof_src =
+        \\bad_refs
+        \\--------
+        \\l1: $ a $ by keep []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.RefCountMismatch, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.RefCountMismatch, diag.err);
+    try std.testing.expectEqualStrings("bad_refs", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("keep", diag.rule_name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("[]", proof_src[span.start..span.end]);
+}
+
+test "compiler pinpoints duplicate proof labels" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem dup_label: $ top $;
+    ;
+    const proof_src =
+        \\dup_label
+        \\---------
+        \\l1: $ top $ by top_i []
+        \\l1: $ top $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.DuplicateLabel, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DuplicateLabel, diag.err);
+    try std.testing.expectEqualStrings("dup_label", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("l1", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("l1", proof_src[span.start..span.end]);
+}
+
+test "compiler pinpoints unknown proof rules" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem bad_rule: $ top $;
+    ;
+    const proof_src =
+        \\bad_rule
+        \\--------
+        \\l1: $ top $ by missing_rule []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.UnknownRule, compiler.check());
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnknownRule, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
+    try std.testing.expectEqualStrings("bad_rule", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("missing_rule", diag.rule_name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "missing_rule",
+        proof_src[span.start..span.end],
+    );
+}
+
+test "compiler pinpoints proof parser identifier errors" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad_parse: $ top $;
+    ;
+    const proof_src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.ExpectedIdentifier, compiler.check());
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.ExpectedIdentifier, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
+    try std.testing.expectEqualStrings("bad_parse", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("bad_parse", diag.block_name.?);
+    try std.testing.expectEqualStrings(
+        "expected identifier",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("[", proof_src[span.start..span.end]);
+}
+
 test "compiler check diagnostics are marked as mm0 source" {
     const mm0_src =
         \\provable sort wff;
@@ -308,6 +443,29 @@ test "compiler check diagnostics are marked as mm0 source" {
     const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DuplicateRuleName, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("dup", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("dup", mm0_src[span.start..span.end]);
+}
+
+test "compiler pinpoints mm0 parser identifier errors" {
+    const mm0_src =
+        \\provable sort wff;
+        \\theorem [: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(error.ExpectedIdent, compiler.check());
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.ExpectedIdent, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings(
+        "expected identifier",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("[", mm0_src[span.start..span.end]);
 }
 
 test "compiler records inference diagnostics for omitted arguments" {
@@ -341,7 +499,11 @@ test "compiler records inference diagnostics for omitted arguments" {
     try std.testing.expectEqualStrings("keep_bad", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("ax_keep", diag.rule_name.?);
-    try std.testing.expect(diag.span != null);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "ax_keep",
+        proof_src[span.start..span.end],
+    );
 }
 
 test "compiler pinpoints unknown math tokens in proof assertions" {
@@ -411,12 +573,121 @@ test "compiler reports which binder assignment is missing" {
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("ax_vacuous", diag.rule_name.?);
     try std.testing.expectEqualStrings("b", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "(a := $ a $)",
+        proof_src[span.start..span.end],
+    );
     switch (diag.detail) {
         .missing_binder_assignment => |detail| {
             try std.testing.expectEqualStrings("b", detail.binder_name);
         },
         else => return error.ExpectedMissingBinderDetail,
     }
+}
+
+test "compiler points binding validation errors at explicit assignments" {
+    const mm0_src =
+        \\sort obj;
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom use_obj (x: obj): $ top $;
+        \\theorem target (x: obj): $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by use_obj (x := $ top $)
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(mm0_src, arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(
+        arena.allocator(),
+    );
+    defer theorem_vars.deinit();
+
+    const assertion = blk: {
+        while (try parser.next()) |stmt| {
+            try env.addStmt(stmt);
+            switch (stmt) {
+                .assertion => |value| {
+                    if (std.mem.eql(u8, value.name, "target")) {
+                        break :blk value;
+                    }
+                },
+                else => {},
+            }
+        }
+        return error.MissingAssertion;
+    };
+    const rule_id = env.getRuleId("use_obj") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+
+    try theorem.seedAssertion(assertion);
+    const parsed_binding = try parser.parseFormulaText(" top ", &theorem_vars);
+    const binding_expr = try theorem.internParsedExpr(parsed_binding);
+
+    const binding_start = std.mem.indexOf(u8, proof_src, "(x := $ top $)") orelse {
+        return error.MissingBindingText;
+    };
+    const binding_span = ProofScript.Span{
+        .start = binding_start,
+        .end = binding_start + "(x := $ top $)".len,
+    };
+    const line = ProofScript.ProofLine{
+        .label = "l1",
+        .label_span = .{ .start = 15, .end = 17 },
+        .assertion = .{
+            .text = " top ",
+            .span = .{ .start = 19, .end = 26 },
+        },
+        .rule_name = "use_obj",
+        .rule_span = .{ .start = 30, .end = 37 },
+        .binding_list_span = binding_span,
+        .arg_bindings = &.{.{
+            .name = "x",
+            .formula = .{
+                .text = " top ",
+                .span = .{ .start = 0, .end = 0 },
+            },
+            .span = binding_span,
+        }},
+        .refs_span = null,
+        .refs = &.{},
+        .span = .{ .start = 15, .end = proof_src.len },
+    };
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.SortMismatch,
+        CompilerInference.validateResolvedBindings(
+            &compiler,
+            &env,
+            &theorem,
+            assertion,
+            line,
+            rule,
+            &.{binding_expr},
+        ),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.SortMismatch, diag.err);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "(x := $ top $)",
+        proof_src[span.start..span.end],
+    );
 }
 
 test "compiler reports missing congruence rules for normalization" {
@@ -468,6 +739,11 @@ test "compiler reports missing congruence rules for normalization" {
     );
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("all_elim", diag.rule_name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "$ Q -> Q $",
+        proof_src[span.start..span.end],
+    );
     switch (diag.detail) {
         .missing_congruence_rule => |detail| {
             try std.testing.expectEqual(.missing_rule, detail.reason);
@@ -595,12 +871,16 @@ test "strict replay does not open defs during omitted inference" {
     const ref_exprs = [_]FrontendExpr.ExprId{};
     const line = ProofScript.ProofLine{
         .label = "l1",
+        .label_span = .{ .start = 0, .end = 0 },
         .assertion = .{
             .text = " a -> a ",
             .span = .{ .start = 0, .end = 0 },
         },
         .rule_name = "ax_id",
+        .rule_span = .{ .start = 0, .end = 0 },
+        .binding_list_span = null,
         .arg_bindings = &.{},
+        .refs_span = null,
         .refs = &.{},
         .span = .{ .start = 0, .end = 0 },
     };

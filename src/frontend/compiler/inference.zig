@@ -11,6 +11,7 @@ const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
 const Expr = @import("../../trusted/expressions.zig").Expr;
 const UnifyReplay = @import("../../trusted/unify_replay.zig");
 const ProofLine = @import("../proof_script.zig").ProofLine;
+const Span = @import("../proof_script.zig").Span;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const NormalizeSpec = @import("../rewrite_registry.zig").NormalizeSpec;
 const Normalizer = @import("../normalizer.zig").Normalizer;
@@ -29,12 +30,6 @@ const CheckedIr = @import("./checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const Emit = @import("./emit.zig");
-
-fn setProofDiagnostic(self: anytype, diag: Diagnostic) void {
-    var proof_diag = diag;
-    proof_diag.source = .proof;
-    self.setDiagnostic(proof_diag);
-}
 
 /// Result of an advanced rule match attempt.
 pub const RuleMatchResult = union(enum) {
@@ -292,36 +287,6 @@ fn hypMarkedForNormalize(norm_spec: ?NormalizeSpec, hyp_idx: usize) bool {
         if (marked == hyp_idx) return true;
     }
     return false;
-}
-
-fn setScratchDiagnosticIfPresent(
-    self: anytype,
-    scratch: *CompilerDiag.Scratch,
-    mark: CompilerDiag.Scratch.Mark,
-    env: *const GlobalEnv,
-    kind: CompilerDiag.DiagnosticKind,
-    err: anyerror,
-    assertion: AssertionStmt,
-    line: ProofLine,
-) bool {
-    const detail = CompilerDiag.takeScratchDetail(
-        scratch,
-        mark,
-        env,
-        err,
-    ) orelse {
-        return false;
-    };
-    maybeSetDiagnostic(self, .{
-        .kind = kind,
-        .err = err,
-        .theorem_name = assertion.name,
-        .line_label = line.label,
-        .rule_name = line.rule_name,
-        .span = line.span,
-        .detail = detail,
-    });
-    return true;
 }
 
 fn matchRulePartNormalized(
@@ -669,13 +634,13 @@ pub fn inferBindings(
 ) ![]const ExprId {
     if (use_advanced_inference) {
         const rule_id = env.getRuleId(line.rule_name) orelse {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .unknown_rule,
                 .err = error.UnknownRule,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
-                .span = line.span,
+                .span = line.rule_span,
             });
             return error.UnknownRule;
         };
@@ -693,20 +658,20 @@ pub fn inferBindings(
             if (fresh_context) |fresh| {
                 view_seed_overrides =
                     try CompilerFresh.seedRecoverHolesFromVarsPool(
-                    allocator,
-                    fresh.parser,
-                    env,
-                    theorem,
-                    fresh.theorem_vars,
-                    fresh.sort_vars,
-                    line_expr,
-                    ref_exprs,
-                    partial_bindings,
-                    view.num_binders,
-                    view.binder_map,
-                    view.arg_infos,
-                    view.derived_bindings,
-                );
+                        allocator,
+                        fresh.parser,
+                        env,
+                        theorem,
+                        fresh.theorem_vars,
+                        fresh.sort_vars,
+                        line_expr,
+                        ref_exprs,
+                        partial_bindings,
+                        view.num_binders,
+                        view.binder_map,
+                        view.arg_infos,
+                        view.derived_bindings,
+                    );
             }
 
             const seeded = try allocator.dupe(?ExprId, partial_bindings);
@@ -812,15 +777,17 @@ pub fn inferBindings(
                 line_expr,
                 partial_bindings,
             )) catch |err| {
-            if (setScratchDiagnosticIfPresent(
+            if (CompilerDiag.setProofScratchDiagnosticIfPresent(
                 self,
                 scratch,
                 match_mark,
                 env,
                 .inference_failed,
                 err,
-                assertion,
-                line,
+                assertion.name,
+                line.label,
+                line.rule_name,
+                line.ruleApplicationSpan(),
             )) {
                 return err;
             }
@@ -843,13 +810,13 @@ pub fn inferBindings(
             },
             .no_match => {},
             .unresolved_dummy_witness => {
-                setProofDiagnostic(self, .{
+                CompilerDiag.setProof(self, .{
                     .kind = .inference_failed,
                     .err = error.UnresolvedDummyWitness,
                     .theorem_name = assertion.name,
                     .line_label = line.label,
                     .rule_name = line.rule_name,
-                    .span = line.span,
+                    .span = line.ruleApplicationSpan(),
                 });
                 return error.UnresolvedDummyWitness;
             },
@@ -872,13 +839,13 @@ pub fn inferBindings(
             ref_exprs,
             line_expr,
         ) catch |err| {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .inference_failed,
                 .err = err,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
-                .span = line.span,
+                .span = line.ruleApplicationSpan(),
             });
             return err;
         };
@@ -921,13 +888,13 @@ pub fn inferBindings(
                 line_expr,
             ) catch |transparent_err| blk: {
                 if (transparent_err == error.UnresolvedDummyWitness) {
-                    setProofDiagnostic(self, .{
+                    CompilerDiag.setProof(self, .{
                         .kind = .inference_failed,
                         .err = transparent_err,
                         .theorem_name = assertion.name,
                         .line_label = line.label,
                         .rule_name = line.rule_name,
-                        .span = line.span,
+                        .span = line.ruleApplicationSpan(),
                     });
                     return transparent_err;
                 }
@@ -946,13 +913,13 @@ pub fn inferBindings(
                 );
             }
         }
-        setProofDiagnostic(self, .{
+        CompilerDiag.setProof(self, .{
             .kind = .inference_failed,
             .err = err,
             .theorem_name = assertion.name,
             .line_label = line.label,
             .rule_name = line.rule_name,
-            .span = line.span,
+            .span = line.ruleApplicationSpan(),
         });
         return err;
     }
@@ -993,14 +960,14 @@ pub fn strictInferBindings(
     for (0..rule.args.len) |idx| {
         const binding = inference.uheap.items[idx] orelse {
             const binder_name = rule.arg_names[idx] orelse "_";
-            maybeSetDiagnostic(self, .{
+            CompilerDiag.maybeSetProof(self, .{
                 .kind = .missing_binder_assignment,
                 .err = error.MissingBinderAssignment,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .name = rule.arg_names[idx],
-                .span = line.span,
+                .span = line.binding_list_span orelse line.rule_span,
                 .detail = .{
                     .missing_binder_assignment = .{
                         .binder_name = binder_name,
@@ -1009,13 +976,24 @@ pub fn strictInferBindings(
             });
             return error.MissingBinderAssignment;
         };
-        try validateBindingExpr(
+        validateBindingExpr(
             env,
             theorem,
             assertion.args,
             rule.args[idx],
             binding,
-        );
+        ) catch |err| {
+            CompilerDiag.maybeSetProof(self, .{
+                .kind = .generic,
+                .err = err,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = rule.arg_names[idx],
+                .span = CompilerDiag.proofBindingDiagnosticSpan(line, rule.arg_names[idx]),
+            });
+            return err;
+        };
         bindings[idx] = binding;
     }
     if (!try bindingsRespectRuleDeps(
@@ -1026,26 +1004,17 @@ pub fn strictInferBindings(
         bindings,
     )) {
         allocator.free(bindings);
+        CompilerDiag.maybeSetProof(self, .{
+            .kind = .generic,
+            .err = error.DepViolation,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.ruleApplicationSpan(),
+        });
         return error.DepViolation;
     }
     return bindings;
-}
-
-fn maybeSetDiagnostic(self: anytype, diag: Diagnostic) void {
-    const T = @TypeOf(self);
-    switch (@typeInfo(T)) {
-        .pointer => |ptr| {
-            if (@hasDecl(ptr.child, "setDiagnostic")) {
-                setProofDiagnostic(self, diag);
-            }
-        },
-        .@"struct" => {
-            if (@hasDecl(T, "setDiagnostic")) {
-                setProofDiagnostic(self, diag);
-            }
-        },
-        else => {},
-    }
 }
 
 pub fn validateResolvedBindings(
@@ -1065,14 +1034,14 @@ pub fn validateResolvedBindings(
             rule.args[idx],
             binding,
         ) catch |err| {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .generic,
                 .err = err,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .name = rule.arg_names[idx],
-                .span = line.span,
+                .span = CompilerDiag.proofBindingDiagnosticSpan(line, rule.arg_names[idx]),
             });
             return err;
         };
@@ -1084,13 +1053,13 @@ pub fn validateResolvedBindings(
         rule.args,
         bindings,
     )) {
-        setProofDiagnostic(self, .{
+        CompilerDiag.setProof(self, .{
             .kind = .generic,
             .err = error.DepViolation,
             .theorem_name = assertion.name,
             .line_label = line.label,
             .rule_name = line.rule_name,
-            .span = line.span,
+            .span = line.ruleApplicationSpan(),
         });
         return error.DepViolation;
     }

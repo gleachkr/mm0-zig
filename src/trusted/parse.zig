@@ -16,6 +16,7 @@ pub const MM0Stmt = union(enum) {
 
 pub const SortStmt = struct {
     name: []const u8,
+    name_span: MathSpan = .{ .start = 0, .end = 0 },
     modifiers: Sort,
 };
 
@@ -26,6 +27,7 @@ pub const AssertionKind = enum {
 
 pub const TermStmt = struct {
     name: []const u8,
+    name_span: MathSpan = .{ .start = 0, .end = 0 },
     args: []const ArgInfo,
     arg_names: []const ?[]const u8,
     arg_exprs: []const *const Expr,
@@ -38,6 +40,7 @@ pub const TermStmt = struct {
 
 pub const AssertionStmt = struct {
     name: []const u8,
+    name_span: MathSpan = .{ .start = 0, .end = 0 },
     args: []const ArgInfo,
     arg_names: []const ?[]const u8,
     arg_exprs: []const *const Expr,
@@ -100,6 +103,11 @@ pub const MathSpan = struct {
 };
 
 pub const MathTokenInfo = struct {
+    text: []const u8,
+    span: MathSpan,
+};
+
+const IdentInfo = struct {
     text: []const u8,
     span: MathSpan,
 };
@@ -205,8 +213,13 @@ pub const MM0Parser = struct {
     // Annotations captured from `--|` comment lines. Accumulated between
     // statements and moved to `last_annotations` when a statement is yielded.
     pending_annotations: std.ArrayListUnmanaged([]const u8) = .{},
+    pending_annotation_spans: std.ArrayListUnmanaged(MathSpan) = .{},
     last_annotations: []const []const u8 = &.{},
+    last_annotation_spans: []const MathSpan = &.{},
     last_math_error: ?MathParseError = null,
+    current_decl_name: ?[]const u8 = null,
+    current_decl_name_span: ?MathSpan = null,
+    last_error_span: ?MathSpan = null,
 
     pub fn init(src: []const u8, allocator: std.mem.Allocator) MM0Parser {
         return .{
@@ -237,21 +250,87 @@ pub const MM0Parser = struct {
             self.last_annotations = self.pending_annotations.toOwnedSlice(
                 self.allocator,
             ) catch &.{};
+            self.last_annotation_spans =
+                self.pending_annotation_spans.toOwnedSlice(
+                    self.allocator,
+                ) catch &.{};
         } else {
             self.last_annotations = &.{};
+            self.last_annotation_spans = &.{};
         }
+    }
+
+    pub fn diagnosticName(self: *const MM0Parser) ?[]const u8 {
+        return self.current_decl_name;
+    }
+
+    pub fn diagnosticSpan(self: *const MM0Parser) ?MathSpan {
+        return self.last_error_span orelse self.current_decl_name_span;
+    }
+
+    fn resetDiagnosticContext(self: *MM0Parser) void {
+        self.last_math_error = null;
+        self.current_decl_name = null;
+        self.current_decl_name_span = null;
+        self.last_error_span = null;
+    }
+
+    fn currentTokenSpan(self: *const MM0Parser) ?MathSpan {
+        const start = @min(self.pos, self.src.len);
+        if (start >= self.src.len) return null;
+
+        var end = start + 1;
+        const ch = self.src[start];
+        if (isIdentStart(ch)) {
+            while (end < self.src.len and isIdentChar(self.src[end])) {
+                end += 1;
+            }
+        } else if (std.ascii.isDigit(ch)) {
+            while (end < self.src.len and std.ascii.isDigit(self.src[end])) {
+                end += 1;
+            }
+        }
+        return .{ .start = start, .end = end };
+    }
+
+    fn recordCurrentTokenError(self: *MM0Parser) void {
+        self.last_error_span = self.currentTokenSpan();
+    }
+
+    fn consumeIdentInfo(self: *MM0Parser) ?IdentInfo {
+        self.skipWhitespaceAndComments();
+        const start = self.pos;
+        const ident = self.peekIdent() orelse return null;
+        self.pos += ident.len;
+        const span = MathSpan{ .start = start, .end = self.pos };
+        self.skipWhitespaceAndComments();
+        return .{ .text = ident, .span = span };
+    }
+
+    fn consumeRequiredIdent(self: *MM0Parser) ![]const u8 {
+        const info = try self.consumeRequiredIdentInfo();
+        return info.text;
+    }
+
+    fn consumeRequiredIdentInfo(self: *MM0Parser) !IdentInfo {
+        return self.consumeIdentInfo() orelse {
+            self.recordCurrentTokenError();
+            return error.ExpectedIdent;
+        };
     }
 
     // Returns next public statement, while processing notation and coercion
     // declarations so later math strings are parsed with the correct grammar.
     pub fn next(self: *MM0Parser) !?MM0Stmt {
         while (true) {
+            self.resetDiagnosticContext();
             self.skipWhitespaceAndComments();
             if (self.pos >= self.src.len) return null;
 
             const word = self.peekIdent() orelse {
                 // Non-statement tokens: discard any pending annotations
                 self.pending_annotations.clearRetainingCapacity();
+                self.pending_annotation_spans.clearRetainingCapacity();
                 try self.skipToSemicolon();
                 continue;
             };
@@ -289,7 +368,10 @@ pub const MM0Parser = struct {
             if (std.mem.eql(u8, word, "pub")) {
                 _ = self.consumeIdent();
                 self.skipWhitespaceAndComments();
-                const next_word = self.peekIdent() orelse return error.ExpectedKeyword;
+                const next_word = self.peekIdent() orelse {
+                    self.recordCurrentTokenError();
+                    return error.ExpectedKeyword;
+                };
                 if (std.mem.eql(u8, next_word, "def")) {
                     self.flushAnnotations();
                     const stmt = try self.parseTermStmt(true);
@@ -300,47 +382,56 @@ pub const MM0Parser = struct {
                     const stmt = try self.parseAssertionStmt(.theorem, false);
                     return MM0Stmt{ .assertion = stmt };
                 }
+                self.recordCurrentTokenError();
                 return error.UnexpectedKeyword;
             }
             // Non-public declarations: annotations don't attach to these
             if (std.mem.eql(u8, word, "local")) {
                 self.pending_annotations.clearRetainingCapacity();
+                self.pending_annotation_spans.clearRetainingCapacity();
                 try self.skipToSemicolon();
                 continue;
             }
             if (std.mem.eql(u8, word, "delimiter")) {
                 self.pending_annotations.clearRetainingCapacity();
+                self.pending_annotation_spans.clearRetainingCapacity();
                 try self.parseDelimiterStmt();
                 continue;
             }
             if (std.mem.eql(u8, word, "prefix")) {
                 self.pending_annotations.clearRetainingCapacity();
+                self.pending_annotation_spans.clearRetainingCapacity();
                 try self.parseSimpleNotationStmt(.prefix);
                 continue;
             }
             if (std.mem.eql(u8, word, "infixl")) {
                 self.pending_annotations.clearRetainingCapacity();
+                self.pending_annotation_spans.clearRetainingCapacity();
                 try self.parseSimpleNotationStmt(.infixl);
                 continue;
             }
             if (std.mem.eql(u8, word, "infixr")) {
                 self.pending_annotations.clearRetainingCapacity();
+                self.pending_annotation_spans.clearRetainingCapacity();
                 try self.parseSimpleNotationStmt(.infixr);
                 continue;
             }
             if (std.mem.eql(u8, word, "notation")) {
                 self.pending_annotations.clearRetainingCapacity();
+                self.pending_annotation_spans.clearRetainingCapacity();
                 if (try self.parseBareNotationMarker()) continue;
                 try self.parseGeneralNotationStmt();
                 continue;
             }
             if (std.mem.eql(u8, word, "coercion")) {
                 self.pending_annotations.clearRetainingCapacity();
+                self.pending_annotation_spans.clearRetainingCapacity();
                 try self.parseCoercionStmt();
                 continue;
             }
 
             self.pending_annotations.clearRetainingCapacity();
+            self.pending_annotation_spans.clearRetainingCapacity();
             try self.skipToSemicolon();
         }
     }
@@ -349,7 +440,10 @@ pub const MM0Parser = struct {
         var modifiers = Sort{};
         while (true) {
             self.skipWhitespaceAndComments();
-            const word = self.peekIdent() orelse return error.ExpectedIdent;
+            const word = self.peekIdent() orelse {
+                self.recordCurrentTokenError();
+                return error.ExpectedIdent;
+            };
             if (std.mem.eql(u8, word, "pure")) {
                 _ = self.consumeIdent();
                 modifiers.pure = true;
@@ -364,28 +458,37 @@ pub const MM0Parser = struct {
                 modifiers.free = true;
             } else if (std.mem.eql(u8, word, "sort")) {
                 _ = self.consumeIdent();
-                self.skipWhitespaceAndComments();
-                const name = self.consumeIdent() orelse return error.ExpectedIdent;
-                self.skipWhitespaceAndComments();
+                const name_info = try self.consumeRequiredIdentInfo();
+                self.current_decl_name = name_info.text;
+                self.current_decl_name_span = name_info.span;
                 try self.expect(';');
-                if (self.sort_names.contains(name)) {
+                if (self.sort_names.contains(name_info.text)) {
+                    self.last_error_span = name_info.span;
                     return error.DuplicateSort;
                 }
                 const sort_id = try self.nextSortId();
-                try self.sort_names.put(name, sort_id);
+                try self.sort_names.put(name_info.text, sort_id);
                 try self.sort_infos.append(self.allocator, modifiers);
                 if (modifiers.provable) {
                     try self.registerProvableSort(sort_id);
                 }
-                return .{ .name = name, .modifiers = modifiers };
-            } else return error.UnexpectedKeyword;
+                return .{
+                    .name = name_info.text,
+                    .name_span = name_info.span,
+                    .modifiers = modifiers,
+                };
+            } else {
+                self.recordCurrentTokenError();
+                return error.UnexpectedKeyword;
+            }
         }
     }
 
     fn parseTermStmt(self: *MM0Parser, is_def: bool) !TermStmt {
         _ = self.consumeIdent();
-        self.skipWhitespaceAndComments();
-        const name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const name_info = try self.consumeRequiredIdentInfo();
+        self.current_decl_name = name_info.text;
+        self.current_decl_name_span = name_info.span;
 
         var ctx = BinderContext.init(self.allocator);
         self.skipWhitespaceAndComments();
@@ -416,10 +519,11 @@ pub const MM0Parser = struct {
             .args = term_args,
             .ret_sort = ret_sort,
         });
-        try self.term_names.put(name, term_id);
+        try self.term_names.put(name_info.text, term_id);
 
         return .{
-            .name = name,
+            .name = name_info.text,
+            .name_span = name_info.span,
             .args = arg_slice,
             .arg_names = arg_names,
             .arg_exprs = arg_exprs,
@@ -437,8 +541,9 @@ pub const MM0Parser = struct {
         is_local: bool,
     ) !AssertionStmt {
         _ = self.consumeIdent();
-        self.skipWhitespaceAndComments();
-        const name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const name_info = try self.consumeRequiredIdentInfo();
+        self.current_decl_name = name_info.text;
+        self.current_decl_name_span = name_info.span;
 
         var ctx = BinderContext.init(self.allocator);
         var hyps_rev: std.ArrayListUnmanaged(*const Expr) = .{};
@@ -456,7 +561,8 @@ pub const MM0Parser = struct {
         }
 
         return .{
-            .name = name,
+            .name = name_info.text,
+            .name_span = name_info.span,
             .args = try ctx.arg_infos.toOwnedSlice(self.allocator),
             .arg_names = try ctx.arg_names.toOwnedSlice(self.allocator),
             .arg_exprs = try ctx.arg_exprs.toOwnedSlice(self.allocator),
@@ -525,7 +631,7 @@ pub const MM0Parser = struct {
                 if (self.peek() == ':') break;
                 const is_dummy = self.peek() == '.';
                 if (is_dummy) self.pos += 1;
-                const ident = self.consumeIdent() orelse return error.ExpectedIdent;
+                const ident = try self.consumeRequiredIdent();
                 try names.append(self.allocator, ident);
                 try is_dummy_buf.append(self.allocator, is_dummy);
             }
@@ -592,7 +698,7 @@ pub const MM0Parser = struct {
         is_bound: bool,
     ) !ArgInfo {
         self.skipWhitespaceAndComments();
-        const sort_name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const sort_name = try self.consumeRequiredIdent();
         if (is_bound) {
             const bv_index = bound_names.len;
             return .{
@@ -618,7 +724,7 @@ pub const MM0Parser = struct {
         bound_names: []const []const u8,
     ) !ArgInfo {
         self.skipWhitespaceAndComments();
-        const sort_name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const sort_name = try self.consumeRequiredIdent();
 
         var deps: u55 = 0;
         while (true) {
@@ -627,7 +733,7 @@ pub const MM0Parser = struct {
             if (ch == '>' or ch == ';' or ch == '=' or ch == ')' or
                 ch == '}' or ch == 0)
                 break;
-            const dep_name = self.consumeIdent() orelse return error.ExpectedIdent;
+            const dep_name = try self.consumeRequiredIdent();
             deps |= self.lookupBoundDep(bound_names, dep_name);
         }
 
@@ -671,7 +777,7 @@ pub const MM0Parser = struct {
     ) !void {
         _ = self.consumeIdent();
         self.skipWhitespaceAndComments();
-        const name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const name = try self.consumeRequiredIdent();
         const term_id = self.term_names.get(name) orelse return error.UnknownTerm;
         const term = self.terms.items[term_id];
 
@@ -679,8 +785,11 @@ pub const MM0Parser = struct {
         try self.expect(':');
         const token = try self.readConstantToken();
         self.skipWhitespaceAndComments();
-        const kw = self.consumeIdent() orelse return error.ExpectedKeyword;
-        if (!std.mem.eql(u8, kw, "prec")) return error.ExpectedKeyword;
+        const kw_info = try self.consumeRequiredIdentInfo();
+        if (!std.mem.eql(u8, kw_info.text, "prec")) {
+            self.last_error_span = kw_info.span;
+            return error.ExpectedKeyword;
+        }
         const prec = try self.parsePrecedence();
         self.skipWhitespaceAndComments();
         try self.expect(';');
@@ -739,7 +848,7 @@ pub const MM0Parser = struct {
     fn parseGeneralNotationStmt(self: *MM0Parser) !void {
         _ = self.consumeIdent();
         self.skipWhitespaceAndComments();
-        const name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const name = try self.consumeRequiredIdent();
         const term_id = self.term_names.get(name) orelse return error.UnknownTerm;
         var var_names = std.StringHashMap(usize).init(self.allocator);
         var arg_index: usize = 0;
@@ -753,7 +862,7 @@ pub const MM0Parser = struct {
             while (true) {
                 self.skipWhitespaceAndComments();
                 if (self.peek() == ':') break;
-                const ident = self.consumeIdent() orelse return error.ExpectedIdent;
+                const ident = try self.consumeRequiredIdent();
                 try names.append(self.allocator, ident);
             }
             self.pos += 1;
@@ -797,7 +906,7 @@ pub const MM0Parser = struct {
                     pending_var_index = null;
                 }
             } else {
-                const ident = self.consumeIdent() orelse return error.ExpectedIdent;
+                const ident = try self.consumeRequiredIdent();
                 const mapped = var_names.get(ident) orelse return error.UnknownVariable;
                 try lits.append(self.allocator, .{ .variable = .{
                     .arg_index = mapped,
@@ -821,7 +930,7 @@ pub const MM0Parser = struct {
     fn parseCoercionStmt(self: *MM0Parser) !void {
         _ = self.consumeIdent();
         self.skipWhitespaceAndComments();
-        const name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const name = try self.consumeRequiredIdent();
         const term_id = self.term_names.get(name) orelse return error.UnknownTerm;
         const term = self.terms.items[term_id];
         if (term.args.len != 1) return error.ExpectedUnaryOperator;
@@ -829,14 +938,14 @@ pub const MM0Parser = struct {
         self.skipWhitespaceAndComments();
         try self.expect(':');
         self.skipWhitespaceAndComments();
-        const src_name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const src_name = try self.consumeRequiredIdent();
         const src: u7 = @intCast(
             self.sort_names.get(src_name) orelse return error.UnknownSort,
         );
         self.skipWhitespaceAndComments();
         try self.expect('>');
         self.skipWhitespaceAndComments();
-        const dst_name = self.consumeIdent() orelse return error.ExpectedIdent;
+        const dst_name = try self.consumeRequiredIdent();
         const dst: u7 = @intCast(
             self.sort_names.get(dst_name) orelse return error.UnknownSort,
         );
@@ -856,7 +965,10 @@ pub const MM0Parser = struct {
         parser.src = src;
         parser.pos = 0;
         parser.pending_annotations = .{};
+        parser.pending_annotation_spans = .{};
         parser.last_annotations = &.{};
+        parser.last_annotation_spans = &.{};
+        parser.resetDiagnosticContext();
         const stmt = try parser.parseAssertionStmt(kind, is_local);
         parser.skipWhitespaceAndComments();
         if (parser.pos != parser.src.len) {
@@ -1287,13 +1399,23 @@ pub const MM0Parser = struct {
 
     fn readQuotedString(self: *MM0Parser) ![]const u8 {
         self.skipWhitespaceAndComments();
-        if (self.peek() != '"') return error.ExpectedString;
+        if (self.peek() != '"') {
+            self.recordCurrentTokenError();
+            return error.ExpectedString;
+        }
+        const quote_start = self.pos;
         self.pos += 1;
         const start = self.pos;
         while (self.pos < self.src.len and self.src[self.pos] != '"') {
             self.pos += 1;
         }
-        if (self.pos >= self.src.len) return error.UnterminatedString;
+        if (self.pos >= self.src.len) {
+            self.last_error_span = .{
+                .start = quote_start,
+                .end = self.src.len,
+            };
+            return error.UnterminatedString;
+        }
         const text = self.src[start..self.pos];
         self.pos += 1;
         self.skipWhitespaceAndComments();
@@ -1302,13 +1424,23 @@ pub const MM0Parser = struct {
 
     fn readMathString(self: *MM0Parser) ![]const u8 {
         self.skipWhitespaceAndComments();
-        if (self.peek() != '$') return error.ExpectedMathStr;
+        if (self.peek() != '$') {
+            self.recordCurrentTokenError();
+            return error.ExpectedMathStr;
+        }
+        const dollar_start = self.pos;
         self.pos += 1;
         const start = self.pos;
         while (self.pos < self.src.len and self.src[self.pos] != '$') {
             self.pos += 1;
         }
-        if (self.pos >= self.src.len) return error.UnterminatedMathStr;
+        if (self.pos >= self.src.len) {
+            self.last_error_span = .{
+                .start = dollar_start,
+                .end = self.src.len,
+            };
+            return error.UnterminatedMathStr;
+        }
         const math = self.src[start..self.pos];
         self.pos += 1;
         self.skipWhitespaceAndComments();
@@ -1338,13 +1470,21 @@ pub const MM0Parser = struct {
 
     fn consumeNumber(self: *MM0Parser) !u16 {
         self.skipWhitespaceAndComments();
+        const start = self.pos;
         if (self.pos >= self.src.len or !std.ascii.isDigit(self.src[self.pos])) {
+            self.recordCurrentTokenError();
             return error.ExpectedNumber;
         }
         var value: u32 = 0;
         while (self.pos < self.src.len and std.ascii.isDigit(self.src[self.pos])) {
             value = value * 10 + (self.src[self.pos] - '0');
-            if (value > std.math.maxInt(u16)) return error.NumberOutOfRange;
+            if (value > std.math.maxInt(u16)) {
+                self.last_error_span = .{
+                    .start = start,
+                    .end = self.pos + 1,
+                };
+                return error.NumberOutOfRange;
+            }
             self.pos += 1;
         }
         self.skipWhitespaceAndComments();
@@ -1352,7 +1492,10 @@ pub const MM0Parser = struct {
     }
 
     fn expect(self: *MM0Parser, ch: u8) !void {
-        if (self.peek() != ch) return error.UnexpectedChar;
+        if (self.peek() != ch) {
+            self.recordCurrentTokenError();
+            return error.UnexpectedChar;
+        }
         self.pos += 1;
         self.skipWhitespaceAndComments();
     }
@@ -1372,18 +1515,22 @@ pub const MM0Parser = struct {
                     self.pos += 1;
                     // Skip leading whitespace after `--|`
                     while (self.pos < self.src.len and
-                        (self.src[self.pos] == ' ' or self.src[self.pos] == '\t'))
+                        (self.src[self.pos] == ' ' or
+                            self.src[self.pos] == '\t'))
                     {
                         self.pos += 1;
                     }
                     const start = self.pos;
-                    while (self.pos < self.src.len and self.src[self.pos] != '\n') {
+                    while (self.pos < self.src.len and
+                        self.src[self.pos] != '\n')
+                    {
                         self.pos += 1;
                     }
                     // Trim trailing whitespace
                     var end = self.pos;
                     while (end > start and
-                        (self.src[end - 1] == ' ' or self.src[end - 1] == '\t' or
+                        (self.src[end - 1] == ' ' or
+                            self.src[end - 1] == '\t' or
                             self.src[end - 1] == '\r'))
                     {
                         end -= 1;
@@ -1393,9 +1540,15 @@ pub const MM0Parser = struct {
                             self.allocator,
                             self.src[start..end],
                         ) catch {};
+                        self.pending_annotation_spans.append(
+                            self.allocator,
+                            .{ .start = start, .end = end },
+                        ) catch {};
                     }
                 } else {
-                    while (self.pos < self.src.len and self.src[self.pos] != '\n') {
+                    while (self.pos < self.src.len and
+                        self.src[self.pos] != '\n')
+                    {
                         self.pos += 1;
                     }
                 }
@@ -1408,16 +1561,24 @@ pub const MM0Parser = struct {
             const ch = self.src[self.pos];
             self.pos += 1;
             if (ch == '$') {
+                const dollar_start = self.pos - 1;
                 while (self.pos < self.src.len and self.src[self.pos] != '$') {
                     self.pos += 1;
                 }
-                if (self.pos >= self.src.len) return error.UnterminatedMathStr;
+                if (self.pos >= self.src.len) {
+                    self.last_error_span = .{
+                        .start = dollar_start,
+                        .end = self.src.len,
+                    };
+                    return error.UnterminatedMathStr;
+                }
                 self.pos += 1;
             } else if (ch == ';') {
                 self.skipWhitespaceAndComments();
                 return;
             }
         }
+        self.last_error_span = self.currentTokenSpan();
         return error.UnexpectedEOF;
     }
 };

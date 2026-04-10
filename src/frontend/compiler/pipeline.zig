@@ -9,6 +9,7 @@ const Metadata = @import("./metadata.zig");
 const Sort = @import("../../trusted/sorts.zig").Sort;
 const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const MM0Stmt = @import("../../trusted/parse.zig").MM0Stmt;
 const ProofScriptParser = @import("../proof_script.zig").Parser;
 const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
 const Span = @import("../proof_script.zig").Span;
@@ -16,7 +17,8 @@ const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerEmit = @import("./emit.zig");
 const Check = @import("./check.zig");
 const CompilerVars = @import("./vars.zig");
-const DiagnosticSource = @import("./diag.zig").DiagnosticSource;
+const CompilerDiag = @import("./diag.zig");
+const DiagnosticSource = CompilerDiag.DiagnosticSource;
 
 const ViewDecl = Metadata.ViewDecl;
 const FreshDecl = Metadata.FreshDecl;
@@ -47,11 +49,27 @@ pub fn run(
         ProofScriptParser.init(allocator, proof)
     else
         null;
+    var last_stmt: ?MM0Stmt = null;
 
-    while (try parser.next()) |stmt| {
-        try CompilerVars.validateSortVarCollisions(&parser, &sort_vars);
+    while (true) {
+        const stmt = parser.next() catch |err| {
+            self.setDiagnostic(CompilerDiag.mm0ParserDiagnostic(
+                &parser,
+                err,
+            ));
+            return err;
+        } orelse break;
+        last_stmt = stmt;
+        CompilerVars.validateSortVarCollisions(&parser, &sort_vars) catch |err| {
+            CompilerDiag.setIfMissing(
+                self,
+                CompilerDiag.mm0StatementDiagnostic(&parser, stmt, err),
+            );
+            return err;
+        };
         switch (stmt) {
             .sort => |sort_stmt| {
+                const sort_stmt_copy = sort_stmt;
                 if (emit) |out| {
                     try out.sort_names.append(allocator, sort_stmt.name);
                     try out.sorts.append(allocator, sort_stmt.modifiers);
@@ -60,44 +78,106 @@ pub fn run(
                         .body = &.{},
                     });
                 }
-                try env.addStmt(stmt);
-                try Metadata.processSortMetadata(
+                env.addStmt(stmt) catch |err| {
+                    CompilerDiag.setIfMissing(
+                        self,
+                        CompilerDiag.mm0StatementDiagnostic(
+                            &parser,
+                            MM0Stmt{ .sort = sort_stmt_copy },
+                            err,
+                        ),
+                    );
+                    return err;
+                };
+                Metadata.processSortMetadata(
                     &parser,
                     sort_stmt,
                     parser.last_annotations,
                     &sort_vars,
-                );
+                ) catch |err| {
+                    CompilerDiag.setIfMissing(
+                        self,
+                        CompilerDiag.mm0StatementDiagnostic(
+                            &parser,
+                            MM0Stmt{ .sort = sort_stmt_copy },
+                            err,
+                        ),
+                    );
+                    return err;
+                };
             },
             .term => |term_stmt| {
+                const term_stmt_copy = term_stmt;
                 if (emit) |out| {
-                    const term_record = try CompilerEmit.compileTermRecord(
+                    const term_record = CompilerEmit.compileTermRecord(
                         allocator,
                         &parser,
                         term_stmt,
-                    );
+                    ) catch |err| {
+                        CompilerDiag.setIfMissing(
+                            self,
+                            CompilerDiag.mm0StatementDiagnostic(
+                                &parser,
+                                MM0Stmt{ .term = term_stmt_copy },
+                                err,
+                            ),
+                        );
+                        return err;
+                    };
                     try out.terms.append(allocator, term_record);
+                    const body = if (term_stmt.is_def)
+                        CompilerEmit.buildDefProofBody(
+                            allocator,
+                            &parser,
+                            term_stmt,
+                        ) catch |err| {
+                            CompilerDiag.setIfMissing(
+                                self,
+                                CompilerDiag.mm0StatementDiagnostic(
+                                    &parser,
+                                    MM0Stmt{ .term = term_stmt_copy },
+                                    err,
+                                ),
+                            );
+                            return err;
+                        }
+                    else
+                        &.{};
                     try out.statements.append(allocator, .{
                         .cmd = .TermDef,
-                        .body = if (term_stmt.is_def)
-                            try CompilerEmit.buildDefProofBody(
-                                allocator,
-                                &parser,
-                                term_stmt,
-                            )
-                        else
-                            &.{},
+                        .body = body,
                     });
                 }
-                try env.addStmt(stmt);
-                try Metadata.processTermMetadata(
+                env.addStmt(stmt) catch |err| {
+                    CompilerDiag.setIfMissing(
+                        self,
+                        CompilerDiag.mm0StatementDiagnostic(
+                            &parser,
+                            MM0Stmt{ .term = term_stmt_copy },
+                            err,
+                        ),
+                    );
+                    return err;
+                };
+                Metadata.processTermMetadata(
                     &env,
                     &registry,
                     term_stmt,
                     parser.last_annotations,
-                );
+                ) catch |err| {
+                    CompilerDiag.setIfMissing(
+                        self,
+                        CompilerDiag.mm0StatementDiagnostic(
+                            &parser,
+                            MM0Stmt{ .term = term_stmt_copy },
+                            err,
+                        ),
+                    );
+                    return err;
+                };
             },
             .assertion => |assertion| {
-                try processAssertion(
+                processAssertion(
                     self,
                     allocator,
                     &parser,
@@ -109,24 +189,45 @@ pub fn run(
                     &proof_parser,
                     assertion,
                     emit,
-                );
+                ) catch |err| {
+                    CompilerDiag.setIfMissing(
+                        self,
+                        CompilerDiag.mm0StatementDiagnostic(
+                            &parser,
+                            MM0Stmt{ .assertion = assertion },
+                            err,
+                        ),
+                    );
+                    return err;
+                };
             },
         }
     }
 
-    try CompilerVars.validateSortVarCollisions(&parser, &sort_vars);
+    CompilerVars.validateSortVarCollisions(&parser, &sort_vars) catch |err| {
+        if (last_stmt) |stmt| {
+            CompilerDiag.setIfMissing(
+                self,
+                CompilerDiag.mm0StatementDiagnostic(&parser, stmt, err),
+            );
+        }
+        return err;
+    };
 
     if (proof_parser) |*proofs| {
-        if (try proofs.nextBlock()) |block| {
-            self.setDiagnostic(.{
-                .kind = .extra_proof_block,
-                .err = error.ExtraProofBlock,
-                .source = .proof,
-                .block_name = block.name,
-                .span = block.name_span,
-            });
-            return error.ExtraProofBlock;
-        }
+        const block = proofs.nextBlock() catch |err| {
+            self.setDiagnostic(CompilerDiag.proofParserDiagnostic(
+                proofs,
+                null,
+                err,
+            ));
+            return err;
+        } orelse return;
+        self.setDiagnostic(CompilerDiag.extraProofBlockDiagnostic(
+            block.name,
+            block.name_span,
+        ));
+        return error.ExtraProofBlock;
     }
 }
 
@@ -174,6 +275,7 @@ fn processAssertion(
             sort_vars,
             proofs,
             assertion.name,
+            CompilerDiag.mathSpanToSpan(assertion.name_span),
             emit,
         );
         const checked = Check.checkTheoremBlock(
@@ -190,12 +292,14 @@ fn processAssertion(
             &theorem,
             theorem_concl,
         ) catch |err| {
-            setTheoremDiagnosticIfMissing(
+            CompilerDiag.setIfMissing(
                 self,
-                assertion.name,
-                block.name_span,
-                .proof,
-                err,
+                CompilerDiag.theoremDiagnostic(
+                    assertion.name,
+                    block.name_span,
+                    .proof,
+                    err,
+                ),
             );
             return err;
         };
@@ -216,12 +320,14 @@ fn processAssertion(
                 env,
                 checked,
             ) catch |err| {
-                setTheoremDiagnosticIfMissing(
+                CompilerDiag.setIfMissing(
                     self,
-                    assertion.name,
-                    block.name_span,
-                    .proof,
-                    err,
+                    CompilerDiag.theoremDiagnostic(
+                        assertion.name,
+                        block.name_span,
+                        .proof,
+                        err,
+                    ),
                 );
                 return err;
             };
@@ -248,7 +354,7 @@ fn processAssertion(
         env,
         assertion,
         assertion.name,
-        null,
+        CompilerDiag.mathSpanToSpan(assertion.name_span),
         .mm0,
     );
     try Metadata.processAssertionMetadata(
@@ -316,7 +422,7 @@ fn processNonTheoremAssertion(
         env,
         assertion,
         assertion.name,
-        null,
+        CompilerDiag.mathSpanToSpan(assertion.name_span),
         .mm0,
     );
     try Metadata.processAssertionMetadata(
@@ -342,16 +448,22 @@ fn nextTheoremBlock(
     sort_vars: *const SortVarRegistry,
     proofs: *ProofScriptParser,
     theorem_name: []const u8,
+    theorem_name_span: Span,
     emit: ?*Output,
 ) !TheoremBlock {
     while (true) {
-        const block = try proofs.nextBlock() orelse {
-            self.setDiagnostic(.{
-                .kind = .missing_proof_block,
-                .err = error.MissingProofBlock,
-                .source = .mm0,
-                .theorem_name = theorem_name,
-            });
+        const block = proofs.nextBlock() catch |err| {
+            self.setDiagnostic(CompilerDiag.proofParserDiagnostic(
+                proofs,
+                theorem_name,
+                err,
+            ));
+            return err;
+        } orelse {
+            self.setDiagnostic(CompilerDiag.missingProofBlockDiagnostic(
+                theorem_name,
+                theorem_name_span,
+            ));
             return error.MissingProofBlock;
         };
         if (block.kind == .lemma) {
@@ -370,15 +482,11 @@ fn nextTheoremBlock(
             continue;
         }
         if (!std.mem.eql(u8, block.name, theorem_name)) {
-            self.setDiagnostic(.{
-                .kind = .theorem_name_mismatch,
-                .err = error.TheoremNameMismatch,
-                .source = .proof,
-                .theorem_name = theorem_name,
-                .block_name = block.name,
-                .expected_name = theorem_name,
-                .span = block.name_span,
-            });
+            self.setDiagnostic(CompilerDiag.theoremNameMismatchDiagnostic(
+                theorem_name,
+                block.name,
+                block.name_span,
+            ));
             return error.TheoremNameMismatch;
         }
         return block;
@@ -397,14 +505,11 @@ fn parseLemmaAssertion(
         .{ block.name, block.header_tail },
     );
     return parser.parseAssertionText(src, .theorem, true) catch |err| {
-        self.setDiagnostic(.{
-            .kind = .generic,
-            .err = err,
-            .source = .proof,
-            .theorem_name = block.name,
-            .block_name = block.name,
-            .span = block.header_span,
-        });
+        self.setDiagnostic(CompilerDiag.proofBlockDiagnostic(
+            block.name,
+            block.header_span,
+            err,
+        ));
         return err;
     };
 }
@@ -442,12 +547,14 @@ fn processLocalProofBlock(
         &theorem,
         theorem_concl,
     ) catch |err| {
-        setTheoremDiagnosticIfMissing(
+        CompilerDiag.setIfMissing(
             self,
-            assertion.name,
-            block.header_span,
-            .proof,
-            err,
+            CompilerDiag.theoremDiagnostic(
+                assertion.name,
+                block.header_span,
+                .proof,
+                err,
+            ),
         );
         return err;
     };
@@ -469,12 +576,14 @@ fn processLocalProofBlock(
             env,
             checked,
         ) catch |err| {
-            setTheoremDiagnosticIfMissing(
+            CompilerDiag.setIfMissing(
                 self,
-                assertion.name,
-                block.header_span,
-                .proof,
-                err,
+                CompilerDiag.theoremDiagnostic(
+                    assertion.name,
+                    block.header_span,
+                    .proof,
+                    err,
+                ),
             );
             return err;
         };
@@ -515,31 +624,12 @@ fn addAssertionToEnv(
 ) !void {
     env.addStmt(.{ .assertion = assertion }) catch |err| {
         if (err == error.DuplicateRuleName) {
-            self.setDiagnostic(.{
-                .kind = .duplicate_rule_name,
-                .err = err,
-                .source = source,
-                .name = diag_name,
-                .span = span,
-            });
+            self.setDiagnostic(CompilerDiag.duplicateRuleNameDiagnostic(
+                diag_name,
+                span,
+                source,
+            ));
         }
         return err;
     };
-}
-
-fn setTheoremDiagnosticIfMissing(
-    self: anytype,
-    theorem_name: []const u8,
-    span: Span,
-    source: DiagnosticSource,
-    err: anyerror,
-) void {
-    if (self.last_diagnostic != null) return;
-    self.setDiagnostic(.{
-        .kind = .generic,
-        .err = err,
-        .source = source,
-        .theorem_name = theorem_name,
-        .span = span,
-    });
 }

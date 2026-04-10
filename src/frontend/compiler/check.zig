@@ -4,10 +4,10 @@ const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RuleDecl = @import("../env.zig").RuleDecl;
 const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
-const MathSpan = @import("../../trusted/parse.zig").MathSpan;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
 const Expr = @import("../../trusted/expressions.zig").Expr;
 const ProofLine = @import("../proof_script.zig").ProofLine;
+const Ref = @import("../proof_script.zig").Ref;
 const Span = @import("../proof_script.zig").Span;
 const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
@@ -27,44 +27,7 @@ const CompilerVars = @import("./vars.zig");
 const SortVarRegistry = CompilerVars.SortVarRegistry;
 
 const NameExprMap = std.StringHashMap(*const Expr);
-
-fn setProofDiagnostic(self: anytype, diag: Diagnostic) void {
-    var proof_diag = diag;
-    proof_diag.source = .proof;
-    self.setDiagnostic(proof_diag);
-}
 const LabelIndexMap = std.StringHashMap(usize);
-
-fn setScratchDiagnosticIfPresent(
-    self: anytype,
-    scratch: *CompilerDiag.Scratch,
-    mark: CompilerDiag.Scratch.Mark,
-    env: *const GlobalEnv,
-    err: anyerror,
-    theorem_name: []const u8,
-    line_label: ?[]const u8,
-    rule_name: ?[]const u8,
-    span: ?Span,
-) bool {
-    const detail = CompilerDiag.takeScratchDetail(
-        scratch,
-        mark,
-        env,
-        err,
-    ) orelse {
-        return false;
-    };
-    setProofDiagnostic(self, .{
-        .kind = .generic,
-        .err = err,
-        .theorem_name = theorem_name,
-        .line_label = line_label,
-        .rule_name = rule_name,
-        .span = span,
-        .detail = detail,
-    });
-    return true;
-}
 
 pub fn checkTheoremBlock(
     self: anytype,
@@ -102,7 +65,7 @@ pub fn checkTheoremBlock(
             sort_vars,
             line,
         ) catch |err| {
-            setProofDiagnostic(self, buildMathParseDiagnostic(
+            CompilerDiag.setProof(self, CompilerDiag.proofMathParseDiagnostic(
                 parser,
                 .parse_assertion,
                 err,
@@ -115,25 +78,25 @@ pub fn checkTheoremBlock(
             return err;
         };
         const rule_id = env.getRuleId(line.rule_name) orelse {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .unknown_rule,
                 .err = error.UnknownRule,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
-                .span = line.span,
+                .span = line.rule_span,
             });
             return error.UnknownRule;
         };
         const rule = &env.rules.items[rule_id];
         if (line.refs.len != rule.hyps.len) {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .ref_count_mismatch,
                 .err = error.RefCountMismatch,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
-                .span = line.span,
+                .span = line.refsOrRuleSpan(),
             });
             return error.RefCountMismatch;
         }
@@ -146,7 +109,7 @@ pub fn checkTheoremBlock(
                     if (hyp.index == 0 or
                         hyp.index > theorem.theorem_hyps.items.len)
                     {
-                        setProofDiagnostic(self, .{
+                        CompilerDiag.setProof(self, .{
                             .kind = .unknown_hypothesis_ref,
                             .err = error.UnknownHypothesisRef,
                             .theorem_name = assertion.name,
@@ -165,7 +128,7 @@ pub fn checkTheoremBlock(
                 },
                 .line => |label| blk: {
                     const line_idx = labels.get(label.label) orelse {
-                        setProofDiagnostic(self, .{
+                        CompilerDiag.setProof(self, .{
                             .kind = .unknown_label,
                             .err = error.UnknownLabel,
                             .theorem_name = assertion.name,
@@ -229,13 +192,13 @@ pub fn checkTheoremBlock(
                     null,
                     self.debug.views,
                 ) catch |err| {
-                    setProofDiagnostic(self, .{
+                    CompilerDiag.setProof(self, .{
                         .kind = .generic,
                         .err = err,
                         .theorem_name = assertion.name,
                         .line_label = line.label,
                         .rule_name = line.rule_name,
-                        .span = line.span,
+                        .span = line.ruleApplicationSpan(),
                     });
                     return err;
                 };
@@ -306,16 +269,17 @@ pub fn checkTheoremBlock(
                 actual,
                 expected,
             ) catch |err| {
-                if (setScratchDiagnosticIfPresent(
+                if (CompilerDiag.setProofScratchDiagnosticIfPresent(
                     self,
                     &diag_scratch,
                     match_mark,
                     env,
+                    .generic,
                     err,
                     assertion.name,
                     line.label,
                     line.rule_name,
-                    line.span,
+                    refSpan(line.refs[idx]),
                 )) {
                     return err;
                 }
@@ -331,7 +295,7 @@ pub fn checkTheoremBlock(
                 .hyp => |hyp| hyp.span,
                 .line => |label| label.span,
             };
-            setProofDiagnostic(self, switch (ref) {
+            CompilerDiag.setProof(self, switch (ref) {
                 .hyp => |hyp| Diagnostic{
                     .kind = .hypothesis_mismatch,
                     .err = error.HypothesisMismatch,
@@ -378,11 +342,12 @@ pub fn checkTheoremBlock(
             bindings,
             refs,
         ) catch |err| {
-            if (setScratchDiagnosticIfPresent(
+            if (CompilerDiag.setProofScratchDiagnosticIfPresent(
                 self,
                 &diag_scratch,
                 concl_mark,
                 env,
+                .generic,
                 err,
                 assertion.name,
                 line.label,
@@ -395,7 +360,7 @@ pub fn checkTheoremBlock(
             return err;
         }) orelse {
             diag_scratch.discard(concl_mark);
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .conclusion_mismatch,
                 .err = error.ConclusionMismatch,
                 .theorem_name = assertion.name,
@@ -409,13 +374,13 @@ pub fn checkTheoremBlock(
 
         const gop = try labels.getOrPut(line.label);
         if (gop.found_existing) {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .duplicate_label,
                 .err = error.DuplicateLabel,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .name = line.label,
-                .span = line.span,
+                .span = line.label_span,
             });
             return error.DuplicateLabel;
         }
@@ -427,7 +392,7 @@ pub fn checkTheoremBlock(
     }
 
     const final_line = last_line orelse {
-        setProofDiagnostic(self, .{
+        CompilerDiag.setProof(self, .{
             .kind = .empty_proof_block,
             .err = error.EmptyProofBlock,
             .theorem_name = assertion.name,
@@ -450,11 +415,12 @@ pub fn checkTheoremBlock(
                 final_line,
                 line_idx,
             ) catch |err| {
-                if (setScratchDiagnosticIfPresent(
+                if (CompilerDiag.setProofScratchDiagnosticIfPresent(
                     self,
                     &diag_scratch,
                     final_mark,
                     env,
+                    .generic,
                     err,
                     assertion.name,
                     last_label,
@@ -471,7 +437,7 @@ pub fn checkTheoremBlock(
             }
             diag_scratch.discard(final_mark);
         }
-        setProofDiagnostic(self, .{
+        CompilerDiag.setProof(self, .{
             .kind = .final_line_mismatch,
             .err = error.FinalLineMismatch,
             .theorem_name = assertion.name,
@@ -527,13 +493,13 @@ fn parseBindings(
 ) ![]?ExprId {
     for (rule.arg_names) |arg_name| {
         if (arg_name == null) {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .generic,
                 .err = error.UnnamedRuleBinder,
                 .theorem_name = theorem_name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
-                .span = line.span,
+                .span = line.ruleApplicationSpan(),
             });
             return error.UnnamedRuleBinder;
         }
@@ -544,7 +510,7 @@ fn parseBindings(
 
     for (line.arg_bindings) |binding| {
         const arg_index = findRuleArgIndex(rule, binding.name) orelse {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .unknown_binder_name,
                 .err = error.UnknownBinderName,
                 .theorem_name = theorem_name,
@@ -556,7 +522,7 @@ fn parseBindings(
             return error.UnknownBinderName;
         };
         if (bindings[arg_index] != null) {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .duplicate_binder_assignment,
                 .err = error.DuplicateBinderAssignment,
                 .theorem_name = theorem_name,
@@ -582,7 +548,7 @@ fn parseBindings(
                 rule.args[arg_index],
             );
         } catch |err| {
-            setProofDiagnostic(self, buildMathParseDiagnostic(
+            CompilerDiag.setProof(self, CompilerDiag.proofMathParseDiagnostic(
                 parser,
                 .parse_binding,
                 err,
@@ -598,49 +564,6 @@ fn parseBindings(
     }
 
     return bindings;
-}
-
-fn buildMathParseDiagnostic(
-    parser: *MM0Parser,
-    kind: CompilerDiag.DiagnosticKind,
-    err: anyerror,
-    theorem_name: []const u8,
-    line_label: []const u8,
-    rule_name: []const u8,
-    name: ?[]const u8,
-    math_span: Span,
-) Diagnostic {
-    var diag = Diagnostic{
-        .kind = kind,
-        .err = err,
-        .theorem_name = theorem_name,
-        .line_label = line_label,
-        .rule_name = rule_name,
-        .name = name,
-        .span = math_span,
-    };
-    if (err != error.UnknownMathToken) return diag;
-
-    const math_err = parser.last_math_error orelse return diag;
-    switch (math_err) {
-        .unknown_token => |token| {
-            diag.span = mathTokenSpan(math_span, token.span);
-            diag.detail = .{
-                .unknown_math_token = .{
-                    .token = token.text,
-                },
-            };
-        },
-    }
-    return diag;
-}
-
-fn mathTokenSpan(math_span: Span, token_span: MathSpan) Span {
-    const inner_start = math_span.start + 1;
-    return .{
-        .start = inner_start + token_span.start,
-        .end = inner_start + token_span.end,
-    };
 }
 
 fn applyFreshBindings(
@@ -680,20 +603,27 @@ fn applyFreshBindings(
             used_deps,
             reserved_deps,
         ) catch |err| {
-            setProofDiagnostic(self, .{
+            CompilerDiag.setProof(self, .{
                 .kind = .parse_fresh,
                 .err = err,
                 .theorem_name = theorem_name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .name = rule.arg_names[fresh.target_arg_idx].?,
-                .span = line.span,
+                .span = line.ruleApplicationSpan(),
             });
             return err;
         };
         bindings[fresh.target_arg_idx] = selection.expr_id;
         reserved_deps |= selection.deps;
     }
+}
+
+fn refSpan(ref: Ref) Span {
+    return switch (ref) {
+        .hyp => |hyp| hyp.span,
+        .line => |line| line.span,
+    };
 }
 
 fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
