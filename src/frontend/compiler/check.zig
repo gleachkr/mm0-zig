@@ -226,6 +226,7 @@ pub fn checkTheoremBlock(
                     ref_exprs,
                     partial_bindings,
                     null,
+                    null,
                     self.debug.views,
                 ) catch |err| {
                     setProofDiagnostic(self, .{
@@ -241,6 +242,12 @@ pub fn checkTheoremBlock(
             }
         }
 
+        const fresh_context: Inference.HiddenWitnessFreshContext = .{
+            .parser = parser,
+            .theorem_vars = &theorem_vars,
+            .sort_vars = sort_vars,
+        };
+
         const bindings = if (had_omitted) blk: {
             break :blk try Inference.inferBindings(
                 self,
@@ -255,6 +262,7 @@ pub fn checkTheoremBlock(
                 partial_bindings,
                 ref_exprs,
                 line_expr,
+                fresh_context,
                 maybe_view,
                 use_advanced_inference,
             );
@@ -650,19 +658,20 @@ fn applyFreshBindings(
     bindings: []?ExprId,
     fresh_list: []const FreshDecl,
 ) !void {
-    const used_deps = try collectUsedDeps(
+    const used_deps = try CompilerFresh.collectUsedDeps(
         env,
         theorem,
         line_expr,
         ref_exprs,
         bindings,
+        0,
     );
     var reserved_deps: u55 = 0;
 
     for (fresh_list) |fresh| {
         if (bindings[fresh.target_arg_idx] != null) continue;
 
-        const selection = chooseFreshBinding(
+        const selection = CompilerFresh.chooseFreshBinding(
             parser,
             theorem,
             theorem_vars,
@@ -685,102 +694,6 @@ fn applyFreshBindings(
         bindings[fresh.target_arg_idx] = selection.expr_id;
         reserved_deps |= selection.deps;
     }
-}
-
-const FreshSelection = struct {
-    expr_id: ExprId,
-    deps: u55,
-};
-
-fn chooseFreshBinding(
-    parser: *MM0Parser,
-    theorem: *TheoremContext,
-    theorem_vars: *NameExprMap,
-    sort_vars: *const SortVarRegistry,
-    sort_name: []const u8,
-    used_deps: u55,
-    reserved_deps: u55,
-) !FreshSelection {
-    const pool = sort_vars.getPool(sort_name) orelse {
-        return error.FreshNoAvailableVar;
-    };
-    var first_unallocated: ?[]const u8 = null;
-
-    for (pool.tokens.items) |token| {
-        if (theorem_vars.get(token)) |parser_expr| {
-            const var_id = theorem.parser_vars.get(parser_expr) orelse {
-                return error.UnknownTheoremVariable;
-            };
-            switch (var_id) {
-                .dummy_var => |dummy_id| {
-                    const dummy_info = theorem.theorem_dummies.items[dummy_id];
-                    if ((used_deps & dummy_info.deps) != 0) continue;
-                    if ((reserved_deps & dummy_info.deps) != 0) continue;
-                    return .{
-                        .expr_id = try theorem.interner.internVar(var_id),
-                        .deps = dummy_info.deps,
-                    };
-                },
-                .theorem_var => continue,
-            }
-        } else if (first_unallocated == null) {
-            first_unallocated = token;
-        }
-    }
-
-    const token = first_unallocated orelse return error.FreshNoAvailableVar;
-    try theorem.ensureNamedDummyParserVar(
-        parser.allocator,
-        theorem_vars,
-        token,
-        pool.sort_name,
-        pool.sort_id,
-    );
-    const parser_expr = theorem_vars.get(token) orelse {
-        return error.UnknownTheoremVariable;
-    };
-    const var_id = theorem.parser_vars.get(parser_expr) orelse {
-        return error.UnknownTheoremVariable;
-    };
-    return switch (var_id) {
-        .dummy_var => |dummy_id| .{
-            .expr_id = try theorem.interner.internVar(var_id),
-            .deps = theorem.theorem_dummies.items[dummy_id].deps,
-        },
-        .theorem_var => error.FreshNoAvailableVar,
-    };
-}
-
-fn collectUsedDeps(
-    env: *const GlobalEnv,
-    theorem: *const TheoremContext,
-    line_expr: ExprId,
-    ref_exprs: []const ExprId,
-    bindings: []const ?ExprId,
-) !u55 {
-    var deps = try exprDeps(env, theorem, line_expr);
-    for (ref_exprs) |expr_id| {
-        deps |= try exprDeps(env, theorem, expr_id);
-    }
-    for (bindings) |maybe_expr_id| {
-        if (maybe_expr_id) |expr_id| {
-            deps |= try exprDeps(env, theorem, expr_id);
-        }
-    }
-    return deps;
-}
-
-fn exprDeps(
-    env: *const GlobalEnv,
-    theorem: *const TheoremContext,
-    expr_id: ExprId,
-) !u55 {
-    return (try Inference.exprInfo(
-        env,
-        theorem,
-        theorem.arg_infos,
-        expr_id,
-    )).deps;
 }
 
 fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {

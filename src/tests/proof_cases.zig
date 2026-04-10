@@ -1,5 +1,5 @@
 const std = @import("std");
-const mm0 = @import("mm0");
+const mm0 = @import("../lib.zig");
 
 const Compiler = mm0.Compiler;
 const Mmb = mm0.Mmb;
@@ -85,6 +85,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_hidden_dummy_infer", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_and_elim", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx", .outcome = .pass },
+    .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_auto", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_reorder", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_unfold", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_fold", .outcome = .pass },
@@ -106,6 +107,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_epi_comp_assign", .outcome = .pass },
     .{ .stem = "pass_def_unfold_then_rewrite_hyp", .outcome = .pass },
     .{ .stem = "pass_def_unfold_then_rewrite_view", .outcome = .pass },
+    .{ .stem = "pass_def_unfold_then_rewrite_view_auto", .outcome = .pass },
     .{
         .stem = "pass_def_unfold_then_rewrite_recover",
         .outcome = .pass,
@@ -185,6 +187,8 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
     .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
     .{ .stem = "pass_view_infer_ctx_raw", .outcome = .pass },
+    .{ .stem = "pass_view_recover_free_hole_auto", .outcome = .pass },
+    .{ .stem = "pass_view_recover_symbolic_hole", .outcome = .pass },
     .{ .stem = "pass_struct_seq_forall_left", .outcome = .pass },
     .{ .stem = "quant_nd", .outcome = .pass },
     .{
@@ -206,6 +210,14 @@ const proof_cases = [_]ProofCase{
     .{
         .stem = "fail_def_hidden_dummy_all_elim_ctx_uncovered",
         .outcome = .{ .fail = error.UnifyMismatch },
+    },
+    .{
+        .stem = "fail_def_hidden_dummy_all_elim_ctx_no_vars",
+        .outcome = .{ .fail = error.UnresolvedDummyWitness },
+    },
+    .{
+        .stem = "fail_def_hidden_dummy_all_elim_ctx_pool_exhausted",
+        .outcome = .{ .fail = error.HiddenWitnessNoAvailableVar },
     },
     .{
         .stem = "fail_acui_same_side_uncovered",

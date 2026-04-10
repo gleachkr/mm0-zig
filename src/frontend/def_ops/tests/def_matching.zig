@@ -509,6 +509,99 @@ test "finalization rejects unresolved hidden-dummy witnesses" {
     try std.testing.expectEqual(dummies_before, theorem.theorem_dummies.items.len);
 }
 
+test "materialized dummy assignments can finalize hidden def bindings" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\term all {x: obj} (p: wff x): wff; prefix all: $A.$ prec 41;
+        \\term eq (a b: obj): wff; infixl eq: $=$ prec 35;
+        \\term pair (a b: obj): obj;
+        \\axiom keep_all {x: obj} (p: wff x): $ A. x p $ > $ A. x p $;
+        \\def mono {.a .b: obj} (f: obj): wff =
+        \\  $ A. a A. b ((pair f a = pair f b) -> (a = b)) $;
+        \\theorem test (f: obj): $ mono f $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const actual = try theorem.internParsedExpr(
+        try parser.parseFormulaText(" mono f ", &theorem_vars),
+    );
+
+    const rule_id = env.getRuleId("keep_all") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(rule.args, &.{ .none, .none });
+    defer session.deinit();
+
+    try std.testing.expect(try session.matchTransparent(rule.hyps[0], actual));
+    try std.testing.expectError(
+        error.UnresolvedDummyWitness,
+        session.finalizeConcreteBindings(),
+    );
+
+    const roots = try session.collectUnresolvedFinalizationRoots();
+    defer arena.allocator().free(roots);
+    try std.testing.expect(roots.len != 0);
+
+    const sort_id = env.sort_names.get("obj") orelse return error.UnknownSort;
+    const assignments = try arena.allocator().alloc(
+        DefOps.MaterializedDummyAssignment,
+        roots.len,
+    );
+    for (roots, assignments) |root, *assignment| {
+        assignment.* = .{
+            .root_slot = root.root_slot,
+            .expr_id = try theorem.addDummyVarResolved("obj", sort_id),
+        };
+    }
+    const witness_count = session.state.witnesses.count();
+
+    try session.applyMaterializedDummyAssignments(assignments);
+
+    try std.testing.expectEqual(witness_count, session.state.witnesses.count());
+    try std.testing.expectEqual(
+        roots.len,
+        session.state.materialized_witnesses.count(),
+    );
+
+    const bindings = try session.finalizeConcreteBindings();
+    defer arena.allocator().free(bindings);
+    try std.testing.expectEqual(rule.args.len, bindings.len);
+}
+
 test "exact hidden-binder seeds match repeated def expansions" {
     const src =
         \\delimiter $ ( ) $;
@@ -571,6 +664,79 @@ test "exact hidden-binder seeds match repeated def expansions" {
     defer session.deinit();
 
     try std.testing.expect(try session.matchTransparent(rule.hyps[0], actual));
+}
+
+test "collectConcreteDepsForPendingFinalization sees exact dummy seeds" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\term all {x: obj} (p: wff x): wff; prefix all: $A.$ prec 41;
+        \\term eq (a b: obj): wff; infixl eq: $=$ prec 35;
+        \\term pair (a b: obj): obj;
+        \\axiom keep_all {x: obj} (p: wff x): $ A. x p $ > $ A. x p $;
+        \\def mono {.a .b: obj} (f: obj): wff =
+        \\  $ A. a A. b ((pair f a = pair f b) -> (a = b)) $;
+        \\theorem test (f: obj): $ mono f $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const actual = try theorem.internParsedExpr(
+        try parser.parseFormulaText(" mono f ", &theorem_vars),
+    );
+    const sort_id = env.sort_names.get("obj") orelse return error.UnknownSort;
+    const exact_x = try theorem.addDummyVarResolved("obj", sort_id);
+    const dummy_id = switch (theorem.interner.node(exact_x).*.variable) {
+        .dummy_var => |idx| idx,
+        else => unreachable,
+    };
+    const exact_dep = theorem.theorem_dummies.items[dummy_id].deps;
+
+    const rule_id = env.getRuleId("keep_all") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(
+        rule.args,
+        &.{ .{ .exact = exact_x }, .none },
+    );
+    defer session.deinit();
+
+    try std.testing.expect(try session.matchTransparent(rule.hyps[0], actual));
+
+    const deps = try session.collectConcreteDepsForPendingFinalization();
+    try std.testing.expect((deps & exact_dep) != 0);
 }
 
 test "resolveBindingSeeds preserves symbolic state through view reuse" {

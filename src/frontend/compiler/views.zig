@@ -148,6 +148,7 @@ pub fn applyViewBindings(
     line_expr: ExprId,
     ref_exprs: []const ExprId,
     partial_bindings: []?ExprId,
+    seed_overrides: ?[]const DefOps.BindingSeed,
     exported_state: ?*?DefOps.MatchSeedState,
     debug_views: bool,
 ) !void {
@@ -161,6 +162,17 @@ pub fn applyViewBindings(
                 .none
         else
             .none;
+    }
+    if (seed_overrides) |overrides| {
+        std.debug.assert(overrides.len == view.num_binders);
+        for (overrides, 0..) |seed, vi| {
+            switch (seed) {
+                .none => {},
+                else => if (seeds[vi] == .none) {
+                    seeds[vi] = seed;
+                },
+            }
+        }
     }
 
     var def_ops = DefOps.Context.initWithRegistry(

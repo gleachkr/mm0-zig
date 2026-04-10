@@ -57,6 +57,11 @@ pub const SymbolicEngine = struct {
         WitnessState.materializeResolvedBoundValue;
     pub const projectMaterializedExpr =
         WitnessState.projectMaterializedExpr;
+    pub const collectUnresolvedRootsInBoundValue =
+        WitnessState.collectUnresolvedRootsInBoundValue;
+    pub const collectConcreteDepsInBoundValue =
+        WitnessState.collectConcreteDepsInBoundValue;
+    pub const resolveDummySlot = WitnessState.resolveDummySlot;
     pub const currentWitnessExpr = WitnessState.currentWitnessExpr;
     pub const isProvisionalWitnessExpr =
         WitnessState.isProvisionalWitnessExpr;

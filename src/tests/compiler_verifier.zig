@@ -1,5 +1,5 @@
 const std = @import("std");
-const mm0 = @import("mm0");
+const mm0 = @import("../lib.zig");
 
 const Compiler = mm0.Compiler;
 const FrontendEnv = mm0.Frontend.Env;

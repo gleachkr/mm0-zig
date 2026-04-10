@@ -16,6 +16,9 @@ const BindingSeed = Types.BindingSeed;
 const SymbolicDummyInfo = Types.SymbolicDummyInfo;
 const SymbolicExpr = Types.SymbolicExpr;
 const MatchSeedState = Types.MatchSeedState;
+const UnresolvedDummyRoot = Types.UnresolvedDummyRoot;
+const MaterializedDummyAssignment =
+    Types.MaterializedDummyAssignment;
 const WitnessMap = Types.WitnessMap;
 const WitnessSlotMap = Types.WitnessSlotMap;
 const DummyAliasMap = Types.DummyAliasMap;
@@ -552,6 +555,100 @@ pub const RuleMatchSession = struct {
             witness.* = symbolic_engine.currentWitnessExpr(slot, &self.state);
         }
         return witnesses;
+    }
+
+    pub fn collectUnresolvedFinalizationRoots(
+        self: *RuleMatchSession,
+    ) ![]UnresolvedDummyRoot {
+        var symbolic_engine = self.engine();
+        var roots = std.ArrayListUnmanaged(UnresolvedDummyRoot){};
+        errdefer roots.deinit(self.shared.allocator);
+        var seen_roots: std.AutoHashMapUnmanaged(usize, void) = .empty;
+        defer seen_roots.deinit(self.shared.allocator);
+        var seen_binders: std.AutoHashMapUnmanaged(usize, void) = .empty;
+        defer seen_binders.deinit(self.shared.allocator);
+
+        for (self.state.bindings) |binding| {
+            const bound = binding orelse return error.MissingBinderAssignment;
+            try symbolic_engine.collectUnresolvedRootsInBoundValue(
+                bound,
+                &self.state,
+                &roots,
+                &seen_roots,
+                &seen_binders,
+            );
+        }
+        return try roots.toOwnedSlice(self.shared.allocator);
+    }
+
+    pub fn applyMaterializedDummyAssignments(
+        self: *RuleMatchSession,
+        assignments: []const MaterializedDummyAssignment,
+    ) !void {
+        var symbolic_engine = self.engine();
+        for (assignments) |assignment| {
+            const root = try symbolic_engine.resolveDummySlot(
+                assignment.root_slot,
+                &self.state,
+            );
+            const info = self.state.symbolic_dummy_infos.items[root];
+            if (self.state.witnesses.get(root)) |existing| {
+                if (existing != assignment.expr_id) return error.UnifyMismatch;
+            }
+            if (self.state.materialized_witnesses.get(root)) |existing| {
+                if (existing != assignment.expr_id) return error.UnifyMismatch;
+            }
+            if (self.state.materialized_witness_slots.get(assignment.expr_id)) |slot| {
+                const slot_root = try symbolic_engine.resolveDummySlot(
+                    slot,
+                    &self.state,
+                );
+                if (slot_root != root) return error.UnifyMismatch;
+            }
+            if (self.state.materialized_witness_infos.get(assignment.expr_id)) |existing_info| {
+                if (existing_info.bound != info.bound or
+                    !std.mem.eql(
+                        u8,
+                        existing_info.sort_name,
+                        info.sort_name,
+                    )) return error.UnifyMismatch;
+            }
+            try self.state.materialized_witnesses.put(
+                self.shared.allocator,
+                root,
+                assignment.expr_id,
+            );
+            try self.state.materialized_witness_slots.put(
+                self.shared.allocator,
+                assignment.expr_id,
+                root,
+            );
+            try self.state.materialized_witness_infos.put(
+                self.shared.allocator,
+                assignment.expr_id,
+                info,
+            );
+        }
+    }
+
+    pub fn collectConcreteDepsForPendingFinalization(
+        self: *RuleMatchSession,
+    ) !u55 {
+        var symbolic_engine = self.engine();
+        var deps: u55 = 0;
+        var seen_binders: std.AutoHashMapUnmanaged(usize, void) = .empty;
+        defer seen_binders.deinit(self.shared.allocator);
+
+        for (self.state.bindings) |binding| {
+            const bound = binding orelse return error.MissingBinderAssignment;
+            try symbolic_engine.collectConcreteDepsInBoundValue(
+                bound,
+                &self.state,
+                &deps,
+                &seen_binders,
+            );
+        }
+        return deps;
     }
 
     pub fn guideBindingTowardExpr(

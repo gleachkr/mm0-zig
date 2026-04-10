@@ -8,6 +8,7 @@ const DefOps = @import("../def_ops.zig");
 const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const Expr = @import("../../trusted/expressions.zig").Expr;
 const UnifyReplay = @import("../../trusted/unify_replay.zig");
 const ProofLine = @import("../proof_script.zig").ProofLine;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
@@ -19,7 +20,11 @@ const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const CompilerViews = @import("./views.zig");
 const ViewDecl = CompilerViews.ViewDecl;
 const CompilerDiag = @import("./diag.zig");
+const CompilerFresh = @import("./fresh.zig");
+const CompilerVars = @import("./vars.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
+const SortVarRegistry = CompilerVars.SortVarRegistry;
+const NameExprMap = std.StringHashMap(*const Expr);
 const CheckedIr = @import("./checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
@@ -45,6 +50,12 @@ const ExprInfo = struct {
     sort_name: []const u8,
     bound: bool,
     deps: u55,
+};
+
+pub const HiddenWitnessFreshContext = struct {
+    parser: *MM0Parser,
+    theorem_vars: *NameExprMap,
+    sort_vars: *const SortVarRegistry,
 };
 
 pub const InferenceContext = struct {
@@ -367,6 +378,103 @@ fn matchRulePartNormalized(
     );
 }
 
+fn sortUnresolvedFinalizationRoots(
+    roots: []DefOps.UnresolvedDummyRoot,
+) void {
+    var i: usize = 1;
+    while (i < roots.len) : (i += 1) {
+        const root = roots[i];
+        var j = i;
+        while (j > 0 and roots[j - 1].root_slot > root.root_slot) : (j -= 1) {
+            roots[j] = roots[j - 1];
+        }
+        roots[j] = root;
+    }
+}
+
+fn tryFinalizeRuleMatchSession(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    session: *DefOps.RuleMatchSession,
+    fresh_context: ?HiddenWitnessFreshContext,
+    line_expr: ExprId,
+    ref_exprs: []const ExprId,
+    explicit_bindings: []const ?ExprId,
+) !RuleMatchResult {
+    if (session.finalizeConcreteBindings()) |bindings| {
+        return .{ .concrete = bindings };
+    } else |err| {
+        if (err != error.UnresolvedDummyWitness) return err;
+    }
+
+    const fresh = fresh_context orelse return .unresolved_dummy_witness;
+
+    const roots = try session.collectUnresolvedFinalizationRoots();
+    defer allocator.free(roots);
+    if (roots.len == 0) return .unresolved_dummy_witness;
+    sortUnresolvedFinalizationRoots(roots);
+
+    for (roots) |root| {
+        if (!root.bound) return .unresolved_dummy_witness;
+        if (fresh.sort_vars.getPool(root.sort_name) == null) {
+            return .unresolved_dummy_witness;
+        }
+    }
+
+    const extra_used_deps =
+        try session.collectConcreteDepsForPendingFinalization();
+    const needs = try allocator.alloc(CompilerFresh.HiddenRootNeed, roots.len);
+    defer allocator.free(needs);
+    for (roots, 0..) |root, idx| {
+        needs[idx] = .{
+            .root_slot = root.root_slot,
+            .sort_name = root.sort_name,
+        };
+    }
+
+    const hidden_assignments = CompilerFresh.assignHiddenRootsFromVarsPool(
+        allocator,
+        fresh.parser,
+        env,
+        session.shared.theorem,
+        fresh.theorem_vars,
+        fresh.sort_vars,
+        line_expr,
+        ref_exprs,
+        explicit_bindings,
+        extra_used_deps,
+        needs,
+    ) catch |assign_err| {
+        if (assign_err == error.FreshNoAvailableVar) {
+            return error.HiddenWitnessNoAvailableVar;
+        }
+        return assign_err;
+    };
+    defer allocator.free(hidden_assignments);
+
+    const materialized = try allocator.alloc(
+        DefOps.MaterializedDummyAssignment,
+        hidden_assignments.len,
+    );
+    defer allocator.free(materialized);
+    for (hidden_assignments, 0..) |assignment, idx| {
+        materialized[idx] = .{
+            .root_slot = assignment.root_slot,
+            .expr_id = assignment.expr_id,
+        };
+    }
+    try session.applyMaterializedDummyAssignments(materialized);
+
+    if (session.finalizeConcreteBindings()) |bindings| {
+        return .{ .concrete = bindings };
+    } else |retry_err| {
+        if (retry_err == error.UnresolvedDummyWitness) {
+            return .unresolved_dummy_witness;
+        }
+        return retry_err;
+    }
+}
+
 fn finishRuleMatchSession(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
@@ -375,8 +483,10 @@ fn finishRuleMatchSession(
     rule_id: u32,
     rule: *const RuleDecl,
     session: *DefOps.RuleMatchSession,
+    fresh_context: ?HiddenWitnessFreshContext,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
+    explicit_bindings: []const ?ExprId,
 ) !RuleMatchResult {
     const norm_spec = registry.getNormalizeSpec(rule_id);
 
@@ -414,18 +524,15 @@ fn finishRuleMatchSession(
         return .no_match;
     }
 
-    // Finalize bindings. All hidden-dummy slots must have been resolved
-    // by matching (via explicit bindings or structural discovery).
-    // Unresolved hidden dummies are an error — the user needs to provide
-    // explicit bindings that cover the hidden def structure.
-    if (session.finalizeConcreteBindings()) |bindings| {
-        return .{ .concrete = bindings };
-    } else |err| {
-        if (err == error.UnresolvedDummyWitness) {
-            return .unresolved_dummy_witness;
-        }
-        return err;
-    }
+    return try tryFinalizeRuleMatchSession(
+        allocator,
+        env,
+        session,
+        fresh_context,
+        line_expr,
+        ref_exprs,
+        explicit_bindings,
+    );
 }
 
 fn inferBindingsByRuleMatchSession(
@@ -437,8 +544,10 @@ fn inferBindingsByRuleMatchSession(
     rule_id: u32,
     rule: *const RuleDecl,
     seeds: []const DefOps.BindingSeed,
+    fresh_context: ?HiddenWitnessFreshContext,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
+    explicit_bindings: []const ?ExprId,
 ) !RuleMatchResult {
     var def_ops = DefOps.Context.initWithRegistry(
         allocator,
@@ -459,8 +568,10 @@ fn inferBindingsByRuleMatchSession(
         rule_id,
         rule,
         &session,
+        fresh_context,
         ref_exprs,
         line_expr,
+        explicit_bindings,
     );
 }
 
@@ -473,8 +584,10 @@ fn inferBindingsByMatchSeedState(
     rule_id: u32,
     rule: *const RuleDecl,
     seed_state: *const DefOps.MatchSeedState,
+    fresh_context: ?HiddenWitnessFreshContext,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
+    explicit_bindings: []const ?ExprId,
 ) !RuleMatchResult {
     var def_ops = DefOps.Context.initWithRegistry(
         allocator,
@@ -498,8 +611,10 @@ fn inferBindingsByMatchSeedState(
         rule_id,
         rule,
         &session,
+        fresh_context,
         ref_exprs,
         line_expr,
+        explicit_bindings,
     );
 }
 
@@ -548,6 +663,7 @@ pub fn inferBindings(
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
+    fresh_context: ?HiddenWitnessFreshContext,
     maybe_view: ?ViewDecl,
     use_advanced_inference: bool,
 ) ![]const ExprId {
@@ -571,6 +687,28 @@ pub fn inferBindings(
         defer if (session_seeds) |seeds| allocator.free(seeds);
 
         if (maybe_view) |view| {
+            var view_seed_overrides: ?[]DefOps.BindingSeed = null;
+            defer if (view_seed_overrides) |seeds| allocator.free(seeds);
+
+            if (fresh_context) |fresh| {
+                view_seed_overrides =
+                    try CompilerFresh.seedRecoverHolesFromVarsPool(
+                    allocator,
+                    fresh.parser,
+                    env,
+                    theorem,
+                    fresh.theorem_vars,
+                    fresh.sort_vars,
+                    line_expr,
+                    ref_exprs,
+                    partial_bindings,
+                    view.num_binders,
+                    view.binder_map,
+                    view.arg_infos,
+                    view.derived_bindings,
+                );
+            }
+
             const seeded = try allocator.dupe(?ExprId, partial_bindings);
             CompilerViews.applyViewBindings(
                 allocator,
@@ -581,6 +719,7 @@ pub fn inferBindings(
                 line_expr,
                 ref_exprs,
                 seeded,
+                view_seed_overrides,
                 &view_seed_state,
                 self.debug.views,
             ) catch |err| {
@@ -653,8 +792,10 @@ pub fn inferBindings(
                 rule_id,
                 rule,
                 seed_state,
+                fresh_context,
                 ref_exprs,
                 line_expr,
+                partial_bindings,
             )
         else
             inferBindingsByRuleMatchSession(
@@ -666,8 +807,10 @@ pub fn inferBindings(
                 rule_id,
                 rule,
                 session_seeds.?,
+                fresh_context,
                 ref_exprs,
                 line_expr,
+                partial_bindings,
             )) catch |err| {
             if (setScratchDiagnosticIfPresent(
                 self,

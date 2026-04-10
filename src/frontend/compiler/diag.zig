@@ -145,6 +145,9 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.FreshStrictSort => "@fresh cannot target a binder in a strict sort",
         error.FreshFreeSort => "@fresh cannot target a binder in a free sort",
         error.FreshNoAvailableVar => "@fresh could not find an available @vars token",
+        error.HiddenWitnessNoAvailableVar =>
+            "hidden def witness needed a fresh @vars token, but none was " ++
+            "available",
         error.InvalidVarsAnnotation => "@vars expects one or more raw math tokens",
         error.VarsStrictSort => "@vars cannot be used on a strict sort",
         error.VarsFreeSort => "@vars cannot be used on a free sort",

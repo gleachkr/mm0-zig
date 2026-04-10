@@ -4,6 +4,7 @@ const Fixtures = @import("./fixtures.zig");
 const Context = DefOps.Context;
 const Testing = DefOps.Testing;
 const MatchSession = Testing.MatchSession;
+const MaterializedDummyAssignment = DefOps.MaterializedDummyAssignment;
 const SessionWitnessFixture = Fixtures.SessionWitnessFixture;
 const allocNoneSeeds = Fixtures.allocNoneSeeds;
 
@@ -198,6 +199,101 @@ test "finalization rejects unresolved hidden-dummy witnesses without allocating"
         @as(usize, 0),
         fixture.theorem.theorem_dummies.items.len,
     );
+}
+
+test "collectUnresolvedFinalizationRoots reports canonical roots" {
+    var fixture = try SessionWitnessFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.init(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+    );
+    defer ctx.deinit();
+
+    const seeds = try allocNoneSeeds(
+        fixture.arena.allocator(),
+        fixture.rule_args.len,
+    );
+    var session = try ctx.beginRuleMatch(fixture.rule_args, seeds);
+    defer session.deinit();
+
+    try std.testing.expect(
+        try session.matchTransparent(fixture.body, fixture.actual),
+    );
+
+    const roots = try session.collectUnresolvedFinalizationRoots();
+    defer fixture.arena.allocator().free(roots);
+
+    try std.testing.expectEqual(fixture.dummy_arg_count, roots.len);
+    for (roots) |root| {
+        try std.testing.expectEqualStrings("mor", root.sort_name);
+        try std.testing.expect(root.bound);
+    }
+
+    try session.state.dummy_aliases.put(
+        fixture.arena.allocator(),
+        roots[1].root_slot,
+        roots[0].root_slot,
+    );
+
+    const collapsed = try session.collectUnresolvedFinalizationRoots();
+    defer fixture.arena.allocator().free(collapsed);
+
+    try std.testing.expectEqual(@as(usize, 1), collapsed.len);
+    try std.testing.expectEqual(roots[0].root_slot, collapsed[0].root_slot);
+}
+
+test "materialized dummy assignments finalize without mutating witnesses" {
+    var fixture = try SessionWitnessFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.init(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+    );
+    defer ctx.deinit();
+
+    const seeds = try allocNoneSeeds(
+        fixture.arena.allocator(),
+        fixture.rule_args.len,
+    );
+    var session = try ctx.beginRuleMatch(fixture.rule_args, seeds);
+    defer session.deinit();
+
+    try std.testing.expect(
+        try session.matchTransparent(fixture.body, fixture.actual),
+    );
+    try std.testing.expectError(
+        error.UnresolvedDummyWitness,
+        session.finalizeConcreteBindings(),
+    );
+
+    const roots = try session.collectUnresolvedFinalizationRoots();
+    defer fixture.arena.allocator().free(roots);
+
+    const sort_id = fixture.env.sort_names.get("mor") orelse {
+        return error.UnknownSort;
+    };
+    const first = try fixture.theorem.addDummyVarResolved("mor", sort_id);
+    const second = try fixture.theorem.addDummyVarResolved("mor", sort_id);
+    const assignments = [_]MaterializedDummyAssignment{
+        .{ .root_slot = roots[0].root_slot, .expr_id = first },
+        .{ .root_slot = roots[1].root_slot, .expr_id = second },
+    };
+    const witness_count = session.state.witnesses.count();
+
+    try session.applyMaterializedDummyAssignments(&assignments);
+
+    try std.testing.expectEqual(witness_count, session.state.witnesses.count());
+    try std.testing.expectEqual(roots.len, session.state.materialized_witnesses.count());
+
+    const bindings = try session.finalizeConcreteBindings();
+    defer fixture.arena.allocator().free(bindings);
+
+    try std.testing.expectEqual(fixture.rule_args.len, bindings.len);
 }
 
 test "abandoning a matched session leaves theorem dummy state unchanged" {

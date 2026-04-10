@@ -1,0 +1,4 @@
+pass_view_recover_free_hole_auto
+--------------------------------
+
+l1: $ u = u $ by hold_elim [#1]

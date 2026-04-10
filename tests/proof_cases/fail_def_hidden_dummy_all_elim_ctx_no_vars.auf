@@ -1,0 +1,6 @@
+fail_def_hidden_dummy_all_elim_ctx_no_vars
+-------------------------------------------
+
+l1: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ alpha) ⊢ mono f $ by ax
+l2: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ alpha) ⊢
+  ∀ y ((f ∘ (h ∘ alpha) ~ f ∘ y) → (h ∘ alpha ~ y)) $ by all_elim [l1]

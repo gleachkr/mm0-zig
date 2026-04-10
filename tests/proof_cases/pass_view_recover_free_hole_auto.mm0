@@ -1,0 +1,15 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 35;
+term hold (x: obj) (p: wff): wff;
+
+--| @view (x: obj) (t: obj) (p: wff) (q: wff): $ hold x p $ > $ q $
+--| @recover t q p x
+axiom hold_elim (x: obj) (t: obj) (p: wff) (q: wff):
+  $ hold x p $ > $ q $;
+
+theorem pass_view_recover_free_hole_auto (u: obj):
+  $ hold u (u = u) $ > $ u = u $;

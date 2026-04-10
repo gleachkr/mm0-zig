@@ -138,79 +138,93 @@ fn applyRecoverBinding(
     const source_expr = view_bindings[recover.source_view_idx] orelse {
         return .no_progress;
     };
-    const hole_expr = view_bindings[recover.hole_view_idx] orelse {
-        return .no_progress;
-    };
+    const hole_expr = view_bindings[recover.hole_view_idx];
 
     if (view_bindings[recover.pattern_view_idx]) |pattern_expr| {
-        var candidate: ?ExprId = null;
-        const found = recoverBindingCandidate(
-            theorem,
-            source_expr,
-            pattern_expr,
-            hole_expr,
-            &candidate,
-        ) catch |err| switch (err) {
-            error.RecoverStructureMismatch => false,
-            else => return err,
-        };
-        if (found) {
+        if (hole_expr) |concrete_hole_expr| {
+            var candidate: ?ExprId = null;
+            const found = recoverBindingCandidate(
+                theorem,
+                source_expr,
+                pattern_expr,
+                concrete_hole_expr,
+                &candidate,
+            ) catch |err| switch (err) {
+                error.RecoverStructureMismatch => false,
+                else => return err,
+            };
+            if (found) {
+                if (debug_views) {
+                    ViewTrace.printMessage(
+                        "raw recover matched concrete pattern",
+                        .{},
+                    );
+                }
+                view_bindings[recover.target_view_idx] = candidate;
+                return .progress;
+            }
+
+            const aligned_source = try preprocessDerivedExpr(
+                theorem,
+                env,
+                registry,
+                source_expr,
+            );
+            const aligned_pattern = try preprocessDerivedExpr(
+                theorem,
+                env,
+                registry,
+                pattern_expr,
+            );
+
+            candidate = null;
+            const aligned_found = recoverBindingCandidate(
+                theorem,
+                aligned_source,
+                aligned_pattern,
+                concrete_hole_expr,
+                &candidate,
+            ) catch |err| switch (err) {
+                error.RecoverStructureMismatch => false,
+                else => return err,
+            };
+            if (aligned_found) {
+                if (debug_views) {
+                    ViewTrace.printMessage(
+                        "aligned recover matched concrete pattern",
+                        .{},
+                    );
+                }
+                view_bindings[recover.target_view_idx] = candidate;
+                return .progress;
+            }
             if (debug_views) {
                 ViewTrace.printMessage(
-                    "raw recover matched concrete pattern",
+                    "concrete recover did not expose the hole; " ++
+                        "trying symbolic seed",
                     .{},
                 );
             }
-            view_bindings[recover.target_view_idx] = candidate;
-            return .progress;
-        }
-
-        const aligned_source = try preprocessDerivedExpr(
-            theorem,
-            env,
-            registry,
-            source_expr,
-        );
-        const aligned_pattern = try preprocessDerivedExpr(
-            theorem,
-            env,
-            registry,
-            pattern_expr,
-        );
-
-        candidate = null;
-        const aligned_found = try recoverBindingCandidate(
-            theorem,
-            aligned_source,
-            aligned_pattern,
-            hole_expr,
-            &candidate,
-        );
-        if (!aligned_found) {
-            if (debug_views) {
-                ViewTrace.printMessage(
-                    "aligned recover did not find hole",
-                    .{},
-                );
-            }
-            return error.RecoverHoleNotFound;
-        }
-
-        if (debug_views) {
+        } else if (debug_views) {
             ViewTrace.printMessage(
-                "aligned recover matched concrete pattern",
+                "concrete recover skipped; hole has only symbolic seed",
                 .{},
             );
         }
-        view_bindings[recover.target_view_idx] = candidate;
-        return .progress;
     }
 
     const seeds = view_seeds orelse return .no_progress;
-    if (recover.pattern_view_idx >= seeds.len) return .no_progress;
+    if (recover.pattern_view_idx >= seeds.len or
+        recover.hole_view_idx >= seeds.len)
+    {
+        return .no_progress;
+    }
+    if (hole_expr == null and seeds[recover.hole_view_idx] == .none) {
+        return .no_progress;
+    }
 
     var candidate: ?ExprId = null;
-    var dummy_bindings = std.AutoHashMapUnmanaged(usize, ExprId){};
+    var dummy_bindings: std.AutoHashMapUnmanaged(usize, ExprId) = .empty;
     defer dummy_bindings.deinit(theorem.allocator);
 
     const found = recoverBindingCandidateFromSeed(
@@ -220,6 +234,7 @@ fn applyRecoverBinding(
         seeds[recover.pattern_view_idx],
         recover.hole_view_idx,
         hole_expr,
+        seeds[recover.hole_view_idx],
         view_bindings,
         seeds,
         &dummy_bindings,
@@ -234,6 +249,9 @@ fn applyRecoverBinding(
                 "symbolic recover did not find hole",
                 .{},
             );
+        }
+        if (hole_expr == null) {
+            return .no_progress;
         }
         return error.RecoverHoleNotFound;
     }
@@ -254,7 +272,8 @@ fn recoverBindingCandidateFromSeed(
     source_expr: ExprId,
     seed: BindingSeed,
     hole_view_idx: usize,
-    hole_expr: ExprId,
+    hole_expr: ?ExprId,
+    hole_seed: BindingSeed,
     view_bindings: []const ?ExprId,
     view_seeds: []const BindingSeed,
     dummy_bindings: *std.AutoHashMapUnmanaged(usize, ExprId),
@@ -262,20 +281,26 @@ fn recoverBindingCandidateFromSeed(
 ) anyerror!bool {
     return switch (seed) {
         .none => false,
-        .exact => |expr_id| try recoverBindingCandidate(
-            theorem,
-            source_expr,
-            expr_id,
-            hole_expr,
-            candidate,
-        ),
-        .semantic => |semantic| try recoverBindingCandidate(
-            theorem,
-            source_expr,
-            semantic.expr_id,
-            hole_expr,
-            candidate,
-        ),
+        .exact => |expr_id| blk: {
+            const concrete_hole_expr = hole_expr orelse break :blk false;
+            break :blk try recoverBindingCandidate(
+                theorem,
+                source_expr,
+                expr_id,
+                concrete_hole_expr,
+                candidate,
+            );
+        },
+        .semantic => |semantic| blk: {
+            const concrete_hole_expr = hole_expr orelse break :blk false;
+            break :blk try recoverBindingCandidate(
+                theorem,
+                source_expr,
+                semantic.expr_id,
+                concrete_hole_expr,
+                candidate,
+            );
+        },
         .bound => |bound| try recoverBindingCandidateFromBoundValue(
             theorem,
             dummy_witnesses,
@@ -283,6 +308,7 @@ fn recoverBindingCandidateFromSeed(
             bound,
             hole_view_idx,
             hole_expr,
+            hole_seed,
             view_bindings,
             view_seeds,
             dummy_bindings,
@@ -297,20 +323,24 @@ fn recoverBindingCandidateFromBoundValue(
     source_expr: ExprId,
     bound: BoundValue,
     hole_view_idx: usize,
-    hole_expr: ExprId,
+    hole_expr: ?ExprId,
+    hole_seed: BindingSeed,
     view_bindings: []const ?ExprId,
     view_seeds: []const BindingSeed,
     dummy_bindings: *std.AutoHashMapUnmanaged(usize, ExprId),
     candidate: *?ExprId,
 ) anyerror!bool {
     return switch (bound) {
-        .concrete => |concrete| try recoverBindingCandidate(
-            theorem,
-            source_expr,
-            concrete.raw,
-            hole_expr,
-            candidate,
-        ),
+        .concrete => |concrete| blk: {
+            const concrete_hole_expr = hole_expr orelse break :blk false;
+            break :blk try recoverBindingCandidate(
+                theorem,
+                source_expr,
+                concrete.raw,
+                concrete_hole_expr,
+                candidate,
+            );
+        },
         .symbolic => |symbolic| try recoverBindingCandidateSymbolic(
             theorem,
             dummy_witnesses,
@@ -318,6 +348,7 @@ fn recoverBindingCandidateFromBoundValue(
             symbolic.expr,
             hole_view_idx,
             hole_expr,
+            hole_seed,
             view_bindings,
             view_seeds,
             dummy_bindings,
@@ -332,7 +363,8 @@ fn recoverBindingCandidateSymbolic(
     source_expr: ExprId,
     symbolic: *const SymbolicExpr,
     hole_view_idx: usize,
-    hole_expr: ExprId,
+    hole_expr: ?ExprId,
+    hole_seed: BindingSeed,
     view_bindings: []const ?ExprId,
     view_seeds: []const BindingSeed,
     dummy_bindings: *std.AutoHashMapUnmanaged(usize, ExprId),
@@ -350,11 +382,12 @@ fn recoverBindingCandidateSymbolic(
             }
             if (idx < view_bindings.len) {
                 if (view_bindings[idx]) |expr_id| {
+                    const concrete_hole_expr = hole_expr orelse break :blk false;
                     break :blk try recoverBindingCandidate(
                         theorem,
                         source_expr,
                         expr_id,
-                        hole_expr,
+                        concrete_hole_expr,
                         candidate,
                     );
                 }
@@ -367,42 +400,59 @@ fn recoverBindingCandidateSymbolic(
                 view_seeds[idx],
                 hole_view_idx,
                 hole_expr,
+                hole_seed,
                 view_bindings,
                 view_seeds,
                 dummy_bindings,
                 candidate,
             );
         },
-        .fixed => |expr_id| try recoverBindingCandidate(
-            theorem,
-            source_expr,
-            expr_id,
-            hole_expr,
-            candidate,
-        ),
+        .fixed => |expr_id| blk: {
+            const concrete_hole_expr = hole_expr orelse break :blk false;
+            break :blk try recoverBindingCandidate(
+                theorem,
+                source_expr,
+                expr_id,
+                concrete_hole_expr,
+                candidate,
+            );
+        },
         .dummy => |slot| blk: {
-            // Symbolic recover must consult the current dummy witnesses from
-            // the live view-match state. Repeated def expansion can allocate
-            // fresh dummy slots for the same hidden binder, so slot identity
-            // alone is not stable enough to recognize the recover hole.
-            if (dummy_witnesses) |witnesses| {
-                if (slot < witnesses.len) {
-                    if (witnesses[slot]) |witness| {
-                        if (witness == hole_expr) {
-                            if (candidate.*) |existing| {
-                                if (existing != source_expr) {
-                                    return error.RecoverConflict;
+            // Prefer live dummy witnesses when the hole already has a
+            // concrete expression. Raw slot identity is too coarse in that
+            // case, because the same hidden binder can occur inside larger
+            // subtrees that only normalize to the hole after rewrites.
+            if (hole_expr) |concrete_hole_expr| {
+                if (dummy_witnesses) |witnesses| {
+                    if (slot < witnesses.len) {
+                        if (witnesses[slot]) |witness| {
+                            if (witness == concrete_hole_expr) {
+                                if (candidate.*) |existing| {
+                                    if (existing != source_expr) {
+                                        return error.RecoverConflict;
+                                    }
+                                } else {
+                                    candidate.* = source_expr;
                                 }
-                            } else {
-                                candidate.* = source_expr;
+                                break :blk true;
                             }
-                            break :blk true;
                         }
                     }
                 }
+            } else if (holeSeedMatchesDummy(hole_seed, slot)) {
+                if (candidate.*) |existing| {
+                    if (existing != source_expr) {
+                        return error.RecoverStructureMismatch;
+                    }
+                } else {
+                    candidate.* = source_expr;
+                }
+                break :blk true;
             }
             if (dummy_bindings.get(slot)) |existing| {
-                if (existing != source_expr) return error.RecoverStructureMismatch;
+                if (existing != source_expr) {
+                    return error.RecoverStructureMismatch;
+                }
             } else {
                 try dummy_bindings.put(theorem.allocator, slot, source_expr);
             }
@@ -429,6 +479,7 @@ fn recoverBindingCandidateSymbolic(
                     pattern_arg,
                     hole_view_idx,
                     hole_expr,
+                    hole_seed,
                     view_bindings,
                     view_seeds,
                     dummy_bindings,
@@ -437,6 +488,19 @@ fn recoverBindingCandidateSymbolic(
             }
             break :blk found;
         },
+    };
+}
+
+fn holeSeedMatchesDummy(seed: BindingSeed, slot: usize) bool {
+    return switch (seed) {
+        .bound => |bound| switch (bound) {
+            .symbolic => |symbolic| switch (symbolic.expr.*) {
+                .dummy => |seed_slot| seed_slot == slot,
+                else => false,
+            },
+            .concrete => false,
+        },
+        else => false,
     };
 }
 

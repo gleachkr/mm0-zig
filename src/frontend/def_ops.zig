@@ -16,6 +16,9 @@ pub const ConversionPlan = Types.ConversionPlan;
 pub const BindingMode = Types.BindingMode;
 pub const BindingSeed = Types.BindingSeed;
 pub const MatchSeedState = Types.MatchSeedState;
+pub const UnresolvedDummyRoot = Types.UnresolvedDummyRoot;
+pub const MaterializedDummyAssignment =
+    Types.MaterializedDummyAssignment;
 pub const SemanticStepCandidate =
     @import("./def_ops/symbolic_engine.zig").SemanticStepCandidate;
 pub const default_semantic_match_budget: usize = 3;

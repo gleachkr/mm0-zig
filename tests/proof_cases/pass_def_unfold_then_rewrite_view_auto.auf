@@ -1,0 +1,5 @@
+pass_def_unfold_then_rewrite_view_auto
+--------------------------------------
+
+l1: $ mono (g o f) |- mono (g o f) $ by ax
+l2: $ mono (g o f) |- A. y ((g o (f o alpha) ~ (g o f) o y) -> (alpha ~ y)) $ by all_elim [l1]

@@ -67,6 +67,17 @@ pub const BoundValue = union(enum) {
     symbolic: SymbolicBinding,
 };
 
+pub const UnresolvedDummyRoot = struct {
+    root_slot: usize,
+    sort_name: []const u8,
+    bound: bool,
+};
+
+pub const MaterializedDummyAssignment = struct {
+    root_slot: usize,
+    expr_id: ExprId,
+};
+
 pub const WitnessMap = std.AutoHashMapUnmanaged(usize, ExprId);
 pub const WitnessSlotMap = std.AutoHashMapUnmanaged(ExprId, usize);
 pub const DummyAliasMap = std.AutoHashMapUnmanaged(usize, usize);

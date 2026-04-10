@@ -12,6 +12,7 @@ const BindingMode = Types.BindingMode;
 const BindingSeed = Types.BindingSeed;
 const ConcreteBinding = Types.ConcreteBinding;
 const BoundValue = Types.BoundValue;
+const UnresolvedDummyRoot = Types.UnresolvedDummyRoot;
 const WitnessMap = Types.WitnessMap;
 const WitnessSlotMap = Types.WitnessSlotMap;
 const DummyAliasMap = Types.DummyAliasMap;
@@ -1199,6 +1200,196 @@ pub fn representResolvedBindings(
                 },
             );
         } else null;
+    }
+}
+
+fn exprDeps(self: anytype, expr_id: ExprId) anyerror!u55 {
+    return switch (self.shared.theorem.interner.node(expr_id).*) {
+        .variable => |var_id| switch (var_id) {
+            .theorem_var => |idx| blk: {
+                if (idx >= self.shared.theorem.arg_infos.len) {
+                    return error.UnknownTheoremVariable;
+                }
+                break :blk self.shared.theorem.arg_infos[idx].deps;
+            },
+            .dummy_var => |idx| blk: {
+                if (idx >= self.shared.theorem.theorem_dummies.items.len) {
+                    return error.UnknownDummyVar;
+                }
+                break :blk self.shared.theorem.theorem_dummies.items[idx].deps;
+            },
+        },
+        .app => |app| blk: {
+            var deps: u55 = 0;
+            for (app.args) |arg| {
+                deps |= try exprDeps(self, arg);
+            }
+            break :blk deps;
+        },
+    };
+}
+
+fn collectUnresolvedRootsInSymbolic(
+    self: anytype,
+    symbolic: *const SymbolicExpr,
+    state: *MatchSession,
+    out: *std.ArrayListUnmanaged(UnresolvedDummyRoot),
+    seen_roots: *std.AutoHashMapUnmanaged(usize, void),
+    seen_binders: *std.AutoHashMapUnmanaged(usize, void),
+) anyerror!void {
+    switch (symbolic.*) {
+        .binder => |idx| {
+            const seen = try seen_binders.getOrPut(
+                self.shared.allocator,
+                idx,
+            );
+            if (seen.found_existing) return;
+            const bound = state.bindings[idx] orelse {
+                return error.MissingBinderAssignment;
+            };
+            try collectUnresolvedRootsInBoundValue(
+                self,
+                bound,
+                state,
+                out,
+                seen_roots,
+                seen_binders,
+            );
+        },
+        .fixed => {},
+        .dummy => |slot| {
+            const root = try resolveDummySlot(self, slot, state);
+            if (state.witnesses.get(root) != null or
+                state.materialized_witnesses.get(root) != null) return;
+            const seen = try seen_roots.getOrPut(
+                self.shared.allocator,
+                root,
+            );
+            if (seen.found_existing) return;
+            const info = state.symbolic_dummy_infos.items[root];
+            try out.append(self.shared.allocator, .{
+                .root_slot = root,
+                .sort_name = info.sort_name,
+                .bound = info.bound,
+            });
+        },
+        .app => |app| {
+            for (app.args) |arg| {
+                try collectUnresolvedRootsInSymbolic(
+                    self,
+                    arg,
+                    state,
+                    out,
+                    seen_roots,
+                    seen_binders,
+                );
+            }
+        },
+    }
+}
+
+pub fn collectUnresolvedRootsInBoundValue(
+    self: anytype,
+    bound: BoundValue,
+    state: *MatchSession,
+    out: *std.ArrayListUnmanaged(UnresolvedDummyRoot),
+    seen_roots: *std.AutoHashMapUnmanaged(usize, void),
+    seen_binders: *std.AutoHashMapUnmanaged(usize, void),
+) anyerror!void {
+    switch (bound) {
+        .concrete => |concrete| try collectUnresolvedRootsInSymbolic(
+            self,
+            concrete.repr,
+            state,
+            out,
+            seen_roots,
+            seen_binders,
+        ),
+        .symbolic => |symbolic| try collectUnresolvedRootsInSymbolic(
+            self,
+            symbolic.expr,
+            state,
+            out,
+            seen_roots,
+            seen_binders,
+        ),
+    }
+}
+
+fn collectConcreteDepsInSymbolic(
+    self: anytype,
+    symbolic: *const SymbolicExpr,
+    state: *MatchSession,
+    deps: *u55,
+    seen_binders: *std.AutoHashMapUnmanaged(usize, void),
+) anyerror!void {
+    switch (symbolic.*) {
+        .binder => |idx| {
+            const seen = try seen_binders.getOrPut(
+                self.shared.allocator,
+                idx,
+            );
+            if (seen.found_existing) return;
+            const bound = state.bindings[idx] orelse {
+                return error.MissingBinderAssignment;
+            };
+            try collectConcreteDepsInBoundValue(
+                self,
+                bound,
+                state,
+                deps,
+                seen_binders,
+            );
+        },
+        .fixed => |expr_id| deps.* |= try exprDeps(self, expr_id),
+        .dummy => |slot| {
+            const root = try resolveDummySlot(self, slot, state);
+            if (state.witnesses.get(root)) |expr_id| {
+                deps.* |= try exprDeps(self, expr_id);
+            }
+            if (state.materialized_witnesses.get(root)) |expr_id| {
+                deps.* |= try exprDeps(self, expr_id);
+            }
+        },
+        .app => |app| {
+            for (app.args) |arg| {
+                try collectConcreteDepsInSymbolic(
+                    self,
+                    arg,
+                    state,
+                    deps,
+                    seen_binders,
+                );
+            }
+        },
+    }
+}
+
+pub fn collectConcreteDepsInBoundValue(
+    self: anytype,
+    bound: BoundValue,
+    state: *MatchSession,
+    deps: *u55,
+    seen_binders: *std.AutoHashMapUnmanaged(usize, void),
+) anyerror!void {
+    switch (bound) {
+        .concrete => |concrete| {
+            deps.* |= try exprDeps(self, concrete.raw);
+            try collectConcreteDepsInSymbolic(
+                self,
+                concrete.repr,
+                state,
+                deps,
+                seen_binders,
+            );
+        },
+        .symbolic => |symbolic| try collectConcreteDepsInSymbolic(
+            self,
+            symbolic.expr,
+            state,
+            deps,
+            seen_binders,
+        ),
     }
 }
 
