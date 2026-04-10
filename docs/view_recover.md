@@ -626,6 +626,11 @@ The practical guideline is simple:
   non-escaping for as long as possible;
 - only the final rule-instantiation path should force escape.
 
+For bound witnesses, that final escape path reuses or allocates a token from
+the sort's `@vars` pool, using the same dependency-aware policy as `@fresh`.
+If no suitable pool entry exists, the witness remains unresolved instead of
+silently inventing a theorem-local dummy.
+
 This keeps the compiler from spending theorem-local dummy slots on witnesses
 that were only temporary artifacts of def unfolding.
 

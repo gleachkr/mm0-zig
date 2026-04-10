@@ -52,6 +52,23 @@ The wasm entrypoints export small C-style functions for buffer
 allocation, compilation / verification, and JSON result retrieval for the
 browser demo.
 
+## Documentation map
+
+Most project-specific docs now live under `docs/`:
+
+- `docs/proof.md` for the Aufbau proof-script format
+- `docs/rewrite_system.md` for rewrite metadata and normalization
+- `docs/transparent_defs.md` for transparent def handling
+- `docs/view_recover.md` for `@view`, `@recover`, and `@abstract`
+- `docs/fresh_binders.md` for `@vars` and `@fresh`
+
+The language / binary specs remain under `specs/`:
+
+- `specs/mm0.md`
+- `specs/mmb.md`
+
+`specs/proof.md` is now just a redirect to `docs/proof.md`.
+
 ## Directory layout
 
 The shared library is organized into three groups.
@@ -113,6 +130,10 @@ Compiler data models and theorem-local state:
 - `rules.zig`
 - `compiler/checked_ir.zig`
 - `compiler/vars.zig`
+
+`compiler/vars.zig` tracks sort-scoped `@vars` pools. Those pools feed
+proof-math token expansion, `@fresh`, recover-hole seeding, and the
+last-resort materialization path for bound hidden-dummy witnesses.
 
 Theorem checking and emission:
 
@@ -500,8 +521,12 @@ After a successful rule match, finalization returns an ordinary concrete
 boundness, and dependency checks run.
 
 That finalization step is also the only place where hidden-dummy
-witnesses are allowed to materialize as main-theorem dummy vars. If a
-match is abandoned before finalization, it should leave the main
+witnesses are allowed to materialize as main-theorem dummy vars. For
+bound witnesses, that escape path reuses or allocates a theorem-local
+variable from the sort's `@vars` pool, using the same dependency-aware
+selection policy as `@fresh`. If no suitable pool entry exists, the
+match stays unresolved instead of inventing an unnamed theorem dummy.
+If a match is abandoned before finalization, it should leave the main
 `TheoremContext` unchanged.
 
 Nothing symbolic escapes into proof emission or into the trusted kernel.
@@ -689,7 +714,8 @@ Operationally, the view pipeline now has a few important invariants:
   retry that unfolds concrete defs without hidden dummy args and
   canonicalizes
 - none of this is allowed to force theorem-local dummy creation early;
-  witness escape is deferred to final rule instantiation
+  witness escape is deferred to final rule instantiation, where bound
+  escapes go through the same `@vars` pool machinery used by `@fresh`
 
 `view_trace.zig` is the debug-oriented formatter used when view tracing is
 turned on.

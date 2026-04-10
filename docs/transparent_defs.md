@@ -147,8 +147,10 @@ When the compiler compares a hidden-dummy def against a concrete target, it
 solves those hidden binders relative to that comparison problem. During
 matching, the witnesses stay match-local and symbolic for as long as possible;
 they are not forced back into theorem-local expressions merely because a def
-was opened. This is still targeted, witness-driven exposure rather than a
-general-purpose "open this hidden-dummy def" operation.
+was opened. If final instantiation later needs a bound witness to escape into
+the theorem, it must do so through the sort's `@vars` pool, using the same
+selection policy as `@fresh`. This is still targeted, witness-driven exposure
+rather than a general-purpose "open this hidden-dummy def" operation.
 
 ---
 

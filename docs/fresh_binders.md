@@ -20,6 +20,12 @@ This is useful for systems with a variable convention: a set of tokens
 that readers understand to be variables of a particular sort, without
 needing each theorem to redeclare them.
 
+The same pools also back a newer hidden-dummy path: when advanced
+matching keeps a bound hidden witness symbolic for most of elaboration,
+final rule instantiation may still need to materialize that witness as a
+real theorem-local variable. That escape path reuses the sort's `@vars`
+pool instead of inventing an unnamed theorem dummy.
+
 ### Syntax
 
 ```
@@ -219,6 +225,53 @@ in declaration order.
 Failure happens only when there is a pool but every token in it is already
 allocated and also appears in the current concrete inputs, so none of them
 is fresh for this application.
+
+### Hidden def witnesses and recover-hole seeds
+
+The same `@vars` pools are also used outside explicit `@fresh`
+annotations.
+
+#### Finalizing hidden def witnesses
+
+Def-aware matching may keep hidden binders symbolic while it compares a
+rule against concrete proof data. That is deliberate: most hidden
+witnesses never need to escape into the theorem context at all.
+
+If final rule instantiation still needs a *bound* hidden witness as a
+concrete theorem expression, the compiler uses the same sort pool and the
+same dependency-aware selection policy described above:
+
+1. reuse an already-allocated theorem-local dummy when it is fresh for
+   the current application;
+2. otherwise allocate the first unused pool token;
+3. otherwise report an error.
+
+Two failure modes matter:
+
+- if the sort has no `@vars` pool, the witness stays unresolved and the
+  rule application is rejected;
+- if the pool exists but every token is blocked by the current concrete
+  inputs, the compiler reports `HiddenWitnessNoAvailableVar`.
+
+This is why hidden-dummy support does not create theorem-local dummies
+just because a def was unfolded. Escape happens only at the final
+instantiation boundary.
+
+#### Seeding omitted recover holes
+
+There is one earlier use of the same pools: when a `@recover` hole is an
+omitted *bound* binder, the compiler may pre-seed that hole from the
+relevant `@vars` pool before view matching runs.
+
+That seeding is still conservative:
+
+- only omitted bound holes are eligible;
+- explicit user bindings still win;
+- multiple seeded holes reserve distinct pool variables.
+
+The goal is not to finalize a hidden witness early. It is to give the
+view / recover pipeline a stable local variable when the rule design
+already makes it clear that the missing binder has to be bound.
 
 ### Example: CNF demo
 

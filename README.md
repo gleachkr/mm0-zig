@@ -24,6 +24,15 @@ Build both with:
 
 `zig build -Doptimize=ReleaseFast`
 
+## Documentation
+
+- `ARCHITECTURE.md` — project structure and trust boundary
+- `docs/proof.md` — Aufbau proof-script format
+- `docs/rewrite_system.md` — rewrite metadata and normalization
+- `docs/transparent_defs.md` — transparent def handling
+- `docs/view_recover.md` — `@view`, `@recover`, `@abstract`
+- `docs/fresh_binders.md` — `@vars` and `@fresh`
+
 ## Testing
 
 This project has separate unit and integration test steps:
@@ -70,7 +79,8 @@ The harness builds with repo-local Zig caches:
 ## Status
 
 - Verifier: working against the current MM0/MMB specs.
-- Compiler: supports the Aufbau script format in `specs/proof.md`,
-  omitted-binder inference, `@view` / `@recover` / `@abstract` /
+- Compiler: supports the Aufbau script format in `docs/proof.md`,
+  omitted-binder inference, transparent defs, hidden-dummy witness
+  resolution, `@view` / `@recover` / `@abstract` / `@vars` /
   `@fresh`, and mixed rewrite / structural normalization.
 - Web demo: ships several proof-case fixtures from `tests/proof_cases`.
