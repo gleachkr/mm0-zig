@@ -211,31 +211,66 @@ pub fn build(b: *std.Build) void {
         run_compiler_cmd.addArgs(args);
     }
 
-    const unit_test_module = b.createModule(.{
-        .root_source_file = b.path("tests/unit_tests.zig"),
+    const trusted_test_module = b.createModule(.{
+        .root_source_file = b.path("src/trusted/tests.zig"),
         .target = target,
         .optimize = optimize,
     });
-    unit_test_module.addImport("mm0", mm0_lib);
-    unit_test_module.addImport("lsp", lsp_module);
+    trusted_test_module.addImport("mm0", mm0_lib);
 
-    const unit_tests = b.addTest(.{
-        .root_module = unit_test_module,
+    const trusted_tests = b.addTest(.{
+        .root_module = trusted_test_module,
     });
-    const run_unit_tests = b.addRunArtifact(unit_tests);
+    const run_trusted_tests = b.addRunArtifact(trusted_tests);
 
-    const lsp_test_module = b.createModule(.{
-        .root_source_file = b.path("src/bin/compiler/lsp.zig"),
+    const root_test_module = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
         .target = target,
         .optimize = optimize,
     });
-    lsp_test_module.addImport("mm0", mm0_lib);
-    lsp_test_module.addImport("lsp", lsp_module);
+    root_test_module.addImport("mm0", mm0_lib);
 
-    const lsp_tests = b.addTest(.{
-        .root_module = lsp_test_module,
+    const root_tests = b.addTest(.{
+        .root_module = root_test_module,
     });
-    const run_lsp_tests = b.addRunArtifact(lsp_tests);
+    const run_root_tests = b.addRunArtifact(root_tests);
+
+    const frontend_test_module = b.createModule(.{
+        .root_source_file = b.path("src/frontend/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    frontend_test_module.addImport("mm0", mm0_lib);
+
+    const frontend_tests = b.addTest(.{
+        .root_module = frontend_test_module,
+    });
+    const run_frontend_tests = b.addRunArtifact(frontend_tests);
+
+    const compiler_test_module = b.createModule(.{
+        .root_source_file = b.path("src/frontend/compiler/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    compiler_test_module.addImport("mm0", mm0_lib);
+
+    const compiler_tests = b.addTest(.{
+        .root_module = compiler_test_module,
+    });
+    const run_compiler_tests = b.addRunArtifact(compiler_tests);
+
+    const compiler_bin_test_module = b.createModule(.{
+        .root_source_file = b.path("src/bin/compiler/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    compiler_bin_test_module.addImport("mm0", mm0_lib);
+    compiler_bin_test_module.addImport("lsp", lsp_module);
+
+    const compiler_bin_tests = b.addTest(.{
+        .root_module = compiler_bin_test_module,
+    });
+    const run_compiler_bin_tests = b.addRunArtifact(compiler_bin_tests);
 
     const integration_test_module = b.createModule(.{
         .root_source_file = b.path("tests/integration_examples.zig"),
@@ -250,8 +285,11 @@ pub fn build(b: *std.Build) void {
     const run_integration_tests = b.addRunArtifact(integration_tests);
 
     const unit_step = b.step("test-unit", "Run unit tests");
-    unit_step.dependOn(&run_unit_tests.step);
-    unit_step.dependOn(&run_lsp_tests.step);
+    unit_step.dependOn(&run_trusted_tests.step);
+    unit_step.dependOn(&run_root_tests.step);
+    unit_step.dependOn(&run_frontend_tests.step);
+    unit_step.dependOn(&run_compiler_tests.step);
+    unit_step.dependOn(&run_compiler_bin_tests.step);
 
     const integration_step = b.step(
         "test-integration",
@@ -260,7 +298,10 @@ pub fn build(b: *std.Build) void {
     integration_step.dependOn(&run_integration_tests.step);
 
     const test_step = b.step("test", "Run all tests");
-    test_step.dependOn(&run_unit_tests.step);
-    test_step.dependOn(&run_lsp_tests.step);
+    test_step.dependOn(&run_trusted_tests.step);
+    test_step.dependOn(&run_root_tests.step);
+    test_step.dependOn(&run_frontend_tests.step);
+    test_step.dependOn(&run_compiler_tests.step);
+    test_step.dependOn(&run_compiler_bin_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 }
