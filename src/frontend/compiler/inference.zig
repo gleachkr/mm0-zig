@@ -1072,22 +1072,28 @@ pub fn bindingsRespectRuleDeps(
     rule_args: []const ArgInfo,
     bindings: []const ExprId,
 ) !bool {
-    var deps_buf: [56]u55 = undefined;
-    var deps_len: usize = 0;
+    var bound_deps: [56]u55 = undefined;
+    var bound_len: usize = 0;
+    var prev_deps: [56]u55 = undefined;
+    var prev_len: usize = 0;
+
     for (bindings, rule_args) |binding, expected| {
         const info = try exprInfo(env, theorem, theorem_args, binding);
         if (expected.bound) {
-            for (0..deps_len) |k| {
-                if (deps_buf[k] & info.deps != 0) return false;
+            for (0..prev_len) |k| {
+                if (prev_deps[k] & info.deps != 0) return false;
             }
-            deps_buf[deps_len] = info.deps;
-            deps_len += 1;
-            continue;
+            bound_deps[bound_len] = info.deps;
+            bound_len += 1;
+        } else {
+            for (0..bound_len) |k| {
+                if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0)
+                    continue;
+                if (bound_deps[k] & info.deps != 0) return false;
+            }
         }
-        for (0..deps_len) |k| {
-            if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0) continue;
-            if (deps_buf[k] & info.deps != 0) return false;
-        }
+        prev_deps[prev_len] = info.deps;
+        prev_len += 1;
     }
     return true;
 }

@@ -99,6 +99,89 @@ test "compiler handles normalize-plus-unfold hidden-dummy proof" {
     try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
+test "compiler rejects repeated binders before emitting bad MMB" {
+    const mm0_src =
+        \\strict provable sort wff;
+        \\delimiter $ ( @ [ $ $ . : ; ) ] $;
+        \\term im: wff > wff > wff;
+        \\infixr im: $⊢$ prec 0;
+        \\term an: wff > wff > wff;
+        \\infixl an: $∧$ prec 1;
+        \\axiom anr (P Q: wff): $ P ∧ Q ⊢ Q $;
+        \\
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\term fun: type > type > type;
+        \\infixr fun: $→$ prec 25;
+        \\
+        \\sort term;
+        \\term ty: term > type > wff;
+        \\infixl ty: $:$ prec 2;
+        \\term app: term > term > term;
+        \\infixl app: $·$ prec 1000;
+        \\term lam {x: term}: type > term x > term;
+        \\notation lam {x: term} (A: type) (t: term x): term =
+        \\  ($λ$:20) x ($:$:2) A ($.$:0) t;
+        \\
+        \\axiom appT (G: wff) (A B: type) (f x: term):
+        \\  $ G ⊢ f: A → B $ > $ G ⊢ x: A $ > $ G ⊢ f · x: B $;
+        \\axiom lamT (G: wff) (A B: type) {x: term} (t: term x):
+        \\  $ G ∧ x: A ⊢ t: B $ > $ G ⊢ λ x: A. t: A → B $;
+        \\
+        \\term eq: type > term;
+        \\def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+        \\notation eqc (A: type) (t u: term): term =
+        \\  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+        \\term thm: term > wff;
+        \\coercion thm: term > wff;
+        \\
+        \\axiom leq (G: wff) (A B: type) {x: term} (a b: term x):
+        \\  $ G ∧ x: A ⊢ ≃[B] a = b $ >
+        \\  $ G ⊢ ≃[A → B] (λ x: A. a) = (λ x: A. b) $;
+        \\axiom beta (A B: type) {x: term} (G: wff x) (t: term x):
+        \\  $ G ⊢ (λ x: A. t) · x: B $ >
+        \\  $ G ⊢ ≃[B] (λ x: A. t) · x = t $;
+        \\
+        \\theorem id_bool_has_type (G: wff) {x: term}:
+        \\  $ G ⊢ λ x: 𝔹. x: 𝔹 → 𝔹 $;
+        \\theorem id_bool_beta (G: wff) {x: term}:
+        \\  $ G ⊢ x: 𝔹 $ > $ G ⊢ ≃[𝔹] ((λ x: 𝔹. x) · x) = x $;
+        \\theorem bad_eta (G: wff) {x: term}:
+        \\  $ G ⊢ ≃[𝔹 → 𝔹]
+        \\      (λ x: 𝔹. (λ x: 𝔹. x) · x)
+        \\      = (λ x: 𝔹. x) $;
+    ;
+    const proof_src =
+        \\id_bool_has_type
+        \\----------------
+        \\l1: $ G ∧ x: 𝔹 ⊢ x: 𝔹 $ by anr []
+        \\l2: $ G ⊢ λ x: 𝔹. x: 𝔹 → 𝔹 $ by lamT [l1]
+        \\
+        \\id_bool_beta
+        \\------------
+        \\l1: $ G ⊢ λ x: 𝔹. x: 𝔹 → 𝔹 $ by id_bool_has_type []
+        \\l2: $ G ⊢ (λ x: 𝔹. x) · x: 𝔹 $ by appT [l1, #1]
+        \\l3: $ G ⊢ ≃[𝔹] ((λ x: 𝔹. x) · x) = x $ by beta [l2]
+        \\
+        \\bad_eta
+        \\-------
+        \\l1: $ G ∧ x: 𝔹 ⊢ x: 𝔹 $ by anr []
+        \\l2: $ G ∧ x: 𝔹 ⊢ ≃[𝔹] ((λ x: 𝔹. x) · x) = x $ by id_bool_beta [l1]
+        \\l3: $ G ⊢ ≃[𝔹 → 𝔹] (λ x: 𝔹. (λ x: 𝔹. x) · x) = (λ x: 𝔹. x) $ by leq [l2]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.DepViolation,
+        compiler.compileMmb(std.testing.allocator),
+    );
+}
+
 test "compiler compiles lemma proof blocks" {
     const allocator = std.testing.allocator;
     const mm0_src =
