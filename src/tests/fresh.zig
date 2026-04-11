@@ -13,7 +13,7 @@ const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
 
 const FreshFixture = struct {
-    arena: std.heap.ArenaAllocator,
+    arena: *std.heap.ArenaAllocator,
     parser: MM0Parser,
     env: FrontendEnv.GlobalEnv,
     theorem: FrontendExpr.TheoremContext,
@@ -25,6 +25,11 @@ const FreshFixture = struct {
         self.theorem_vars.deinit();
         self.theorem.deinit();
         self.arena.deinit();
+        std.testing.allocator.destroy(self.arena);
+    }
+
+    fn allocator(self: *FreshFixture) std.mem.Allocator {
+        return self.arena.allocator();
     }
 
     fn ensureDummyToken(self: *FreshFixture, token: []const u8) !void {
@@ -81,26 +86,30 @@ const FreshFixture = struct {
 };
 
 fn buildFreshFixture(src: []const u8) !FreshFixture {
+    const arena = try std.testing.allocator.create(std.heap.ArenaAllocator);
+    errdefer std.testing.allocator.destroy(arena);
+    arena.* = std.heap.ArenaAllocator.init(std.testing.allocator);
+    errdefer arena.deinit();
+
     var fixture = FreshFixture{
-        .arena = std.heap.ArenaAllocator.init(std.testing.allocator),
+        .arena = arena,
         .parser = undefined,
         .env = undefined,
         .theorem = undefined,
         .theorem_vars = undefined,
         .sort_vars = undefined,
     };
-    errdefer fixture.deinit();
 
-    fixture.parser = MM0Parser.init(src, fixture.arena.allocator());
-    fixture.env = FrontendEnv.GlobalEnv.init(fixture.arena.allocator());
+    fixture.parser = MM0Parser.init(src, fixture.allocator());
+    fixture.env = FrontendEnv.GlobalEnv.init(fixture.allocator());
     fixture.theorem = FrontendExpr.TheoremContext.init(
-        fixture.arena.allocator(),
+        fixture.allocator(),
     );
     fixture.theorem_vars = std.StringHashMap(*const Expr).init(
-        fixture.arena.allocator(),
+        fixture.allocator(),
     );
     fixture.sort_vars = CompilerVars.SortVarRegistry.init(
-        fixture.arena.allocator(),
+        fixture.allocator(),
     );
 
     var theorem_stmt: ?AssertionStmt = null;
