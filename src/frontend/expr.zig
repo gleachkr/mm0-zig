@@ -77,6 +77,43 @@ pub const ExprInterner = struct {
         self.index.deinit(self.allocator);
     }
 
+    pub fn clone(self: *const ExprInterner) !ExprInterner {
+        var copy = ExprInterner.init(self.allocator);
+        errdefer copy.deinit();
+
+        try copy.nodes.ensureTotalCapacity(
+            self.allocator,
+            self.nodes.items.len,
+        );
+        try copy.index.ensureTotalCapacity(
+            self.allocator,
+            self.index.count(),
+        );
+
+        for (self.nodes.items, 0..) |expr_node, idx| {
+            const cloned: ExprNode = switch (expr_node) {
+                .variable => expr_node,
+                .app => |app| .{ .app = .{
+                    .term_id = app.term_id,
+                    .args = try self.allocator.dupe(ExprId, app.args),
+                } },
+            };
+            errdefer switch (cloned) {
+                .variable => {},
+                .app => |app| self.allocator.free(app.args),
+            };
+
+            try copy.nodes.append(self.allocator, cloned);
+            try copy.index.putContext(
+                self.allocator,
+                cloned,
+                @intCast(idx),
+                .{},
+            );
+        }
+        return copy;
+    }
+
     pub fn count(self: *const ExprInterner) usize {
         return self.nodes.items.len;
     }
@@ -165,6 +202,42 @@ pub const TheoremContext = struct {
         self.theorem_hyps.deinit(self.allocator);
         self.theorem_dummies.deinit(self.allocator);
         self.parser_vars.deinit(self.allocator);
+    }
+
+    pub fn clone(self: *const TheoremContext) !TheoremContext {
+        var copy = TheoremContext.init(self.allocator);
+        errdefer copy.deinit();
+
+        copy.interner = try self.interner.clone();
+        copy.arg_infos = self.arg_infos;
+        try copy.theorem_vars.appendSlice(
+            self.allocator,
+            self.theorem_vars.items,
+        );
+        try copy.theorem_hyps.appendSlice(
+            self.allocator,
+            self.theorem_hyps.items,
+        );
+        try copy.theorem_dummies.appendSlice(
+            self.allocator,
+            self.theorem_dummies.items,
+        );
+        copy.next_dummy_id = self.next_dummy_id;
+        copy.next_dummy_dep = self.next_dummy_dep;
+
+        try copy.parser_vars.ensureTotalCapacity(
+            self.allocator,
+            self.parser_vars.count(),
+        );
+        var it = self.parser_vars.iterator();
+        while (it.next()) |entry| {
+            try copy.parser_vars.put(
+                self.allocator,
+                entry.key_ptr.*,
+                entry.value_ptr.*,
+            );
+        }
+        return copy;
     }
 
     // Seed a context with `count` theorem binders but without any parser-side

@@ -62,3 +62,25 @@ pub fn appendTransportLine(
     });
     return idx;
 }
+
+pub fn deinitLine(
+    allocator: std.mem.Allocator,
+    line: CheckedLine,
+) void {
+    switch (line.data) {
+        .rule => |rule| {
+            allocator.free(rule.bindings);
+            allocator.free(rule.refs);
+        },
+        .transport => {},
+    }
+}
+
+pub fn deinitLines(
+    allocator: std.mem.Allocator,
+    lines: []const CheckedLine,
+) void {
+    for (lines) |line| {
+        deinitLine(allocator, line);
+    }
+}

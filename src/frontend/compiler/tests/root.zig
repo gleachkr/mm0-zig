@@ -109,6 +109,66 @@ test "compiler rejects unknown term annotations" {
     try std.testing.expectEqualStrings("@bogus", mm0_src[span.start..span.end]);
 }
 
+test "compiler pinpoints invalid fallback annotations" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\--| @fallback
+        \\axiom top_i: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(error.InvalidFallbackAnnotation, compiler.check());
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.InvalidFallbackAnnotation, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("top_i", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("@fallback", mm0_src[span.start..span.end]);
+}
+
+test "compiler pinpoints duplicate fallback annotations" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_j: $ top $;
+        \\axiom top_k: $ top $;
+        \\--| @fallback top_j
+        \\--| @fallback top_k
+        \\axiom top_i: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(error.DuplicateFallbackAnnotation, compiler.check());
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DuplicateFallbackAnnotation, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("top_i", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("@fallback top_j", mm0_src[span.start..span.end]);
+}
+
+test "compiler pinpoints unknown fallback rules" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\--| @fallback missing_rule
+        \\axiom top_i: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(error.UnknownFallbackRule, compiler.check());
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnknownFallbackRule, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("top_i", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("@fallback missing_rule", mm0_src[span.start..span.end]);
+}
+
 test "compiler pinpoints unknown terms in notation statements" {
     const mm0_src =
         \\sort nat;
@@ -589,6 +649,101 @@ test "compiler pinpoints unknown proof rules" {
         "missing_rule",
         proof_src[span.start..span.end],
     );
+}
+
+test "compiler retries theorem lines through fallback chains" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term and (a b: wff): wff;
+        \\term fst (a b: wff): wff;
+        \\term snd (a b: wff): wff;
+        \\axiom and_elim_right (a b: wff): $ and a b $ > $ snd a b $;
+        \\--| @fallback and_elim_right
+        \\axiom and_elim_mid (a b: wff): $ and a b $ > $ fst a b $;
+        \\--| @fallback and_elim_mid
+        \\axiom and_elim (a b: wff): $ and a b $ > $ fst a b $;
+        \\theorem use_fallback (a b: wff): $ and a b $ > $ snd a b $;
+    ;
+    const proof_src =
+        \\use_fallback
+        \\------------
+        \\l1: $ snd a b $ by and_elim [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler reports fallback cycles when every candidate fails" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\term mid: wff;
+        \\--| @fallback step_a
+        \\axiom step_a: $ top $;
+        \\theorem bad_cycle: $ mid $;
+    ;
+    const proof_src =
+        \\bad_cycle
+        \\---------
+        \\l1: $ mid $ by step_a []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.FallbackCycle, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.FallbackCycle, diag.err);
+    try std.testing.expectEqualStrings("bad_cycle", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("step_a", diag.rule_name.?);
+}
+
+test "compiler preserves the first fallback failure diagnostic" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\term bot: wff;
+        \\term mid: wff;
+        \\axiom step_b: $ bot $;
+        \\--| @fallback step_b
+        \\axiom step_a: $ top $;
+        \\theorem bad_fallback: $ mid $;
+    ;
+    const proof_src =
+        \\bad_fallback
+        \\------------
+        \\l1: $ mid $ by step_a []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.ConclusionMismatch,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.ConclusionMismatch, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
+    try std.testing.expectEqualStrings("bad_fallback", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("step_a", diag.rule_name.?);
 }
 
 test "compiler pinpoints proof parser identifier errors" {

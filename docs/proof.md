@@ -133,6 +133,7 @@ Where:
 - `label` is a local proof-line label
 - `formula` is an MM0 math string, written as `$ ... $`
 - `rule-name` is an axiom, public theorem, or earlier lemma name
+  (possibly one that carries `@fallback` metadata)
 - `arg-bindings` is an optional comma-separated named argument list
 - `refs` is an optional comma-separated reference list
 
@@ -209,11 +210,19 @@ is checked roughly as follows:
    allowing frontend features such as transparent defs, views, recover /
    abstract bindings, fresh binders, and normalization when the rule's
    metadata permits them.
-8. Record label `L` as proving `C`.
+8. If that attempt fails and the cited rule has `@fallback`, retry the
+   whole line with the fallback target, then continue through the
+   fallback chain if needed.
+9. Record label `L` as proving `C`.
 
 The line formula is always explicit and must be written out by the user.
 The compiler may elaborate the application internally, but it does not
 infer the whole asserted formula from the cited rule.
+
+Fallback metadata is resolved eagerly while processing the `.mm0` file,
+so `@fallback target_rule` may refer only to a rule already in scope at
+the annotation site. See `docs/rewrite_system.md` for the annotation
+details.
 
 ## Final-line condition
 

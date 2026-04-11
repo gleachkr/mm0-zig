@@ -22,12 +22,17 @@ const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const Inference = @import("./inference.zig");
 const Matching = @import("./check/matching.zig");
-const Emit = @import("./emit.zig");
 const CompilerVars = @import("./vars.zig");
 const SortVarRegistry = CompilerVars.SortVarRegistry;
 
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
+
+const SuccessfulLineAttempt = struct {
+    line_idx: usize,
+    theorem: TheoremContext,
+    theorem_vars: NameExprMap,
+};
 
 pub fn checkTheoremBlock(
     self: anytype,
@@ -58,322 +63,7 @@ pub fn checkTheoremBlock(
     var last_span: ?Span = null;
 
     for (block.lines) |line| {
-        const line_expr = parseLineAssertion(
-            parser,
-            theorem,
-            &theorem_vars,
-            sort_vars,
-            line,
-        ) catch |err| {
-            CompilerDiag.setProof(self, CompilerDiag.proofMathParseDiagnostic(
-                parser,
-                .parse_assertion,
-                err,
-                assertion.name,
-                line.label,
-                line.rule_name,
-                null,
-                line.assertion.span,
-            ));
-            return err;
-        };
-        const rule_id = env.getRuleId(line.rule_name) orelse {
-            CompilerDiag.setProof(self, .{
-                .kind = .unknown_rule,
-                .err = error.UnknownRule,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.rule_span,
-            });
-            return error.UnknownRule;
-        };
-        const rule = &env.rules.items[rule_id];
-        if (line.refs.len != rule.hyps.len) {
-            CompilerDiag.setProof(self, .{
-                .kind = .ref_count_mismatch,
-                .err = error.RefCountMismatch,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.refsOrRuleSpan(),
-            });
-            return error.RefCountMismatch;
-        }
-
-        const refs = try allocator.alloc(CheckedRef, line.refs.len);
-        const ref_exprs = try allocator.alloc(ExprId, line.refs.len);
-        for (line.refs, 0..) |ref, idx| {
-            ref_exprs[idx] = switch (ref) {
-                .hyp => |hyp| blk: {
-                    if (hyp.index == 0 or
-                        hyp.index > theorem.theorem_hyps.items.len)
-                    {
-                        CompilerDiag.setProof(self, .{
-                            .kind = .unknown_hypothesis_ref,
-                            .err = error.UnknownHypothesisRef,
-                            .theorem_name = assertion.name,
-                            .line_label = line.label,
-                            .span = hyp.span,
-                            .detail = .{
-                                .hypothesis_ref = .{
-                                    .index = hyp.index,
-                                },
-                            },
-                        });
-                        return error.UnknownHypothesisRef;
-                    }
-                    refs[idx] = .{ .hyp = hyp.index - 1 };
-                    break :blk theorem.theorem_hyps.items[hyp.index - 1];
-                },
-                .line => |label| blk: {
-                    const line_idx = labels.get(label.label) orelse {
-                        CompilerDiag.setProof(self, .{
-                            .kind = .unknown_label,
-                            .err = error.UnknownLabel,
-                            .theorem_name = assertion.name,
-                            .line_label = line.label,
-                            .name = label.label,
-                            .span = label.span,
-                        });
-                        return error.UnknownLabel;
-                    };
-                    refs[idx] = .{ .line = line_idx };
-                    break :blk checked.items[line_idx].expr;
-                },
-            };
-        }
-
-        const partial_bindings = try parseBindings(
-            self,
-            allocator,
-            parser,
-            theorem,
-            &theorem_vars,
-            sort_vars,
-            assertion.name,
-            rule,
-            line,
-        );
-        if (fresh_bindings.get(rule_id)) |rule_fresh| {
-            try applyFreshBindings(
-                self,
-                parser,
-                env,
-                theorem,
-                &theorem_vars,
-                sort_vars,
-                assertion.name,
-                rule,
-                line,
-                line_expr,
-                ref_exprs,
-                partial_bindings,
-                rule_fresh,
-            );
-        }
-        const maybe_view = views.get(rule_id);
-        const had_omitted = Inference.hasOmittedBindings(partial_bindings);
-        const use_advanced_inference = had_omitted and
-            Inference.shouldUseAdvancedInference(rule_id, maybe_view, registry);
-
-        if (maybe_view) |view| {
-            if (!use_advanced_inference) {
-                CompilerViews.applyViewBindings(
-                    allocator,
-                    theorem,
-                    env,
-                    registry,
-                    &view,
-                    line_expr,
-                    ref_exprs,
-                    partial_bindings,
-                    null,
-                    null,
-                    self.debug.views,
-                ) catch |err| {
-                    CompilerDiag.setProof(self, .{
-                        .kind = .generic,
-                        .err = err,
-                        .theorem_name = assertion.name,
-                        .line_label = line.label,
-                        .rule_name = line.rule_name,
-                        .span = line.ruleApplicationSpan(),
-                    });
-                    return err;
-                };
-            }
-        }
-
-        const fresh_context: Inference.HiddenWitnessFreshContext = .{
-            .parser = parser,
-            .theorem_vars = &theorem_vars,
-            .sort_vars = sort_vars,
-        };
-
-        const bindings = if (had_omitted) blk: {
-            break :blk try Inference.inferBindings(
-                self,
-                allocator,
-                env,
-                registry,
-                &diag_scratch,
-                theorem,
-                assertion,
-                rule,
-                line,
-                partial_bindings,
-                ref_exprs,
-                line_expr,
-                fresh_context,
-                maybe_view,
-                use_advanced_inference,
-            );
-        } else blk: {
-            const b = try Inference.requireConcreteBindings(
-                allocator,
-                partial_bindings,
-            );
-            break :blk b;
-        };
-        if (!had_omitted) {
-            try Inference.validateResolvedBindings(
-                self,
-                env,
-                theorem,
-                assertion,
-                line,
-                rule,
-                bindings,
-            );
-        }
-
-        const norm_spec = registry.getNormalizeSpec(rule_id);
-
-        for (ref_exprs, line.refs, 0..) |actual, ref, idx| {
-            const expected = try theorem.instantiateTemplate(
-                rule.hyps[idx],
-                bindings,
-            );
-            const match_mark = diag_scratch.mark();
-            if (Matching.tryMatchHypothesis(
-                allocator,
-                theorem,
-                registry,
-                env,
-                &checked,
-                &diag_scratch,
-                norm_spec,
-                idx,
-                refs[idx],
-                actual,
-                expected,
-            ) catch |err| {
-                if (CompilerDiag.setProofScratchDiagnosticIfPresent(
-                    self,
-                    &diag_scratch,
-                    match_mark,
-                    env,
-                    .generic,
-                    err,
-                    assertion.name,
-                    line.label,
-                    line.rule_name,
-                    refSpan(line.refs[idx]),
-                )) {
-                    return err;
-                }
-                diag_scratch.discard(match_mark);
-                return err;
-            }) |matched_ref| {
-                diag_scratch.discard(match_mark);
-                refs[idx] = matched_ref;
-                continue;
-            }
-            diag_scratch.discard(match_mark);
-            const span = switch (ref) {
-                .hyp => |hyp| hyp.span,
-                .line => |label| label.span,
-            };
-            CompilerDiag.setProof(self, switch (ref) {
-                .hyp => |hyp| Diagnostic{
-                    .kind = .hypothesis_mismatch,
-                    .err = error.HypothesisMismatch,
-                    .theorem_name = assertion.name,
-                    .line_label = line.label,
-                    .rule_name = line.rule_name,
-                    .span = span,
-                    .detail = .{
-                        .hypothesis_ref = .{
-                            .index = hyp.index,
-                        },
-                    },
-                },
-                .line => |label| Diagnostic{
-                    .kind = .hypothesis_mismatch,
-                    .err = error.HypothesisMismatch,
-                    .theorem_name = assertion.name,
-                    .line_label = line.label,
-                    .rule_name = line.rule_name,
-                    .name = label.label,
-                    .span = span,
-                },
-            });
-            return error.HypothesisMismatch;
-        }
-
-        const expected_line = try theorem.instantiateTemplate(
-            rule.concl,
-            bindings,
-        );
-
-        const concl_mark = diag_scratch.mark();
-        const line_idx = (Matching.tryBuildConclusionLine(
-            allocator,
-            theorem,
-            registry,
-            env,
-            &checked,
-            &diag_scratch,
-            norm_spec,
-            line_expr,
-            expected_line,
-            rule_id,
-            bindings,
-            refs,
-        ) catch |err| {
-            if (CompilerDiag.setProofScratchDiagnosticIfPresent(
-                self,
-                &diag_scratch,
-                concl_mark,
-                env,
-                .generic,
-                err,
-                assertion.name,
-                line.label,
-                line.rule_name,
-                line.assertion.span,
-            )) {
-                return err;
-            }
-            diag_scratch.discard(concl_mark);
-            return err;
-        }) orelse {
-            diag_scratch.discard(concl_mark);
-            CompilerDiag.setProof(self, .{
-                .kind = .conclusion_mismatch,
-                .err = error.ConclusionMismatch,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.assertion.span,
-            });
-            return error.ConclusionMismatch;
-        };
-        diag_scratch.discard(concl_mark);
-
-        const gop = try labels.getOrPut(line.label);
-        if (gop.found_existing) {
+        if (labels.contains(line.label)) {
             CompilerDiag.setProof(self, .{
                 .kind = .duplicate_label,
                 .err = error.DuplicateLabel,
@@ -384,11 +74,120 @@ pub fn checkTheoremBlock(
             });
             return error.DuplicateLabel;
         }
-        gop.value_ptr.* = line_idx;
-        last_line = checked.items[line_idx].expr;
-        last_line_idx = line_idx;
-        last_label = line.label;
-        last_span = line.assertion.span;
+
+        const base_refs = try allocator.alloc(CheckedRef, line.refs.len);
+        defer allocator.free(base_refs);
+        const base_ref_exprs = try allocator.alloc(ExprId, line.refs.len);
+        defer allocator.free(base_ref_exprs);
+        try resolveBaseRefs(
+            self,
+            theorem,
+            assertion,
+            line,
+            &labels,
+            checked.items,
+            base_refs,
+            base_ref_exprs,
+        );
+
+        const initial_rule_id = env.getRuleId(line.rule_name) orelse {
+            CompilerDiag.setProof(self, .{
+                .kind = .unknown_rule,
+                .err = error.UnknownRule,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .span = line.rule_span,
+            });
+            return error.UnknownRule;
+        };
+
+        const saved_diag = getDiagnostic(self);
+        var first_diag: ?Diagnostic = null;
+        var first_err: ?anyerror = null;
+        var seen_candidates = std.AutoHashMap(u32, void).init(allocator);
+        defer seen_candidates.deinit();
+        var candidate_rule_id = initial_rule_id;
+
+        while (true) {
+            const seen = try seen_candidates.getOrPut(candidate_rule_id);
+            if (seen.found_existing) {
+                CompilerDiag.setProof(self, .{
+                    .kind = .generic,
+                    .err = error.FallbackCycle,
+                    .theorem_name = assertion.name,
+                    .line_label = line.label,
+                    .rule_name = line.rule_name,
+                    .span = line.rule_span,
+                });
+                return error.FallbackCycle;
+            }
+
+            restoreDiagnostic(self, null);
+            const checked_mark = checked.items.len;
+            var attempt_theorem = try theorem.clone();
+            var attempt_theorem_vars = cloneNameExprMap(
+                allocator,
+                &theorem_vars,
+            ) catch |err| {
+                attempt_theorem.deinit();
+                return err;
+            };
+
+            const attempt = tryApplyLineWithCandidate(
+                self,
+                allocator,
+                parser,
+                env,
+                registry,
+                fresh_bindings,
+                views,
+                sort_vars,
+                assertion,
+                line,
+                candidate_rule_id,
+                &attempt_theorem,
+                &attempt_theorem_vars,
+                base_refs,
+                base_ref_exprs,
+                &checked,
+                &diag_scratch,
+            ) catch |err| {
+                CheckedIr.deinitLines(
+                    allocator,
+                    checked.items[checked_mark..],
+                );
+                checked.shrinkRetainingCapacity(checked_mark);
+                attempt_theorem_vars.deinit();
+                attempt_theorem.deinit();
+                if (first_err == null) {
+                    first_err = err;
+                    first_diag = getDiagnostic(self);
+                }
+                restoreDiagnostic(self, null);
+                candidate_rule_id = registry.getFallbackRule(
+                    candidate_rule_id,
+                ) orelse {
+                    restoreDiagnostic(self, first_diag orelse saved_diag);
+                    return first_err.?;
+                };
+                continue;
+            };
+
+            var old_theorem = theorem.*;
+            theorem.* = attempt.theorem;
+            old_theorem.deinit();
+            theorem_vars.deinit();
+            theorem_vars = attempt.theorem_vars;
+            restoreDiagnostic(self, saved_diag);
+
+            try labels.put(line.label, attempt.line_idx);
+            last_line = checked.items[attempt.line_idx].expr;
+            last_line_idx = attempt.line_idx;
+            last_label = line.label;
+            last_span = line.assertion.span;
+            break;
+        }
     }
 
     const final_line = last_line orelse {
@@ -449,6 +248,350 @@ pub fn checkTheoremBlock(
     return try checked.toOwnedSlice(allocator);
 }
 
+fn tryApplyLineWithCandidate(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+    views: *const std.AutoHashMap(u32, ViewDecl),
+    sort_vars: *const SortVarRegistry,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    rule_id: u32,
+    theorem: *TheoremContext,
+    theorem_vars: *NameExprMap,
+    base_refs: []const CheckedRef,
+    base_ref_exprs: []const ExprId,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    diag_scratch: *CompilerDiag.Scratch,
+) !SuccessfulLineAttempt {
+    const line_expr = parseLineAssertion(
+        parser,
+        theorem,
+        theorem_vars,
+        sort_vars,
+        line,
+    ) catch |err| {
+        CompilerDiag.setProof(self, CompilerDiag.proofMathParseDiagnostic(
+            parser,
+            .parse_assertion,
+            err,
+            assertion.name,
+            line.label,
+            line.rule_name,
+            null,
+            line.assertion.span,
+        ));
+        return err;
+    };
+
+    const rule = &env.rules.items[rule_id];
+    if (line.refs.len != rule.hyps.len) {
+        CompilerDiag.setProof(self, .{
+            .kind = .ref_count_mismatch,
+            .err = error.RefCountMismatch,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.refsOrRuleSpan(),
+        });
+        return error.RefCountMismatch;
+    }
+
+    const refs = try allocator.dupe(CheckedRef, base_refs);
+
+    const partial_bindings = try parseBindings(
+        self,
+        allocator,
+        parser,
+        theorem,
+        theorem_vars,
+        sort_vars,
+        assertion.name,
+        rule,
+        line,
+    );
+    defer allocator.free(partial_bindings);
+
+    if (fresh_bindings.get(rule_id)) |rule_fresh| {
+        try applyFreshBindings(
+            self,
+            parser,
+            env,
+            theorem,
+            theorem_vars,
+            sort_vars,
+            assertion.name,
+            rule,
+            line,
+            line_expr,
+            base_ref_exprs,
+            partial_bindings,
+            rule_fresh,
+        );
+    }
+    const maybe_view = views.get(rule_id);
+    const had_omitted = Inference.hasOmittedBindings(partial_bindings);
+    const use_advanced_inference = had_omitted and
+        Inference.shouldUseAdvancedInference(rule_id, maybe_view, registry);
+
+    if (maybe_view) |view| {
+        if (!use_advanced_inference) {
+            CompilerViews.applyViewBindings(
+                allocator,
+                theorem,
+                env,
+                registry,
+                &view,
+                line_expr,
+                base_ref_exprs,
+                partial_bindings,
+                null,
+                null,
+                self.debug.views,
+            ) catch |err| {
+                CompilerDiag.setProof(self, .{
+                    .kind = .generic,
+                    .err = err,
+                    .theorem_name = assertion.name,
+                    .line_label = line.label,
+                    .rule_name = line.rule_name,
+                    .span = line.ruleApplicationSpan(),
+                });
+                return err;
+            };
+        }
+    }
+
+    const fresh_context: Inference.HiddenWitnessFreshContext = .{
+        .parser = parser,
+        .theorem_vars = theorem_vars,
+        .sort_vars = sort_vars,
+    };
+
+    const bindings = if (had_omitted) blk: {
+        break :blk try Inference.inferBindings(
+            self,
+            allocator,
+            env,
+            registry,
+            diag_scratch,
+            theorem,
+            assertion,
+            rule,
+            line,
+            partial_bindings,
+            base_ref_exprs,
+            line_expr,
+            fresh_context,
+            maybe_view,
+            use_advanced_inference,
+        );
+    } else blk: {
+        const b = try Inference.requireConcreteBindings(
+            allocator,
+            partial_bindings,
+        );
+        break :blk b;
+    };
+
+    if (!had_omitted) {
+        try Inference.validateResolvedBindings(
+            self,
+            env,
+            theorem,
+            assertion,
+            line,
+            rule,
+            bindings,
+        );
+    }
+
+    const norm_spec = registry.getNormalizeSpec(rule_id);
+
+    for (base_ref_exprs, line.refs, 0..) |actual, ref, idx| {
+        const expected = try theorem.instantiateTemplate(
+            rule.hyps[idx],
+            bindings,
+        );
+        const match_mark = diag_scratch.mark();
+        if (Matching.tryMatchHypothesis(
+            allocator,
+            theorem,
+            registry,
+            env,
+            checked,
+            diag_scratch,
+            norm_spec,
+            idx,
+            refs[idx],
+            actual,
+            expected,
+        ) catch |err| {
+            if (CompilerDiag.setProofScratchDiagnosticIfPresent(
+                self,
+                diag_scratch,
+                match_mark,
+                env,
+                .generic,
+                err,
+                assertion.name,
+                line.label,
+                line.rule_name,
+                refSpan(line.refs[idx]),
+            )) {
+                return err;
+            }
+            diag_scratch.discard(match_mark);
+            return err;
+        }) |matched_ref| {
+            diag_scratch.discard(match_mark);
+            refs[idx] = matched_ref;
+            continue;
+        }
+        diag_scratch.discard(match_mark);
+        const span = switch (ref) {
+            .hyp => |hyp| hyp.span,
+            .line => |label| label.span,
+        };
+        CompilerDiag.setProof(self, switch (ref) {
+            .hyp => |hyp| Diagnostic{
+                .kind = .hypothesis_mismatch,
+                .err = error.HypothesisMismatch,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .span = span,
+                .detail = .{
+                    .hypothesis_ref = .{
+                        .index = hyp.index,
+                    },
+                },
+            },
+            .line => |label| Diagnostic{
+                .kind = .hypothesis_mismatch,
+                .err = error.HypothesisMismatch,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = label.label,
+                .span = span,
+            },
+        });
+        return error.HypothesisMismatch;
+    }
+
+    const expected_line = try theorem.instantiateTemplate(
+        rule.concl,
+        bindings,
+    );
+
+    const concl_mark = diag_scratch.mark();
+    const line_idx = (Matching.tryBuildConclusionLine(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        diag_scratch,
+        norm_spec,
+        line_expr,
+        expected_line,
+        rule_id,
+        bindings,
+        refs,
+    ) catch |err| {
+        if (CompilerDiag.setProofScratchDiagnosticIfPresent(
+            self,
+            diag_scratch,
+            concl_mark,
+            env,
+            .generic,
+            err,
+            assertion.name,
+            line.label,
+            line.rule_name,
+            line.assertion.span,
+        )) {
+            return err;
+        }
+        diag_scratch.discard(concl_mark);
+        return err;
+    }) orelse {
+        diag_scratch.discard(concl_mark);
+        CompilerDiag.setProof(self, .{
+            .kind = .conclusion_mismatch,
+            .err = error.ConclusionMismatch,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.assertion.span,
+        });
+        return error.ConclusionMismatch;
+    };
+    diag_scratch.discard(concl_mark);
+
+    return .{
+        .line_idx = line_idx,
+        .theorem = theorem.*,
+        .theorem_vars = theorem_vars.*,
+    };
+}
+
+fn resolveBaseRefs(
+    self: anytype,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    labels: *const LabelIndexMap,
+    checked: []const CheckedLine,
+    refs: []CheckedRef,
+    ref_exprs: []ExprId,
+) !void {
+    for (line.refs, 0..) |ref, idx| {
+        ref_exprs[idx] = switch (ref) {
+            .hyp => |hyp| blk: {
+                if (hyp.index == 0 or
+                    hyp.index > theorem.theorem_hyps.items.len)
+                {
+                    CompilerDiag.setProof(self, .{
+                        .kind = .unknown_hypothesis_ref,
+                        .err = error.UnknownHypothesisRef,
+                        .theorem_name = assertion.name,
+                        .line_label = line.label,
+                        .span = hyp.span,
+                        .detail = .{
+                            .hypothesis_ref = .{
+                                .index = hyp.index,
+                            },
+                        },
+                    });
+                    return error.UnknownHypothesisRef;
+                }
+                refs[idx] = .{ .hyp = hyp.index - 1 };
+                break :blk theorem.theorem_hyps.items[hyp.index - 1];
+            },
+            .line => |label| blk: {
+                const line_idx = labels.get(label.label) orelse {
+                    CompilerDiag.setProof(self, .{
+                        .kind = .unknown_label,
+                        .err = error.UnknownLabel,
+                        .theorem_name = assertion.name,
+                        .line_label = line.label,
+                        .name = label.label,
+                        .span = label.span,
+                    });
+                    return error.UnknownLabel;
+                };
+                refs[idx] = .{ .line = line_idx };
+                break :blk checked[line_idx].expr;
+            },
+        };
+    }
+}
+
 fn buildTheoremVarMap(
     allocator: std.mem.Allocator,
     assertion: AssertionStmt,
@@ -460,6 +603,56 @@ fn buildTheoremVarMap(
         }
     }
     return vars;
+}
+
+fn cloneNameExprMap(
+    allocator: std.mem.Allocator,
+    src: *const NameExprMap,
+) !NameExprMap {
+    var dst = NameExprMap.init(allocator);
+    errdefer dst.deinit();
+
+    try dst.ensureTotalCapacity(src.count());
+    var it = src.iterator();
+    while (it.next()) |entry| {
+        try dst.put(entry.key_ptr.*, entry.value_ptr.*);
+    }
+    return dst;
+}
+
+fn getDiagnostic(self: anytype) ?Diagnostic {
+    const T = @TypeOf(self);
+    switch (@typeInfo(T)) {
+        .pointer => |ptr| {
+            if (@hasField(ptr.child, "last_diagnostic")) {
+                return self.last_diagnostic;
+            }
+        },
+        .@"struct" => {
+            if (@hasField(T, "last_diagnostic")) {
+                return self.last_diagnostic;
+            }
+        },
+        else => {},
+    }
+    return null;
+}
+
+fn restoreDiagnostic(self: anytype, diag: ?Diagnostic) void {
+    const T = @TypeOf(self);
+    switch (@typeInfo(T)) {
+        .pointer => |ptr| {
+            if (@hasField(ptr.child, "last_diagnostic")) {
+                self.last_diagnostic = diag;
+            }
+        },
+        .@"struct" => {
+            if (@hasField(T, "last_diagnostic")) {
+                self.last_diagnostic = diag;
+            }
+        },
+        else => {},
+    }
 }
 
 fn parseLineAssertion(

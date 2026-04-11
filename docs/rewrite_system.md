@@ -16,7 +16,8 @@ the rewrite system enters the picture, the compiler needs to determine
 the *concrete arguments* to that rule application: what expressions to
 substitute for each binder declared by the rule.
 
-There are four mechanisms that can supply these arguments, and they compose:
+There are four mechanisms that can supply these arguments, and they
+compose:
 
 1. **Explicit bindings.** The proof line names arguments directly:
    `(x := $ x $, t := $ S zer $, p := $ x = zer $)`. These take precedence
@@ -46,6 +47,12 @@ Once all arguments are known, the compiler *instantiates* the rule: it
 substitutes the concrete expressions for each binder throughout the rule's
 conclusion and hypotheses, producing fully concrete expressions. That
 instantiated conclusion is then subject to normalization.
+
+If the application still fails, the compiler may retry with a fallback rule.
+An axiom or theorem annotated with `@fallback other_rule` says: "if applying
+this rule to a proof line fails, try the same proof line again using
+`other_rule`." This retry happens after ordinary binding inference and line
+checking have been attempted for the original rule.
 
 ### How normalization fits in
 
@@ -94,6 +101,7 @@ form. The two normalized forms agree, so the line is accepted.
 | `@congr`        | `axiom`             | Marks an axiom as a congruence rule for a term constructor |
 | `@acui`         | `term`              | Marks a binary combiner for structural ACUI normalization |
 | `@normalize`    | `axiom` / `theorem` | Specifies which positions should be auto-normalized |
+| `@fallback`     | `axiom` / `theorem` | Retries theorem application through another named rule |
 
 Transparent def unfolding at theorem-application boundaries is covered
 in `docs/transparent_defs.md`. `@view`, `@recover`, and `@abstract` are
@@ -440,6 +448,76 @@ in reverse: the compiler normalizes the *expected* hypothesis form (from the
 rule's instantiated signature) and checks that your cited reference, after
 normalization, matches it. A transport step is emitted to bridge the gap
 before the reference is fed into the theorem application.
+
+---
+
+## `@fallback`
+
+### Purpose
+
+`@fallback` lets one rule delegate theorem application to another rule when
+its own application fails. This is useful when several rules have the same
+hypotheses but different conclusions or different inference behavior, and you
+want to expose them under one user-facing rule name.
+
+A typical use is to group several elimination rules under a single entry
+point. For example, `and_elim` can fall back to `and_elim_right` if applying
+`and_elim` itself does not match the user's proof line.
+
+### Syntax
+```
+--| @fallback <other-rule>
+```
+
+The target must be the name of an axiom, theorem, or earlier lemma already in
+scope at the annotation site.
+
+### Semantics
+
+When a proof line cites a rule `R`, the compiler first tries to apply `R`
+normally, including:
+
+- explicit argument bindings
+- omitted-binder inference
+- `@view`, `@recover`, and `@abstract`
+- `@fresh`
+- `@normalize`
+
+If that whole attempt fails, and `R` has `@fallback S`, the compiler throws
+away the failed tentative state and retries the same proof line using `S`.
+The proof line text, explicit bindings, and references are unchanged; only the
+candidate rule changes.
+
+Fallbacks can chain:
+```
+--| @fallback and_elim_right
+axiom and_elim_mid (a b: wff): $ and a b $ > $ fst a b $;
+
+--| @fallback and_elim_mid
+axiom and_elim (a b: wff): $ and a b $ > $ fst a b $;
+```
+
+A line such as
+```
+l1: $ snd a b $ by and_elim [#1]
+```
+first tries `and_elim`, then `and_elim_mid`, and finally
+`and_elim_right`.
+
+If every candidate in the chain fails, the diagnostic from the **first**
+failed attempt is reported. This keeps the error anchored to the rule name the
+user actually wrote.
+
+### Constraints
+
+- `@fallback` takes exactly one rule name.
+- Only one `@fallback` annotation may be attached to a rule.
+- The target is resolved eagerly while processing MM0 metadata, so forward
+  references are not allowed.
+- Cycles in the fallback chain are rejected when the chain is used.
+
+`@fallback` affects theorem application only. It is unrelated to rewrite-rule
+selection inside the normalizer.
 
 ---
 

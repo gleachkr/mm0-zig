@@ -91,6 +91,8 @@ pub const RewriteRegistry = struct {
     congr_by_head: std.AutoHashMap(u32, CongruenceRule),
     /// Normalize specs by rule_id.
     normalize_specs: std.AutoHashMap(u32, NormalizeSpec),
+    /// Fallback rules by rule_id.
+    fallbacks: std.AutoHashMap(u32, u32),
     /// ACUI structural metadata by combiner head term_id.
     acui_by_head: std.AutoHashMap(u32, StructuralCombiner),
 
@@ -108,6 +110,7 @@ pub const RewriteRegistry = struct {
             .normalize_specs = std.AutoHashMap(u32, NormalizeSpec).init(
                 allocator,
             ),
+            .fallbacks = std.AutoHashMap(u32, u32).init(allocator),
             .acui_by_head = std.AutoHashMap(u32, StructuralCombiner).init(
                 allocator,
             ),
@@ -142,6 +145,8 @@ pub const RewriteRegistry = struct {
             try self.processCongr(env, stmt_name);
         } else if (std.mem.eql(u8, directive, "@normalize")) {
             try self.processNormalize(env, stmt_name, &iter);
+        } else if (std.mem.eql(u8, directive, "@fallback")) {
+            try self.processFallback(env, stmt_name, &iter);
         } else if (std.mem.eql(u8, directive, "@acui")) {
             try self.processAcui(env, stmt_name, &iter);
         }
@@ -251,6 +256,28 @@ pub const RewriteRegistry = struct {
         });
     }
 
+    fn processFallback(
+        self: *RewriteRegistry,
+        env: *const GlobalEnv,
+        stmt_name: []const u8,
+        iter: *std.mem.TokenIterator(u8, .scalar),
+    ) !void {
+        const rule_id = env.getRuleId(stmt_name) orelse return;
+        if (self.fallbacks.contains(rule_id)) {
+            return error.DuplicateFallbackAnnotation;
+        }
+        const target_name = iter.next() orelse {
+            return error.InvalidFallbackAnnotation;
+        };
+        if (iter.next() != null) {
+            return error.InvalidFallbackAnnotation;
+        }
+        const target_id = env.getRuleId(target_name) orelse {
+            return error.UnknownFallbackRule;
+        };
+        try self.fallbacks.put(rule_id, target_id);
+    }
+
     fn processAcui(
         self: *RewriteRegistry,
         env: *const GlobalEnv,
@@ -293,6 +320,13 @@ pub const RewriteRegistry = struct {
         sort_name: []const u8,
     ) ?*const RelationBundle {
         return if (self.relations.getPtr(sort_name)) |ptr| ptr else null;
+    }
+
+    pub fn getFallbackRule(
+        self: *const RewriteRegistry,
+        rule_id: u32,
+    ) ?u32 {
+        return self.fallbacks.get(rule_id);
     }
 
     pub fn resolveRelation(
