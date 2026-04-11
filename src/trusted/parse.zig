@@ -114,6 +114,8 @@ const IdentInfo = struct {
 
 pub const MathParseError = union(enum) {
     unknown_token: MathTokenInfo,
+    unexpected_token: MathTokenInfo,
+    unexpected_end: usize,
 };
 
 const BinderContext = struct {
@@ -217,6 +219,7 @@ pub const MM0Parser = struct {
     last_annotations: []const []const u8 = &.{},
     last_annotation_spans: []const MathSpan = &.{},
     last_math_error: ?MathParseError = null,
+    last_math_span: ?MathSpan = null,
     current_decl_name: ?[]const u8 = null,
     current_decl_name_span: ?MathSpan = null,
     last_error_span: ?MathSpan = null,
@@ -270,6 +273,7 @@ pub const MM0Parser = struct {
 
     fn resetDiagnosticContext(self: *MM0Parser) void {
         self.last_math_error = null;
+        self.last_math_span = null;
         self.current_decl_name = null;
         self.current_decl_name_span = null;
         self.last_error_span = null;
@@ -319,6 +323,70 @@ pub const MM0Parser = struct {
         };
     }
 
+    fn recordNameContext(self: *MM0Parser, info: IdentInfo) void {
+        self.current_decl_name = info.text;
+        self.current_decl_name_span = info.span;
+    }
+
+    fn lookupRecordedTermId(
+        self: *MM0Parser,
+        name_info: IdentInfo,
+    ) !u32 {
+        self.recordNameContext(name_info);
+        return self.term_names.get(name_info.text) orelse {
+            self.last_error_span = name_info.span;
+            return error.UnknownTerm;
+        };
+    }
+
+    fn lookupSortIdInfo(self: *MM0Parser, info: IdentInfo) !u7 {
+        const sort_id = self.sort_names.get(info.text) orelse {
+            self.last_error_span = info.span;
+            return error.UnknownSort;
+        };
+        return @intCast(sort_id);
+    }
+
+    fn mathTokenSpanInSource(
+        self: *const MM0Parser,
+        token_span: MathSpan,
+    ) ?MathSpan {
+        const math_span = self.last_math_span orelse return null;
+        return .{
+            .start = math_span.start + token_span.start,
+            .end = math_span.start + token_span.end,
+        };
+    }
+
+    fn recordMathParseFailure(self: *MM0Parser) void {
+        if (self.last_error_span != null) return;
+
+        if (self.last_math_error) |math_err| {
+            switch (math_err) {
+                .unknown_token, .unexpected_token => |token| {
+                    self.last_error_span = self.mathTokenSpanInSource(
+                        token.span,
+                    ) orelse self.last_math_span;
+                    return;
+                },
+                .unexpected_end => |pos| {
+                    const math_span = self.last_math_span orelse return;
+                    const end = math_span.start + @min(
+                        pos,
+                        math_span.end - math_span.start,
+                    );
+                    self.last_error_span = .{
+                        .start = end,
+                        .end = end,
+                    };
+                    return;
+                },
+            }
+        }
+
+        self.last_error_span = self.last_math_span;
+    }
+
     // Returns next public statement, while processing notation and coercion
     // declarations so later math strings are parsed with the correct grammar.
     pub fn next(self: *MM0Parser) !?MM0Stmt {
@@ -328,11 +396,10 @@ pub const MM0Parser = struct {
             if (self.pos >= self.src.len) return null;
 
             const word = self.peekIdent() orelse {
-                // Non-statement tokens: discard any pending annotations
                 self.pending_annotations.clearRetainingCapacity();
                 self.pending_annotation_spans.clearRetainingCapacity();
-                try self.skipToSemicolon();
-                continue;
+                self.recordCurrentTokenError();
+                return error.UnexpectedChar;
             };
 
             if (std.mem.eql(u8, word, "pure") or
@@ -386,7 +453,10 @@ pub const MM0Parser = struct {
                 return error.UnexpectedKeyword;
             }
             // Non-public declarations: annotations don't attach to these
-            if (std.mem.eql(u8, word, "local")) {
+            if (std.mem.eql(u8, word, "local") or
+                std.mem.eql(u8, word, "input") or
+                std.mem.eql(u8, word, "output"))
+            {
                 self.pending_annotations.clearRetainingCapacity();
                 self.pending_annotation_spans.clearRetainingCapacity();
                 try self.skipToSemicolon();
@@ -432,7 +502,8 @@ pub const MM0Parser = struct {
 
             self.pending_annotations.clearRetainingCapacity();
             self.pending_annotation_spans.clearRetainingCapacity();
-            try self.skipToSemicolon();
+            self.recordCurrentTokenError();
+            return error.UnexpectedKeyword;
         }
     }
 
@@ -459,8 +530,7 @@ pub const MM0Parser = struct {
             } else if (std.mem.eql(u8, word, "sort")) {
                 _ = self.consumeIdent();
                 const name_info = try self.consumeRequiredIdentInfo();
-                self.current_decl_name = name_info.text;
-                self.current_decl_name_span = name_info.span;
+                self.recordNameContext(name_info);
                 try self.expect(';');
                 if (self.sort_names.contains(name_info.text)) {
                     self.last_error_span = name_info.span;
@@ -487,8 +557,7 @@ pub const MM0Parser = struct {
     fn parseTermStmt(self: *MM0Parser, is_def: bool) !TermStmt {
         _ = self.consumeIdent();
         const name_info = try self.consumeRequiredIdentInfo();
-        self.current_decl_name = name_info.text;
-        self.current_decl_name_span = name_info.span;
+        self.recordNameContext(name_info);
 
         var ctx = BinderContext.init(self.allocator);
         self.skipWhitespaceAndComments();
@@ -542,8 +611,7 @@ pub const MM0Parser = struct {
     ) !AssertionStmt {
         _ = self.consumeIdent();
         const name_info = try self.consumeRequiredIdentInfo();
-        self.current_decl_name = name_info.text;
-        self.current_decl_name_span = name_info.span;
+        self.recordNameContext(name_info);
 
         var ctx = BinderContext.init(self.allocator);
         var hyps_rev: std.ArrayListUnmanaged(*const Expr) = .{};
@@ -698,11 +766,12 @@ pub const MM0Parser = struct {
         is_bound: bool,
     ) !ArgInfo {
         self.skipWhitespaceAndComments();
-        const sort_name = try self.consumeRequiredIdent();
+        const sort_info = try self.consumeRequiredIdentInfo();
+        _ = try self.lookupSortIdInfo(sort_info);
         if (is_bound) {
             const bv_index = bound_names.len;
             return .{
-                .sort_name = sort_name,
+                .sort_name = sort_info.text,
                 .bound = true,
                 .deps = @as(u55, 1) << @intCast(bv_index),
             };
@@ -716,7 +785,7 @@ pub const MM0Parser = struct {
             const dep_name = self.consumeIdent() orelse break;
             deps |= self.lookupBoundDep(bound_names, dep_name);
         }
-        return .{ .sort_name = sort_name, .bound = false, .deps = deps };
+        return .{ .sort_name = sort_info.text, .bound = false, .deps = deps };
     }
 
     fn parseSortExpr(
@@ -724,7 +793,8 @@ pub const MM0Parser = struct {
         bound_names: []const []const u8,
     ) !ArgInfo {
         self.skipWhitespaceAndComments();
-        const sort_name = try self.consumeRequiredIdent();
+        const sort_info = try self.consumeRequiredIdentInfo();
+        _ = try self.lookupSortIdInfo(sort_info);
 
         var deps: u55 = 0;
         while (true) {
@@ -737,7 +807,7 @@ pub const MM0Parser = struct {
             deps |= self.lookupBoundDep(bound_names, dep_name);
         }
 
-        return .{ .sort_name = sort_name, .bound = false, .deps = deps };
+        return .{ .sort_name = sort_info.text, .bound = false, .deps = deps };
     }
 
     fn parseTermType(self: *MM0Parser, ctx: *BinderContext) ![]const u8 {
@@ -777,8 +847,8 @@ pub const MM0Parser = struct {
     ) !void {
         _ = self.consumeIdent();
         self.skipWhitespaceAndComments();
-        const name = try self.consumeRequiredIdent();
-        const term_id = self.term_names.get(name) orelse return error.UnknownTerm;
+        const name_info = try self.consumeRequiredIdentInfo();
+        const term_id = try self.lookupRecordedTermId(name_info);
         const term = self.terms.items[term_id];
 
         self.skipWhitespaceAndComments();
@@ -848,8 +918,8 @@ pub const MM0Parser = struct {
     fn parseGeneralNotationStmt(self: *MM0Parser) !void {
         _ = self.consumeIdent();
         self.skipWhitespaceAndComments();
-        const name = try self.consumeRequiredIdent();
-        const term_id = self.term_names.get(name) orelse return error.UnknownTerm;
+        const name_info = try self.consumeRequiredIdentInfo();
+        const term_id = try self.lookupRecordedTermId(name_info);
         var var_names = std.StringHashMap(usize).init(self.allocator);
         var arg_index: usize = 0;
         while (self.peek() == '(' or self.peek() == '{') {
@@ -906,8 +976,11 @@ pub const MM0Parser = struct {
                     pending_var_index = null;
                 }
             } else {
-                const ident = try self.consumeRequiredIdent();
-                const mapped = var_names.get(ident) orelse return error.UnknownVariable;
+                const ident_info = try self.consumeRequiredIdentInfo();
+                const mapped = var_names.get(ident_info.text) orelse {
+                    self.last_error_span = ident_info.span;
+                    return error.UnknownVariable;
+                };
                 try lits.append(self.allocator, .{ .variable = .{
                     .arg_index = mapped,
                     .prec = MAX_PRECEDENCE,
@@ -930,25 +1003,21 @@ pub const MM0Parser = struct {
     fn parseCoercionStmt(self: *MM0Parser) !void {
         _ = self.consumeIdent();
         self.skipWhitespaceAndComments();
-        const name = try self.consumeRequiredIdent();
-        const term_id = self.term_names.get(name) orelse return error.UnknownTerm;
+        const name_info = try self.consumeRequiredIdentInfo();
+        const term_id = try self.lookupRecordedTermId(name_info);
         const term = self.terms.items[term_id];
         if (term.args.len != 1) return error.ExpectedUnaryOperator;
 
         self.skipWhitespaceAndComments();
         try self.expect(':');
         self.skipWhitespaceAndComments();
-        const src_name = try self.consumeRequiredIdent();
-        const src: u7 = @intCast(
-            self.sort_names.get(src_name) orelse return error.UnknownSort,
-        );
+        const src_info = try self.consumeRequiredIdentInfo();
+        const src = try self.lookupSortIdInfo(src_info);
         self.skipWhitespaceAndComments();
         try self.expect('>');
         self.skipWhitespaceAndComments();
-        const dst_name = try self.consumeRequiredIdent();
-        const dst: u7 = @intCast(
-            self.sort_names.get(dst_name) orelse return error.UnknownSort,
-        );
+        const dst_info = try self.consumeRequiredIdentInfo();
+        const dst = try self.lookupSortIdInfo(dst_info);
         self.skipWhitespaceAndComments();
         try self.expect(';');
 
@@ -1031,8 +1100,17 @@ pub const MM0Parser = struct {
             .right_delims = self.right_delims,
         };
         self.last_math_error = null;
-        const expr = try self.parseExpr(&cursor, vars, 0);
-        if (cursor.peek() != null) return error.TrailingMathTokens;
+        self.last_error_span = null;
+        const expr = self.parseExpr(&cursor, vars, 0) catch |err| {
+            self.recordMathParseFailure();
+            return err;
+        };
+        if (cursor.peek()) |token| {
+            self.last_error_span = self.mathTokenSpanInSource(
+                token.span,
+            ) orelse self.last_math_span;
+            return error.TrailingMathTokens;
+        }
         return expr;
     }
 
@@ -1064,11 +1142,24 @@ pub const MM0Parser = struct {
         vars: *const std.StringHashMap(*const Expr),
         min_prec: u16,
     ) anyerror!*const Expr {
-        const token = cursor.next() orelse return error.ExpectedMathToken;
+        const token = cursor.next() orelse {
+            self.last_math_error = .{
+                .unexpected_end = cursor.pos,
+            };
+            return error.ExpectedMathToken;
+        };
         if (std.mem.eql(u8, token.text, "(")) {
             const expr = try self.parseExpr(cursor, vars, 0);
-            const close = cursor.next() orelse return error.ExpectedCloseParen;
+            const close = cursor.next() orelse {
+                self.last_math_error = .{
+                    .unexpected_end = cursor.pos,
+                };
+                return error.ExpectedCloseParen;
+            };
             if (!std.mem.eql(u8, close.text, ")")) {
+                self.last_math_error = .{
+                    .unexpected_token = close,
+                };
                 return error.ExpectedCloseParen;
             }
             return expr;
@@ -1081,14 +1172,24 @@ pub const MM0Parser = struct {
         }
 
         if (self.prefix_notations.get(token.text)) |prefix| {
-            if (prefix.prec < min_prec) return error.PrecMismatch;
+            if (prefix.prec < min_prec) {
+                self.last_math_error = .{
+                    .unexpected_token = token,
+                };
+                return error.PrecMismatch;
+            }
             return try self.parsePrefixNotation(cursor, vars, prefix);
         }
 
         if (self.term_names.get(token.text)) |term_id| {
             const term = self.terms.items[term_id];
             if (term.args.len == 0) return try self.applyTerm(term_id, &.{});
-            if (APP_PRECEDENCE < min_prec) return error.PrecMismatch;
+            if (APP_PRECEDENCE < min_prec) {
+                self.last_math_error = .{
+                    .unexpected_token = token,
+                };
+                return error.PrecMismatch;
+            }
             var args: std.ArrayListUnmanaged(*const Expr) = .{};
             for (term.args) |_| {
                 const arg = try self.parseExpr(cursor, vars, MAX_PRECEDENCE);
@@ -1114,9 +1215,16 @@ pub const MM0Parser = struct {
         for (prefix.lits) |lit| {
             switch (lit) {
                 .constant => |expected| {
-                    const actual =
-                        cursor.next() orelse return error.ExpectedMathToken;
+                    const actual = cursor.next() orelse {
+                        self.last_math_error = .{
+                            .unexpected_end = cursor.pos,
+                        };
+                        return error.ExpectedMathToken;
+                    };
                     if (!std.mem.eql(u8, actual.text, expected)) {
+                        self.last_math_error = .{
+                            .unexpected_token = actual,
+                        };
                         return error.NotationMismatch;
                     }
                 },
@@ -1442,6 +1550,10 @@ pub const MM0Parser = struct {
             return error.UnterminatedMathStr;
         }
         const math = self.src[start..self.pos];
+        self.last_math_span = .{
+            .start = start,
+            .end = self.pos,
+        };
         self.pos += 1;
         self.skipWhitespaceAndComments();
         return math;

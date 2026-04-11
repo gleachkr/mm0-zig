@@ -116,13 +116,14 @@ pub fn mm0ParserDiagnostic(
     parser: *const MM0Parser,
     err: anyerror,
 ) Diagnostic {
-    return .{
+    const diag = Diagnostic{
         .kind = .generic,
         .err = err,
         .source = .mm0,
         .name = parser.diagnosticName(),
         .span = mathSpanToSpanOpt(parser.diagnosticSpan()),
     };
+    return mathErrorDiagnostic(diag, err, parser.last_math_error);
 }
 
 pub fn mm0StatementDiagnostic(
@@ -270,8 +271,6 @@ pub fn proofMathParseDiagnostic(
         .name = name,
         .span = math_span,
     };
-    if (err != error.UnknownMathToken) return diag;
-
     const math_err = parser.last_math_error orelse return diag;
     return proofMathErrorDiagnostic(diag, math_err, math_span);
 }
@@ -320,16 +319,39 @@ fn proofMathErrorDiagnostic(
     math_err: MathParseError,
     math_span: Span,
 ) Diagnostic {
-    var result = diag;
+    var result = mathErrorDiagnostic(diag, diag.err, math_err);
     switch (math_err) {
-        .unknown_token => |token| {
+        .unknown_token, .unexpected_token => |token| {
             result.span = proofMathTokenSpan(math_span, token.span);
+        },
+        .unexpected_end => |pos| {
+            const start = @min(math_span.start + pos, math_span.end);
+            result.span = .{ .start = start, .end = start };
+        },
+    }
+    return result;
+}
+
+fn mathErrorDiagnostic(
+    diag: Diagnostic,
+    err: anyerror,
+    math_err: ?MathParseError,
+) Diagnostic {
+    if (err != error.UnknownMathToken) return diag;
+    const actual = math_err orelse return diag;
+
+    var result = diag;
+    switch (actual) {
+        .unknown_token => |token| {
             result.detail = .{
                 .unknown_math_token = .{
                     .token = token.text,
                 },
             };
         },
+        .unexpected_token,
+        .unexpected_end,
+        => {},
     }
     return result;
 }
@@ -506,11 +528,22 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.ExpectedIdent,
         => "expected identifier",
         error.ExpectedNumber => "expected number",
+        error.UnknownMathToken => "unknown token in math string",
+        error.ExpectedMathToken => "expected token in math string",
+        error.ExpectedCloseParen => "expected closing parenthesis in math string",
+        error.TrailingMathTokens => "unexpected trailing tokens in math string",
+        error.NotationMismatch => "token sequence does not match declared notation",
+        error.PrecMismatch => "operator precedence does not allow this parse",
+        error.NotProvable => "math string does not have a provable sort",
         error.ExpectedMathString,
         error.ExpectedMathStr,
         => "expected $...$ math string",
         error.ExpectedKeyword => "expected keyword",
         error.ExpectedString => "expected quoted string",
+        error.UnknownTerm => "unknown term",
+        error.UnknownSort => "unknown sort",
+        error.UnknownVariable => "unknown variable",
+        error.UnexpectedKeyword => "unexpected keyword",
         error.UnexpectedCharacter,
         error.UnexpectedChar,
         => "unexpected character",
