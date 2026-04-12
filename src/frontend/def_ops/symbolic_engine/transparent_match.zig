@@ -76,7 +76,10 @@ pub fn planDefToTarget(
     const witness = try instantiateDefTowardExpr(self, def_expr, target_expr) orelse {
         return null;
     };
-    const next = try compareTransparent(self, witness, target_expr) orelse {
+    const next = switch (side) {
+        .lhs => try compareTransparent(self, witness, target_expr),
+        .rhs => try compareTransparent(self, target_expr, witness),
+    } orelse {
         return null;
     };
     return switch (side) {

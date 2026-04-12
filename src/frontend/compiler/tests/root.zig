@@ -1155,6 +1155,50 @@ test "transparent def compression does not leak temp binders" {
     try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
 }
 
+test "transparent transport verifies eqmp over bic symmetry" {
+    const mm0_src =
+        \\strict provable sort wff;
+        \\delimiter $ ( @ [ / $ $ . : ; ) ] $;
+        \\term im: wff > wff > wff;
+        \\infixr im: $⊢$ prec 0;
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\sort term;
+        \\term app: term > term > term;
+        \\infixl app: $·$ prec 1000;
+        \\term eq: type > term;
+        \\def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+        \\notation eqc (A: type) (t u: term): term =
+        \\  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+        \\term thm: term > wff;
+        \\coercion thm: term > wff;
+        \\def bic (p q: term): term = $ ≃[𝔹] p = q $;
+        \\infixr bic: $⇔$ prec 20;
+        \\axiom symt (G: wff) (A: type) (a b: term):
+        \\  $ G ⊢ ≃[A] a = b $ > $ G ⊢ ≃[A] b = a $;
+        \\axiom eqmp (G: wff) (P Q: term):
+        \\  $ G ⊢ P ⇔ Q $ > $ G ⊢ P $ > $ G ⊢ Q $;
+        \\theorem eqmpr (G: wff) (P Q: term):
+        \\  $ G ⊢ Q ⇔ P $ > $ G ⊢ P $ > $ G ⊢ Q $;
+    ;
+    const proof_src =
+        \\eqmpr
+        \\-----
+        \\l1: $ G ⊢ P ⇔ Q $ by symt [#1]
+        \\l2: $ G ⊢ Q $ by eqmp [l1, #2]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
 test "compiler reports dependency slot exhaustion clearly" {
     const allocator = std.testing.allocator;
 
