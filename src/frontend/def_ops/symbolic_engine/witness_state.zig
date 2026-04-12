@@ -386,6 +386,11 @@ pub fn rebuildExprRepresentativeSymbolic(
     };
 }
 
+const CompressionMatchKind = enum {
+    concrete,
+    symbolic,
+};
+
 pub fn compressRepresentativeToDef(
     self: anytype,
     symbolic: *const SymbolicExpr,
@@ -406,12 +411,20 @@ pub fn compressRepresentativeToDef(
         );
         defer temp.deinit(self.shared.allocator);
 
-        const symbolic_template = try TransparentMatch.symbolicFromTemplate(self, term.body.?);
-        const matched = if (try symbolicToConcreteIfPlain(
+        const symbolic_template = try TransparentMatch.symbolicFromTemplate(
+            self,
+            term.body.?,
+        );
+        const plain_symbolic = try symbolicToConcreteIfPlain(
             self,
             symbolic,
             state,
-        )) |plain|
+        );
+        const match_kind: CompressionMatchKind = if (plain_symbolic != null)
+            .concrete
+        else
+            .symbolic;
+        const matched = if (plain_symbolic) |plain|
             try TransparentMatch.matchExprToSymbolic(
                 self,
                 plain,
@@ -430,11 +443,16 @@ pub fn compressRepresentativeToDef(
             continue;
         }
 
-        const args = try self.shared.allocator.alloc(*const SymbolicExpr, term.args.len);
+        const args = try self.shared.allocator.alloc(
+            *const SymbolicExpr,
+            term.args.len,
+        );
         errdefer self.shared.allocator.free(args);
-        const plain_args = try self.shared.allocator.alloc(ExprId, term.args.len);
+        const plain_args = try self.shared.allocator.alloc(
+            ExprId,
+            term.args.len,
+        );
         errdefer self.shared.allocator.free(plain_args);
-
         var all_plain = true;
         for (0..term.args.len) |idx| {
             const binding = temp.bindings[idx] orelse {
@@ -442,7 +460,12 @@ pub fn compressRepresentativeToDef(
                 self.shared.allocator.free(plain_args);
                 continue :term_loop;
             };
-            args[idx] = try boundValueRepresentative(self, binding);
+            args[idx] = try exportCompressedArgFromTempState(
+                self,
+                binding,
+                &temp,
+                match_kind,
+            );
             if (try symbolicToConcreteIfPlain(self, args[idx], &temp)) |plain| {
                 plain_args[idx] = plain;
             } else {
@@ -465,6 +488,92 @@ pub fn compressRepresentativeToDef(
         } });
     }
     return null;
+}
+
+fn exportCompressedArgFromTempState(
+    self: anytype,
+    bound: BoundValue,
+    state: *const MatchSession,
+    match_kind: CompressionMatchKind,
+) anyerror!*const SymbolicExpr {
+    return switch (match_kind) {
+        // A concrete match builds bindings entirely inside the temporary
+        // session. Any binder that survives here is temp-local and must
+        // be inlined before we return a representative to the caller.
+        .concrete => try exportConcreteMatchedBoundValue(
+            self,
+            bound,
+            state,
+        ),
+        // A symbolic-to-symbolic match may legitimately bind a def arg to
+        // a caller-owned binder. We therefore preserve the representative
+        // structure as-is on this path.
+        .symbolic => try boundValueRepresentative(self, bound),
+    };
+}
+
+fn exportConcreteMatchedBoundValue(
+    self: anytype,
+    bound: BoundValue,
+    state: *const MatchSession,
+) anyerror!*const SymbolicExpr {
+    return switch (bound) {
+        .concrete => |concrete| if (concrete.mode == .exact)
+            try self.allocSymbolic(.{ .fixed = concrete.raw })
+        else
+            try exportConcreteMatchedSymbolic(
+                self,
+                concrete.repr,
+                state,
+            ),
+        .symbolic => |symbolic| try exportConcreteMatchedSymbolic(
+            self,
+            symbolic.expr,
+            state,
+        ),
+    };
+}
+
+fn exportConcreteMatchedSymbolic(
+    self: anytype,
+    symbolic: *const SymbolicExpr,
+    state: *const MatchSession,
+) anyerror!*const SymbolicExpr {
+    return switch (symbolic.*) {
+        .binder => |idx| blk: {
+            if (idx >= state.bindings.len) {
+                return error.TemplateBinderOutOfRange;
+            }
+            const binding = state.bindings[idx] orelse {
+                return error.MissingBinderAssignment;
+            };
+            break :blk try exportConcreteMatchedBoundValue(
+                self,
+                binding,
+                state,
+            );
+        },
+        .fixed => |expr_id| try self.allocSymbolic(.{ .fixed = expr_id }),
+        .dummy => |slot| try self.allocSymbolic(.{ .dummy = slot }),
+        .app => |app| blk: {
+            const args = try self.shared.allocator.alloc(
+                *const SymbolicExpr,
+                app.args.len,
+            );
+            errdefer self.shared.allocator.free(args);
+            for (app.args, 0..) |arg, idx| {
+                args[idx] = try exportConcreteMatchedSymbolic(
+                    self,
+                    arg,
+                    state,
+                );
+            }
+            break :blk try self.allocSymbolic(.{ .app = .{
+                .term_id = app.term_id,
+                .args = args,
+            } });
+        },
+    };
 }
 
 pub fn symbolicSortName(
