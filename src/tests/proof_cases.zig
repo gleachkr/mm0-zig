@@ -601,29 +601,33 @@ test "compiler emits name, var, and hyp index tables" {
     try std.testing.expectEqualStrings("imp", (try mmb.termName(0)).?);
     try std.testing.expectEqualStrings("not", (try mmb.termName(1)).?);
     try std.testing.expectEqualStrings("h1", (try mmb.theoremName(0)).?);
-    try std.testing.expectEqualStrings("mp", (try mmb.theoremName(3)).?);
-    try std.testing.expectEqualStrings("imp_refl", (try mmb.theoremName(4)).?);
-    try std.testing.expectEqualStrings("hs", (try mmb.theoremName(5)).?);
+    try std.testing.expectEqualStrings("con2", (try mmb.theoremName(3)).?);
+    try std.testing.expectEqualStrings("inot", (try mmb.theoremName(4)).?);
+    try std.testing.expectEqualStrings("mp", (try mmb.theoremName(5)).?);
+    try std.testing.expectEqualStrings("imp_refl", (try mmb.theoremName(6)).?);
+    try std.testing.expectEqualStrings("hs", (try mmb.theoremName(7)).?);
+    try std.testing.expectEqualStrings("notnot1", (try mmb.theoremName(8)).?);
+    try std.testing.expectEqualStrings("dne", (try mmb.theoremName(9)).?);
 
     const imp_vars = (try mmb.termVarNames(0)).?;
     try std.testing.expectEqual(@as(usize, 2), imp_vars.len());
     try std.testing.expectEqualStrings("a", (try imp_vars.get(0)).?);
     try std.testing.expectEqualStrings("b", (try imp_vars.get(1)).?);
 
-    const mp_vars = (try mmb.theoremVarNames(3)).?;
+    const mp_vars = (try mmb.theoremVarNames(5)).?;
     try std.testing.expectEqual(@as(usize, 2), mp_vars.len());
     try std.testing.expectEqualStrings("a", (try mp_vars.get(0)).?);
     try std.testing.expectEqualStrings("b", (try mp_vars.get(1)).?);
 
-    const mp_hyps = (try mmb.theoremHypNames(3)).?;
+    const mp_hyps = (try mmb.theoremHypNames(5)).?;
     try std.testing.expectEqual(@as(usize, 2), mp_hyps.len());
     try std.testing.expectEqualStrings("#1", (try mp_hyps.get(0)).?);
     try std.testing.expectEqualStrings("#2", (try mp_hyps.get(1)).?);
 
-    const refl_hyps = (try mmb.theoremHypNames(4)).?;
+    const refl_hyps = (try mmb.theoremHypNames(6)).?;
     try std.testing.expectEqual(@as(usize, 0), refl_hyps.len());
 
-    const hs_hyps = (try mmb.theoremHypNames(5)).?;
+    const hs_hyps = (try mmb.theoremHypNames(7)).?;
     try std.testing.expectEqual(@as(usize, 2), hs_hyps.len());
     try std.testing.expectEqualStrings("#1", (try hs_hyps.get(0)).?);
     try std.testing.expectEqualStrings("#2", (try hs_hyps.get(1)).?);

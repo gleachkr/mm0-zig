@@ -1,15 +1,27 @@
 imp_refl
 --------
-l1: $ a -> ((a -> a) -> a) $ by h1 []
-l2: $ a -> (a -> a) $ by h1 []
-l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 []
+l1: $ a -> ((a -> a) -> a) $ by h1 
+l2: $ a -> (a -> a) $ by h1 
+l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by h2 
 l4: $ (a -> (a -> a)) -> (a -> a) $ by mp [l1, l3]
 l5: $ a -> a $ by mp [l2, l4]
 
 hs
 --
-l1: $ (b -> c) -> (a -> (b -> c)) $ by h1 []
+l1: $ (b -> c) -> (a -> (b -> c)) $ by h1 
 l2: $ a -> (b -> c) $ by mp [#2, l1]
-l3: $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $ by h2 []
+l3: $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $ by h2 
 l4: $ (a -> b) -> (a -> c) $ by mp [l2, l3]
 l5: $ a -> c $ by mp [#1, l4]
+
+notnot1
+-------
+l1: $ not p -> not p $ by imp_refl 
+l2: $ (not p -> not p) -> (p -> not not p) $ by con2 
+l3: $ p -> not not p $ by mp [l1, l2]
+
+dne
+---
+l1: $ not p -> not not not p $ by notnot1 
+l2: $ (not p -> not not not p) -> (not not p -> p) $ by h3 
+l3: $ not not p -> p $ by mp [l1, l2]

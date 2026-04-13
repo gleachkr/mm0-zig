@@ -6,6 +6,10 @@ axiom h1 (a b: wff): $ a -> (b -> a) $;
 axiom h2 (a b c: wff):
   $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $;
 axiom h3 (a b: wff): $ (not a -> not b) -> (b -> a) $;
+axiom con2 (a b: wff): $ (a -> not b) -> (b -> not a) $;
+axiom inot (a: wff): $ (a -> not a) -> not a $;
 axiom mp (a b: wff): $ a $ > $ a -> b $ > $ b $;
 theorem imp_refl (a: wff): $ a -> a $;
 theorem hs (a b c: wff): $ a -> b $ > $ b -> c $ > $ a -> c $;
+theorem notnot1 (p: wff): $ p -> not not p $;
+theorem dne (p: wff): $ not not p -> p $;
