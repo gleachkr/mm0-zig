@@ -31,7 +31,7 @@ infixl join: $,$ prec 5;
 term hyp (a: wff): ctx;
 coercion hyp: wff > ctx;
 term seq (g d: ctx): wff;
-infixl seq: $⊢$ prec 0;
+infixl seq: $==>$ prec 0;
 
 --| @relation wff iff iff_refl iff_trans iff_sym iff_mp
 axiom iff_refl (a: wff): $ a ↔ a $;
@@ -61,7 +61,7 @@ axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
 
 --| @congr
 axiom seq_congr (g1 g2 d1 d2: ctx):
-  $ ctx_eq g1 g2 $ > $ ctx_eq d1 d2 $ > $ (g1 ⊢ d1) ↔ (g2 ⊢ d2) $;
+  $ ctx_eq g1 g2 $ > $ ctx_eq d1 d2 $ > $ (g1 ==> d1) ↔ (g2 ==> d2) $;
 
 --| @congr
 axiom imp_congr (a b c d: wff):
@@ -81,34 +81,34 @@ axiom sb_imp (t: obj) {x: obj} (p q: wff x):
 -- Weakening is the only explicit structural rule.
 
 --| @normalize conc
-axiom ax (a: wff): $ a ⊢ a $;
+axiom ax (a: wff): $ a ==> a $;
 
 --| @normalize hyp0 conc
-axiom weak_left (g d: ctx) (a: wff): $ g ⊢ d $ > $ g , a ⊢ d $;
+axiom weak_left (g d: ctx) (a: wff): $ g ==> d $ > $ g , a ==> d $;
 
 --| @normalize hyp0 conc
-axiom weak_right (g d: ctx) (a: wff): $ g ⊢ d $ > $ g ⊢ d , a $;
+axiom weak_right (g d: ctx) (a: wff): $ g ==> d $ > $ g ==> d , a $;
 
 --| @normalize hyp0 hyp1 conc
 axiom imp_left (g h d e: ctx) (a b: wff):
-  $ g ⊢ d , a $ > $ h , b ⊢ e $ > $ g , h , (a → b) ⊢ d , e $;
+  $ g ==> d , a $ > $ h , b ==> e $ > $ g , h , (a → b) ==> d , e $;
 
 -- all_left and ex_right are the interesting cases here:
 -- @view/@recover have to find the normalized witness inside an ACUI match.
---| @view (g d: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ g , q ⊢ d $ > $ g , ∀ x p ⊢ d $
+--| @view (g d: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ g , q ==> d $ > $ g , ∀ x p ==> d $
 --| @recover t q p x
 --| @normalize hyp0 conc
 axiom all_left (g d: ctx) {x: obj} (t: obj x) (p: wff x):
-  $ g , sb t x p ⊢ d $ > $ g , ∀ x p ⊢ d $;
+  $ g , sb t x p ==> d $ > $ g , ∀ x p ==> d $;
 
 --| @normalize hyp0 conc
 axiom ex_left (g d: ctx) {x: obj} (p: wff x):
-  $ g , p ⊢ d $ > $ g , ∃ x p ⊢ d $;
+  $ g , p ==> d $ > $ g , ∃ x p ==> d $;
 
---| @view (g d: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ g ⊢ d , q $ > $ g ⊢ d , ∃ x p $
+--| @view (g d: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ g ==> d , q $ > $ g ==> d , ∃ x p $
 --| @recover t q p x
 --| @normalize hyp0 conc
 axiom ex_right (g d: ctx) {x: obj} (t: obj x) (p: wff x):
-  $ g ⊢ d , sb t x p $ > $ g ⊢ d , ∃ x p $;
+  $ g ==> d , sb t x p $ > $ g ==> d , ∃ x p $;
 
-theorem exists_mono {x y z: obj}: $ ∀ x (F x → G x) , ∃ y F y ⊢ ∃ z G z $;
+theorem exists_mono {x y z: obj}: $ ∀ x (F x → G x) , ∃ y F y ==> ∃ z G z $;
