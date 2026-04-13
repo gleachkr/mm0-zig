@@ -448,6 +448,10 @@ infixl orc: $\/$ prec 31;
 theorem orcT (G: wff) (p q: term):
   $ G ⊢ p: 𝔹 $ > $ G ⊢ q: 𝔹 $ > $ G ⊢ p ∨ q: 𝔹 $;
 
+theorem ORC_DEF (G: wff) (a b: term) {r: term}:
+  $ G ⊢ a: 𝔹 $ > $ G ⊢ b: 𝔹 $ >
+  $ G ⊢ a ∨ b ⇔ (!r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r) $;
+
 theorem orR (G: wff) (p q: term):
   $ G ⊢ p ∨ q $ > $ G ⊢ p: 𝔹 ∧ q: 𝔹 $;
 
@@ -487,25 +491,3 @@ theorem NOT_ELIM (G: wff) (p: term):
 
 theorem NOT_INTRO (G: wff) (p: term):
   $ G ⊢ p ⇒ F $ > $ G ⊢ ¬ p $;
-
--- A term-level normalization example. The surface proof line never mentions
--- the raw substitution binder.
-theorem normalize_subst_nested {x y z: term}:
-  $ ((λ y: 𝔹. y) · x) ≈ z $ >
-  $ ((λ y: 𝔹. y) · x) · ((λ y: 𝔹. y) · x) ≈ z · z $;
-
--- A larger chain using β-reduction, congruence, and transitivity.
-theorem double_id_congr_chain (G: wff) {x y: term}:
-  $ G ⊢ ≡[𝔹] x = y $ >
-  $ G ⊢ ≡[𝔹] ((λ y: 𝔹. y) · ((λ x: 𝔹. x) · x)) = y $;
-
--- Judgment-level substitution with a hidden raw binder recovered through the
--- normalized surface shape.
-theorem subst_eq_demo (G: wff) {x y z: term}:
-  $ G ⊢ ≡[𝔹] ((λ y: 𝔹. y) · x) = z $ >
-  $ G ⊢ ≡[𝔹] ((λ y: 𝔹. y) · x) · ((λ y: 𝔹. y) · x) = z · z $;
-
--- A slightly larger chain combining β-reduction with judgmental substitution.
-theorem square_id_subst (G: wff) {x y: term}:
-  $ G ⊢ ≡[𝔹] x = y $ >
-  $ G ⊢ ≡[𝔹] ((λ x: 𝔹. x) · x) · ((λ x: 𝔹. x) · x) = y · y $;
