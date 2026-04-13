@@ -6,16 +6,25 @@ sort obj;
 term imp (a b: wff): wff;
 infixr imp: $→$ prec 25;
 infixr imp: $->$ prec 25;
+term and (a b: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
+term or (a b: wff): wff;
+infixr or: $∨$ prec 30;
+infixr or: $\\/$ prec 30;
+term not (a: wff): wff;
+prefix not: $¬$ prec 35;
+prefix not: $~$ prec 35;
 term all {x: obj} (p: wff x): wff;
 prefix all: $∀$ prec 41;
 prefix all: $A.$ prec 41;
 term ex {x: obj} (p: wff x): wff;
 prefix ex: $∃$ prec 41;
 prefix ex: $E.$ prec 41;
-term F (t: obj): wff;
-prefix F: $F$ prec 50;
-term G (t: obj): wff;
-prefix G: $G$ prec 50;
+term P (t: obj): wff;
+prefix P: $P$ prec 50;
+term Q (t: obj): wff;
+prefix Q: $Q$ prec 50;
 term sb (t: obj) {x: obj} (p: wff x): wff;
 
 term iff (a b: wff): wff;
@@ -32,6 +41,10 @@ term hyp (a: wff): ctx;
 coercion hyp: wff > ctx;
 term seq (g d: ctx): wff;
 infixl seq: $==>$ prec 0;
+
+-- Contexts are ACUI collections of formulas. This bakes in exchange and
+-- contraction, so the only explicit structural rules below are identity,
+-- weakening, and cut.
 
 --| @relation wff iff iff_refl iff_trans iff_sym iff_mp
 axiom iff_refl (a: wff): $ a ↔ a $;
@@ -67,18 +80,52 @@ axiom seq_congr (g1 g2 d1 d2: ctx):
 axiom imp_congr (a b c d: wff):
   $ a ↔ b $ > $ c ↔ d $ > $ (a → c) ↔ (b → d) $;
 
---| @rewrite
-axiom sb_F (t: obj) {x: obj}: $ sb t x (F x) ↔ F t $;
+--| @congr
+axiom and_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
+
+--| @congr
+axiom or_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∨ c) ↔ (b ∨ d) $;
+
+--| @congr
+axiom not_congr (a b: wff): $ a ↔ b $ > $ ¬ a ↔ ¬ b $;
+
+--| @congr
+axiom all_congr {x: obj} (p q: wff x): $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @congr
+axiom ex_congr {x: obj} (p q: wff x): $ p ↔ q $ > $ ∃ x p ↔ ∃ x q $;
 
 --| @rewrite
-axiom sb_G (t: obj) {x: obj}: $ sb t x (G x) ↔ G t $;
+axiom sb_P (t: obj) {x: obj}: $ sb t x (P x) ↔ P t $;
+
+--| @rewrite
+axiom sb_Q (t: obj) {x: obj}: $ sb t x (Q x) ↔ Q t $;
 
 --| @rewrite
 axiom sb_imp (t: obj) {x: obj} (p q: wff x):
   $ sb t x (p → q) ↔ (sb t x p → sb t x q) $;
 
--- Identity and the logical rules carry contexts.
--- Weakening is the only explicit structural rule.
+--| @rewrite
+axiom sb_and (t: obj) {x: obj} (p q: wff x):
+  $ sb t x (p ∧ q) ↔ (sb t x p ∧ sb t x q) $;
+
+--| @rewrite
+axiom sb_or (t: obj) {x: obj} (p q: wff x):
+  $ sb t x (p ∨ q) ↔ (sb t x p ∨ sb t x q) $;
+
+--| @rewrite
+axiom sb_not (t: obj) {x: obj} (p: wff x):
+  $ sb t x (¬ p) ↔ ¬ sb t x p $;
+
+--| @rewrite
+axiom sb_all {x y: obj} (t: obj x) (p: wff x y):
+  $ sb t x (∀ y p) ↔ ∀ y (sb t x p) $;
+
+--| @rewrite
+axiom sb_ex {x y: obj} (t: obj x) (p: wff x y):
+  $ sb t x (∃ y p) ↔ ∃ y (sb t x p) $;
 
 --| @normalize conc
 axiom ax (a: wff): $ a ==> a $;
@@ -90,16 +137,52 @@ axiom weak_left (g d: ctx) (a: wff): $ g ==> d $ > $ g , a ==> d $;
 axiom weak_right (g d: ctx) (a: wff): $ g ==> d $ > $ g ==> d , a $;
 
 --| @normalize hyp0 hyp1 conc
+axiom cut (g h d e: ctx) (a: wff):
+  $ g ==> d , a $ > $ h , a ==> e $ > $ g , h ==> d , e $;
+
+--| @normalize hyp0 hyp1 conc
 axiom imp_left (g h d e: ctx) (a b: wff):
   $ g ==> d , a $ > $ h , b ==> e $ > $ g , h , (a → b) ==> d , e $;
 
--- all_left and ex_right are the interesting cases here:
--- @view/@recover have to find the normalized witness inside an ACUI match.
+--| @normalize hyp0 conc
+axiom imp_right (g d: ctx) (a b: wff):
+  $ g , a ==> d , b $ > $ g ==> d , (a → b) $;
+
+--| @normalize hyp0 conc
+axiom and_left (g d: ctx) (a b: wff):
+  $ g , a , b ==> d $ > $ g , (a ∧ b) ==> d $;
+
+--| @normalize hyp0 hyp1 conc
+axiom and_right (g d: ctx) (a b: wff):
+  $ g ==> d , a $ > $ g ==> d , b $ > $ g ==> d , (a ∧ b) $;
+
+--| @normalize hyp0 hyp1 conc
+axiom or_left (g h d e: ctx) (a b: wff):
+  $ g , a ==> d $ > $ h , b ==> e $ > $ g , h , (a ∨ b) ==> d , e $;
+
+--| @normalize hyp0 conc
+axiom or_right (g d: ctx) (a b: wff):
+  $ g ==> d , a , b $ > $ g ==> d , (a ∨ b) $;
+
+--| @normalize hyp0 conc
+axiom not_left (g d: ctx) (a: wff):
+  $ g ==> d , a $ > $ g , ¬ a ==> d $;
+
+--| @normalize hyp0 conc
+axiom not_right (g d: ctx) (a: wff):
+  $ g , a ==> d $ > $ g ==> d , ¬ a $;
+
+-- all_left and ex_right are the witness-carrying rules. @view/@recover let
+-- the demo infer the witness term from normalized sequents.
 --| @view (g d: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ g , q ==> d $ > $ g , ∀ x p ==> d $
 --| @recover t q p x
 --| @normalize hyp0 conc
 axiom all_left (g d: ctx) {x: obj} (t: obj x) (p: wff x):
   $ g , sb t x p ==> d $ > $ g , ∀ x p ==> d $;
+
+--| @normalize hyp0 conc
+axiom all_right (g d: ctx) {x: obj} (p: wff x):
+  $ g ==> d , p $ > $ g ==> d , ∀ x p $;
 
 --| @normalize hyp0 conc
 axiom ex_left (g d: ctx) {x: obj} (p: wff x):
@@ -111,4 +194,11 @@ axiom ex_left (g d: ctx) {x: obj} (p: wff x):
 axiom ex_right (g d: ctx) {x: obj} (t: obj x) (p: wff x):
   $ g ==> d , sb t x p $ > $ g ==> d , ∃ x p $;
 
-theorem exists_mono {x y z: obj}: $ ∀ x (F x → G x) , ∃ y F y ==> ∃ z G z $;
+theorem exists_mono {x y z: obj}:
+  $ ∀ y (P y → Q y) , ∃ x P x ==> ∃ z Q z $;
+
+theorem exists_or_distrib {x y z: obj}:
+  $ ∃ x (P x ∨ Q x) ==> (∃ y P y ∨ ∃ z Q z) $;
+
+theorem forall_excluded_middle {x: obj}:
+  $ emp ==> ∀ x (P x ∨ ¬ P x) $;

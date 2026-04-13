@@ -35,7 +35,7 @@ const examples = {
     proof: "./fixtures/demo_seq_peirce.auf",
   },
   demo_lk_exists_mono: {
-    label: "lk exists mono",
+    label: "quantified lk",
     mm0: "./fixtures/demo_lk_exists_mono.mm0",
     proof: "./fixtures/demo_lk_exists_mono.auf",
   },

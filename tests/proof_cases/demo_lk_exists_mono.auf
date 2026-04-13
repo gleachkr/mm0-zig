@@ -1,9 +1,31 @@
 exists_mono
 -----------
 
-l1: $ F y ==> F y $ by ax
-l2: $ G y ==> G y $ by ax
-l3: $ F y , F y → G y ==> G y $ by imp_left [l1, l2]
-l4: $ ∀ x (F x → G x) , F y ==> G y $ by all_left [l3]
-l5: $ ∀ x (F x → G x) , F y ==> ∃ z G z $ by ex_right [l4]
-l6: $ ∀ x (F x → G x) , ∃ y F y ==> ∃ z G z $ by ex_left [l5]
+l1: $ P x ==> P x $ by ax
+l2: $ Q x ==> Q x $ by ax
+l3: $ P x , P x → Q x ==> Q x $ by imp_left [l1, l2]
+l4: $ ∀ y (P y → Q y) , P x ==> Q x $ by all_left [l3]
+l5: $ ∀ y (P y → Q y) , P x ==> ∃ z Q z $ by ex_right [l4]
+l6: $ ∀ y (P y → Q y) , ∃ x P x ==> ∃ z Q z $ by ex_left [l5]
+
+exists_or_distrib
+-----------------
+
+l1: $ P x ==> P x $ by ax
+l2: $ P x ==> ∃ y P y $ by ex_right [l1]
+l3: $ P x ==> ∃ y P y , ∃ z Q z $ by weak_right [l2]
+l4: $ P x ==> (∃ y P y ∨ ∃ z Q z) $ by or_right [l3]
+l5: $ Q x ==> Q x $ by ax
+l6: $ Q x ==> ∃ z Q z $ by ex_right [l5]
+l7: $ Q x ==> ∃ y P y , ∃ z Q z $ by weak_right [l6]
+l8: $ Q x ==> (∃ y P y ∨ ∃ z Q z) $ by or_right [l7]
+l9: $ P x ∨ Q x ==> (∃ y P y ∨ ∃ z Q z) $ by or_left(g := $ _ $) [l4, l8]
+l10: $ ∃ x (P x ∨ Q x) ==> (∃ y P y ∨ ∃ z Q z) $ by ex_left [l9]
+
+forall_excluded_middle
+----------------------
+
+l1: $ P x ==> P x $ by ax
+l2: $ _ ==> P x , ¬ P x $ by not_right [l1]
+l3: $ _ ==> P x ∨ ¬ P x $ by or_right [l2]
+l4: $ _ ==> ∀ x (P x ∨ ¬ P x) $ by all_right [l3]
