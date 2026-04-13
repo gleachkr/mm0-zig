@@ -103,6 +103,7 @@ const proof_cases = [_]ProofCase{
         .outcome = .unsupported,
     },
     .{ .stem = "pass_alleq_transparent_inference", .outcome = .pass },
+    .{ .stem = "pass_alleq_surface_inference", .outcome = .pass },
     .{ .stem = "unsupported_epi_comp", .outcome = .pass },
     .{ .stem = "pass_epi_cancel_right", .outcome = .pass },
     .{ .stem = "pass_epi_mono_cancel_right", .outcome = .pass },

@@ -1,0 +1,5 @@
+pass_alleq_surface_inference
+----------------------------
+l1: $ G ∧ ≃[𝔹] p = a ∧ q: 𝔹 ⊢
+      (!r: 𝔹. (p ⇒ r) ⇒ (q ⇒ r) ⇒ r) ⇔
+      (!r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r) $ by alleq [#1]
