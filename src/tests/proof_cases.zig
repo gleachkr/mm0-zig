@@ -31,6 +31,11 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
         .reason = "requires inventing an erased hidden def witness after " ++
             "unfold then rewrite; treating that as out of scope",
     },
+    .{
+        .stem = "unsupported_alleq_transparent_inference",
+        .reason = "transparent inference needs to be strengthened; " ++
+            "see pass_alleq_normalized_inference",
+    },
 };
 
 fn lookupProofCaseReason(
@@ -81,6 +86,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_all_elim_free_param", .outcome = .pass },
     .{ .stem = "pass_category_defs_direct", .outcome = .pass },
     .{ .stem = "pass_infer_normalized_conclusion", .outcome = .pass },
+    .{ .stem = "pass_alleq_normalized_inference", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_explicit", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_infer", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_and_elim", .outcome = .pass },
@@ -99,6 +105,10 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "fail_nested_def_unfold_then_acui", .outcome = .pass },
     .{
         .stem = "unsupported_def_unfold_then_rewrite_concl",
+        .outcome = .unsupported,
+    },
+    .{
+        .stem = "unsupported_alleq_transparent_inference",
         .outcome = .unsupported,
     },
     .{ .stem = "unsupported_epi_comp", .outcome = .pass },

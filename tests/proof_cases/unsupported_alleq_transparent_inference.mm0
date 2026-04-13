@@ -1,0 +1,58 @@
+strict provable sort wff;
+
+delimiter $ ( @ [ / ! ~ $ $ . : ; ) ] $;
+
+term im: wff > wff > wff;
+infixr im: $⊢$ prec 0;
+
+term an: wff > wff > wff;
+infixl an: $∧$ prec 1;
+
+strict sort type;
+term bool: type;
+notation bool: type = ($𝔹$:max);
+
+sort term;
+
+term ty: term > type > wff;
+infixl ty: $:$ prec 2;
+
+term app: term > term > term;
+infixl app: $·$ prec 1000;
+
+term lam {x: term}: type > term x > term;
+notation lam {x: term} (A: type) (t: term x): term =
+  ($λ$:20) x ($:$:2) A ($.$:0) t;
+
+term eq: type > term;
+def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+notation eqc (A: type) (t u: term): term =
+  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+
+term thm: term > wff;
+coercion thm: term > wff;
+
+def bic (p q: term): term = $ ≃[𝔹] p = q $;
+infixr bic: $⇔$ prec 20;
+
+term all: type > term;
+term imp: term;
+def impc (p q: term): term = $ imp · p · q $;
+infixr impc: $⇒$ prec 30;
+
+axiom alleq (G: wff) (A: type) {x: term} (t u: term x):
+  $ G ∧ x: A ⊢ t ⇔ u $ >
+  $ G ⊢ all A · (λ x: A. t) ⇔ (all A · (λ x: A. u)) $;
+
+theorem unsupported_alleq_transparent_inference
+    (G: wff)
+    (p a q: term)
+    {r: term}:
+  $ G ∧ ≃[𝔹] p = a ∧ q: 𝔹 ∧ r: 𝔹 ⊢
+      ≃[𝔹] imp · (imp · p · r) ·
+      (imp · (imp · q · r) · r) =
+      imp · (imp · a · r) ·
+      (imp · (imp · q · r) · r) $ >
+  $ G ∧ ≃[𝔹] p = a ∧ q: 𝔹 ⊢
+      all 𝔹 · (λ r: 𝔹. (p ⇒ r) ⇒ (q ⇒ r) ⇒ r) ⇔
+      (all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r)) $;

@@ -99,6 +99,43 @@ test "compiler handles normalize-plus-unfold hidden-dummy proof" {
     try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
+test "compiler verifies bodyful constant defs with lambda bodies" {
+    const mm0_src =
+        \\delimiter $ ( @ [ $ $ . : ; ) ] $;
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\term fun: type > type > type;
+        \\infixr fun: $→$ prec 25;
+        \\sort term;
+        \\term app: term > term > term;
+        \\infixl app: $·$ prec 1000;
+        \\term lam {x: term}: type > term x > term;
+        \\notation lam {x: term} (A: type) (t: term x): term =
+        \\  ($λ$:20) x ($:$:2) A ($.$:0) t;
+        \\term eq: type > term;
+        \\def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+        \\notation eqc (A: type) (t u: term): term =
+        \\  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+        \\def T {.x: term}: term =
+        \\  $ ≃[𝔹 → 𝔹] (λ x: 𝔹. x) = (λ x: 𝔹. x) $;
+        \\def and {.x .y .f: term}: term =
+        \\  $ λ x: 𝔹. λ y: 𝔹. ≃[(𝔹 → 𝔹 → 𝔹) → 𝔹]
+        \\      (λ f: 𝔹 → 𝔹 → 𝔹. f · x · y) =
+        \\      (λ f: 𝔹 → 𝔹 → 𝔹. f · T · T) $;
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        "",
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
 test "compiler rejects repeated binders before emitting bad MMB" {
     const mm0_src =
         \\strict provable sort wff;
