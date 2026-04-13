@@ -1,0 +1,511 @@
+-- Higher-order logic demo inspired by third_party/mm0/examples/hol.mm0.
+--
+-- This file keeps the object theory tiny, but it tries to show a few
+-- frontend features in one place:
+--   * Unicode notation for a small HOL-style λ-calculus
+--   * β and η reasoning
+--   * congruence-driven rewriting
+--   * substitution rules whose raw binders disappear after normalization
+--
+-- There are two equalities in play:
+--   * `≃[A] t = u` is a Boolean-valued term
+--   * `≡[A] t = u` is a wff-level judgmental equality proposition
+
+strict provable sort wff;
+
+delimiter $ ( @ [ / ! ~ $ $ . : ; ) ] $;
+
+term im: wff > wff > wff;
+infixr im: $⊢$ prec 0;
+infixr im: $|-$ prec 0;
+
+term an: wff > wff > wff;
+infixl an: $∧$ prec 1;
+infixl an: $;$ prec 1;
+
+axiom id (P: wff): $ P ⊢ P $;
+axiom syl (P Q R: wff): $ P ⊢ Q $ > $ Q ⊢ R $ > $ P ⊢ R $;
+axiom ian (G P Q: wff): $ G ⊢ P $ > $ G ⊢ Q $ > $ G ⊢ P ∧ Q $;
+axiom anl (P Q: wff): $ P ∧ Q ⊢ P $;
+axiom anr (P Q: wff): $ P ∧ Q ⊢ Q $;
+
+term iff: wff > wff > wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (P: wff): $ P ↔ P $;
+axiom iff_trans (P Q R: wff): $ P ↔ Q $ > $ Q ↔ R $ > $ P ↔ R $;
+axiom iff_sym (P Q: wff): $ P ↔ Q $ > $ Q ↔ P $;
+axiom iff_mp (P Q: wff): $ P ↔ Q $ > $ P $ > $ Q $;
+
+-- Propositions, types, and terms.
+
+strict sort type;
+
+term bool: type;
+notation bool: type = ($𝔹$:max);
+
+term fun: type > type > type;
+infixr fun: $→$ prec 25;
+infixr fun: $->$ prec 25;
+
+term tyeq: type > type > wff;
+infixl tyeq: $≐$ prec 15;
+
+--| @relation type tyeq tyeq_refl tyeq_trans tyeq_sym _
+axiom tyeq_refl (A: type): $ A ≐ A $;
+axiom tyeq_trans (A B C: type):
+  $ A ≐ B $ > $ B ≐ C $ > $ A ≐ C $;
+axiom tyeq_sym (A B: type): $ A ≐ B $ > $ B ≐ A $;
+
+--| @vars α β γ x y z p q r f g h u v w
+sort term;
+
+term ty: term > type > wff;
+infixl ty: $:$ prec 2;
+
+term app: term > term > term;
+infixl app: $·$ prec 1000;
+infixl app: $@$ prec 1000;
+
+term lam {x: term}: type > term x > term;
+notation lam {x: term} (A: type) (t: term x): term =
+  ($λ$:20) x ($:$:2) A ($.$:0) t;
+notation lam {x: term} (A: type) (t: term x): term =
+  ($\\$:20) x ($:$:2) A ($.$:0) t;
+
+axiom appT (G: wff) (A B: type) (f x: term):
+  $ G ⊢ f: A → B $ > $ G ⊢ x: A $ > $ G ⊢ f · x: B $;
+
+axiom lamT (G: wff) (A B: type) {x: term} (t: term x):
+  $ G ∧ x: A ⊢ t: B $ > $ G ⊢ λ x: A. t: A → B $;
+
+term eq: type > term;
+axiom eqT (G: wff) (A: type): $ G ⊢ eq A: A → A → 𝔹 $;
+
+def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+notation eqc (A: type) (t u: term): term =
+  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+notation eqc (A: type) (t u: term): term =
+  ($=[$:50) A ($]$:0) t ($=$:50) u;
+
+term jeq: type > term > term > wff;
+notation jeq (A: type) (t u: term): wff =
+  ($≡[$:50) A ($]$:0) t ($=$:50) u;
+notation jeq (A: type) (t u: term): wff =
+  ($==[$:50) A ($]$:0) t ($=$:50) u;
+
+term thm: term > wff;
+coercion thm: term > wff;
+
+def bic (p q: term): term = $ ≃[𝔹] p = q $;
+infixr bic: $⇔$ prec 20;
+infixr bic: $<->$ prec 20;
+
+axiom eqmp (G: wff) (P Q: term):
+  $ G ⊢ P ⇔ Q $ > $ G ⊢ P $ > $ G ⊢ Q $;
+
+axiom ded (G: wff) (P Q: term):
+  $ G ∧ P ⊢ Q $ > $ G ∧ Q ⊢ P $ > $ G ⊢ P ⇔ Q $;
+
+axiom thmR (G: wff) (A: term): $ G ⊢ A $ > $ G ⊢ A: 𝔹 $;
+
+axiom refl (G: wff) (A: type) (t: term):
+  $ G ⊢ t: A $ > $ G ⊢ ≡[A] t = t $;
+
+axiom aeq (G: wff) (A B: type) (f g a b: term):
+  $ G ⊢ ≡[A → B] f = g $ > $ G ⊢ ≡[A] a = b $ >
+  $ G ⊢ ≡[B] f · a = g · b $;
+
+axiom leq (G: wff) (A B: type) {x: term} (a b: term x):
+  $ G ∧ x: A ⊢ ≡[B] a = b $ >
+  $ G ⊢ ≡[A → B] (λ x: A. a) = (λ x: A. b) $;
+
+axiom beta (A B: type) {x: term} (G: wff x) (t: term x):
+  $ G ⊢ (λ x: A. t) · x: B $ >
+  $ G ⊢ ≡[B] (λ x: A. t) · x = t $;
+
+axiom betat (A B: type) {x: term} (G: wff x) (t: term x):
+  $ G ⊢ (λ x: A. t) · x: B $ >
+  $ G ⊢ ≃[B] (λ x: A. t) · x = t $;
+
+axiom inst (G: wff) (A: type) {x: term} (t a: term x):
+  $ G ⊢ a: 𝔹 $ > $ G ⊢ t: A $ > $ G ∧ ≃[A] x = t ⊢ a $ > $ G ⊢ a $;
+
+axiom eta (G: wff) (A B: type) {x: term} (e: term x):
+  $ G ⊢ e: A → B $ >
+  $ G ⊢ ≡[A → B] (λ x: A. e · x) = e $;
+
+axiom eqsym (G: wff) (A: type) (a b: term):
+  $ G ⊢ ≡[A] a = b $ > $ G ⊢ ≡[A] b = a $;
+
+axiom eqtrans (G: wff) (A: type) (a b c: term):
+  $ G ⊢ ≡[A] a = b $ > $ G ⊢ ≡[A] b = c $ >
+  $ G ⊢ ≡[A] a = c $;
+
+axiom eqTR1 (G: wff) (A: type) (a b: term):
+  $ G ⊢ ≡[A] a = b $ > $ G ⊢ a: A $;
+
+axiom eqTR2 (G: wff) (A: type) (a b: term):
+  $ G ⊢ ≡[A] a = b $ > $ G ⊢ b: A $;
+
+-- Raw term-level equality used by the normalization machinery.
+
+term teq: term > term > wff;
+infixl teq: $≈$ prec 15;
+
+--| @relation term teq teq_refl teq_trans teq_sym _
+axiom teq_refl (t: term): $ t ≈ t $;
+axiom teq_trans (t u v: term): $ t ≈ u $ > $ u ≈ v $ > $ t ≈ v $;
+axiom teq_sym (t u: term): $ t ≈ u $ > $ u ≈ t $;
+
+--| @congr
+axiom teq_congr (a b c d: term):
+  $ a ≈ b $ > $ c ≈ d $ > $ (a ≈ c) ↔ (b ≈ d) $;
+
+--| @congr
+axiom judg_congr (G H P Q: wff):
+  $ G ↔ H $ > $ P ↔ Q $ > $ (G ⊢ P) ↔ (H ⊢ Q) $;
+
+--| @congr
+axiom eq_congr (A B: type) (a b c d: term):
+  $ A ≐ B $ > $ a ≈ b $ > $ c ≈ d $ > $ ≡[A] a = c ↔ ≡[B] b = d $;
+
+--| @congr
+axiom app_congr (f g a b: term):
+  $ f ≈ g $ > $ a ≈ b $ > $ f · a ≈ g · b $;
+
+-- Explicit substitution for term rewrites.
+
+term sb {x: term}: term > term x > term;
+notation sb {x: term} (t: term) (u: term x): term =
+  ($[$:41) x ($/$:0) t ($]$:0) u;
+
+--| @rewrite
+axiom sb_var {x: term} (t: term): $ [x / t] x ≈ t $;
+
+--| @rewrite
+axiom sb_irrel {x: term} (t u: term): $ [x / t] u ≈ u $;
+
+--| @rewrite
+axiom sb_app {x: term} (t: term) (f a: term x):
+  $ [x / t] (f · a) ≈ ([x / t] f) · ([x / t] a) $;
+
+-- Substitution rules. The raw binder `{x}` is hidden by normalization, so we
+-- expose a cleaner user-facing surface with `@view`, `@abstract`, and
+-- `@fresh`, as in the calculus demo.
+
+--| @view {x: term} (G: wff) (A: type) (a b: term) (r: term x) (p q: term): $ G ⊢ ≡[A] a = b $ > $ G ⊢ ≡[A] p = q $
+--| @abstract r p q x a b
+--| @fresh x
+--| @normalize conc
+axiom subst_eq {x: term} (G: wff) (A: type) (a b: term) (r: term x):
+  $ G ⊢ ≡[A] a = b $ >
+  $ G ⊢ ≡[A] ([x / a] r) = ([x / b] r) $;
+
+--| @view {x: term} (a b: term) (r: term x) (p q: term): $ a ≈ b $ > $ p ≈ q $
+--| @abstract r p q x a b
+--| @fresh x
+--| @normalize conc
+axiom subst_teq {x: term} (a b: term) (r: term x):
+  $ a ≈ b $ >
+  $ ([x / a] r) ≈ ([x / b] r) $;
+
+-- Derived term-level equality rules used for the propositional basis.
+
+axiom appTR1 (G: wff) (A B: type) (f x: term):
+  $ G ⊢ f · x: B $ > $ G ⊢ x: A $ > $ G ⊢ f: A → B $;
+
+axiom appTR2 (G: wff) (A B: type) (f x: term):
+  $ G ⊢ f · x: B $ > $ G ⊢ f: A → B $ > $ G ⊢ x: A $;
+
+axiom appTR22 (G: wff) (A B C: type) (f x y: term):
+  $ G ⊢ f · x · y: C $ > $ G ⊢ f: A → B → C $ > $ G ⊢ x: A ∧ y: B $;
+
+theorem eqcT (G: wff) (A: type) (t u: term):
+  $ G ⊢ t: A $ > $ G ⊢ u: A $ > $ G ⊢ (≃[A] t = u): 𝔹 $;
+
+axiom reflt (G: wff) (A: type) (t: term):
+  $ G ⊢ t: A $ > $ G ⊢ ≃[A] t = t $;
+
+axiom aeqt (G: wff) (A B: type) (f g a b: term):
+  $ G ⊢ ≃[A → B] f = g $ > $ G ⊢ ≃[A] a = b $ >
+  $ G ⊢ ≃[B] f · a = g · b $;
+
+axiom leqt (G: wff) (A B: type) {x: term} (a b: term x):
+  $ G ∧ x: A ⊢ ≃[B] a = b $ >
+  $ G ⊢ ≃[A → B] (λ x: A. a) = (λ x: A. b) $;
+
+axiom betac (G: wff) (A B: type) {x: term} (t: term x) (u: term):
+  $ G ⊢ u: A $ > $ G ⊢ ≃[B] (λ x: A. t) · u = ([x / u] t) $;
+
+axiom symt (G: wff) (A: type) (a b: term):
+  $ G ⊢ ≃[A] a = b $ > $ G ⊢ ≃[A] b = a $;
+
+axiom transt (G: wff) (A: type) (a b c: term):
+  $ G ⊢ ≃[A] a = b $ > $ G ⊢ ≃[A] b = c $ >
+  $ G ⊢ ≃[A] a = c $;
+
+axiom eqR1 (G: wff) (A: type) (a b: term):
+  $ G ⊢ ≃[A] a = b $ > $ G ⊢ a: A $;
+
+axiom eqR2 (G: wff) (A: type) (a b: term):
+  $ G ⊢ ≃[A] a = b $ > $ G ⊢ b: A $;
+
+theorem aeq1 (G: wff) (A B: type) (f g a: term):
+  $ G ⊢ ≃[A → B] f = g $ > $ G ⊢ a: A $ >
+  $ G ⊢ ≃[B] f · a = g · a $;
+
+theorem aeq2 (G: wff) (A B: type) (f a b: term):
+  $ G ⊢ f: A → B $ > $ G ⊢ ≃[A] a = b $ >
+  $ G ⊢ ≃[B] f · a = f · b $;
+
+theorem bineq (G: wff) (A B C: type) (f a1 a2 b1 b2: term):
+  $ G ⊢ f: A → B → C $ > $ G ⊢ ≃[A] a1 = a2 $ >
+  $ G ⊢ ≃[B] b1 = b2 $ > $ G ⊢ ≃[C] f · a1 · b1 = f · a2 · b2 $;
+
+theorem bineq1 (G: wff) (A B C: type) (f a1 a2 b: term):
+  $ G ⊢ f: A → B → C $ > $ G ⊢ ≃[A] a1 = a2 $ > $ G ⊢ b: B $ >
+  $ G ⊢ ≃[C] f · a1 · b = f · a2 · b $;
+
+theorem bineq2 (G: wff) (A B C: type) (f a b1 b2: term):
+  $ G ⊢ f: A → B → C $ > $ G ⊢ a: A $ > $ G ⊢ ≃[B] b1 = b2 $ >
+  $ G ⊢ ≃[C] f · a · b1 = f · a · b2 $;
+
+theorem sym (G: wff) (A: type) (a b: term):
+  $ G ⊢ ≃[A] a = b $ > $ G ⊢ ≃[A] b = a $;
+
+theorem trans (G: wff) (A: type) (a b c: term):
+  $ G ⊢ ≃[A] a = b $ > $ G ⊢ ≃[A] b = c $ >
+  $ G ⊢ ≃[A] a = c $;
+
+theorem eqmpr (G: wff) (P Q: term):
+  $ G ⊢ Q ⇔ P $ > $ G ⊢ P $ > $ G ⊢ Q $;
+
+-- Small helper lemmas plus a few user-facing examples.
+
+theorem weaken_ctx (G H P: wff):
+  $ G ⊢ P $ > $ G ∧ H ⊢ P $;
+
+theorem lamTR (A B: type) {x: term} (G: wff x) (t: term x):
+  $ G ⊢ λ x: A. t: A → B $ > $ G ∧ x: A ⊢ t: B $;
+
+theorem betacv (G: wff) (A B: type) {x: term} (t u v: term x):
+  $ G ∧ x: A ⊢ u: B $ >
+  $ G ⊢ t: A $ >
+  $ G ⊢ v: B $ >
+  $ G ∧ ≃[A] x = t ⊢ ≃[B] u = v $ >
+  $ G ⊢ ≃[B] (λ x: A. u) · t = v $;
+
+theorem id_bool_has_type (G: wff) {x: term}:
+  $ G ⊢ λ x: 𝔹. x: 𝔹 → 𝔹 $;
+
+theorem id_bool_refl (G: wff) {x: term}:
+  $ G ⊢ ≡[𝔹 → 𝔹] (λ x: 𝔹. x) = (λ x: 𝔹. x) $;
+
+theorem id_bool_beta (G: wff) {x: term}:
+  $ G ⊢ x: 𝔹 $ > $ G ⊢ ≡[𝔹] ((λ x: 𝔹. x) · x) = x $;
+
+theorem eq_subst_id (G: wff) {x y: term}:
+  $ G ⊢ ≡[𝔹] x = y $ >
+  $ G ⊢ ≡[𝔹] ((λ x: 𝔹. x) · x) = y $;
+
+theorem id_bool_eta (G: wff) {x y: term}:
+  $ G ⊢ ≡[𝔹 → 𝔹] (λ x: 𝔹. (λ y: 𝔹. y) · x) = (λ y: 𝔹. y) $;
+
+def T {.x: term}: term =
+  $ ≃[𝔹 → 𝔹] (λ x: 𝔹. x) = (λ x: 𝔹. x) $;
+notation T: term = ($⊤$:max);
+
+theorem T_DEF (G: wff) {x: term}:
+  $ G ⊢ ≃[𝔹] T = =[𝔹 → 𝔹] (λ x: 𝔹. x) = (λ x: 𝔹. x) $;
+
+theorem TT (G: wff):
+  $ G ⊢ T: 𝔹 $;
+
+theorem TRUTH (G: wff):
+  $ G ⊢ T $;
+
+theorem EQT_ELIM (G: wff) (P: term):
+  $ G ⊢ P ⇔ T $ > $ G ⊢ P $;
+
+theorem EQT_INTRO (G: wff) (P: term):
+  $ G ⊢ P $ > $ G ⊢ P ⇔ T $;
+
+def and {.x .y .f: term}: term =
+  $ λ x: 𝔹. λ y: 𝔹. ≃[(𝔹 → 𝔹 → 𝔹) → 𝔹]
+      (λ f: 𝔹 → 𝔹 → 𝔹. f · x · y) =
+      (λ f: 𝔹 → 𝔹 → 𝔹. f · T · T) $;
+
+theorem AND_DEF (G: wff) {x y f: term}:
+  $ G ⊢ ≃[𝔹 → 𝔹 → 𝔹] and =
+      (λ x: 𝔹. λ y: 𝔹. ≃[(𝔹 → 𝔹 → 𝔹) → 𝔹]
+        (λ f: 𝔹 → 𝔹 → 𝔹. f · x · y) =
+        (λ f: 𝔹 → 𝔹 → 𝔹. f · T · T)) $;
+
+theorem andT (G: wff):
+  $ G ⊢ and: 𝔹 → 𝔹 → 𝔹 $;
+
+def andc (p q: term): term = $ and · p · q $;
+infixl andc: $⋏$ prec 35;
+
+theorem andcT (G: wff) (p q: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ q: 𝔹 $ > $ G ⊢ p ⋏ q: 𝔹 $;
+
+def imp {.p .q: term}: term =
+  $ λ p: 𝔹. λ q: 𝔹. p ⋏ q ⇔ p $;
+
+theorem IMP_DEF (G: wff) {p q: term}:
+  $ G ⊢ ≃[𝔹 → 𝔹 → 𝔹] imp =
+      (λ p: 𝔹. λ q: 𝔹. p ⋏ q ⇔ p) $;
+
+theorem impT (G: wff):
+  $ G ⊢ imp: 𝔹 → 𝔹 → 𝔹 $;
+
+def impc (p q: term): term = $ imp · p · q $;
+infixr impc: $⇒$ prec 30;
+
+theorem impcT (G: wff) (p q: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ q: 𝔹 $ > $ G ⊢ p ⇒ q: 𝔹 $;
+
+theorem impR (G: wff) (p q: term):
+  $ G ⊢ p ⇒ q $ > $ G ⊢ p: 𝔹 ∧ q: 𝔹 $;
+
+theorem IMPC_DEF (G: wff) (a b: term):
+  $ G ⊢ a: 𝔹 $ > $ G ⊢ b: 𝔹 $ > $ G ⊢ a ⇒ b ⇔ (a ⋏ b ⇔ a) $;
+
+axiom CONJ (G: wff) (p q: term):
+  $ G ⊢ p $ > $ G ⊢ q $ > $ G ⊢ p ⋏ q $;
+
+axiom CONJUNCT1 (G: wff) (p q: term):
+  $ G ⊢ p ⋏ q $ > $ G ⊢ p $;
+
+axiom CONJUNCT2 (G: wff) (p q: term):
+  $ G ⊢ p ⋏ q $ > $ G ⊢ q $;
+
+theorem MP (G: wff) (p q: term):
+  $ G ⊢ p ⇒ q $ > $ G ⊢ p $ > $ G ⊢ q $;
+
+theorem DISCH (G: wff) (p q: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ q: 𝔹 $ > $ G ∧ p ⊢ q $ > $ G ⊢ p ⇒ q $;
+
+theorem UNDISCH (G: wff) (p q: term):
+  $ G ⊢ p ⇒ q $ > $ G ∧ p ⊢ q $;
+
+theorem IMP_ID (G: wff) (p: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ p ⇒ p $;
+
+theorem IMP_TRANS (G: wff) (p q r: term):
+  $ G ⊢ p ⇒ q $ > $ G ⊢ q ⇒ r $ > $ G ⊢ p ⇒ r $;
+
+theorem CONJ_COMM (G: wff) (p q: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ q: 𝔹 $ > $ G ⊢ p ⋏ q ⇒ q ⋏ p $;
+
+theorem CONJ_ASSOC (G: wff) (p q r: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ q: 𝔹 $ > $ G ⊢ r: 𝔹 $ >
+  $ G ⊢ (p ⋏ q) ⋏ r ⇒ p ⋏ (q ⋏ r) $;
+
+theorem IMP_CONJ_CHAIN (G: wff) (p q r: term):
+  $ G ⊢ p ⇒ q $ > $ G ⊢ q ⇒ r $ > $ G ⊢ p ⇒ q ⋏ r $;
+
+def all (A: type) {.P .x: term}: term =
+  $ λ P: A → 𝔹. ≃[A → 𝔹] P = (λ x: A. T) $;
+
+theorem FORALL_DEF (G: wff) (A: type) {P x: term}:
+  $ G ⊢ ≃[(A → 𝔹) → 𝔹] all A =
+      (λ P: A → 𝔹. ≃[A → 𝔹] P = (λ x: A. T)) $;
+
+theorem allT (G: wff) (A: type):
+  $ G ⊢ all A: (A → 𝔹) → 𝔹 $;
+
+def allc {x: term} (A: type) (t: term x): term =
+  $ all A · (λ x: A. t) $;
+notation allc {x: term} (A: type) (t: term x): term =
+  ($!$:20) x ($:$:2) A ($.$:0) t;
+
+theorem allcT (G: wff) (A: type) {x: term} (t: term x):
+  $ G ∧ x: A ⊢ t: 𝔹 $ > $ G ⊢ !x: A. t: 𝔹 $;
+
+theorem alleq (G: wff) (A: type) {x: term} (t u: term x):
+  $ G ∧ x: A ⊢ t ⇔ u $ >
+  $ G ⊢ all A · (λ x: A. t) ⇔ (all A · (λ x: A. u)) $;
+
+def or {.p .q .r: term}: term =
+  $ λ p: 𝔹. λ q: 𝔹. !r: 𝔹. (p ⇒ r) ⇒ (q ⇒ r) ⇒ r $;
+
+theorem OR_DEF (G: wff) {p q r: term}:
+  $ G ⊢ ≃[𝔹 → 𝔹 → 𝔹] or =
+      (λ p: 𝔹. λ q: 𝔹. !r: 𝔹. (p ⇒ r) ⇒ (q ⇒ r) ⇒ r) $;
+
+theorem orT (G: wff):
+  $ G ⊢ or: 𝔹 → 𝔹 → 𝔹 $;
+
+def orc (p q: term): term = $ or · p · q $;
+infixl orc: $∨$ prec 31;
+infixl orc: $\/$ prec 31;
+
+theorem orcT (G: wff) (p q: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ q: 𝔹 $ > $ G ⊢ p ∨ q: 𝔹 $;
+
+theorem orR (G: wff) (p q: term):
+  $ G ⊢ p ∨ q $ > $ G ⊢ p: 𝔹 ∧ q: 𝔹 $;
+
+def F {.p: term}: term =
+  $ !p: 𝔹. p $;
+
+theorem F_DEF (G: wff) {p: term}:
+  $ G ⊢ F ⇔ (!p: 𝔹. p) $;
+
+theorem FT (G: wff):
+  $ G ⊢ F: 𝔹 $;
+
+def not {.p: term}: term =
+  $ λ p: 𝔹. p ⇒ F $;
+
+theorem NOT_DEF (G: wff) {p: term}:
+  $ G ⊢ ≃[𝔹 → 𝔹] not = (λ p: 𝔹. p ⇒ F) $;
+
+theorem notT (G: wff):
+  $ G ⊢ not: 𝔹 → 𝔹 $;
+
+def notc (p: term): term = $ not · p $;
+prefix notc: $¬$ prec 100;
+prefix notc: $~$ prec 100;
+
+theorem notcT (G: wff) (p: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ ¬ p: 𝔹 $;
+
+theorem notR (G: wff) (p: term):
+  $ G ⊢ ¬ p $ > $ G ⊢ p: 𝔹 $;
+
+theorem notc_def (G: wff) (p: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ ¬ p ⇔ (p ⇒ F) $;
+
+theorem NOT_ELIM (G: wff) (p: term):
+  $ G ⊢ ¬ p $ > $ G ⊢ p ⇒ F $;
+
+theorem NOT_INTRO (G: wff) (p: term):
+  $ G ⊢ p ⇒ F $ > $ G ⊢ ¬ p $;
+
+-- A term-level normalization example. The surface proof line never mentions
+-- the raw substitution binder.
+theorem normalize_subst_nested {x y z: term}:
+  $ ((λ y: 𝔹. y) · x) ≈ z $ >
+  $ ((λ y: 𝔹. y) · x) · ((λ y: 𝔹. y) · x) ≈ z · z $;
+
+-- A larger chain using β-reduction, congruence, and transitivity.
+theorem double_id_congr_chain (G: wff) {x y: term}:
+  $ G ⊢ ≡[𝔹] x = y $ >
+  $ G ⊢ ≡[𝔹] ((λ y: 𝔹. y) · ((λ x: 𝔹. x) · x)) = y $;
+
+-- Judgment-level substitution with a hidden raw binder recovered through the
+-- normalized surface shape.
+theorem subst_eq_demo (G: wff) {x y z: term}:
+  $ G ⊢ ≡[𝔹] ((λ y: 𝔹. y) · x) = z $ >
+  $ G ⊢ ≡[𝔹] ((λ y: 𝔹. y) · x) · ((λ y: 𝔹. y) · x) = z · z $;
+
+-- A slightly larger chain combining β-reduction with judgmental substitution.
+theorem square_id_subst (G: wff) {x y: term}:
+  $ G ⊢ ≡[𝔹] x = y $ >
+  $ G ⊢ ≡[𝔹] ((λ x: 𝔹. x) · x) · ((λ x: 𝔹. x) · x) = y · y $;

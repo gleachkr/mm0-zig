@@ -191,6 +191,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_view_recover_symbolic_hole", .outcome = .pass },
     .{ .stem = "pass_struct_seq_forall_left", .outcome = .pass },
     .{ .stem = "quant_nd", .outcome = .pass },
+    .{ .stem = "demo_hol_beta", .outcome = .pass },
     .{
         .stem = "fail_missing_binding",
         .outcome = .{ .fail = error.MissingBinderAssignment },

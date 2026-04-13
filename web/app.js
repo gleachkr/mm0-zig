@@ -44,6 +44,11 @@ const examples = {
     mm0: "./fixtures/quant_nd.mm0",
     proof: "./fixtures/quant_nd.auf",
   },
+  demo_hol_beta: {
+    label: "hol λβ",
+    mm0: "./fixtures/demo_hol_beta.mm0",
+    proof: "./fixtures/demo_hol_beta.auf",
+  },
   demo_calculus_product_rule: {
     label: "calculus product rule",
     mm0: "./fixtures/demo_calculus_product_rule.mm0",

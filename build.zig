@@ -154,6 +154,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/quant_nd.auf"),
         "web-demo/fixtures/quant_nd.auf",
     );
+    const install_hol_beta_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/demo_hol_beta.mm0"),
+        "web-demo/fixtures/demo_hol_beta.mm0",
+    );
+    const install_hol_beta_proof = b.addInstallFile(
+        b.path("tests/proof_cases/demo_hol_beta.auf"),
+        "web-demo/fixtures/demo_hol_beta.auf",
+    );
     const install_calculus_product_rule_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/demo_calculus_product_rule.mm0"),
         "web-demo/fixtures/demo_calculus_product_rule.mm0",
@@ -188,6 +196,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_lk_exists_mono_proof.step);
     web_demo_step.dependOn(&install_quant_nd_mm0.step);
     web_demo_step.dependOn(&install_quant_nd_proof.step);
+    web_demo_step.dependOn(&install_hol_beta_mm0.step);
+    web_demo_step.dependOn(&install_hol_beta_proof.step);
     web_demo_step.dependOn(&install_calculus_product_rule_mm0.step);
     web_demo_step.dependOn(&install_calculus_product_rule_proof.step);
     web_demo_step.dependOn(&install_category_pullback_mm0.step);
