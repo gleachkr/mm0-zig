@@ -376,6 +376,31 @@ pub fn guideSymbolicWitnessesFromAcuiTarget(
     return false;
 }
 
+fn matchResolvedTemplateConcrete(
+    self: anytype,
+    template: TemplateExpr,
+    actual: ExprId,
+    state: *MatchSession,
+) anyerror!bool {
+    // This is only for subtrees whose binders were already solved by earlier
+    // matches. Once a template subtree is fully concrete, transparent matching
+    // should use the same concrete relation as explicit checking rather than
+    // insisting on more symbolic replay.
+    const symbolic = try symbolicFromTemplate(self, template);
+    const resolved = try WitnessState.materializeResolvedSymbolic(
+        self,
+        symbolic,
+        state,
+    ) orelse return false;
+    return try WitnessState.concreteExprsMatchMode(
+        self,
+        resolved,
+        actual,
+        state,
+        .transparent,
+    );
+}
+
 pub fn matchTemplateRecState(
     self: anytype,
     template: TemplateExpr,
@@ -410,7 +435,15 @@ pub fn matchTemplateRecState(
                 break :blk true;
             }
 
-            break :blk false;
+            // Structural replay and def expansion did not match, but earlier
+            // hypotheses may already have solved every binder in this subtree.
+            // In that case, compare the resolved concrete expression directly.
+            break :blk try matchResolvedTemplateConcrete(
+                self,
+                template,
+                actual,
+                state,
+            );
         },
     };
 }

@@ -31,11 +31,6 @@ const unsupported_proof_cases = [_]ProofCaseMetadata{
         .reason = "requires inventing an erased hidden def witness after " ++
             "unfold then rewrite; treating that as out of scope",
     },
-    .{
-        .stem = "unsupported_alleq_transparent_inference",
-        .reason = "transparent inference needs to be strengthened; " ++
-            "see pass_alleq_normalized_inference",
-    },
 };
 
 fn lookupProofCaseReason(
@@ -107,10 +102,7 @@ const proof_cases = [_]ProofCase{
         .stem = "unsupported_def_unfold_then_rewrite_concl",
         .outcome = .unsupported,
     },
-    .{
-        .stem = "unsupported_alleq_transparent_inference",
-        .outcome = .unsupported,
-    },
+    .{ .stem = "pass_alleq_transparent_inference", .outcome = .pass },
     .{ .stem = "unsupported_epi_comp", .outcome = .pass },
     .{ .stem = "pass_epi_cancel_right", .outcome = .pass },
     .{ .stem = "pass_epi_mono_cancel_right", .outcome = .pass },

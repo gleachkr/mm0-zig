@@ -5,6 +5,7 @@ const FrontendEnv = @import("../../env.zig");
 const FrontendExpr = @import("../../expr.zig");
 const Expr = @import("../../../trusted/expressions.zig").Expr;
 const MM0Parser = @import("../../../trusted/parse.zig").MM0Parser;
+const allocNoneSeeds = @import("./fixtures.zig").allocNoneSeeds;
 
 fn readProofCaseFile(
     allocator: std.mem.Allocator,
@@ -737,6 +738,210 @@ test "collectConcreteDepsForPendingFinalization sees exact dummy seeds" {
 
     const deps = try session.collectConcreteDepsForPendingFinalization();
     try std.testing.expect((deps & exact_dep) != 0);
+}
+
+test "symbolic transparent bindings fall back to representatives" {
+    const allocator = std.testing.allocator;
+    const src = try readProofCaseFile(
+        allocator,
+        "pass_alleq_transparent_inference",
+        "mm0",
+    );
+    defer allocator.free(src);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(
+        arena.allocator(),
+    );
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const hyp_text =
+        " G ∧ ≃[𝔹] p = a ∧ q: 𝔹 ∧ r: 𝔹 ⊢" ++
+        " ≃[𝔹] imp · (imp · p · r) ·" ++
+        " (imp · (imp · q · r) · r) =" ++
+        " imp · (imp · a · r) ·" ++
+        " (imp · (imp · q · r) · r) ";
+    const concl_text =
+        " G ∧ ≃[𝔹] p = a ∧ q: 𝔹 ⊢" ++
+        " all 𝔹 · (λ r: 𝔹. (p ⇒ r) ⇒ (q ⇒ r) ⇒ r) ⇔" ++
+        " (all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r)) ";
+    const ref_expr = try theorem.internParsedExpr(
+        try parser.parseFormulaText(hyp_text, &theorem_vars),
+    );
+    const line_expr = try theorem.internParsedExpr(
+        try parser.parseFormulaText(concl_text, &theorem_vars),
+    );
+
+    const rule_id = env.getRuleId("alleq") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+    const seeds = try allocNoneSeeds(allocator, rule.args.len);
+    defer allocator.free(seeds);
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(rule.args, seeds);
+    defer session.deinit();
+
+    try std.testing.expect(
+        try session.matchTransparent(rule.hyps[0], ref_expr),
+    );
+    try std.testing.expect(
+        try session.matchTransparent(rule.concl, line_expr),
+    );
+}
+
+test "transparent matching reuses resolved allc representatives" {
+    const allocator = std.testing.allocator;
+    const src =
+        \\strict provable sort wff;
+        \\
+        \\delimiter $ ( @ [ / ! $ $ . : ; ) ] $;
+        \\
+        \\term im: wff > wff > wff;
+        \\infixr im: $⊢$ prec 0;
+        \\
+        \\term an: wff > wff > wff;
+        \\infixl an: $∧$ prec 1;
+        \\
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\
+        \\sort term;
+        \\term ty: term > type > wff;
+        \\infixl ty: $:$ prec 2;
+        \\term app: term > term > term;
+        \\infixl app: $·$ prec 1000;
+        \\term lam {x: term}: type > term x > term;
+        \\notation lam {x: term} (A: type) (t: term x): term =
+        \\  ($λ$:20) x ($:$:2) A ($.$:0) t;
+        \\term eq: type > term;
+        \\def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+        \\notation eqc (A: type) (t u: term): term =
+        \\  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+        \\term thm: term > wff;
+        \\coercion thm: term > wff;
+        \\def bic (p q: term): term = $ ≃[𝔹] p = q $;
+        \\infixr bic: $⇔$ prec 20;
+        \\term imp: term;
+        \\def impc (p q: term): term = $ imp · p · q $;
+        \\infixr impc: $⇒$ prec 30;
+        \\term all: type > term;
+        \\def allc {x: term} (A: type) (t: term x): term =
+        \\  $ all A · (λ x: A. t) $;
+        \\notation allc {x: term} (A: type) (t: term x): term =
+        \\  ($!$:20) x ($:$:2) A ($.$:0) t;
+        \\
+        \\axiom betacv (G: wff) (A B: type) {x: term} (t u v: term x):
+        \\  $ G ∧ x: A ⊢ u: B $ >
+        \\  $ G ⊢ t: A $ >
+        \\  $ G ⊢ v: B $ >
+        \\  $ G ∧ ≃[A] x = t ⊢ ≃[B] u = v $ >
+        \\  $ G ⊢ ≃[B] (λ x: A. u) · t = v $;
+        \\
+        \\theorem orc_betacv_probe (G: wff) (a b: term) {q r: term}:
+        \\  $ G ∧ q: 𝔹 ⊢ !r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r: 𝔹 $ >
+        \\  $ G ⊢ b: 𝔹 $ >
+        \\  $ G ⊢ all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r): 𝔹 $ >
+        \\  $ G ∧ ≃[𝔹] q = b ⊢
+        \\      (!r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r) ⇔
+        \\      (all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r)) $ >
+        \\  $ G ⊢ ≃[𝔹]
+        \\      ((λ q: 𝔹. !r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r) · b) =
+        \\      (all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r)) $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(
+        arena.allocator(),
+    );
+    defer theorem_vars.deinit();
+
+    const assertion = blk: {
+        while (try parser.next()) |stmt| {
+            try env.addStmt(stmt);
+            switch (stmt) {
+                .assertion => |value| {
+                    if (value.kind != .theorem) continue;
+                    if (!std.mem.eql(
+                        u8,
+                        value.name,
+                        "orc_betacv_probe",
+                    )) continue;
+                    try theorem.seedAssertion(value);
+                    for (value.arg_names, value.arg_exprs) |name, expr| {
+                        if (name) |actual_name| {
+                            try theorem_vars.put(actual_name, expr);
+                        }
+                    }
+                    break :blk value;
+                },
+                else => {},
+            }
+        }
+        return error.MissingAssertion;
+    };
+
+    const rule_id = env.getRuleId("betacv") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+    const seeds = try allocNoneSeeds(allocator, rule.args.len);
+    defer allocator.free(seeds);
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(rule.args, seeds);
+    defer session.deinit();
+
+    try std.testing.expect(
+        try session.matchTransparent(rule.hyps[0], theorem.theorem_hyps.items[0]),
+    );
+    try std.testing.expect(
+        try session.matchTransparent(rule.hyps[1], theorem.theorem_hyps.items[1]),
+    );
+    try std.testing.expect(
+        try session.matchTransparent(rule.hyps[2], theorem.theorem_hyps.items[2]),
+    );
+    try std.testing.expect(
+        try session.matchTransparent(rule.hyps[3], theorem.theorem_hyps.items[3]),
+    );
+
+    const concl = try theorem.internParsedExpr(assertion.concl);
+    try std.testing.expect(
+        try session.matchTransparent(rule.concl, concl),
+    );
 }
 
 test "resolveBindingSeeds preserves symbolic state through view reuse" {

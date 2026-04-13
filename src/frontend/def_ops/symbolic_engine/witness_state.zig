@@ -1130,14 +1130,51 @@ pub fn boundValueMatchesExpr(
             );
         },
         .symbolic => |symbolic| {
-            return try TransparentMatch.matchSymbolicToExprState(
+            return try matchSymbolicToExprWithConcreteFallback(
                 self,
                 symbolic.expr,
                 actual,
                 state,
+                symbolic.mode,
             );
         },
     };
+}
+
+/// Compare two concrete expressions using the representative relation for the
+/// requested mode. This is the common concrete fallback used by normalized
+/// matching and by transparent reuse of previously symbolic bindings.
+pub fn concreteExprsMatchMode(
+    self: anytype,
+    lhs: ExprId,
+    rhs: ExprId,
+    state: *MatchSession,
+    mode: BindingMode,
+) anyerror!bool {
+    if (mode == .exact) return lhs == rhs;
+
+    if (mode == .transparent) {
+        // Transparent matching is strictly stronger than representative
+        // equality, so try the direct relation first and only then fall back
+        // to representative comparison.
+        if ((try TransparentMatch.compareTransparent(self, lhs, rhs)) != null) {
+            return true;
+        }
+    }
+
+    const lhs_repr = try chooseRepresentativeSymbolic(
+        self,
+        lhs,
+        state,
+        mode,
+    );
+    const rhs_repr = try chooseRepresentativeSymbolic(
+        self,
+        rhs,
+        state,
+        mode,
+    );
+    return symbolicExprEql(self, lhs_repr, rhs_repr);
 }
 
 pub fn concreteBindingMatchesExpr(
@@ -1149,6 +1186,20 @@ pub fn concreteBindingMatchesExpr(
     if (concrete.mode == .exact) {
         return concrete.raw == actual;
     }
+    if (concrete.mode == .transparent) {
+        const concrete_expr = (try concreteBindingMatchExpr(
+            self,
+            concrete,
+            state,
+        )) orelse return false;
+        if ((try TransparentMatch.compareTransparent(
+            self,
+            concrete_expr,
+            actual,
+        )) != null) {
+            return true;
+        }
+    }
     const actual_repr = try chooseRepresentativeSymbolic(
         self,
         actual,
@@ -1156,6 +1207,43 @@ pub fn concreteBindingMatchesExpr(
         concrete.mode,
     );
     return symbolicExprEql(self, concrete.repr, actual_repr);
+}
+
+fn matchSymbolicToExprWithConcreteFallback(
+    self: anytype,
+    symbolic: *const SymbolicExpr,
+    actual: ExprId,
+    state: *MatchSession,
+    mode: BindingMode,
+) anyerror!bool {
+    var snapshot = try saveMatchSnapshot(self, state);
+    defer deinitMatchSnapshot(self, &snapshot);
+
+    if (try TransparentMatch.matchSymbolicToExprState(
+        self,
+        symbolic,
+        actual,
+        state,
+    )) {
+        return true;
+    }
+    try restoreMatchSnapshot(self, &snapshot, state);
+
+    // If structural replay fails but the symbolic value can already be
+    // resolved to a concrete expression, compare representatives instead.
+    // This mirrors the extra strength that normalized matching already had.
+    const symbolic_expr = try materializeResolvedSymbolic(
+        self,
+        symbolic,
+        state,
+    ) orelse return false;
+    return try concreteExprsMatchMode(
+        self,
+        symbolic_expr,
+        actual,
+        state,
+        mode,
+    );
 }
 
 pub fn boundValueMatchesSymbolic(

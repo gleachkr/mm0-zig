@@ -69,6 +69,8 @@ pub const SymbolicEngine = struct {
         WitnessState.makeConcreteBoundValue;
     pub const makeSymbolicBoundValue =
         WitnessState.makeSymbolicBoundValue;
+    pub const concreteExprsMatchMode =
+        WitnessState.concreteExprsMatchMode;
     pub const matchSymbolicDummyState =
         WitnessState.matchSymbolicDummyState;
     pub const matchDummyToSymbolic = WitnessState.matchDummyToSymbolic;

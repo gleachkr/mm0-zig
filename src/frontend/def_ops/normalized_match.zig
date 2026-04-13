@@ -784,17 +784,12 @@ pub const RuleMatchSession = struct {
             const actual_concrete =
                 try self.mirrorExprToConcrete(actual_expr, view);
             if (pattern_concrete != null and actual_concrete != null) {
-                const pattern_repr = try symbolic_engine.chooseRepresentativeSymbolic(
+                if (try symbolic_engine.concreteExprsMatchMode(
                     pattern_concrete.?,
-                    &self.state,
-                    .normalized,
-                );
-                const actual_repr = try symbolic_engine.chooseRepresentativeSymbolic(
                     actual_concrete.?,
                     &self.state,
                     .normalized,
-                );
-                if (symbolic_engine.symbolicExprEql(pattern_repr, actual_repr)) {
+                )) {
                     return true;
                 }
             }

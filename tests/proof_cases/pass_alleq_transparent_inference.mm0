@@ -44,7 +44,7 @@ axiom alleq (G: wff) (A: type) {x: term} (t u: term x):
   $ G ∧ x: A ⊢ t ⇔ u $ >
   $ G ⊢ all A · (λ x: A. t) ⇔ (all A · (λ x: A. u)) $;
 
-theorem unsupported_alleq_transparent_inference
+theorem pass_alleq_transparent_inference
     (G: wff)
     (p a q: term)
     {r: term}:

@@ -1199,6 +1199,153 @@ test "transparent transport verifies eqmp over bic symmetry" {
     try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
 }
 
+test "transparent final line matching unfolds allc notation" {
+    // The last proof line is raw `all A · (λ x: A. t)`, while the theorem
+    // statement uses the surface `!x: A. t` notation.
+    const mm0_src =
+        \\strict provable sort wff;
+        \\delimiter $ ( @ [ / ! $ $ . : ; ) ] $;
+        \\term im: wff > wff > wff;
+        \\infixr im: $⊢$ prec 0;
+        \\term an: wff > wff > wff;
+        \\infixl an: $∧$ prec 1;
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\sort term;
+        \\term ty: term > type > wff;
+        \\infixl ty: $:$ prec 2;
+        \\term app: term > term > term;
+        \\infixl app: $·$ prec 1000;
+        \\term lam {x: term}: type > term x > term;
+        \\notation lam {x: term} (A: type) (t: term x): term =
+        \\  ($λ$:20) x ($:$:2) A ($.$:0) t;
+        \\term all: type > term;
+        \\def allc {x: term} (A: type) (t: term x): term =
+        \\  $ all A · (λ x: A. t) $;
+        \\notation allc {x: term} (A: type) (t: term x): term =
+        \\  ($!$:20) x ($:$:2) A ($.$:0) t;
+        \\axiom allc_raw (G: wff) (A: type) {x: term} (t: term x):
+        \\  $ G ∧ x: A ⊢ t: 𝔹 $ >
+        \\  $ G ⊢ all A · (λ x: A. t): 𝔹 $;
+        \\theorem final_allc (G: wff) (A: type) {x: term} (t: term x):
+        \\  $ G ∧ x: A ⊢ t: 𝔹 $ >
+        \\  $ G ⊢ !x: A. t: 𝔹 $;
+    ;
+    const proof_src =
+        \\final_allc
+        \\----------
+        \\l1: $ G ⊢ all A · (λ x: A. t): 𝔹 $ by allc_raw [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "transparent betacv matching handles quantified bic operands" {
+    const mm0_src =
+        \\strict provable sort wff;
+        \\
+        \\delimiter $ ( @ [ / ! $ $ . : ; ) ] $;
+        \\
+        \\term im: wff > wff > wff;
+        \\infixr im: $⊢$ prec 0;
+        \\
+        \\term an: wff > wff > wff;
+        \\infixl an: $∧$ prec 1;
+        \\
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\
+        \\sort term;
+        \\term ty: term > type > wff;
+        \\infixl ty: $:$ prec 2;
+        \\term app: term > term > term;
+        \\infixl app: $·$ prec 1000;
+        \\term lam {x: term}: type > term x > term;
+        \\notation lam {x: term} (A: type) (t: term x): term =
+        \\  ($λ$:20) x ($:$:2) A ($.$:0) t;
+        \\term eq: type > term;
+        \\def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+        \\notation eqc (A: type) (t u: term): term =
+        \\  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+        \\term thm: term > wff;
+        \\coercion thm: term > wff;
+        \\def bic (p q: term): term = $ ≃[𝔹] p = q $;
+        \\infixr bic: $⇔$ prec 20;
+        \\term imp: term;
+        \\def impc (p q: term): term = $ imp · p · q $;
+        \\infixr impc: $⇒$ prec 30;
+        \\term all: type > term;
+        \\def allc {x: term} (A: type) (t: term x): term =
+        \\  $ all A · (λ x: A. t) $;
+        \\notation allc {x: term} (A: type) (t: term x): term =
+        \\  ($!$:20) x ($:$:2) A ($.$:0) t;
+        \\
+        \\axiom betacv (G: wff) (A B: type) {x: term} (t u v: term x):
+        \\  $ G ∧ x: A ⊢ u: B $ >
+        \\  $ G ⊢ t: A $ >
+        \\  $ G ⊢ v: B $ >
+        \\  $ G ∧ ≃[A] x = t ⊢ ≃[B] u = v $ >
+        \\  $ G ⊢ ≃[B] (λ x: A. u) · t = v $;
+        \\
+        \\theorem orc_betacv_probe (G: wff) (a b: term) {q r: term}:
+        \\  $ G ∧ q: 𝔹 ⊢ !r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r: 𝔹 $ >
+        \\  $ G ⊢ b: 𝔹 $ >
+        \\  $ G ⊢ all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r): 𝔹 $ >
+        \\  $ G ∧ ≃[𝔹] q = b ⊢
+        \\      (!r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r) ⇔
+        \\      (all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r)) $ >
+        \\  $ G ⊢ ≃[𝔹]
+        \\      ((λ q: 𝔹. !r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r) · b) =
+        \\      (all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r)) $;
+    ;
+    const omitted_proof_src =
+        "orc_betacv_probe\n" ++
+        "----------------\n" ++
+        "l1: $ G ⊢ ≃[𝔹] ((λ q: 𝔹. !r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r) ·" ++
+        " b) = (all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r)) $" ++
+        " by betacv [#1, #2, #3, #4]\n";
+    const explicit_proof_src =
+        "orc_betacv_probe\n" ++
+        "----------------\n" ++
+        "l1: $ G ⊢ ≃[𝔹] ((λ q: 𝔹. !r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r) ·" ++
+        " b) = (all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r)) $ by" ++
+        " betacv (G := $ G $, A := $ 𝔹 $, B := $ 𝔹 $, x := $ q $," ++
+        " t := $ b $, u := $ !r: 𝔹. (a ⇒ r) ⇒ (q ⇒ r) ⇒ r $," ++
+        " v := $ all 𝔹 · (λ r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r) $)" ++
+        " [#1, #2, #3, #4]\n";
+
+    {
+        var compiler = Compiler.initWithProof(
+            std.testing.allocator,
+            mm0_src,
+            omitted_proof_src,
+        );
+        const mmb = try compiler.compileMmb(std.testing.allocator);
+        defer std.testing.allocator.free(mmb);
+        try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+    }
+
+    {
+        var compiler = Compiler.initWithProof(
+            std.testing.allocator,
+            mm0_src,
+            explicit_proof_src,
+        );
+        const mmb = try compiler.compileMmb(std.testing.allocator);
+        defer std.testing.allocator.free(mmb);
+        try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+    }
+}
+
 test "compiler reports dependency slot exhaustion clearly" {
     const allocator = std.testing.allocator;
 
