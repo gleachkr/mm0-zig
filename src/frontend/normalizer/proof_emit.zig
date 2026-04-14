@@ -597,8 +597,10 @@ pub fn validateRewriteBindings(
 ) !void {
     if (expected_args.len != bindings.len) return error.SortMismatch;
 
-    var deps_buf: [56]u55 = undefined;
-    var deps_len: usize = 0;
+    var bound_deps: [56]u55 = undefined;
+    var bound_len: usize = 0;
+    var prev_deps: [56]u55 = undefined;
+    var prev_len: usize = 0;
     for (expected_args, bindings) |expected, expr_id| {
         const info = try rewriteExprInfo(env, theorem, expr_id);
         if (!std.mem.eql(u8, info.sort_name, expected.sort_name)) {
@@ -607,17 +609,20 @@ pub fn validateRewriteBindings(
         if (expected.bound) {
             if (!info.bound) return error.BoundnessMismatch;
             var k: usize = 0;
-            while (k < deps_len) : (k += 1) {
-                if (deps_buf[k] & info.deps != 0) return error.DepViolation;
+            while (k < prev_len) : (k += 1) {
+                if (prev_deps[k] & info.deps != 0) return error.DepViolation;
             }
-            deps_buf[deps_len] = info.deps;
-            deps_len += 1;
-            continue;
+            bound_deps[bound_len] = info.deps;
+            bound_len += 1;
+        } else {
+            for (0..bound_len) |k| {
+                if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0)
+                    continue;
+                if (bound_deps[k] & info.deps != 0) return error.DepViolation;
+            }
         }
-        for (0..deps_len) |k| {
-            if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0) continue;
-            if (deps_buf[k] & info.deps != 0) return error.DepViolation;
-        }
+        prev_deps[prev_len] = info.deps;
+        prev_len += 1;
     }
 }
 
@@ -664,4 +669,55 @@ pub fn rewriteExprInfo(
             };
         },
     };
+}
+
+test "validateRewriteBindings rejects bound alias after regular arg" {
+    const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+    const allocator = std.testing.allocator;
+    const mm0_src =
+        \\sort obj;
+        \\provable sort wff;
+        \\term P (x: obj): wff;
+        \\axiom sb_rule (t: obj) {x: obj} (p: wff x): $ P t $;
+        \\theorem host {x y: obj}: $ P y $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(mm0_src, arena.allocator());
+    var env = GlobalEnv.init(arena.allocator());
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+    }
+
+    const rule = env.getRule("sb_rule") orelse return error.MissingAssertion;
+
+    var theorem = TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    parser = MM0Parser.init(mm0_src, arena.allocator());
+    var found_host = false;
+    while (try parser.next()) |stmt| {
+        switch (stmt) {
+            .assertion => |assertion| {
+                if (std.mem.eql(u8, assertion.name, "host")) {
+                    try theorem.seedAssertion(assertion);
+                    found_host = true;
+                    break;
+                }
+            },
+            else => {},
+        }
+    }
+    if (!found_host) return error.MissingAssertion;
+
+    const y_expr = try theorem.interner.internVar(.{ .theorem_var = 1 });
+    const p_term = env.term_names.get("P") orelse return error.MissingTerm;
+    const p_y = try theorem.interner.internApp(p_term, &.{y_expr});
+    const bindings = [_]ExprId{ y_expr, y_expr, p_y };
+
+    try std.testing.expectError(
+        error.DepViolation,
+        validateRewriteBindings(&env, &theorem, rule.args, &bindings),
+    );
 }
