@@ -1,6 +1,0 @@
-resolution_demo
----------------
-
-l1: $ derives (join (cl (disj (clit r) (clit (neg p)))) (join (cl (clit p)) (cl (clit (neg r))))) $ by resolve(d := $ cl (clit (neg r)) $) [#1]
-l2: $ derives (join (cl (clit (neg r))) (cl (clit r))) $ by resolve(d := $ cl (clit (neg r)) $) [l1]
-l3: $ derives (cl clause_bot) $ by resolve(d := $ cnf_top $) [l2]

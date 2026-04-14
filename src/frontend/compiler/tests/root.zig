@@ -1077,17 +1077,17 @@ test "-Werror upgrades ambiguity warnings into errors" {
     try std.testing.expectEqual(error.AmbiguousAcuiMatch, diag.err);
 }
 
-test "resolution demo uses omitted binders across two ACUI sorts" {
+test "robinson demo uses omitted binders across two ACUI sorts" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
         allocator,
-        "demo_resolution_double_acui",
+        "robinson",
         "mm0",
     );
     defer allocator.free(mm0_src);
     const proof_src = try readProofCaseFile(
         allocator,
-        "demo_resolution_double_acui",
+        "robinson",
         "auf",
     );
     defer allocator.free(proof_src);
@@ -1098,20 +1098,24 @@ test "resolution demo uses omitted binders across two ACUI sorts" {
     try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
-test "fully omitted resolution step emits ambiguity warning" {
+test "fully omitted robinson step emits ambiguity warning" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
         allocator,
-        "demo_resolution_double_acui",
+        "robinson",
         "mm0",
     );
     defer allocator.free(mm0_src);
     const proof_src =
-        \\resolution_demo
-        \\---------------
-        \\l1: $ derives (join (cl (disj (clit r) (clit (neg p)))) (join (cl (clit p)) (cl (clit (neg r))))) $ by resolve [#1]
-        \\l2: $ derives (join (cl (clit (neg r))) (cl (clit r))) $ by resolve(d := $ cl (clit (neg r)) $) [l1]
-        \\l3: $ derives (cl clause_bot) $ by resolve(d := $ cnf_top $) [l2]
+        \\resolve_on_q
+        \\------------
+        \\step: $ ⊢ ((¬ p ∨ r) ∧ (p ∧ (¬ r))) $ by resolve(d := $ ¬ r $) [#1]
+        \\
+        \\robinson
+        \\--------
+        \\l1: $ ⊢ ((¬ p ∨ r) ∧ (p ∧ (¬ r))) $ by resolve [#1]
+        \\l2: $ ⊢ (r ∧ (¬ r)) $ by resolve(d := $ ¬ r $) [l1]
+        \\l3: $ ⊢ ⊥ $ by resolve(d := $ ⊤ $) [l2]
     ;
 
     var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
@@ -1128,13 +1132,13 @@ test "or_left demo works with both contexts omitted" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
         allocator,
-        "demo_lk_exists_mono",
+        "gentzen",
         "mm0",
     );
     defer allocator.free(mm0_src);
     const proof_src = try readProofCaseFile(
         allocator,
-        "demo_lk_exists_mono",
+        "gentzen",
         "auf",
     );
     defer allocator.free(proof_src);

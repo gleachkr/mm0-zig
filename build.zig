@@ -106,77 +106,85 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/hilbert.auf"),
         "web-demo/fixtures/hilbert.auf",
     );
-    const install_hilbert_russell_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/hilbert_russell.mm0"),
-        "web-demo/fixtures/hilbert_russell.mm0",
+    const install_russell_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/russell.mm0"),
+        "web-demo/fixtures/russell.mm0",
     );
-    const install_hilbert_russell_proof = b.addInstallFile(
-        b.path("tests/proof_cases/hilbert_russell.auf"),
-        "web-demo/fixtures/hilbert_russell.auf",
+    const install_russell_proof = b.addInstallFile(
+        b.path("tests/proof_cases/russell.auf"),
+        "web-demo/fixtures/russell.auf",
     );
     const install_prop_cnf_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/demo_prop_cnf.mm0"),
-        "web-demo/fixtures/demo_prop_cnf.mm0",
+        b.path("tests/proof_cases/tseitin.mm0"),
+        "web-demo/fixtures/tseitin.mm0",
     );
     const install_prop_cnf_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_prop_cnf.auf"),
-        "web-demo/fixtures/demo_prop_cnf.auf",
+        b.path("tests/proof_cases/tseitin.auf"),
+        "web-demo/fixtures/tseitin.auf",
+    );
+    const install_robinson_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/robinson.mm0"),
+        "web-demo/fixtures/robinson.mm0",
+    );
+    const install_robinson_proof = b.addInstallFile(
+        b.path("tests/proof_cases/robinson.auf"),
+        "web-demo/fixtures/robinson.auf",
     );
     const install_nd_em_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/demo_nd_excluded_middle.mm0"),
-        "web-demo/fixtures/demo_nd_excluded_middle.mm0",
+        b.path("tests/proof_cases/aristotle.mm0"),
+        "web-demo/fixtures/aristotle.mm0",
     );
     const install_nd_em_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_nd_excluded_middle.auf"),
-        "web-demo/fixtures/demo_nd_excluded_middle.auf",
+        b.path("tests/proof_cases/aristotle.auf"),
+        "web-demo/fixtures/aristotle.auf",
     );
     const install_seq_peirce_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/demo_seq_peirce.mm0"),
-        "web-demo/fixtures/demo_seq_peirce.mm0",
+        b.path("tests/proof_cases/peirce.mm0"),
+        "web-demo/fixtures/peirce.mm0",
     );
     const install_seq_peirce_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_seq_peirce.auf"),
-        "web-demo/fixtures/demo_seq_peirce.auf",
+        b.path("tests/proof_cases/peirce.auf"),
+        "web-demo/fixtures/peirce.auf",
     );
     const install_lk_exists_mono_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/demo_lk_exists_mono.mm0"),
-        "web-demo/fixtures/demo_lk_exists_mono.mm0",
+        b.path("tests/proof_cases/gentzen.mm0"),
+        "web-demo/fixtures/gentzen.mm0",
     );
     const install_lk_exists_mono_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_lk_exists_mono.auf"),
-        "web-demo/fixtures/demo_lk_exists_mono.auf",
+        b.path("tests/proof_cases/gentzen.auf"),
+        "web-demo/fixtures/gentzen.auf",
     );
-    const install_quant_nd_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/quant_nd.mm0"),
-        "web-demo/fixtures/quant_nd.mm0",
+    const install_prawitz_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/prawitz.mm0"),
+        "web-demo/fixtures/prawitz.mm0",
     );
-    const install_quant_nd_proof = b.addInstallFile(
-        b.path("tests/proof_cases/quant_nd.auf"),
-        "web-demo/fixtures/quant_nd.auf",
+    const install_prawitz_proof = b.addInstallFile(
+        b.path("tests/proof_cases/prawitz.auf"),
+        "web-demo/fixtures/prawitz.auf",
     );
     const install_hol_beta_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/demo_hol_beta.mm0"),
-        "web-demo/fixtures/demo_hol_beta.mm0",
+        b.path("tests/proof_cases/church.mm0"),
+        "web-demo/fixtures/church.mm0",
     );
     const install_hol_beta_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_hol_beta.auf"),
-        "web-demo/fixtures/demo_hol_beta.auf",
+        b.path("tests/proof_cases/church.auf"),
+        "web-demo/fixtures/church.auf",
     );
     const install_calculus_product_rule_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/demo_calculus_product_rule.mm0"),
-        "web-demo/fixtures/demo_calculus_product_rule.mm0",
+        b.path("tests/proof_cases/leibniz.mm0"),
+        "web-demo/fixtures/leibniz.mm0",
     );
     const install_calculus_product_rule_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_calculus_product_rule.auf"),
-        "web-demo/fixtures/demo_calculus_product_rule.auf",
+        b.path("tests/proof_cases/leibniz.auf"),
+        "web-demo/fixtures/leibniz.auf",
     );
     const install_category_pullback_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/demo_category_pullback.mm0"),
-        "web-demo/fixtures/demo_category_pullback.mm0",
+        b.path("tests/proof_cases/mac_lane.mm0"),
+        "web-demo/fixtures/mac_lane.mm0",
     );
     const install_category_pullback_proof = b.addInstallFile(
-        b.path("tests/proof_cases/demo_category_pullback.auf"),
-        "web-demo/fixtures/demo_category_pullback.auf",
+        b.path("tests/proof_cases/mac_lane.auf"),
+        "web-demo/fixtures/mac_lane.auf",
     );
     web_demo_step.dependOn(&install_compiler_wasm.step);
     web_demo_step.dependOn(&install_verifier_wasm.step);
@@ -184,18 +192,20 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_web_fonts.step);
     web_demo_step.dependOn(&install_hilbert_mm0.step);
     web_demo_step.dependOn(&install_hilbert_proof.step);
-    web_demo_step.dependOn(&install_hilbert_russell_mm0.step);
-    web_demo_step.dependOn(&install_hilbert_russell_proof.step);
+    web_demo_step.dependOn(&install_russell_mm0.step);
+    web_demo_step.dependOn(&install_russell_proof.step);
     web_demo_step.dependOn(&install_prop_cnf_mm0.step);
     web_demo_step.dependOn(&install_prop_cnf_proof.step);
+    web_demo_step.dependOn(&install_robinson_mm0.step);
+    web_demo_step.dependOn(&install_robinson_proof.step);
     web_demo_step.dependOn(&install_nd_em_mm0.step);
     web_demo_step.dependOn(&install_nd_em_proof.step);
     web_demo_step.dependOn(&install_seq_peirce_mm0.step);
     web_demo_step.dependOn(&install_seq_peirce_proof.step);
     web_demo_step.dependOn(&install_lk_exists_mono_mm0.step);
     web_demo_step.dependOn(&install_lk_exists_mono_proof.step);
-    web_demo_step.dependOn(&install_quant_nd_mm0.step);
-    web_demo_step.dependOn(&install_quant_nd_proof.step);
+    web_demo_step.dependOn(&install_prawitz_mm0.step);
+    web_demo_step.dependOn(&install_prawitz_proof.step);
     web_demo_step.dependOn(&install_hol_beta_mm0.step);
     web_demo_step.dependOn(&install_hol_beta_proof.step);
     web_demo_step.dependOn(&install_calculus_product_rule_mm0.step);

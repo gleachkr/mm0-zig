@@ -275,7 +275,7 @@ already makes it clear that the missing binder has to be bound.
 
 ### Example: CNF demo
 
-A real use appears in `tests/proof_cases/demo_prop_cnf.mm0`.
+A real use appears in `tests/proof_cases/tseitin.mm0`.
 
 ```mm0
 --| @vars X
@@ -324,7 +324,7 @@ already determine everything else.
 
 ### Another real use: calculus demo
 
-The same pattern appears in `tests/proof_cases/demo_calculus_product_rule`
+The same pattern appears in `tests/proof_cases/leibniz`
 for equality substitution:
 
 ```mm0

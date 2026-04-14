@@ -19,7 +19,7 @@ l5: $ Q x ==> Q x $ by ax
 l6: $ Q x ==> ∃ z Q z $ by ex_right [l5]
 l7: $ Q x ==> ∃ y P y , ∃ z Q z $ by weak_right [l6]
 l8: $ Q x ==> (∃ y P y ∨ ∃ z Q z) $ by or_right [l7]
-l9: $ P x ∨ Q x ==> (∃ y P y ∨ ∃ z Q z) $ by or_left(g := $ _ $) [l4, l8]
+l9: $ P x ∨ Q x ==> (∃ y P y ∨ ∃ z Q z) $ by or_left [l4, l8]
 l10: $ ∃ x (P x ∨ Q x) ==> (∃ y P y ∨ ∃ z Q z) $ by ex_left [l9]
 
 forall_excluded_middle

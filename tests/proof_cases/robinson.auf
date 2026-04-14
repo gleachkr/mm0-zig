@@ -1,0 +1,11 @@
+resolve_on_q
+------------
+
+step: $ ⊢ ((¬ p ∨ r) ∧ (p ∧ (¬ r))) $ by resolve [#1]
+
+robinson
+--------
+
+on_q: $ ⊢ ((¬ p ∨ r) ∧ (p ∧ (¬ r))) $ by resolve [#1]
+on_p: $ ⊢ (r ∧ (¬ r)) $ by resolve [on_q]
+close: $ ⊢ ⊥ $ by resolve(d := $ ⊤ $) [on_p]

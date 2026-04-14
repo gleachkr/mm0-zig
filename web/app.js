@@ -14,50 +14,55 @@ const examples = {
     mm0: "./fixtures/hilbert.mm0",
     proof: "./fixtures/hilbert.auf",
   },
-  hilbert_russell: {
+  russell: {
     label: "russell",
-    mm0: "./fixtures/hilbert_russell.mm0",
-    proof: "./fixtures/hilbert_russell.auf",
+    mm0: "./fixtures/russell.mm0",
+    proof: "./fixtures/russell.auf",
   },
-  demo_prop_cnf: {
-    label: "prop cnf",
-    mm0: "./fixtures/demo_prop_cnf.mm0",
-    proof: "./fixtures/demo_prop_cnf.auf",
+  tseitin: {
+    label: "tseitin",
+    mm0: "./fixtures/tseitin.mm0",
+    proof: "./fixtures/tseitin.auf",
   },
-  demo_nd_excluded_middle: {
-    label: "nd excluded middle",
-    mm0: "./fixtures/demo_nd_excluded_middle.mm0",
-    proof: "./fixtures/demo_nd_excluded_middle.auf",
+  robinson: {
+    label: "robinson",
+    mm0: "./fixtures/robinson.mm0",
+    proof: "./fixtures/robinson.auf",
   },
-  demo_seq_peirce: {
-    label: "seq peirce",
-    mm0: "./fixtures/demo_seq_peirce.mm0",
-    proof: "./fixtures/demo_seq_peirce.auf",
+  aristotle: {
+    label: "aristotle",
+    mm0: "./fixtures/aristotle.mm0",
+    proof: "./fixtures/aristotle.auf",
   },
-  demo_lk_exists_mono: {
-    label: "quantified lk",
-    mm0: "./fixtures/demo_lk_exists_mono.mm0",
-    proof: "./fixtures/demo_lk_exists_mono.auf",
+  peirce: {
+    label: "peirce",
+    mm0: "./fixtures/peirce.mm0",
+    proof: "./fixtures/peirce.auf",
   },
-  quant_nd: {
-    label: "quant nd",
-    mm0: "./fixtures/quant_nd.mm0",
-    proof: "./fixtures/quant_nd.auf",
+  gentzen: {
+    label: "gentzen",
+    mm0: "./fixtures/gentzen.mm0",
+    proof: "./fixtures/gentzen.auf",
   },
-  demo_hol_beta: {
-    label: "hol λβ",
-    mm0: "./fixtures/demo_hol_beta.mm0",
-    proof: "./fixtures/demo_hol_beta.auf",
+  prawitz: {
+    label: "prawitz",
+    mm0: "./fixtures/prawitz.mm0",
+    proof: "./fixtures/prawitz.auf",
   },
-  demo_calculus_product_rule: {
-    label: "calculus product rule",
-    mm0: "./fixtures/demo_calculus_product_rule.mm0",
-    proof: "./fixtures/demo_calculus_product_rule.auf",
+  church: {
+    label: "church",
+    mm0: "./fixtures/church.mm0",
+    proof: "./fixtures/church.auf",
   },
-  demo_category_pullback: {
-    label: "category pullback",
-    mm0: "./fixtures/demo_category_pullback.mm0",
-    proof: "./fixtures/demo_category_pullback.auf",
+  leibniz: {
+    label: "leibniz",
+    mm0: "./fixtures/leibniz.mm0",
+    proof: "./fixtures/leibniz.auf",
+  },
+  mac_lane: {
+    label: "mac lane",
+    mm0: "./fixtures/mac_lane.mm0",
+    proof: "./fixtures/mac_lane.auf",
   },
 };
 
