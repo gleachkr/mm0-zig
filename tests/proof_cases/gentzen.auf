@@ -18,6 +18,13 @@ l4: $ ∀ x (P x → Q x) , P z ==> Q z $ by all_left [l3]
 l5: $ ∀ x (P x → Q x) , ∀ y P y ==> Q z $ by all_left [l4]
 l6: $ ∀ x (P x → Q x) , ∀ y P y ==> ∀ z Q z $ by all_right [l5]
 
+forall_to_exists
+----------------
+
+l1: $ P z ==> P z $ by ax
+l2: $ ∀ x P x ==> P z $ by all_left [l1]
+l3: $ ∀ x P x ==> ∃ y P y $ by ex_right [l2]
+
 forall_not_to_not_exists
 ------------------------
 
@@ -26,6 +33,44 @@ l2: $ P y , ¬ P y ==> _ $ by not_left [l1]
 l3: $ ∀ x (¬ P x) , P y ==> _ $ by all_left [l2]
 l4: $ ∀ x (¬ P x) , ∃ y P y ==> _ $ by ex_left [l3]
 l5: $ ∀ x (¬ P x) ==> ¬ (∃ y P y) $ by not_right [l4]
+
+not_exists_to_forall_not
+------------------------
+
+l1: $ P y ==> P y $ by ax
+l2: $ P y ==> ∃ x P x $ by ex_right [l1]
+l3: $ P y , ¬ (∃ x P x) ==> _ $ by not_left [l2]
+l4: $ ¬ (∃ x P x) ==> ¬ P y $ by not_right [l3]
+l5: $ ¬ (∃ x P x) ==> ∀ y (¬ P y) $ by all_right [l4]
+
+forall_exists_permute_mono
+--------------------------
+
+a1: $ P z ==> P z $ by ax
+a2: $ P z , Q v ==> P z $ by weak_left [a1]
+a3: $ P z ∧ Q v ==> P z $ by and_left [a2]
+a4: $ ∃ v (P z ∧ Q v) ==> P z $ by ex_left [a3]
+a5: $ ∀ u ∃ v (P u ∧ Q v) ==> P z $ by all_left [a4]
+a6: $ ∀ u ∃ v (P u ∧ Q v) ==> ∀ z P z $ by all_right [a5]
+
+b1: $ Q v ==> Q v $ by ax
+b2: $ P x , Q v ==> Q v $ by weak_left [b1]
+b3: $ P x ∧ Q v ==> Q v $ by and_left [b2]
+b4: $ P x ∧ Q v ==> ∃ z Q z $ by ex_right [b3]
+b5: $ ∃ v (P x ∧ Q v) ==> ∃ z Q z $ by ex_left [b4]
+b6: $ ∀ u ∃ v (P u ∧ Q v) ==> ∃ z Q z $ by all_left [b5]
+
+c1: $ P x ==> P x $ by ax
+c2: $ ∀ z P z ==> P x $ by all_left [c1]
+c3: $ ∀ z P z , Q z ==> P x $ by weak_left [c2]
+c4a: $ Q z ==> Q z $ by ax
+c4: $ ∀ z P z , Q z ==> Q z $ by weak_left [c4a]
+c5: $ ∀ z P z , Q z ==> P x ∧ Q z $ by and_right [c3, c4]
+c6: $ ∀ z P z , Q z ==> ∀ x (P x ∧ Q z) $ by all_right [c5]
+c7: $ ∀ z P z , Q z ==> ∃ y ∀ x (P x ∧ Q y) $ by ex_right [c6]
+c8: $ ∀ u ∃ v (P u ∧ Q v) , Q z ==> ∃ y ∀ x (P x ∧ Q y) $ by cut [a6, c7]
+c9: $ ∀ u ∃ v (P u ∧ Q v) , ∃ z Q z ==> ∃ y ∀ x (P x ∧ Q y) $ by ex_left [c8]
+c10: $ ∀ u ∃ v (P u ∧ Q v) ==> ∃ y ∀ x (P x ∧ Q y) $ by cut [b6, c9]
 
 exists_or_distrib
 -----------------

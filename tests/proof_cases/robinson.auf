@@ -8,4 +8,4 @@ robinson
 
 on_q: $ ⊢ ((¬ p ∨ r) ∧ (p ∧ (¬ r))) $ by resolve [#1]
 on_p: $ ⊢ (r ∧ (¬ r)) $ by resolve [on_q]
-close: $ ⊢ ⊥ $ by resolve(d := $ ⊤ $) [on_p]
+close: $ ⊢ ⊥ $ by resolve [on_p]
