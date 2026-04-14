@@ -99,7 +99,7 @@ form. The two normalized forms agree, so the line is accepted.
 | `@relation`     | `axiom`             | Declares an equivalence relation on a sort |
 | `@rewrite`      | `axiom`             | Marks an axiom as an oriented rewrite rule |
 | `@congr`        | `axiom`             | Marks an axiom as a congruence rule for a term constructor |
-| `@acui`         | `term`              | Marks a binary combiner for structural ACUI normalization |
+| `@acui`         | `term`              | Marks a binary combiner for structural AU / ACU / AUI / ACUI normalization |
 | `@normalize`    | `axiom` / `theorem` | Specifies which positions should be auto-normalized |
 | `@fallback`     | `axiom` / `theorem` | Retries theorem application through another named rule |
 

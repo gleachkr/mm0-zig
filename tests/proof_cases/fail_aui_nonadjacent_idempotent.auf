@@ -1,0 +1,4 @@
+aui_nonadjacent_idempotent_fail
+-------------------------------
+
+l1: $ x , (a , b) ⇒ a $ by split_dup []

@@ -1,0 +1,4 @@
+acui_joint_cover_conflict
+------------------------
+
+l1: $ x ==> emp $ by balance []

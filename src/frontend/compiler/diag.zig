@@ -476,7 +476,9 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.UnifyStackNotEmpty,
         error.HypCountMismatch,
         => "could not infer omitted rule arguments from the line and refs",
-        error.AmbiguousAcuiMatch => "omitted rule arguments are ambiguous after structural " ++
+        // Legacy public error name. The repaired structural solver uses
+        // this for ambiguity across AU, ACU, AUI, and ACUI matching.
+        error.AmbiguousAcuiMatch => "omitted rule arguments remain ambiguous after structural " ++
             "or def-aware matching",
         error.UnknownTheoremVariable => "binding refers to a theorem variable that is not in scope",
         error.DuplicateRuleName => "duplicate rule name",

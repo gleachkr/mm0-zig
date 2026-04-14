@@ -1,0 +1,66 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+sort set;
+
+term iff (a b: wff): wff; infixr iff: $<->$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+term hyp (a: wff): ctx;
+term boxg (g: ctx): ctx;
+term boxh (g: ctx): ctx;
+term seq (g d: ctx): wff;
+term all {x: set} (p: wff x): wff; prefix all: $A.$ prec 41;
+term pred (t: set): wff; prefix pred: $P$ prec 50;
+term sb (t: set) {x: set} (p: wff x): wff;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq (join (join g h) i) (join g (join h i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (join g h) (join h g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (join g g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (join emp g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (join g1 h1) (join g2 h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a <-> b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom seq_congr (g1 g2 d1 d2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq d1 d2 $ >
+  $ seq g1 d1 <-> seq g2 d2 $;
+
+--| @rewrite
+axiom sb_pred (t: set) {x: set}: $ sb t x (P x) <-> P t $;
+
+--| @view (g h d: ctx) {x: set} (t: set) (p: wff x) (q: wff): $ seq (join g (join (hyp q) h)) (join (boxg g) (join (boxh h) d)) $ > $ seq (join g (join (hyp (A. x p)) h)) (join (boxg g) (join (boxh h) d)) $
+--| @recover t q p x
+--| @normalize hyp0 conc
+axiom all_left_split (g h d: ctx) {x: set} (t: set) (p: wff x):
+  $ seq (join g (join (hyp (sb t x p)) h))
+      (join (boxg g) (join (boxh h) d)) $
+  > $ seq (join g (join (hyp (A. x p)) h))
+      (join (boxg g) (join (boxh h) d)) $;
+
+theorem pass_view_acui_joint_cover (a b c: wff) (u: set) {x: set}:
+  $ seq (join (hyp a) (join (hyp (P u)) (join emp (hyp b))))
+      (join (boxg (hyp a)) (join (boxh (hyp b)) (join emp (hyp c)))) $
+  > $ seq (join (hyp b) (join (hyp (A. x (P x))) (join emp (hyp a))))
+      (join (boxh (hyp b)) (join (hyp c) (boxg (hyp a)))) $;

@@ -1,0 +1,4 @@
+acui_four_way_cut_stress
+------------------------
+
+l1: $ emp ==> u , v , w , z $ by quad_cut [#1, #2, #3, #4]

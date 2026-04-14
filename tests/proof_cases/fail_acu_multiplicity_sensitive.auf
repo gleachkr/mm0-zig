@@ -1,0 +1,4 @@
+acu_multiplicity_sensitive_fail
+-------------------------------
+
+l1: $ x , a ⇒ a $ by two_as []

@@ -1,0 +1,4 @@
+aui_ordered_idempotent
+----------------------
+
+l1: $ x , (a , b) ⇒ b $ by adjacent_dup []

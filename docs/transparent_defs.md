@@ -225,22 +225,23 @@ still bridge the def boundary afterwards.
 The examples above are about the exact replay fast path only.
 
 Higher-level solver paths such as `@view`-guided matching,
-normalization-aware inference, and ACUI-aware inference may still use
-separate def-aware logic when they are solving a different kind of
-comparison problem. In particular, a rule with `@view` or `@normalize` does
-not have to live or die by raw unify replay: the compiler may switch to a
-`RuleMatchSession`-based path that can compare through defs when that is part
-of the intended rule behavior.
+normalization-aware inference, and structural inference under an `@acui`
+combiner may still use separate def-aware logic when they are solving a
+different kind of comparison problem. This structural path now respects the
+declared fragment semantics: AU, ACU, AUI, or ACUI. In particular, a rule
+with `@view` or `@normalize` does not have to live or die by raw unify
+replay: the compiler may switch to a `RuleMatchSession`-based path that can
+compare through defs when that is part of the intended rule behavior.
 
 ### Ambiguity is still an error
 
 Def-aware higher-level inference still does **not** mean the compiler guesses
 when several solutions remain possible.
 
-In particular, when def-aware matching combines with ACUI context matching,
-two or more omitted-binder assignments may survive all constraints. In that
-case the compiler rejects the line as ambiguous rather than picking one
-arbitrarily.
+In particular, when def-aware matching combines with structural matching
+under an `@acui` combiner, two or more omitted-binder assignments may
+survive all constraints. In that case the compiler rejects the line as
+ambiguous rather than picking one arbitrarily.
 
 ---
 

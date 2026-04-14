@@ -1,0 +1,4 @@
+pass_view_acui_joint_cover
+--------------------------
+
+l1: $ seq (join (hyp b) (join (hyp (A. x (P x))) (join emp (hyp a)))) (join (boxh (hyp b)) (join (hyp c) (boxg (hyp a)))) $ by all_left_split [#1]

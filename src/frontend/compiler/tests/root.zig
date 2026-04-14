@@ -935,6 +935,140 @@ test "compiler reports which binder assignment is missing" {
     }
 }
 
+test "multi-remainder inference handles a simple ACUI cover" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_acui_multi_remainder_infer",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_acui_multi_remainder_infer",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+}
+
+test "joint structural cover conflicts fail before missing binders" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "fail_acui_joint_cover_conflict",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "fail_acui_joint_cover_conflict",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    try std.testing.expectError(
+        error.UnifyMismatch,
+        compiler.compileMmb(allocator),
+    );
+}
+
+test "multi-remainder ambiguity survives to final bindings" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "fail_acui_multi_remainder_ambiguous",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "fail_acui_multi_remainder_ambiguous",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    try std.testing.expectError(
+        error.AmbiguousAcuiMatch,
+        compiler.compileMmb(allocator),
+    );
+}
+
+test "compiler reports structural ambiguity without ACUI-only wording" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "fail_acui_multi_remainder_ambiguous",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "fail_acui_multi_remainder_ambiguous",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    try std.testing.expectError(
+        error.AmbiguousAcuiMatch,
+        compiler.compileMmb(allocator),
+    );
+    const diag = compiler.last_diagnostic orelse {
+        return error.ExpectedDiagnostic;
+    };
+    try std.testing.expectEqual(error.AmbiguousAcuiMatch, diag.err);
+    try std.testing.expectEqual(.inference_failed, diag.kind);
+    try std.testing.expectEqualStrings(
+        "omitted rule arguments remain ambiguous after structural " ++
+            "or def-aware matching",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+}
+
+test "or_left demo works with both contexts omitted" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "demo_lk_exists_mono",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "demo_lk_exists_mono",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    const needle = "by or_left(g := $ _ $)";
+    const repl = "by or_left";
+    const start = std.mem.indexOf(u8, proof_src, needle) orelse {
+        return error.MissingReplacementTarget;
+    };
+    const rewritten = try std.fmt.allocPrint(
+        allocator,
+        "{s}{s}{s}",
+        .{
+            proof_src[0..start],
+            repl,
+            proof_src[start + needle.len ..],
+        },
+    );
+    defer allocator.free(rewritten);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, rewritten);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+}
+
 test "compiler points binding validation errors at explicit assignments" {
     const mm0_src =
         \\sort obj;
