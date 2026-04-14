@@ -5,6 +5,9 @@ sort ctx;
 term imp (a b: wff): wff;
 infixr imp: $→$ prec 25;
 infixr imp: $->$ prec 25;
+term and (a b: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
 term or (a b: wff): wff;
 infixr or: $∨$ prec 30;
 infixr or: $\\/$ prec 30;
@@ -52,6 +55,10 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom nd_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
 
+--| @congr
+axiom and_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
+
 --| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 
@@ -60,6 +67,15 @@ axiom or_intro_l (g: ctx) (a b: wff): $ g ⊢ a $ > $ g ⊢ a ∨ b $;
 
 --| @normalize hyp0 conc
 axiom or_intro_r (g: ctx) (a b: wff): $ g ⊢ b $ > $ g ⊢ a ∨ b $;
+
+--| @normalize hyp0 hyp1 conc
+axiom and_intro (g: ctx) (a b: wff): $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
+
+--| @normalize hyp0 conc
+axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
+
+--| @normalize hyp0 conc
+axiom and_elim_r (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ b $;
 
 --| @normalize hyp0 hyp1 conc
 axiom bot_intro (g: ctx) (a: wff): $ g ⊢ a $ > $ g ⊢ ¬ a $ > $ g ⊢ bot $;
@@ -71,3 +87,4 @@ axiom neg_intro (g: ctx) (a: wff): $ g , a ⊢ bot $ > $ g ⊢ ¬ a $;
 axiom dne (g: ctx) (a: wff): $ g ⊢ ¬ ¬ a $ > $ g ⊢ a $;
 
 theorem excluded_middle (a: wff): $ emp ⊢ a ∨ ¬ a $;
+theorem noncontradiction (a: wff): $ emp ⊢ ¬ (a ∧ ¬ a) $;

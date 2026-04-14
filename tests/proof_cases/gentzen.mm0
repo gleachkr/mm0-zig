@@ -197,6 +197,12 @@ axiom ex_right (g d: ctx) {x: obj} (t: obj x) (p: wff x):
 theorem exists_mono {x y z: obj}:
   $ ∀ y (P y → Q y) , ∃ x P x ==> ∃ z Q z $;
 
+theorem forall_mono {x y z: obj}:
+  $ ∀ x (P x → Q x) , ∀ y P y ==> ∀ z Q z $;
+
+theorem forall_not_to_not_exists {x y: obj}:
+  $ ∀ x (¬ P x) ==> ¬ (∃ y P y) $;
+
 theorem exists_or_distrib {x y z: obj}:
   $ ∃ x (P x ∨ Q x) ==> (∃ y P y ∨ ∃ z Q z) $;
 

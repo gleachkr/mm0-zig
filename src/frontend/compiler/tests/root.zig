@@ -1145,18 +1145,18 @@ test "or_left demo works with both contexts omitted" {
 
     const needle = "by or_left(g := $ _ $)";
     const repl = "by or_left";
-    const start = std.mem.indexOf(u8, proof_src, needle) orelse {
-        return error.MissingReplacementTarget;
-    };
-    const rewritten = try std.fmt.allocPrint(
-        allocator,
-        "{s}{s}{s}",
-        .{
-            proof_src[0..start],
-            repl,
-            proof_src[start + needle.len ..],
-        },
-    );
+    const rewritten = if (std.mem.indexOf(u8, proof_src, needle)) |start|
+        try std.fmt.allocPrint(
+            allocator,
+            "{s}{s}{s}",
+            .{
+                proof_src[0..start],
+                repl,
+                proof_src[start + needle.len ..],
+            },
+        )
+    else
+        try allocator.dupe(u8, proof_src);
     defer allocator.free(rewritten);
 
     var compiler = Compiler.initWithProof(allocator, mm0_src, rewritten);

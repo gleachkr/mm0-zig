@@ -8,6 +8,25 @@ l4: $ ∀ y (P y → Q y) , P x ==> Q x $ by all_left [l3]
 l5: $ ∀ y (P y → Q y) , P x ==> ∃ z Q z $ by ex_right [l4]
 l6: $ ∀ y (P y → Q y) , ∃ x P x ==> ∃ z Q z $ by ex_left [l5]
 
+forall_mono
+-----------
+
+l1: $ P z ==> P z $ by ax
+l2: $ Q z ==> Q z $ by ax
+l3: $ P z , P z → Q z ==> Q z $ by imp_left [l1, l2]
+l4: $ ∀ x (P x → Q x) , P z ==> Q z $ by all_left [l3]
+l5: $ ∀ x (P x → Q x) , ∀ y P y ==> Q z $ by all_left [l4]
+l6: $ ∀ x (P x → Q x) , ∀ y P y ==> ∀ z Q z $ by all_right [l5]
+
+forall_not_to_not_exists
+------------------------
+
+l1: $ P y ==> P y $ by ax
+l2: $ P y , ¬ P y ==> _ $ by not_left [l1]
+l3: $ ∀ x (¬ P x) , P y ==> _ $ by all_left [l2]
+l4: $ ∀ x (¬ P x) , ∃ y P y ==> _ $ by ex_left [l3]
+l5: $ ∀ x (¬ P x) ==> ¬ (∃ y P y) $ by not_right [l4]
+
 exists_or_distrib
 -----------------
 

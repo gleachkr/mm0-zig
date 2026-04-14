@@ -12,3 +12,12 @@ l8: $ ¬ (a ∨ ¬ a) ⊢ ¬ (a ∨ ¬ a) $ by ax
 l9: $ ¬ (a ∨ ¬ a) ⊢ bot $ by bot_intro [l7, l8]
 l10: $ _ ⊢ ¬ ¬ (a ∨ ¬ a) $ by neg_intro [l9]
 l11: $ _ ⊢ a ∨ ¬ a $ by dne [l10]
+
+noncontradiction
+----------------
+
+l1: $ a ∧ ¬ a ⊢ a ∧ ¬ a $ by ax
+l2: $ a ∧ ¬ a ⊢ a $ by and_elim_l [l1]
+l3: $ a ∧ ¬ a ⊢ ¬ a $ by and_elim_r [l1]
+l4: $ a ∧ ¬ a ⊢ bot $ by bot_intro [l2, l3]
+l5: $ _ ⊢ ¬ (a ∧ ¬ a) $ by neg_intro [l4]
