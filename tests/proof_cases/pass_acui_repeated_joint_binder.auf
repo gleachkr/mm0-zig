@@ -1,0 +1,4 @@
+acui_repeated_joint_binder
+--------------------------
+
+l1: $ a ⇒ a $ by dup_goal []

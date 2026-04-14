@@ -956,6 +956,56 @@ test "multi-remainder inference handles a simple ACUI cover" {
     try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
+test "repeated ACUI remainder binder infers a principal witness" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_acui_repeated_joint_binder",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_acui_repeated_joint_binder",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        compiler.warningDiagnostics().len,
+    );
+}
+
+test "transparent ctx defs satisfy structural intervals" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_acui_transparent_ctx_reuse",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_acui_transparent_ctx_reuse",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        compiler.warningDiagnostics().len,
+    );
+}
+
 test "joint structural cover conflicts fail before missing binders" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(

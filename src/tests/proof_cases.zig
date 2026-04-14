@@ -178,6 +178,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_acui_order_independent_overlap", .outcome = .pass },
     .{ .stem = "pass_acui_repeated_explicit_item", .outcome = .pass },
     .{ .stem = "pass_acui_duplicate_binders_same_item", .outcome = .pass },
+    .{ .stem = "pass_acui_repeated_joint_binder", .outcome = .pass },
     .{ .stem = "pass_acui_principal_remainder", .outcome = .pass },
     .{ .stem = "pass_acui_same_side_absorb", .outcome = .pass },
     .{ .stem = "pass_acui_same_side_absorb_commuted", .outcome = .pass },
@@ -199,6 +200,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_acu_multi_remainder_infer", .outcome = .pass },
     .{ .stem = "pass_aui_multi_remainder_infer", .outcome = .pass },
     .{ .stem = "pass_acui_multi_remainder_infer", .outcome = .pass },
+    .{ .stem = "pass_acui_transparent_ctx_reuse", .outcome = .pass },
     .{ .stem = "pass_acui_four_way_cut_stress", .outcome = .pass },
     .{
         .stem = "fail_acui_joint_cover_conflict",
