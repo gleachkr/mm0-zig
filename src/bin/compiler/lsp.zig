@@ -308,7 +308,14 @@ const Handler = struct {
             }
             return;
         };
-        try self.clearDiagnostics(arena, uri, version);
+        try self.publishCompilerWarnings(
+            arena,
+            uri,
+            version,
+            text,
+            compiler.warningDiagnostics(),
+            .mm0,
+        );
     }
 
     fn analyzeProofDocument(
@@ -405,8 +412,22 @@ const Handler = struct {
             return;
         };
 
-        try self.clearDiagnostics(arena, proof_uri, proof_version);
-        try self.clearDiagnostics(arena, mm0_loaded.uri, mm0_loaded.version);
+        try self.publishCompilerWarnings(
+            arena,
+            proof_uri,
+            proof_version,
+            proof_text,
+            compiler.warningDiagnostics(),
+            .proof,
+        );
+        try self.publishCompilerWarnings(
+            arena,
+            mm0_loaded.uri,
+            mm0_loaded.version,
+            mm0_loaded.text,
+            compiler.warningDiagnostics(),
+            .mm0,
+        );
     }
 
     fn loadTextPreferOpenDocument(
@@ -445,6 +466,29 @@ const Handler = struct {
             diag,
             self.offset_encoding,
         );
+        try self.publishDiagnostics(arena, uri, version, diagnostics);
+    }
+
+    fn publishCompilerWarnings(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        uri: []const u8,
+        version: ?i32,
+        text: []const u8,
+        diags: []const mm0.CompilerDiagnostic,
+        source: mm0.CompilerDiagnosticSource,
+    ) !void {
+        const diagnostics = try compilerDiagnosticsToLsp(
+            arena,
+            text,
+            diags,
+            source,
+            self.offset_encoding,
+        );
+        if (diagnostics.len == 0) {
+            try self.clearDiagnostics(arena, uri, version);
+            return;
+        }
         try self.publishDiagnostics(arena, uri, version, diagnostics);
     }
 
@@ -603,6 +647,32 @@ fn readFileAlloc(
     );
 }
 
+fn compilerDiagnosticsToLsp(
+    arena: std.mem.Allocator,
+    text: []const u8,
+    diags: []const mm0.CompilerDiagnostic,
+    source: mm0.CompilerDiagnosticSource,
+    encoding: lsp.offsets.Encoding,
+) ![]types.Diagnostic {
+    var count: usize = 0;
+    for (diags) |diag| {
+        if (diag.source == source) count += 1;
+    }
+    const result = try arena.alloc(types.Diagnostic, count);
+    var out_idx: usize = 0;
+    for (diags) |diag| {
+        if (diag.source != source) continue;
+        result[out_idx] = try compilerDiagnosticToLsp(
+            arena,
+            text,
+            diag,
+            encoding,
+        );
+        out_idx += 1;
+    }
+    return result;
+}
+
 fn compilerDiagnosticToLsp(
     arena: std.mem.Allocator,
     text: []const u8,
@@ -611,9 +681,18 @@ fn compilerDiagnosticToLsp(
 ) !types.Diagnostic {
     return .{
         .range = rangeForDiagnostic(text, diag, encoding),
-        .severity = .Error,
+        .severity = diagnosticSeverityToLsp(diag.severity),
         .source = "abc",
         .message = try compilerDiagnosticMessage(arena, diag),
+    };
+}
+
+fn diagnosticSeverityToLsp(
+    severity: mm0.CompilerDiagnosticSeverity,
+) types.DiagnosticSeverity {
+    return switch (severity) {
+        .@"error" => .Error,
+        .warning => .Warning,
     };
 }
 
@@ -714,4 +793,61 @@ test "document kind" {
     try std.testing.expectEqual(DocumentKind.mm0, documentKind("/tmp/a.mm0"));
     try std.testing.expectEqual(DocumentKind.proof, documentKind("/tmp/a.auf"));
     try std.testing.expectEqual(DocumentKind.other, documentKind("/tmp/a.txt"));
+}
+
+
+test "compiler diagnostic severity maps to LSP severity" {
+    try std.testing.expectEqual(
+        types.DiagnosticSeverity.Error,
+        diagnosticSeverityToLsp(mm0.CompilerDiagnosticSeverity.@"error"),
+    );
+    try std.testing.expectEqual(
+        types.DiagnosticSeverity.Warning,
+        diagnosticSeverityToLsp(mm0.CompilerDiagnosticSeverity.warning),
+    );
+}
+
+test "compiler diagnostics filter by source for LSP publishing" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+    const diags = [_]mm0.CompilerDiagnostic{
+        .{
+            .severity = .warning,
+            .kind = .generic,
+            .err = error.AmbiguousAcuiMatch,
+            .source = .proof,
+        },
+        .{
+            .severity = .warning,
+            .kind = .generic,
+            .err = error.UnknownTerm,
+            .source = .mm0,
+        },
+    };
+    const proof = try compilerDiagnosticsToLsp(
+        allocator,
+        "",
+        &diags,
+        .proof,
+        .@"utf-16",
+    );
+    try std.testing.expectEqual(@as(usize, 1), proof.len);
+    try std.testing.expectEqual(
+        types.DiagnosticSeverity.Warning,
+        proof[0].severity.?,
+    );
+
+    const mm0_diags = try compilerDiagnosticsToLsp(
+        allocator,
+        "",
+        &diags,
+        .mm0,
+        .@"utf-16",
+    );
+    try std.testing.expectEqual(@as(usize, 1), mm0_diags.len);
+    try std.testing.expectEqual(
+        types.DiagnosticSeverity.Warning,
+        mm0_diags[0].severity.?,
+    );
 }

@@ -164,6 +164,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_fresh_explicit_override", .outcome = .pass },
     .{ .stem = "pass_fresh_reuse", .outcome = .pass },
     .{ .stem = "demo_prop_cnf", .outcome = .pass },
+    .{ .stem = "demo_resolution_double_acui", .outcome = .pass },
     .{ .stem = "demo_nd_excluded_middle", .outcome = .pass },
     .{ .stem = "demo_seq_peirce", .outcome = .pass },
     .{ .stem = "demo_lk_exists_mono", .outcome = .pass },
@@ -203,7 +204,7 @@ const proof_cases = [_]ProofCase{
         .stem = "fail_acui_joint_cover_conflict",
         .outcome = .{ .fail = error.UnifyMismatch },
     },
-    .{ .stem = "fail_acui_multi_remainder_ambiguous", .outcome = .{ .fail = error.AmbiguousAcuiMatch } },
+    .{ .stem = "pass_acui_multi_remainder_ambiguous", .outcome = .pass },
     .{
         .stem = "fail_acui_multi_remainder_impossible",
         .outcome = .{ .fail = error.UnifyMismatch },
@@ -230,8 +231,8 @@ const proof_cases = [_]ProofCase{
         .outcome = .{ .fail = error.ViewHypothesisMismatch },
     },
     .{
-        .stem = "fail_def_infer_ambiguous",
-        .outcome = .{ .fail = error.AmbiguousAcuiMatch },
+        .stem = "pass_def_infer_ambiguous",
+        .outcome = .pass,
     },
     .{
         .stem = "fail_def_hidden_dummy_all_elim_ctx_uncovered",

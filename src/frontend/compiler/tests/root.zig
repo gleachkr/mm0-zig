@@ -982,53 +982,145 @@ test "multi-remainder ambiguity survives to final bindings" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
         allocator,
-        "fail_acui_multi_remainder_ambiguous",
+        "pass_acui_multi_remainder_ambiguous",
         "mm0",
     );
     defer allocator.free(mm0_src);
     const proof_src = try readProofCaseFile(
         allocator,
-        "fail_acui_multi_remainder_ambiguous",
+        "pass_acui_multi_remainder_ambiguous",
         "auf",
     );
     defer allocator.free(proof_src);
 
     var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
-    try std.testing.expectError(
-        error.AmbiguousAcuiMatch,
-        compiler.compileMmb(allocator),
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        compiler.warningDiagnostics().len,
     );
+    try std.testing.expect(compiler.last_diagnostic == null);
 }
 
 test "compiler reports structural ambiguity without ACUI-only wording" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
         allocator,
-        "fail_acui_multi_remainder_ambiguous",
+        "pass_acui_multi_remainder_ambiguous",
         "mm0",
     );
     defer allocator.free(mm0_src);
     const proof_src = try readProofCaseFile(
         allocator,
-        "fail_acui_multi_remainder_ambiguous",
+        "pass_acui_multi_remainder_ambiguous",
         "auf",
     );
     defer allocator.free(proof_src);
 
     var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
-    try std.testing.expectError(
-        error.AmbiguousAcuiMatch,
-        compiler.compileMmb(allocator),
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+
+    const warnings = compiler.warningDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), warnings.len);
+    const diag = warnings[0];
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSeverity.warning,
+        diag.severity,
     );
-    const diag = compiler.last_diagnostic orelse {
-        return error.ExpectedDiagnostic;
-    };
     try std.testing.expectEqual(error.AmbiguousAcuiMatch, diag.err);
     try std.testing.expectEqual(.inference_failed, diag.kind);
     try std.testing.expectEqualStrings(
         "omitted rule arguments remain ambiguous after structural " ++
             "or def-aware matching",
         mm0.compilerDiagnosticSummary(diag),
+    );
+}
+
+test "-Werror upgrades ambiguity warnings into errors" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_acui_multi_remainder_ambiguous",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_acui_multi_remainder_ambiguous",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    compiler.warnings_as_errors = true;
+    try std.testing.expectError(
+        error.AmbiguousAcuiMatch,
+        compiler.compileMmb(allocator),
+    );
+
+    const warnings = compiler.warningDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), warnings.len);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSeverity.warning,
+        warnings[0].severity,
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSeverity.@"error",
+        diag.severity,
+    );
+    try std.testing.expectEqual(error.AmbiguousAcuiMatch, diag.err);
+}
+
+test "resolution demo uses omitted binders across two ACUI sorts" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "demo_resolution_double_acui",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "demo_resolution_double_acui",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+}
+
+test "fully omitted resolution step emits ambiguity warning" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "demo_resolution_double_acui",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src =
+        \\resolution_demo
+        \\---------------
+        \\l1: $ derives (join (cl (disj (clit r) (clit (neg p)))) (join (cl (clit p)) (cl (clit (neg r))))) $ by resolve [#1]
+        \\l2: $ derives (join (cl (clit (neg r))) (cl (clit r))) $ by resolve(d := $ cl (clit (neg r)) $) [l1]
+        \\l3: $ derives (cl clause_bot) $ by resolve(d := $ cnf_top $) [l2]
+    ;
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        compiler.warningDiagnostics().len,
     );
 }
 

@@ -829,6 +829,7 @@ pub fn inferBindings(
             registry,
             rule,
             if (maybe_view) |*view| view else null,
+            self.debug.inference,
         );
         const solver_bindings = if (seeded_bindings_storage) |seeded|
             seeded
@@ -850,7 +851,7 @@ pub fn inferBindings(
             return err;
         };
 
-        return try validateInferredBindings(
+        const validated = try validateInferredBindings(
             self,
             allocator,
             env,
@@ -860,6 +861,19 @@ pub fn inferBindings(
             rule,
             bindings,
         );
+        if (solver.hadAmbiguityWarning()) {
+            self.addWarning(.{
+                .severity = .warning,
+                .kind = .inference_failed,
+                .err = error.AmbiguousAcuiMatch,
+                .source = .proof,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .span = line.ruleApplicationSpan(),
+            });
+        }
+        return validated;
     }
 
     if (strictInferBindings(

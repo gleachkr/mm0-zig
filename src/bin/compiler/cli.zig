@@ -14,6 +14,7 @@ const CompilePaths = struct {
 const CompileCommand = struct {
     paths: CompilePaths,
     debug: DebugConfig,
+    warnings_as_errors: bool,
 };
 
 const Command = union(enum) {
@@ -22,23 +23,26 @@ const Command = union(enum) {
 };
 
 pub fn usage() !void {
-    var buf: [512]u8 = undefined;
+    var buf: [640]u8 = undefined;
     var w = std.fs.File.stdout().writer(&buf);
     const stdout = &w.interface;
 
     try stdout.writeAll(
         "Usage:\n" ++
-            "  abc compile INPUT.mm0 INPUT.auf OUTPUT.mmb [--debug SYSTEMS]\n" ++
+            "  abc compile INPUT.mm0 INPUT.auf OUTPUT.mmb " ++
+            "[--debug SYSTEMS] [-Werror]\n" ++
             "  abc lsp\n" ++
             "\nOptions:\n" ++
             "  --debug SYSTEMS  Enable debug output (comma-separated:\n" ++
-            "                   inference,views,unfolding,normalization,emission,check,all)\n",
+            "                   inference,views,unfolding,normalization,emission,check,all)\n" ++
+            "  -Werror          Treat compiler warnings as errors\n",
     );
     try stdout.flush();
 }
 
 fn parseCompileArgs(argv: []const []const u8) !Command {
     var debug = DebugConfig.none;
+    var warnings_as_errors = false;
     var positional = std.ArrayListUnmanaged([]const u8){};
     var buf: [64][]const u8 = undefined;
     positional.items = buf[0..0];
@@ -52,6 +56,8 @@ fn parseCompileArgs(argv: []const []const u8) !Command {
             debug = DebugConfig.parse(argv[i]) catch {
                 return UsageError.InvalidUsage;
             };
+        } else if (std.mem.eql(u8, argv[i], "-Werror")) {
+            warnings_as_errors = true;
         } else {
             positional.appendAssumeCapacity(argv[i]);
         }
@@ -69,6 +75,7 @@ fn parseCompileArgs(argv: []const []const u8) !Command {
             .output = pos[3],
         },
         .debug = debug,
+        .warnings_as_errors = warnings_as_errors,
     } };
 }
 
@@ -106,12 +113,15 @@ fn runCompile(
         proof,
     );
     compiler.debug = cmd.debug;
+    compiler.warnings_as_errors = cmd.warnings_as_errors;
     const mmb = compiler.compileMmb(allocator) catch |err| {
         std.debug.print("Failed to compile {s}\n", .{cmd.paths.input});
         compiler.reportError(err);
         return err;
     };
     defer allocator.free(mmb);
+
+    compiler.reportWarnings();
 
     try std.fs.cwd().writeFile(.{
         .sub_path = cmd.paths.output,

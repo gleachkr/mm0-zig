@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const GlobalEnv = @import("./env.zig").GlobalEnv;
 const RuleDecl = @import("./env.zig").RuleDecl;
@@ -15,6 +16,7 @@ const AcuiSupport = @import("./acui_support.zig");
 const compareExprIds = AcuiSupport.compareExprIds;
 const DerivedBindings = @import("./derived_bindings.zig");
 const DefOps = @import("./def_ops.zig");
+const ViewTrace = @import("./view_trace.zig");
 
 const BinderSpace = enum {
     rule,
@@ -118,6 +120,8 @@ pub const Solver = struct {
     rule: *const RuleDecl,
     view: ?*const ViewDecl,
     canonicalizer: Canonicalizer,
+    debug_inference: bool,
+    ambiguity_warning: bool = false,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -126,6 +130,7 @@ pub const Solver = struct {
         registry: *RewriteRegistry,
         rule: *const RuleDecl,
         view: ?*const ViewDecl,
+        debug_inference: bool,
     ) Solver {
         return .{
             .allocator = allocator,
@@ -140,7 +145,12 @@ pub const Solver = struct {
                 registry,
                 env,
             ),
+            .debug_inference = debug_inference,
         };
+    }
+
+    pub fn hadAmbiguityWarning(self: *const Solver) bool {
+        return self.ambiguity_warning;
     }
 
     // This entry point is supposed to infer omitted structural binders for
@@ -498,32 +508,96 @@ pub const Solver = struct {
     ) anyerror![]const ExprId {
         if (states.len == 0) return error.UnifyMismatch;
 
-        var unique_idx: ?usize = null;
+        var distinct_idxs = std.ArrayListUnmanaged(usize){};
+        defer distinct_idxs.deinit(self.allocator);
+
         for (states, 0..) |state, idx| {
             for (state.rule_bindings) |binding| {
                 if (binding == null) return error.MissingBinderAssignment;
             }
-            if (unique_idx == null) {
-                unique_idx = idx;
-                continue;
+
+            var already_seen = false;
+            for (distinct_idxs.items) |seen_idx| {
+                if (try self.sameRuleBindingsCompatible(
+                    states[seen_idx].rule_bindings,
+                    state.rule_bindings,
+                )) {
+                    already_seen = true;
+                    break;
+                }
             }
-            if (!try self.sameRuleBindingsCompatible(
-                states[unique_idx.?].rule_bindings,
-                state.rule_bindings,
-            )) {
-                // Legacy public error name. Reaching this point means the
-                // surviving final states disagree after fragment-aware
-                // structural search, not just on ACUI-specific inputs.
-                return error.AmbiguousAcuiMatch;
+            if (!already_seen) {
+                try distinct_idxs.append(self.allocator, idx);
             }
         }
 
-        const chosen = states[unique_idx.?].rule_bindings;
+        if (distinct_idxs.items.len > 1) {
+            self.ambiguity_warning = true;
+            if (self.debug_inference) {
+                try self.debugPrintAmbiguousSolutions(
+                    states,
+                    distinct_idxs.items,
+                );
+            }
+        }
+
+        const chosen = states[distinct_idxs.items[0]].rule_bindings;
         const result = try self.allocator.alloc(ExprId, chosen.len);
         for (chosen, 0..) |binding, idx| {
             result[idx] = binding.?;
         }
         return result;
+    }
+
+    fn debugPrintAmbiguousSolutions(
+        self: *Solver,
+        states: []const BranchState,
+        distinct_idxs: []const usize,
+    ) !void {
+        if (comptime builtin.target.os.tag == .freestanding) return;
+
+        debugPrint(
+            "[debug:inference] omitted binders left {d} distinct final " ++
+                "solutions; choosing the first\n",
+            .{distinct_idxs.len},
+        );
+        for (distinct_idxs, 0..) |state_idx, choice_idx| {
+            debugPrint(
+                "[debug:inference]   solution {d}{s}\n",
+                .{
+                    choice_idx + 1,
+                    if (choice_idx == 0) " (chosen)" else "",
+                },
+            );
+            try self.debugPrintRuleBindings(states[state_idx].rule_bindings);
+        }
+    }
+
+    fn debugPrintRuleBindings(
+        self: *Solver,
+        bindings: []const ?ExprId,
+    ) !void {
+        for (bindings, 0..) |binding, idx| {
+            const name = self.rule.arg_names[idx] orelse "_";
+            if (binding) |expr_id| {
+                const text = try ViewTrace.formatExpr(
+                    self.allocator,
+                    self.theorem,
+                    self.env,
+                    expr_id,
+                );
+                defer self.allocator.free(text);
+                debugPrint(
+                    "[debug:inference]     {s}#{d} = {s}\n",
+                    .{ name, idx, text },
+                );
+            } else {
+                debugPrint(
+                    "[debug:inference]     {s}#{d} = <null>\n",
+                    .{ name, idx },
+                );
+            }
+        }
     }
 
     fn matchExpr(
@@ -2701,4 +2775,9 @@ fn appendSortedExprSetIntersection(
             .gt => rhs_idx += 1,
         }
     }
+}
+
+fn debugPrint(comptime fmt: []const u8, args: anytype) void {
+    if (comptime builtin.target.os.tag == .freestanding) return;
+    std.debug.print(fmt, args);
 }

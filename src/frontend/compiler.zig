@@ -13,6 +13,7 @@ pub const FreshDecl = Metadata.FreshDecl;
 pub const SortVarDecl = CompilerVars.SortVarDecl;
 pub const SortVarRegistry = CompilerVars.SortVarRegistry;
 pub const Diagnostic = CompilerDiag.Diagnostic;
+pub const DiagnosticSeverity = CompilerDiag.DiagnosticSeverity;
 pub const DiagnosticSource = CompilerDiag.DiagnosticSource;
 pub const CheckedRef = CheckedIr.CheckedRef;
 pub const CheckedLine = CheckedIr.CheckedLine;
@@ -20,10 +21,16 @@ pub const appendRuleLine = CheckedIr.appendRuleLine;
 pub const appendTransportLine = CheckedIr.appendTransportLine;
 
 pub const Compiler = struct {
+    pub const max_warnings = 32;
+
     allocator: std.mem.Allocator,
     source: []const u8,
     proof_source: ?[]const u8,
     last_diagnostic: ?Diagnostic,
+    warning_storage: [max_warnings]Diagnostic = undefined,
+    warning_count: usize = 0,
+    dropped_warning_count: usize = 0,
+    warnings_as_errors: bool = false,
     debug: DebugConfig,
 
     const PipelineOutput = Pipeline.Output;
@@ -37,6 +44,10 @@ pub const Compiler = struct {
             .source = source,
             .proof_source = null,
             .last_diagnostic = null,
+            .warning_storage = undefined,
+            .warning_count = 0,
+            .dropped_warning_count = 0,
+            .warnings_as_errors = false,
             .debug = DebugConfig.none,
         };
     }
@@ -51,24 +62,29 @@ pub const Compiler = struct {
             .source = source,
             .proof_source = proof_source,
             .last_diagnostic = null,
+            .warning_storage = undefined,
+            .warning_count = 0,
+            .dropped_warning_count = 0,
+            .warnings_as_errors = false,
             .debug = DebugConfig.none,
         };
     }
 
     pub fn check(self: *Compiler) !void {
-        self.last_diagnostic = null;
+        self.clearDiagnostics();
 
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
 
         try Pipeline.run(self, arena.allocator(), null);
+        try self.promoteWarningsToErrors();
     }
 
     pub fn compileMmb(
         self: *Compiler,
         out_allocator: std.mem.Allocator,
     ) ![]u8 {
-        self.last_diagnostic = null;
+        self.clearDiagnostics();
 
         _ = self.proof_source orelse return error.MissingProofFile;
 
@@ -77,6 +93,7 @@ pub const Compiler = struct {
 
         var emit = PipelineOutput{};
         try Pipeline.run(self, arena.allocator(), &emit);
+        try self.promoteWarningsToErrors();
 
         return try MmbWriter.buildFile(
             out_allocator,
@@ -93,37 +110,89 @@ pub const Compiler = struct {
         self.allocator.free(bytes);
     }
 
+    pub fn warningDiagnostics(self: *const Compiler) []const Diagnostic {
+        return self.warning_storage[0..self.warning_count];
+    }
+
+    pub fn addWarning(self: *Compiler, diag: Diagnostic) void {
+        var warning = diag;
+        warning.severity = .warning;
+        if (self.warning_count >= self.warning_storage.len) {
+            self.dropped_warning_count += 1;
+            return;
+        }
+        self.warning_storage[self.warning_count] = warning;
+        self.warning_count += 1;
+    }
+
+    pub fn reportWarnings(self: *const Compiler) void {
+        for (self.warningDiagnostics()) |diag| {
+            self.reportDiagnostic(diag, "warning");
+        }
+        if (self.dropped_warning_count != 0) {
+            std.debug.print(
+                "warning: omitted {d} additional warning(s)\n",
+                .{self.dropped_warning_count},
+            );
+        }
+    }
+
     pub fn reportError(self: *const Compiler, err: anyerror) void {
         if (self.last_diagnostic) |diag| {
             if (diag.err == err) {
-                std.debug.print(
-                    "error: {s}\n",
-                    .{diagnosticSummary(diag)},
-                );
-                if (diag.theorem_name) |name| {
-                    std.debug.print("  theorem: {s}\n", .{name});
-                }
-                if (diag.block_name) |name| {
-                    std.debug.print("  proof block: {s}\n", .{name});
-                }
-                if (diag.line_label) |label| {
-                    std.debug.print("  line: {s}\n", .{label});
-                }
-                if (diag.rule_name) |rule| {
-                    std.debug.print("  rule: {s}\n", .{rule});
-                }
-                if (diag.name) |name| {
-                    std.debug.print("  name: {s}\n", .{name});
-                }
-                if (diag.expected_name) |name| {
-                    std.debug.print("  expected: {s}\n", .{name});
-                }
-                reportDiagnosticDetail(diag.detail);
-                self.reportDiagnosticLocation(diag);
+                self.reportDiagnostic(diag, "error");
                 return;
             }
         }
         std.debug.print("error: {s}\n", .{@errorName(err)});
+    }
+
+    fn clearDiagnostics(self: *Compiler) void {
+        self.last_diagnostic = null;
+        self.warning_count = 0;
+        self.dropped_warning_count = 0;
+    }
+
+    fn promoteWarningsToErrors(self: *Compiler) !void {
+        if (!self.warnings_as_errors) return;
+        const warnings = self.warningDiagnostics();
+        if (warnings.len == 0) return;
+
+        var diag = warnings[0];
+        diag.severity = .@"error";
+        self.last_diagnostic = diag;
+        return diag.err;
+    }
+
+    fn reportDiagnostic(
+        self: *const Compiler,
+        diag: Diagnostic,
+        label: []const u8,
+    ) void {
+        std.debug.print(
+            "{s}: {s}\n",
+            .{ label, diagnosticSummary(diag) },
+        );
+        if (diag.theorem_name) |name| {
+            std.debug.print("  theorem: {s}\n", .{name});
+        }
+        if (diag.block_name) |name| {
+            std.debug.print("  proof block: {s}\n", .{name});
+        }
+        if (diag.line_label) |line_label| {
+            std.debug.print("  line: {s}\n", .{line_label});
+        }
+        if (diag.rule_name) |rule_name| {
+            std.debug.print("  rule: {s}\n", .{rule_name});
+        }
+        if (diag.name) |name| {
+            std.debug.print("  name: {s}\n", .{name});
+        }
+        if (diag.expected_name) |name| {
+            std.debug.print("  expected: {s}\n", .{name});
+        }
+        reportDiagnosticDetail(diag.detail);
+        self.reportDiagnosticLocation(diag);
     }
 
     fn reportDiagnosticLocation(

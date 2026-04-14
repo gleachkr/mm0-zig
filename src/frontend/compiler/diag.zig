@@ -62,7 +62,13 @@ pub const DiagnosticSource = enum {
     proof,
 };
 
+pub const DiagnosticSeverity = enum {
+    @"error",
+    warning,
+};
+
 pub const Diagnostic = struct {
+    severity: DiagnosticSeverity = .@"error",
     kind: DiagnosticKind,
     err: anyerror,
     source: DiagnosticSource = .mm0,
