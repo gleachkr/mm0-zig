@@ -49,6 +49,11 @@ const examples = {
     mm0: "./fixtures/prawitz.mm0",
     proof: "./fixtures/prawitz.auf",
   },
+  barcan: {
+    label: "barcan",
+    mm0: "./fixtures/barcan.mm0",
+    proof: "./fixtures/barcan.auf",
+  },
   church: {
     label: "church",
     mm0: "./fixtures/church.mm0",

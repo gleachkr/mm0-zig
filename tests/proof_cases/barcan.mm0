@@ -1,0 +1,195 @@
+delimiter $ ( ) [ / ] $;
+provable sort wff;
+sort ctx;
+--| @vars x y z
+sort obj;
+--| @vars r v
+sort world;
+sort mform;
+
+term miff (a b: mform): wff;
+infixr miff: $≃$ prec 20;
+term imp (a b: mform): mform;
+infixr imp: $→$ prec 25;
+term box (a: mform): mform;
+prefix box: $□$ prec 40;
+term all {x: obj} (p: mform x): mform;
+prefix all: $∀$ prec 41;
+term eq (a b: obj): mform;
+infixl eq: $=$ prec 35;
+term obj_eq (a b: obj): wff;
+infixl obj_eq: $≐$ prec 35;
+term world_eq (w v: world): wff;
+infixl world_eq: $≈$ prec 35;
+
+term at (w: world) (a: mform): wff;
+infixl at: $:$ prec 24;
+term acc (w v: world): wff;
+infixl acc: $R$ prec 35;
+
+term sb_t {x: obj} (t: obj x) (a: obj x): obj;
+notation sb_t {x: obj} (t: obj x) (a: obj x): obj =
+  ($subst$:41) x ($/$:0) t a;
+term sb_m {x: obj} (t: obj x) (p: mform x): mform;
+notation sb_m {x: obj} (t: obj x) (p: mform x): mform =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation mform miff miff_refl miff_trans miff_sym _
+axiom miff_refl (a: mform): $ a ≃ a $;
+axiom miff_trans (a b c: mform):
+  $ a ≃ b $ > $ b ≃ c $ > $ a ≃ c $;
+axiom miff_sym (a b: mform): $ a ≃ b $ > $ b ≃ a $;
+
+--| @relation obj obj_eq obj_refl obj_trans obj_sym _
+axiom obj_refl (a: obj): $ a ≐ a $;
+axiom obj_trans (a b c: obj):
+  $ a ≐ b $ > $ b ≐ c $ > $ a ≐ c $;
+axiom obj_sym (a b: obj): $ a ≐ b $ > $ b ≐ a $;
+
+--| @relation world world_eq world_refl world_trans world_sym _
+axiom world_refl (w: world): $ w ≈ w $;
+axiom world_trans (w v u: world):
+  $ w ≈ v $ > $ v ≈ u $ > $ w ≈ u $;
+axiom world_sym (w v: world): $ w ≈ v $ > $ v ≈ w $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom at_congr (w1 w2: world) (a b: mform):
+  $ w1 ≈ w2 $ > $ a ≃ b $ > $ w1 : a ↔ w2 : b $;
+
+--| @normalize hyp1 conc
+axiom at_nd_mp (g: ctx) (w: world) (a b: mform):
+  $ a ≃ b $ > $ g ⊢ w : a $ > $ g ⊢ w : b $;
+
+--| @congr
+axiom eq_congr (a b c d: obj):
+  $ a ≐ b $ > $ c ≐ d $ > $ (a = c) ≃ (b = d) $;
+
+--| @congr
+axiom acc_congr (w1 w2 v1 v2: world):
+  $ w1 ≈ w2 $ > $ v1 ≈ v2 $ > $ (w1 R v1) ↔ (w2 R v2) $;
+
+--| @congr
+axiom imp_congr (a b c d: mform):
+  $ a ≃ b $ > $ c ≃ d $ > $ (a → c) ≃ (b → d) $;
+
+--| @congr
+axiom box_congr (a b: mform):
+  $ a ≃ b $ > $ □ a ≃ □ b $;
+
+--| @congr
+axiom all_congr {x: obj} (p q: mform x):
+  $ p ≃ q $ > $ ∀ x p ≃ ∀ x q $;
+
+--| @rewrite
+axiom sb_t_var {x: obj} (t: obj x): $ subst x / t x ≐ t $;
+
+--| @rewrite
+axiom sb_t_other {x y: obj} (t: obj x): $ subst x / t y ≐ y $;
+
+--| @rewrite
+axiom sb_t_free {x: obj} (t: obj x) (a: obj): $ subst x / t a ≐ a $;
+
+--| @rewrite
+axiom sb_m_self {x: obj} (p: mform x): $ [x/x] p ≃ p $;
+
+--| @rewrite
+axiom sb_m_eq {x: obj} (t: obj x) (a b: obj x):
+  $ [x/t] (a = b) ≃ (subst x / t a = subst x / t b) $;
+
+--| @rewrite
+axiom sb_m_box {x: obj} (t: obj x) (p: mform x):
+  $ [x/t] (□ p) ≃ □ ([x/t] p) $;
+
+--| @alpha x y
+axiom all_alpha {x y: obj} (p: mform x y):
+  $ ∀ x p ≃ ∀ y ([x/y] p) $;
+
+-- Axiom
+--| @normalize conc
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+
+-- Implication
+--| @normalize hyp0 conc
+axiom imp_intro (g: ctx) (w: world) (a b: mform):
+  $ g , w : a ⊢ w : b $ > $ g ⊢ w : (a → b) $;
+
+-- Labelled equality and quantifier rules
+--| @normalize conc
+axiom eq_refl_nd (g: ctx) (w: world) (a: obj): $ g ⊢ w : a = a $;
+
+--| @freshen g x
+--| @normalize hyp0 conc
+axiom all_intro (g: ctx) (w: world) {x: obj} (p: mform x):
+  $ g ⊢ w : p $ > $ g ⊢ w : ∀ x p $;
+
+--| @normalize hyp0 conc
+axiom all_elim {x: obj} (g: ctx x) (w: world) (t: obj x) (p: mform x):
+  $ g ⊢ w : ∀ x p $ > $ g ⊢ w : [x/t] p $;
+
+-- Modal rules
+--| @normalize hyp0 conc
+axiom box_intro (g: ctx) (w: world) {v: world} (a: mform):
+  $ g , (w R v) ⊢ v : a $ > $ g ⊢ w : □ a $;
+
+--| @normalize hyp0 hyp1 conc
+axiom box_elim (g h: ctx) (w v: world) (a: mform):
+  $ g ⊢ w : □ a $ > $ h ⊢ w R v $ > $ g , h ⊢ v : a $;
+
+--| @view (g: ctx) (w: world) {z: obj} (a b: obj) (p: mform z) (q r: mform): $ g ⊢ w : a = b $ > $ g ⊢ w : q $ > $ g ⊢ w : r $
+--| @abstract p q r z a b
+--| @normalize hyp0 hyp1 conc
+--| @fresh z
+axiom eq_replace (g: ctx) (w: world) {z: obj} (a b: obj) (p: mform z):
+  $ g ⊢ w : a = b $ >
+  $ g ⊢ w : [z/a] p $ >
+  $ g ⊢ w : [z/b] p $;
+
+theorem barcan (w: world) {x: obj} (p: mform x):
+  $ emp ⊢ w : ((∀ x (□ p)) → □ (∀ x p)) $;
+
+theorem nec_id (w: world) (x y: obj):
+  $ emp ⊢ w : ((x = y) → □ (x = y)) $;

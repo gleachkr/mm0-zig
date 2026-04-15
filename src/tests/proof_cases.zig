@@ -220,6 +220,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_view_acui_joint_cover", .outcome = .pass },
     .{ .stem = "pass_struct_seq_forall_left", .outcome = .pass },
     .{ .stem = "prawitz", .outcome = .pass },
+    .{ .stem = "barcan", .outcome = .pass },
     .{ .stem = "church", .outcome = .pass },
     .{
         .stem = "fail_missing_binding",

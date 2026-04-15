@@ -1,0 +1,23 @@
+barcan
+------
+
+l1: $ w : (∀ x (□ p)) , w R v ⊢ w : (∀ x (□ p)) $ by ax
+l2: $ w : (∀ x (□ p)) , w R v ⊢ w : (□ ([x/z] p)) $ by all_elim [l1]
+l3: $ w : (∀ x (□ p)) , w R v ⊢ w R v $ by ax
+l4: $ w : (∀ x (□ p)) , w R v ⊢ v : ([x/z] p) $ by box_elim [l2, l3]
+l5: $ w : (∀ x (□ p)) , w R v ⊢ v : (∀ z ([x/z] p)) $ by all_intro [l4]
+l6: $ ∀ x p ≃ ∀ z ([x/z] p) $ by all_alpha
+l7: $ ∀ z ([x/z] p) ≃ ∀ x p $ by miff_sym [l6]
+l8: $ w : (∀ x (□ p)) , w R v ⊢ v : (∀ x p) $ by at_nd_mp [l7, l5]
+l9: $ w : (∀ x (□ p)) ⊢ w : (□ (∀ x p)) $ by box_intro  [l8]
+l10: $ _ ⊢ w : ((∀ x (□ p)) → □ (∀ x p)) $ by imp_intro  [l9]
+
+nec_id
+------
+
+l1: $ w : (x = y) ⊢ w : (x = y) $ by ax
+l2: $ w : (x = y) , w R v ⊢ w : (x = y) $ by ax
+l3: $ w : (x = y) , w R v ⊢ v : (x = x) $ by eq_refl_nd
+l4: $ w : (x = y) ⊢ w : (□ (x = x)) $ by box_intro [l3]
+l5: $ w : (x = y) ⊢ w : (□ (x = y)) $ by eq_replace [l1, l4]
+l6: $ _ ⊢ w : ((x = y) → □ (x = y)) $ by imp_intro [l5]

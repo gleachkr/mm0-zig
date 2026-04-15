@@ -748,13 +748,6 @@ fn parseAbstractAnnotation(
     }
     if (!std.mem.eql(
         u8,
-        sig.arg_infos[target_view_idx].sort_name,
-        sig.arg_infos[hole_view_idx].sort_name,
-    )) {
-        return error.AbstractHoleSortMismatch;
-    }
-    if (!std.mem.eql(
-        u8,
         sig.arg_infos[hole_view_idx].sort_name,
         sig.arg_infos[left_plug_view_idx].sort_name,
     ) or !std.mem.eql(

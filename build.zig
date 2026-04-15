@@ -162,6 +162,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/prawitz.auf"),
         "web-demo/fixtures/prawitz.auf",
     );
+    const install_barcan_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/barcan.mm0"),
+        "web-demo/fixtures/barcan.mm0",
+    );
+    const install_barcan_proof = b.addInstallFile(
+        b.path("tests/proof_cases/barcan.auf"),
+        "web-demo/fixtures/barcan.auf",
+    );
     const install_hol_beta_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/church.mm0"),
         "web-demo/fixtures/church.mm0",
@@ -206,6 +214,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_lk_exists_mono_proof.step);
     web_demo_step.dependOn(&install_prawitz_mm0.step);
     web_demo_step.dependOn(&install_prawitz_proof.step);
+    web_demo_step.dependOn(&install_barcan_mm0.step);
+    web_demo_step.dependOn(&install_barcan_proof.step);
     web_demo_step.dependOn(&install_hol_beta_mm0.step);
     web_demo_step.dependOn(&install_hol_beta_proof.step);
     web_demo_step.dependOn(&install_calculus_product_rule_mm0.step);
