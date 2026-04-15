@@ -1249,6 +1249,9 @@ pub const MM0Parser = struct {
         var deps: u55 = 0;
         for (raw_args, term.args, 0..) |expr, arg, idx| {
             const coerced = try self.coerceExpr(expr, arg.sort);
+            if (arg.bound and !coerced.bound()) {
+                return error.BoundnessMismatch;
+            }
             args[idx] = coerced;
             deps |= coerced.deps();
         }

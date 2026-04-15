@@ -1044,6 +1044,30 @@ test "MM0 parser handles nullary terms in applications" {
     }
 }
 
+test "MM0 parser rejects non-bound terms in bound slots" {
+    const src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort obj;
+        \\sort fm;
+        \\term holds (p: fm): wff;
+        \\term sb {x: obj} (t: obj x) (r: fm x): fm;
+        \\theorem bad {x: obj} (t: obj x) (r: fm x):
+        \\  $ holds (sb t x r) $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.BoundnessMismatch, parser.next());
+}
+
 test "stack and heap basic behavior" {
     var expr = Expr{ .variable = .{ .sort = 1, .bound = false, .deps = 0 } };
 

@@ -281,6 +281,10 @@ const proof_cases = [_]ProofCase{
         .outcome = .{ .fail = error.BoundnessMismatch },
     },
     .{
+        .stem = "fail_statement_boundness",
+        .outcome = .{ .fail = error.BoundnessMismatch },
+    },
+    .{
         .stem = "fail_view_boundness",
         .outcome = .{ .fail = error.BoundnessMismatch },
     },

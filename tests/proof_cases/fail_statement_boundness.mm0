@@ -1,0 +1,8 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+sort fm;
+term holds (p: fm): wff;
+term sb {x: obj} (t: obj x) (r: fm x): fm;
+theorem bad {x: obj} (t: obj x) (r: fm x):
+  $ holds (sb t x r) $;
