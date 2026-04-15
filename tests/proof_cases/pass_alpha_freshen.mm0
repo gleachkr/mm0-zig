@@ -1,0 +1,134 @@
+delimiter $ ( ) , $;
+provable sort wff;
+sort ctx;
+--| @vars z w
+sort obj;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term seq (g d: ctx): wff;
+infixl seq: $==>$ prec 0;
+
+term all {x: obj} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+prefix all: $A.$ prec 41;
+term ex {x: obj} (p: wff x): wff;
+prefix ex: $∃$ prec 41;
+prefix ex: $E.$ prec 41;
+term P (t: obj): wff;
+prefix P: $P$ prec 50;
+term sb (t: obj) {x: obj} (p: wff x): wff;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom seq_congr (g1 g2 d1 d2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq d1 d2 $ > $ (g1 ==> d1) ↔ (g2 ==> d2) $;
+
+--| @congr
+axiom all_congr {x: obj} (p q: wff x):
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @congr
+axiom ex_congr {x: obj} (p q: wff x):
+  $ p ↔ q $ > $ ∃ x p ↔ ∃ x q $;
+
+--| @rewrite
+axiom sb_P (t: obj) {x: obj}: $ sb t x (P x) ↔ P t $;
+
+--| @rewrite
+axiom sb_P_other {x y: obj} (t: obj x): $ sb t x (P y) ↔ P y $;
+
+--| @rewrite
+axiom sb_P_free {x: obj} (t: obj x) (a: obj): $ sb t x (P a) ↔ P a $;
+
+--| @alpha x y
+axiom all_alpha {x y: obj} (p: wff x y):
+  $ ∀ x p ↔ ∀ y (sb y x p) $;
+
+--| @alpha x y
+axiom ex_alpha {x y: obj} (p: wff x y):
+  $ ∃ x p ↔ ∃ y (sb y x p) $;
+
+--| @normalize conc
+axiom ax (a: wff): $ a ==> a $;
+
+--| @normalize hyp0 conc
+axiom weak_left (g d: ctx) (a: wff): $ g ==> d $ > $ g , a ==> d $;
+
+--| @view (g d: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ g , q ==> d $ > $ g , ∀ x p ==> d $
+--| @recover t q p x
+--| @freshen g x
+--| @freshen d x
+--| @normalize hyp0 conc
+axiom all_left (g d: ctx) {x: obj} (t: obj x) (p: wff x):
+  $ g , sb t x p ==> d $ > $ g , ∀ x p ==> d $;
+
+--| @freshen g x
+--| @freshen d x
+--| @normalize hyp0 conc
+axiom all_right (g d: ctx) {x: obj} (p: wff x):
+  $ g ==> d , p $ > $ g ==> d , ∀ x p $;
+
+--| @freshen g x
+--| @freshen d x
+--| @normalize hyp0 conc
+axiom ex_left (g d: ctx) {x: obj} (p: wff x):
+  $ g , p ==> d $ > $ g , ∃ x p ==> d $;
+
+--| @view (g d: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ g ==> d , q $ > $ g ==> d , ∃ x p $
+--| @recover t q p x
+--| @freshen g x
+--| @freshen d x
+--| @normalize hyp0 conc
+axiom ex_right (g d: ctx) {x: obj} (t: obj x) (p: wff x):
+  $ g ==> d , sb t x p $ > $ g ==> d , ∃ x p $;
+
+-- This file is an implementation-focused demo for abc's alpha-freshening
+-- support. The main logic demos such as gentzen avoid these theorem names.
+
+theorem alpha_all_right_demo {a b: obj}:
+  $ ∀ a (P a) , P b ==> ∀ a (P b) $;
+
+theorem alpha_ex_right_demo {a b: obj}:
+  $ ∀ a (P a) , P b ==> ∃ a (P a) $;
+
+theorem alpha_all_left_demo {a b c: obj}:
+  $ ∀ a (P a) , P c , ∀ a (P a) ==> P c $;
+
+theorem alpha_ex_left_demo {a c: obj}:
+  $ ∀ a (P a) , P c , ∃ a (P a) ==> P c $;

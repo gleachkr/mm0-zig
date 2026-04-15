@@ -14,6 +14,9 @@ Related docs:
 - `docs/view_recover.md`
 - `docs/fresh_binders.md`
 
+In particular, `@alpha` and `@freshen` are frontend-only annotations used
+for targeted alpha-renaming retries during rule application.
+
 ## Scope
 
 The `.mm0` file remains the source of truth for:
@@ -208,8 +211,8 @@ is checked roughly as follows:
    binders.
 7. Compare the instantiated rule against the user's line and refs,
    allowing frontend features such as transparent defs, views, recover /
-   abstract bindings, fresh binders, and normalization when the rule's
-   metadata permits them.
+   abstract bindings, fresh binders, targeted alpha-freshening, and
+   normalization when the rule's metadata permits them.
 8. If that attempt fails and the cited rule has `@fallback`, retry the
    whole line with the fallback target, then continue through the
    fallback chain if needed.

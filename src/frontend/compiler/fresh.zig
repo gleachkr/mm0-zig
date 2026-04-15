@@ -16,6 +16,11 @@ pub const FreshDecl = struct {
     target_arg_idx: usize,
 };
 
+pub const FreshenDecl = struct {
+    target_arg_idx: usize,
+    blocker_arg_idx: usize,
+};
+
 pub const FreshSelection = struct {
     expr_id: ExprId,
     deps: u55,
@@ -38,6 +43,7 @@ pub fn processFreshAnnotations(
     env: *const GlobalEnv,
     assertion: AssertionStmt,
     fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
     annotations: []const []const u8,
 ) !void {
     const rule_id = env.getRuleId(assertion.name) orelse return;
@@ -45,29 +51,53 @@ pub fn processFreshAnnotations(
 
     var decls = std.ArrayListUnmanaged(FreshDecl){};
     defer decls.deinit(allocator);
+    var freshen_decls = std.ArrayListUnmanaged(FreshenDecl){};
+    defer freshen_decls.deinit(allocator);
 
     for (annotations) |ann| {
         if (annotationMatchesTag(ann, "@dummy")) {
             return error.DummyAnnotationRemoved;
         }
-        if (!annotationMatchesTag(ann, "@fresh")) continue;
+        if (annotationMatchesTag(ann, "@fresh")) {
+            const decl = try parseFreshAnnotation(
+                parser,
+                rule,
+                ann["@fresh".len..],
+            );
 
-        const decl = try parseFreshAnnotation(
-            parser,
+            for (decls.items) |existing| {
+                if (existing.target_arg_idx == decl.target_arg_idx) {
+                    return error.DuplicateFreshBinder;
+                }
+            }
+            try decls.append(allocator, decl);
+            continue;
+        }
+        if (!annotationMatchesTag(ann, "@freshen")) continue;
+
+        const decl = try parseFreshenAnnotation(
             rule,
-            ann["@fresh".len..],
+            ann["@freshen".len..],
         );
-
-        for (decls.items) |existing| {
-            if (existing.target_arg_idx == decl.target_arg_idx) {
-                return error.DuplicateFreshBinder;
+        for (freshen_decls.items) |existing| {
+            if (existing.target_arg_idx == decl.target_arg_idx and
+                existing.blocker_arg_idx == decl.blocker_arg_idx)
+            {
+                return error.DuplicateFreshenPair;
             }
         }
-        try decls.append(allocator, decl);
+        try freshen_decls.append(allocator, decl);
     }
 
-    if (decls.items.len == 0) return;
-    try fresh_bindings.put(rule_id, try decls.toOwnedSlice(allocator));
+    if (decls.items.len != 0) {
+        try fresh_bindings.put(rule_id, try decls.toOwnedSlice(allocator));
+    }
+    if (freshen_decls.items.len != 0) {
+        try freshen_bindings.put(
+            rule_id,
+            try freshen_decls.toOwnedSlice(allocator),
+        );
+    }
 }
 
 pub fn chooseFreshBinding(
@@ -291,6 +321,39 @@ fn parseFreshAnnotation(
 
     return .{
         .target_arg_idx = target_arg_idx,
+    };
+}
+
+fn parseFreshenAnnotation(
+    rule: *const RuleDecl,
+    text: []const u8,
+) !FreshenDecl {
+    var it = std.mem.tokenizeAny(
+        u8,
+        std.mem.trimRight(u8, text, " \t\r\n;"),
+        " \t\r\n",
+    );
+    const target_name = it.next() orelse return error.InvalidFreshenAnnotation;
+    const blocker_name =
+        it.next() orelse return error.InvalidFreshenAnnotation;
+    if (it.next() != null) return error.InvalidFreshenAnnotation;
+
+    const target_arg_idx = findRuleArgIndex(rule, target_name) orelse {
+        return error.UnknownFreshenBinder;
+    };
+    const blocker_arg_idx = findRuleArgIndex(rule, blocker_name) orelse {
+        return error.UnknownFreshenBinder;
+    };
+    if (rule.args[target_arg_idx].bound) {
+        return error.FreshenTargetMustBeRegularBinder;
+    }
+    if (!rule.args[blocker_arg_idx].bound) {
+        return error.FreshenBlockerMustBeBoundBinder;
+    }
+
+    return .{
+        .target_arg_idx = target_arg_idx,
+        .blocker_arg_idx = blocker_arg_idx,
     };
 }
 

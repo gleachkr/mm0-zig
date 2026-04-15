@@ -25,6 +25,7 @@ pub const Frontend = struct {
 
 pub const CompilerSupport = struct {
     pub const Inference = @import("./frontend/compiler/inference.zig");
+    pub const Metadata = @import("./frontend/compiler/metadata.zig");
     pub const Vars = @import("./frontend/compiler/vars.zig");
     pub const Views = @import("./frontend/compiler/views.zig");
     pub const Normalize = @import("./frontend/compiler/normalize.zig");

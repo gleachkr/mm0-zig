@@ -226,6 +226,134 @@ Failure happens only when there is a pool but every token in it is already
 allocated and also appears in the current concrete inputs, so none of them
 is fresh for this application.
 
+---
+
+## `@freshen`
+
+### Purpose
+
+`@freshen` handles a different problem from `@fresh`.
+
+`@fresh` fills in an omitted bound binder directly. `@freshen` instead
+repairs a rule application that already has concrete bindings, but those
+bindings fail MM0's dependency check because some regular argument still
+depends on a bound binder.
+
+This is necessary in some cases because of how MM0 checks theorem
+applications. Suppose a rule has a bound binder `{x : obj}` and also a
+regular argument `(p : wff)` which does not declare any dependence on
+`x`.
+
+Then the expression substituted for `p` is not allowed to use the variable `x` 
+*at all*. This is the surprising part: MM0 checks dependency against all 
+variable occurrences, even occurrences where a variable like `x` is itself 
+bound by an quantifier. So if the candidate expression for `p` contains `x` 
+anywhere, whether free or attached to a quantifier, the application can fail.
+
+For rules like ∀-introduction, that is often stricter than the usual
+textbook presentation, where we only care that the generalized variable
+does not occur *free* in the surrounding context. A context or
+hypothesis that would be fine after α-renaming can therefore still fail
+in MM0 when it is written using the same binder name `x`.
+
+`@freshen` bridges that gap. It tells the frontend that, for a
+specified pair of rule arguments, it may try to α-rename the offending
+subexpression to use a fresh binder first, and then retry the rule
+application.
+
+For more background, see section 2.3 of Mario Carneiro's *Metamath
+Zero: The Cartesian Theorem Prover*, and the MM0 specs in Mario's repo:
+[`mm0.md`, under
+"Verification"](https://github.com/digama0/mm0/blob/master/mm0.md#verification)
+and [`mmb.md`, under
+"Proof Checking"](https://github.com/digama0/mm0/blob/master/mm0-c/mmb.md#proof-checking).
+
+If a regular rule argument still depends on a bound binder, the application is 
+rejected unless the frontend can rewrite that regular argument to an 
+alpha-equivalent fresh form first.
+
+`@freshen` declares exactly which `(regular argument, bound binder)` pair
+may be repaired that way.
+
+### Syntax
+
+```
+--| @freshen <target-arg> <blocker-binder>
+```
+
+Example:
+
+```
+--| @freshen g x
+axiom all_intro (g: ctx) {x: obj} (p: wff x):
+  $ g ⊢ p $ > $ g ⊢ ∀ x p $;
+```
+
+This means: if applying `all_intro` fails because the concrete binding for
+`g` depends on `x`, the compiler may try to alpha-rename `g` to remove
+that dependency.
+
+### Requirements
+
+The annotation is accepted only when:
+
+- `target-arg` names a regular rule argument
+- `blocker-binder` names a bound rule binder
+
+The annotation does not itself say how to perform the rewrite. It only
+marks that dependency pair as eligible. The actual rewrite still needs:
+
+- a fresh replacement binder from the sort's `@vars` pool
+- a matching `@alpha` rule for the relevant constructor
+- successful transport of hypotheses and conclusion through the rewritten
+  rule application
+
+### Operational model
+
+Rule application still starts the ordinary way.
+
+1. infer or read the concrete rule bindings
+2. run the normal dependency checks
+3. if there is no dependency violation, succeed normally
+4. if there is a dependency violation, inspect the first failing pair
+5. if that pair matches a declared `@freshen` annotation, choose one fresh
+   replacement binder using the same pool policy as `@fresh`
+6. use a matching `@alpha` lemma to rewrite the blocked regular argument
+7. retry the rule application in that freshened world
+8. emit transport steps so the final proof still checks against the user's
+   original line
+
+The search is deliberately narrow and deterministic: one declared pair,
+then one chosen fresh binder, then the first successful alpha rewrite.
+
+### Relation to `@vars`, `@fresh`, and `@alpha`
+
+- `@vars` supplies the pool of names from which a fresh replacement binder
+  may be chosen
+- `@fresh` creates or reuses a local dummy when an omitted bound binder
+  itself needs a value
+- `@freshen` rewrites an already-concrete regular argument that depends on
+  the wrong binder
+- `@alpha` provides the proven relation used to justify that rewrite
+
+### Example shape
+
+A typical pair looks like this:
+
+```mm0
+--| @alpha x y
+axiom all_alpha {x y: obj} (p: wff x y):
+  $ ∀ x p ↔ ∀ y ([x/y] p) $;
+
+--| @freshen g x
+axiom all_intro (g: ctx) {x: obj} (p: wff x):
+  $ g ⊢ p $ > $ g ⊢ ∀ x p $;
+```
+
+If a proof line tries to use `all_intro` with a concrete context binding
+like `∀ x P x , Q y`, the compiler may alpha-rename the `∀ x P x` part to
+use a fresh theorem-local binder before retrying the rule.
+
 ### Hidden def witnesses and recover-hole seeds
 
 The same `@vars` pools are also used outside explicit `@fresh`

@@ -13,8 +13,10 @@ const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerViews = @import("./views.zig");
 const CompilerFresh = @import("./fresh.zig");
+const CompilerFreshen = @import("./freshen.zig");
 const ViewDecl = CompilerViews.ViewDecl;
 const FreshDecl = CompilerFresh.FreshDecl;
+const FreshenDecl = CompilerFresh.FreshenDecl;
 const CompilerDiag = @import("./diag.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
 const CheckedIr = @import("./checked_ir.zig");
@@ -41,6 +43,7 @@ pub fn checkTheoremBlock(
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
     fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
     assertion: AssertionStmt,
@@ -141,6 +144,7 @@ pub fn checkTheoremBlock(
                 env,
                 registry,
                 fresh_bindings,
+                freshen_bindings,
                 views,
                 sort_vars,
                 assertion,
@@ -255,6 +259,7 @@ fn tryApplyLineWithCandidate(
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
     fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
     assertion: AssertionStmt,
@@ -397,7 +402,72 @@ fn tryApplyLineWithCandidate(
         break :blk b;
     };
 
-    if (!had_omitted) {
+    var resolved_bindings = bindings;
+    var freshened_bindings: ?CompilerFreshen.FreshenResult = null;
+    Inference.validateResolvedBindings(
+        self,
+        env,
+        theorem,
+        assertion,
+        line,
+        rule,
+        resolved_bindings,
+    ) catch |err| {
+        if (err != error.DepViolation) return err;
+        const rule_freshen = freshen_bindings.get(rule_id) orelse return err;
+        const dep_detail = (try Inference.firstDepViolation(
+            env,
+            theorem,
+            assertion.args,
+            rule.args,
+            resolved_bindings,
+        )) orelse return err;
+        freshened_bindings = CompilerFreshen.tryFreshenBindings(
+            allocator,
+            parser,
+            env,
+            registry,
+            theorem,
+            theorem_vars,
+            sort_vars,
+            rule,
+            line_expr,
+            base_ref_exprs,
+            resolved_bindings,
+            rule_freshen,
+            dep_detail,
+            checked,
+            diag_scratch,
+        ) catch |fresh_err| {
+            CompilerDiag.setProof(self, .{
+                .kind = .generic,
+                .err = fresh_err,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .span = line.ruleApplicationSpan(),
+            });
+            return fresh_err;
+        } orelse return err;
+        resolved_bindings = freshened_bindings.?.bindings;
+        if ((try Inference.firstDepViolation(
+            env,
+            theorem,
+            assertion.args,
+            rule.args,
+            resolved_bindings,
+        )) != null) {
+            CompilerDiag.setProof(self, .{
+                .kind = .generic,
+                .err = error.AlphaRewriteSearchFailed,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .span = line.ruleApplicationSpan(),
+            });
+            return error.AlphaRewriteSearchFailed;
+        }
+        restoreDiagnostic(self, null);
         try Inference.validateResolvedBindings(
             self,
             env,
@@ -405,16 +475,51 @@ fn tryApplyLineWithCandidate(
             assertion,
             line,
             rule,
-            bindings,
+            resolved_bindings,
         );
-    }
+    };
+    restoreDiagnostic(self, null);
 
     const norm_spec = registry.getNormalizeSpec(rule_id);
+
+    if (freshened_bindings) |freshened| {
+        const line_idx = applyFreshenedRuleLine(
+            allocator,
+            theorem,
+            registry,
+            env,
+            checked,
+            diag_scratch,
+            norm_spec,
+            line_expr,
+            rule,
+            rule_id,
+            bindings,
+            freshened,
+            refs,
+            base_ref_exprs,
+        ) catch |err| {
+            CompilerDiag.setProof(self, .{
+                .kind = .generic,
+                .err = err,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .span = line.ruleApplicationSpan(),
+            });
+            return err;
+        };
+        return .{
+            .line_idx = line_idx,
+            .theorem = theorem.*,
+            .theorem_vars = theorem_vars.*,
+        };
+    }
 
     for (base_ref_exprs, line.refs, 0..) |actual, ref, idx| {
         const expected = try theorem.instantiateTemplate(
             rule.hyps[idx],
-            bindings,
+            resolved_bindings,
         );
         const match_mark = diag_scratch.mark();
         if (Matching.tryMatchHypothesis(
@@ -485,7 +590,7 @@ fn tryApplyLineWithCandidate(
 
     const expected_line = try theorem.instantiateTemplate(
         rule.concl,
-        bindings,
+        resolved_bindings,
     );
 
     const concl_mark = diag_scratch.mark();
@@ -500,7 +605,7 @@ fn tryApplyLineWithCandidate(
         line_expr,
         expected_line,
         rule_id,
-        bindings,
+        resolved_bindings,
         refs,
     ) catch |err| {
         if (CompilerDiag.setProofScratchDiagnosticIfPresent(
@@ -537,6 +642,150 @@ fn tryApplyLineWithCandidate(
         .line_idx = line_idx,
         .theorem = theorem.*,
         .theorem_vars = theorem_vars.*,
+    };
+}
+
+fn applyFreshenedRuleLine(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    diag_scratch: *CompilerDiag.Scratch,
+    norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
+    line_expr: ExprId,
+    rule: *const RuleDecl,
+    rule_id: u32,
+    original_bindings: []const ExprId,
+    freshened: CompilerFreshen.FreshenResult,
+    refs: []const CheckedRef,
+    base_ref_exprs: []const ExprId,
+) !usize {
+    const fresh_refs = try allocator.dupe(CheckedRef, refs);
+    errdefer allocator.free(fresh_refs);
+
+    for (base_ref_exprs, 0..) |actual, idx| {
+        const expected_old = try theorem.instantiateTemplate(
+            rule.hyps[idx],
+            original_bindings,
+        );
+        const matched_old = (try Matching.tryMatchHypothesis(
+            allocator,
+            theorem,
+            registry,
+            env,
+            checked,
+            diag_scratch,
+            norm_spec,
+            idx,
+            refs[idx],
+            actual,
+            expected_old,
+        )) orelse return error.HypothesisMismatch;
+
+        const expected_new = try theorem.instantiateTemplate(
+            rule.hyps[idx],
+            freshened.bindings,
+        );
+        if (expected_old == expected_new) {
+            fresh_refs[idx] = matched_old;
+            continue;
+        }
+
+        const conv_idx = (try CompilerFreshen.buildRelationProofFromTargetChange(
+            allocator,
+            theorem,
+            registry,
+            env,
+            checked,
+            diag_scratch,
+            expected_old,
+            expected_new,
+            freshened.old_target_expr,
+            freshened.new_target_expr,
+            freshened.target_conv_line_idx,
+        )) orelse return error.FreshenTransportFailed;
+        fresh_refs[idx] = try CompilerFreshen.transportRefAlongProof(
+            allocator,
+            theorem,
+            registry,
+            env,
+            checked,
+            diag_scratch,
+            expected_new,
+            expected_old,
+            conv_idx,
+            matched_old,
+        );
+    }
+
+    const expected_new_line = try theorem.instantiateTemplate(
+        rule.concl,
+        freshened.bindings,
+    );
+    const raw_idx = try CheckedIr.appendRuleLine(
+        checked,
+        allocator,
+        expected_new_line,
+        rule_id,
+        freshened.bindings,
+        fresh_refs,
+    );
+
+    var result_ref: CheckedRef = .{ .line = raw_idx };
+    var result_expr = expected_new_line;
+    const expected_old_line = try theorem.instantiateTemplate(
+        rule.concl,
+        original_bindings,
+    );
+    if (expected_old_line != expected_new_line) {
+        const conv_idx = (try CompilerFreshen.buildRelationProofFromTargetChange(
+            allocator,
+            theorem,
+            registry,
+            env,
+            checked,
+            diag_scratch,
+            expected_old_line,
+            expected_new_line,
+            freshened.old_target_expr,
+            freshened.new_target_expr,
+            freshened.target_conv_line_idx,
+        )) orelse return error.FreshenTransportFailed;
+        result_ref = try CompilerFreshen.transportRefBackwardAlongProof(
+            allocator,
+            theorem,
+            registry,
+            env,
+            checked,
+            diag_scratch,
+            expected_old_line,
+            expected_new_line,
+            conv_idx,
+            result_ref,
+        );
+        result_expr = expected_old_line;
+    }
+
+    if (result_expr != line_expr) {
+        result_ref = (try Matching.tryMatchHypothesis(
+            allocator,
+            theorem,
+            registry,
+            env,
+            checked,
+            diag_scratch,
+            norm_spec,
+            0,
+            result_ref,
+            result_expr,
+            line_expr,
+        )) orelse return error.ConclusionMismatch;
+    }
+
+    return switch (result_ref) {
+        .line => |line_idx| line_idx,
+        .hyp => error.ConclusionMismatch,
     };
 }
 

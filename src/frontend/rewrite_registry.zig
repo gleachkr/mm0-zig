@@ -44,6 +44,17 @@ pub const RewriteRule = struct {
     head_term_id: u32,
 };
 
+/// A special alpha-renaming rule used only by freshening.
+pub const AlphaRule = struct {
+    rule_id: u32,
+    lhs: TemplateExpr,
+    rhs: TemplateExpr,
+    num_binders: usize,
+    head_term_id: u32,
+    old_idx: usize,
+    new_idx: usize,
+};
+
 /// A congruence rule for a specific head term.
 pub const CongruenceRule = struct {
     rule_id: u32,
@@ -87,6 +98,11 @@ pub const RewriteRegistry = struct {
         u32,
         std.ArrayListUnmanaged(RewriteRule),
     ),
+    /// Alpha rules indexed by LHS head term_id.
+    alpha_by_head: std.AutoHashMap(
+        u32,
+        std.ArrayListUnmanaged(AlphaRule),
+    ),
     /// Congruence rules by head term_id.
     congr_by_head: std.AutoHashMap(u32, CongruenceRule),
     /// Normalize specs by rule_id.
@@ -103,6 +119,10 @@ pub const RewriteRegistry = struct {
             .rewrites_by_head = std.AutoHashMap(
                 u32,
                 std.ArrayListUnmanaged(RewriteRule),
+            ).init(allocator),
+            .alpha_by_head = std.AutoHashMap(
+                u32,
+                std.ArrayListUnmanaged(AlphaRule),
             ).init(allocator),
             .congr_by_head = std.AutoHashMap(u32, CongruenceRule).init(
                 allocator,
@@ -141,6 +161,8 @@ pub const RewriteRegistry = struct {
             try self.processRelation(&iter);
         } else if (std.mem.eql(u8, directive, "@rewrite")) {
             try self.processRewrite(env, stmt_name, &iter);
+        } else if (std.mem.eql(u8, directive, "@alpha")) {
+            try self.processAlpha(env, stmt_name, &iter);
         } else if (std.mem.eql(u8, directive, "@congr")) {
             try self.processCongr(env, stmt_name);
         } else if (std.mem.eql(u8, directive, "@normalize")) {
@@ -205,6 +227,69 @@ pub const RewriteRegistry = struct {
                 });
             },
             else => {},
+        }
+    }
+
+    fn processAlpha(
+        self: *RewriteRegistry,
+        env: *const GlobalEnv,
+        stmt_name: []const u8,
+        iter: *std.mem.TokenIterator(u8, .scalar),
+    ) !void {
+        const rule_id = env.getRuleId(stmt_name) orelse return;
+        const rule = &env.rules.items[rule_id];
+
+        const old_name = iter.next() orelse return error.InvalidAlphaAnnotation;
+        const new_name = iter.next() orelse return error.InvalidAlphaAnnotation;
+        if (iter.next() != null) return error.InvalidAlphaAnnotation;
+
+        if (rule.hyps.len != 0) {
+            return error.AlphaRuleHasHypotheses;
+        }
+
+        const old_idx = findRuleArgIndex(rule, old_name) orelse {
+            return error.UnknownAlphaBinder;
+        };
+        const new_idx = findRuleArgIndex(rule, new_name) orelse {
+            return error.UnknownAlphaBinder;
+        };
+        if (!rule.args[old_idx].bound or !rule.args[new_idx].bound) {
+            return error.AlphaRequiresBoundBinders;
+        }
+        if (!std.mem.eql(
+            u8,
+            rule.args[old_idx].sort_name,
+            rule.args[new_idx].sort_name,
+        )) {
+            return error.AlphaSortMismatch;
+        }
+
+        switch (rule.concl) {
+            .app => |app| {
+                if (app.args.len != 2) {
+                    return error.AlphaConclusionMustBeBinaryRelation;
+                }
+                const lhs = app.args[0];
+                const rhs = app.args[1];
+                const head_id = getHeadTermId(lhs) orelse {
+                    return error.AlphaConclusionUnsupported;
+                };
+
+                const gop = try self.alpha_by_head.getOrPut(head_id);
+                if (!gop.found_existing) {
+                    gop.value_ptr.* = .{};
+                }
+                try gop.value_ptr.append(self.allocator, .{
+                    .rule_id = rule_id,
+                    .lhs = lhs,
+                    .rhs = rhs,
+                    .num_binders = rule.args.len,
+                    .head_term_id = head_id,
+                    .old_idx = old_idx,
+                    .new_idx = new_idx,
+                });
+            },
+            else => return error.AlphaConclusionMustBeBinaryRelation,
         }
     }
 
@@ -375,6 +460,16 @@ pub const RewriteRegistry = struct {
         return &.{};
     }
 
+    pub fn getAlphaRules(
+        self: *const RewriteRegistry,
+        head_term_id: u32,
+    ) []const AlphaRule {
+        if (self.alpha_by_head.get(head_term_id)) |list| {
+            return list.items;
+        }
+        return &.{};
+    }
+
     pub fn getCongruenceRule(
         self: *const RewriteRegistry,
         head_term_id: u32,
@@ -524,4 +619,13 @@ fn getHeadTermId(template: TemplateExpr) ?u32 {
         .app => |app| app.term_id,
         .binder => null,
     };
+}
+
+fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
+    for (rule.arg_names, 0..) |arg_name, idx| {
+        if (arg_name) |actual_name| {
+            if (std.mem.eql(u8, actual_name, name)) return idx;
+        }
+    }
+    return null;
 }

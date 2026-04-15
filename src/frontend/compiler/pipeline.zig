@@ -22,6 +22,7 @@ const DiagnosticSource = CompilerDiag.DiagnosticSource;
 
 const ViewDecl = Metadata.ViewDecl;
 const FreshDecl = Metadata.FreshDecl;
+const FreshenDecl = Metadata.FreshenDecl;
 const SortVarRegistry = CompilerVars.SortVarRegistry;
 
 pub const Output = struct {
@@ -41,6 +42,9 @@ pub fn run(
     var env = GlobalEnv.init(allocator);
     var registry = RewriteRegistry.init(allocator);
     var fresh_bindings = std.AutoHashMap(u32, []const FreshDecl).init(
+        allocator,
+    );
+    var freshen_bindings = std.AutoHashMap(u32, []const FreshenDecl).init(
         allocator,
     );
     var views = std.AutoHashMap(u32, ViewDecl).init(allocator);
@@ -184,6 +188,7 @@ pub fn run(
                     &env,
                     &registry,
                     &fresh_bindings,
+                    &freshen_bindings,
                     &views,
                     &sort_vars,
                     &proof_parser,
@@ -238,6 +243,7 @@ fn processAssertion(
     env: *GlobalEnv,
     registry: *RewriteRegistry,
     fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
     views: *std.AutoHashMap(u32, ViewDecl),
     sort_vars: *SortVarRegistry,
     proof_parser: *?ProofScriptParser,
@@ -252,6 +258,7 @@ fn processAssertion(
             env,
             registry,
             fresh_bindings,
+            freshen_bindings,
             views,
             assertion,
             emit,
@@ -271,6 +278,7 @@ fn processAssertion(
             env,
             registry,
             fresh_bindings,
+            freshen_bindings,
             views,
             sort_vars,
             proofs,
@@ -285,6 +293,7 @@ fn processAssertion(
             env,
             registry,
             fresh_bindings,
+            freshen_bindings,
             views,
             sort_vars,
             assertion,
@@ -363,6 +372,7 @@ fn processAssertion(
         env,
         registry,
         fresh_bindings,
+        freshen_bindings,
         views,
         assertion,
         parser.last_annotations,
@@ -376,6 +386,7 @@ fn processNonTheoremAssertion(
     env: *GlobalEnv,
     registry: *RewriteRegistry,
     fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
     views: *std.AutoHashMap(u32, ViewDecl),
     assertion: AssertionStmt,
     emit: ?*Output,
@@ -431,6 +442,7 @@ fn processNonTheoremAssertion(
         env,
         registry,
         fresh_bindings,
+        freshen_bindings,
         views,
         assertion,
         parser.last_annotations,
@@ -444,6 +456,7 @@ fn nextTheoremBlock(
     env: *GlobalEnv,
     registry: *RewriteRegistry,
     fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
     proofs: *ProofScriptParser,
@@ -474,6 +487,7 @@ fn nextTheoremBlock(
                 env,
                 registry,
                 fresh_bindings,
+                freshen_bindings,
                 views,
                 sort_vars,
                 block,
@@ -521,6 +535,7 @@ fn processLocalProofBlock(
     env: *GlobalEnv,
     registry: *RewriteRegistry,
     fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
     block: TheoremBlock,
@@ -540,6 +555,7 @@ fn processLocalProofBlock(
         env,
         registry,
         fresh_bindings,
+        freshen_bindings,
         views,
         sort_vars,
         assertion,

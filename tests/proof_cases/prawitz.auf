@@ -180,6 +180,25 @@ l7: $ ¬ (a ∨ ¬ a) ⊢ ⊥ $ by not_elim [l1, l6]
 -- Conclude ~~(a \/ ~a)
 l8: $ _ ⊢ ¬ ¬ (a ∨ ¬ a) $ by not_intro [l7]
 
+alpha_all_intro_demo
+--------------------
+
+l1: $ ∀ a (F a b) , F b b ⊢ F b b $ by ax []
+l2: $ ∀ a (F a b) , F b b ⊢ ∀ a (F b b) $ by all_intro [l1]
+
+alpha_ex_intro_demo
+-------------------
+
+l1: $ ∀ a (F a b) , F b b ⊢ F b b $ by ax []
+l2: $ ∀ a (F a b) , F b b ⊢ ∃ a (F a b) $ by ex_intro (t := $ b $) [l1]
+
+alpha_ex_elim_demo
+------------------
+
+l1: $ ∀ a (F a b) , ∃ a (F a b) ⊢ ∃ a (F a b) $ by ax []
+l2: $ ∀ a (F a b) , F a b ⊢ ∀ a (F a b) $ by ax []
+l3: $ ∀ a (F a b) , ∃ a (F a b) ⊢ ∀ a (F a b) $ by ex_elim [l1, l2]
+
 forall_swap
 -----------
 

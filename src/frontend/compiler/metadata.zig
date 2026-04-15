@@ -12,6 +12,7 @@ const TermStmt = @import("../../trusted/parse.zig").TermStmt;
 
 pub const ViewDecl = CompilerViews.ViewDecl;
 pub const FreshDecl = CompilerFresh.FreshDecl;
+pub const FreshenDecl = CompilerFresh.FreshenDecl;
 pub const SortVarDecl = CompilerVars.SortVarDecl;
 pub const SortVarRegistry = CompilerVars.SortVarRegistry;
 
@@ -50,6 +51,7 @@ pub fn processAssertionMetadata(
     env: *GlobalEnv,
     registry: *RewriteRegistry,
     fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
     views: *std.AutoHashMap(u32, ViewDecl),
     assertion: AssertionStmt,
     annotations: []const []const u8,
@@ -61,6 +63,7 @@ pub fn processAssertionMetadata(
         env,
         assertion,
         fresh_bindings,
+        freshen_bindings,
         annotations,
     );
     try CompilerViews.processViewAnnotations(

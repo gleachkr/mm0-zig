@@ -1,0 +1,29 @@
+alpha_all_right_demo
+--------------------
+
+l1: $ P b ==> P b $ by ax
+l2: $ ∀ a (P a) , P b ==> P b $ by weak_left [l1]
+l3: $ ∀ a (P a) , P b ==> ∀ a (P b) $ by all_right [l2]
+
+alpha_ex_right_demo
+-------------------
+
+l1: $ P b ==> P b $ by ax
+l2: $ ∀ a (P a) , P b ==> P b $ by weak_left [l1]
+l3: $ ∀ a (P a) , P b ==> ∃ a (P a) $ by ex_right (t := $ b $) [l2]
+
+alpha_all_left_demo
+-------------------
+
+l1: $ P c ==> P c $ by ax
+l2: $ P c , P b ==> P c $ by weak_left [l1]
+l3: $ ∀ a (P a) , P c , P b ==> P c $ by weak_left [l2]
+l4: $ ∀ a (P a) , P c , ∀ a (P a) ==> P c $ by all_left (t := $ b $) [l3]
+
+alpha_ex_left_demo
+------------------
+
+l1: $ P c ==> P c $ by ax
+l2: $ P c , P a ==> P c $ by weak_left [l1]
+l3: $ ∀ a (P a) , P c , P a ==> P c $ by weak_left [l2]
+l4: $ ∀ a (P a) , P c , ∃ a (P a) ==> P c $ by ex_left [l3]

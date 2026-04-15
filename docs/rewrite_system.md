@@ -102,10 +102,73 @@ form. The two normalized forms agree, so the line is accepted.
 | `@acui`         | `term`              | Marks a binary combiner for structural AU / ACU / AUI / ACUI normalization |
 | `@normalize`    | `axiom` / `theorem` | Specifies which positions should be auto-normalized |
 | `@fallback`     | `axiom` / `theorem` | Retries theorem application through another named rule |
+| `@alpha`        | `axiom`             | Registers an alpha-renaming lemma for freshening |
 
 Transparent def unfolding at theorem-application boundaries is covered
 in `docs/transparent_defs.md`. `@view`, `@recover`, and `@abstract` are
-covered in `docs/view_recover.md`.
+covered in `docs/view_recover.md`. `@fresh` and `@freshen` are covered in
+`docs/fresh_binders.md`.
+
+---
+
+## `@alpha`
+
+### Purpose
+
+`@alpha` registers a theorem as an alpha-renaming lemma that the frontend
+may use when a rule application fails a binder dependency check. The
+trusted verifier does not gain any new primitive here: the compiler is
+just allowed to reuse an ordinary proved relation such as
+`∀ x p ↔ ∀ y ([x/y] p)` or `∃ x p ↔ ∃ y ([x/y] p)` as a targeted rewrite.
+
+This is used together with `@freshen`. A `@freshen g x` annotation says
+that if a concrete binding for regular argument `g` depends on bound
+binder `x`, the compiler may try to alpha-rename `g` to a fresh binder.
+`@alpha` supplies the relation proof that justifies that rewrite.
+
+### Syntax
+
+```
+--| @alpha <old-binder> <new-binder>
+```
+
+Example:
+
+```
+--| @alpha x y
+axiom all_alpha {x y: obj} (p: wff x y):
+  $ ∀ x p ↔ ∀ y ([x/y] p) $;
+```
+
+### Requirements
+
+The annotated rule must satisfy these frontend checks:
+
+- both named arguments exist
+- both are bound binders
+- both have the same sort
+- the rule has no hypotheses
+- the conclusion is a binary relation already understood by the rewrite
+  / transport machinery
+- the left-hand side has a visible head term, so the compiler can index
+  the rule as a rewrite candidate for that constructor
+
+### Operational model
+
+When the freshening helper inspects a concrete expression, it only looks
+at `@alpha` rules whose left-hand side head matches the expression's head
+constructor. It then instantiates the annotated old binder with the
+blocked binder and the annotated new binder with the chosen fresh binder.
+If the left-hand side matches, the compiler emits an ordinary theorem
+application of the alpha lemma, then uses the existing congruence and
+transport pipeline to lift that local rewrite through the surrounding
+formula.
+
+This search is intentionally narrow:
+
+- no broad rewrite search
+- no backtracking over many alpha rules in v1
+- no new trusted alpha primitive
 
 ---
 

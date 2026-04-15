@@ -168,6 +168,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "aristotle", .outcome = .pass },
     .{ .stem = "peirce", .outcome = .pass },
     .{ .stem = "gentzen", .outcome = .pass },
+    .{ .stem = "pass_alpha_freshen", .outcome = .pass },
     .{ .stem = "leibniz", .outcome = .pass },
     .{ .stem = "mac_lane", .outcome = .pass },
     .{ .stem = "mac_lane_unfold", .outcome = .pass },

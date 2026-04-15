@@ -1,6 +1,7 @@
 delimiter $ ( ) [ / ] $;
 provable sort wff;
 sort ctx;
+--| @vars u v w
 sort obj;
 
 term imp (a b: wff): wff;
@@ -159,6 +160,9 @@ axiom sb_t_h {x: obj} (t: obj x) (a b: obj x):
 axiom sb_t_other {x y: obj} (t: obj x): $ subst x / t y = y $;
 
 --| @rewrite
+axiom sb_t_free {x: obj} (t: obj x) (a: obj): $ subst x / t a = a $;
+
+--| @rewrite
 axiom sb_f_pred {x: obj} (t: obj x) (a b: obj x):
   $ [x/t] (F a b) ↔ F (subst x / t a) (subst x / t b) $;
 
@@ -193,6 +197,14 @@ axiom sb_f_all {x y: obj} (t: obj x) (p: wff x y):
 --| @rewrite
 axiom sb_f_ex {x y: obj} (t: obj x) (p: wff x y):
   $ [x/t] (∃ y p) ↔ ∃ y ([x/t] p) $;
+
+--| @alpha x y
+axiom all_alpha {x y: obj} (p: wff x y):
+  $ ∀ x p ↔ ∀ y ([x/y] p) $;
+
+--| @alpha x y
+axiom ex_alpha {x y: obj} (p: wff x y):
+  $ ∃ x p ↔ ∃ y ([x/y] p) $;
 
 -- ===== Natural deduction rules =====
 
@@ -281,6 +293,7 @@ axiom eq_transitivity (g: ctx) (a b c: obj):
   $ g ⊢ a = b $ > $ g ⊢ b = c $ > $ g ⊢ a = c $;
 
 -- Universal quantification
+--| @freshen g x
 --| @normalize hyp0 conc
 axiom all_intro (g: ctx) {x: obj} (p: wff x):
   $ g ⊢ p $ > $ g ⊢ ∀ x p $;
@@ -294,10 +307,12 @@ axiom all_elim {x: obj} (g: ctx x) (t: obj x) (p: wff x):
 -- Existential quantification
 --| @view {x: obj} (g: ctx) (t: obj x) (p: wff x) (q: wff): $ g ⊢ q $ > $ g ⊢ ∃ x p $
 --| @recover t q p x
+--| @freshen g x
 --| @normalize hyp0 conc
 axiom ex_intro {x: obj} (g: ctx) (t: obj x) (p: wff x):
   $ g ⊢ [x/t] p $ > $ g ⊢ ∃ x p $;
 
+--| @freshen c x
 --| @normalize hyp0 hyp1 conc
 axiom ex_elim {x: obj} (g: ctx x) (h: ctx x) (p: wff x) (c: wff):
   $ g ⊢ ∃ x p $ > $ h , p ⊢ c $ > $ g , h ⊢ c $;
@@ -349,6 +364,15 @@ theorem imp_trans (a b c: wff):
 theorem not_not_lem (a: wff): $ emp ⊢ ¬ ¬ (a ∨ ¬ a) $;
 
 -- ===== Quantifier theorems =====
+
+theorem alpha_all_intro_demo {a b: obj}:
+  $ ∀ a (F a b) , F b b ⊢ ∀ a (F b b) $;
+
+theorem alpha_ex_intro_demo {a b: obj}:
+  $ ∀ a (F a b) , F b b ⊢ ∃ a (F a b) $;
+
+theorem alpha_ex_elim_demo {a b: obj}:
+  $ ∀ a (F a b) , ∃ a (F a b) ⊢ ∀ a (F a b) $;
 
 -- Swapping universal quantifiers
 theorem forall_swap {a b: obj}:

@@ -10,6 +10,8 @@ const MM0Parser = mm0.MM0Parser;
 const Mmb = mm0.Mmb;
 const Proof = mm0.Proof;
 const ProofScript = mm0.ProofScript;
+const RewriteRegistry = mm0.RewriteRegistry.RewriteRegistry;
+const CompilerMetadata = mm0.CompilerSupport.Metadata;
 
 fn collectStatementCmds(
     allocator: std.mem.Allocator,
@@ -51,6 +53,131 @@ fn readProofCaseFile(
         path,
         std.math.maxInt(usize),
     );
+}
+
+fn replaceOnceOwned(
+    allocator: std.mem.Allocator,
+    src: []const u8,
+    needle: []const u8,
+    repl: []const u8,
+) ![]u8 {
+    const start = std.mem.indexOf(u8, src, needle) orelse {
+        return error.ExpectedNeedle;
+    };
+    return try std.fmt.allocPrint(
+        allocator,
+        "{s}{s}{s}",
+        .{
+            src[0..start],
+            repl,
+            src[start + needle.len ..],
+        },
+    );
+}
+
+const AnnotatedMetadata = struct {
+    env: FrontendEnv.GlobalEnv,
+    registry: RewriteRegistry,
+    fresh_bindings: std.AutoHashMap(
+        u32,
+        []const CompilerMetadata.FreshDecl,
+    ),
+    freshen_bindings: std.AutoHashMap(
+        u32,
+        []const CompilerMetadata.FreshenDecl,
+    ),
+    views: std.AutoHashMap(u32, CompilerMetadata.ViewDecl),
+    sort_vars: CompilerMetadata.SortVarRegistry,
+};
+
+fn processAnnotatedMetadata(
+    allocator: std.mem.Allocator,
+    src: []const u8,
+) !AnnotatedMetadata {
+    var parser = MM0Parser.init(src, allocator);
+    var result = AnnotatedMetadata{
+        .env = FrontendEnv.GlobalEnv.init(allocator),
+        .registry = RewriteRegistry.init(allocator),
+        .fresh_bindings = std.AutoHashMap(
+            u32,
+            []const CompilerMetadata.FreshDecl,
+        ).init(allocator),
+        .freshen_bindings = std.AutoHashMap(
+            u32,
+            []const CompilerMetadata.FreshenDecl,
+        ).init(allocator),
+        .views = std.AutoHashMap(
+            u32,
+            CompilerMetadata.ViewDecl,
+        ).init(allocator),
+        .sort_vars = CompilerMetadata.SortVarRegistry.init(allocator),
+    };
+
+    while (try parser.next()) |stmt| {
+        switch (stmt) {
+            .sort => |sort_stmt| {
+                try result.env.addStmt(stmt);
+                try CompilerMetadata.processSortMetadata(
+                    &parser,
+                    sort_stmt,
+                    parser.last_annotations,
+                    &result.sort_vars,
+                );
+            },
+            .term => |term_stmt| {
+                try result.env.addStmt(stmt);
+                try CompilerMetadata.processTermMetadata(
+                    &result.env,
+                    &result.registry,
+                    term_stmt,
+                    parser.last_annotations,
+                );
+            },
+            .assertion => |assertion| {
+                try result.env.addStmt(stmt);
+                try CompilerMetadata.processAssertionMetadata(
+                    allocator,
+                    &parser,
+                    &result.env,
+                    &result.registry,
+                    &result.fresh_bindings,
+                    &result.freshen_bindings,
+                    &result.views,
+                    assertion,
+                    parser.last_annotations,
+                );
+            },
+        }
+    }
+
+    return result;
+}
+
+fn ruleArgIndex(
+    rule: *const FrontendEnv.RuleDecl,
+    name: []const u8,
+) !usize {
+    for (rule.arg_names, 0..) |arg_name, idx| {
+        if (arg_name) |actual_name| {
+            if (std.mem.eql(u8, actual_name, name)) return idx;
+        }
+    }
+    return error.MissingRuleArg;
+}
+
+fn hasFreshenDecl(
+    decls: []const CompilerMetadata.FreshenDecl,
+    target_arg_idx: usize,
+    blocker_arg_idx: usize,
+) bool {
+    for (decls) |decl| {
+        if (decl.target_arg_idx == target_arg_idx and
+            decl.blocker_arg_idx == blocker_arg_idx)
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 test "compiler env retains def dummy metadata" {
@@ -1004,6 +1131,248 @@ test "transparent ctx defs satisfy structural intervals" {
         @as(usize, 0),
         compiler.warningDiagnostics().len,
     );
+}
+
+test "prawitz alpha freshen proof compiles and verifies" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "prawitz",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "prawitz",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+}
+
+test "compiler pinpoints invalid @freshen binder kinds" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "prawitz",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+
+    const rewritten = try replaceOnceOwned(
+        allocator,
+        mm0_src,
+        "@freshen g x",
+        "@freshen x g",
+    );
+    defer allocator.free(rewritten);
+
+    var compiler = Compiler.init(allocator, rewritten);
+    try std.testing.expectError(
+        error.FreshenTargetMustBeRegularBinder,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(
+        error.FreshenTargetMustBeRegularBinder,
+        diag.err,
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "@freshen x g",
+        rewritten[span.start..span.end],
+    );
+}
+
+test "compiler pinpoints invalid @alpha binder kinds" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "prawitz",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+
+    const rewritten = try replaceOnceOwned(
+        allocator,
+        mm0_src,
+        "@alpha x y",
+        "@alpha p y",
+    );
+    defer allocator.free(rewritten);
+
+    var compiler = Compiler.init(allocator, rewritten);
+    try std.testing.expectError(
+        error.AlphaRequiresBoundBinders,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.AlphaRequiresBoundBinders, diag.err);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "@alpha p y",
+        rewritten[span.start..span.end],
+    );
+}
+
+test "prawitz metadata registers alpha and freshen annotations" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "prawitz",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const meta = try processAnnotatedMetadata(arena.allocator(), mm0_src);
+
+    const all_term_id = meta.env.term_names.get("all") orelse {
+        return error.MissingTerm;
+    };
+    const ex_term_id = meta.env.term_names.get("ex") orelse {
+        return error.MissingTerm;
+    };
+    const all_alpha_id = meta.env.getRuleId("all_alpha") orelse {
+        return error.MissingRule;
+    };
+    const ex_alpha_id = meta.env.getRuleId("ex_alpha") orelse {
+        return error.MissingRule;
+    };
+
+    const all_alpha_rules = meta.registry.getAlphaRules(all_term_id);
+    try std.testing.expectEqual(@as(usize, 1), all_alpha_rules.len);
+    try std.testing.expectEqual(all_alpha_id, all_alpha_rules[0].rule_id);
+
+    const ex_alpha_rules = meta.registry.getAlphaRules(ex_term_id);
+    try std.testing.expectEqual(@as(usize, 1), ex_alpha_rules.len);
+    try std.testing.expectEqual(ex_alpha_id, ex_alpha_rules[0].rule_id);
+
+    const all_alpha_rule = &meta.env.rules.items[all_alpha_id];
+    try std.testing.expectEqual(
+        try ruleArgIndex(all_alpha_rule, "x"),
+        all_alpha_rules[0].old_idx,
+    );
+    try std.testing.expectEqual(
+        try ruleArgIndex(all_alpha_rule, "y"),
+        all_alpha_rules[0].new_idx,
+    );
+
+    const ex_alpha_rule = &meta.env.rules.items[ex_alpha_id];
+    try std.testing.expectEqual(
+        try ruleArgIndex(ex_alpha_rule, "x"),
+        ex_alpha_rules[0].old_idx,
+    );
+    try std.testing.expectEqual(
+        try ruleArgIndex(ex_alpha_rule, "y"),
+        ex_alpha_rules[0].new_idx,
+    );
+
+    const all_intro_id = meta.env.getRuleId("all_intro") orelse {
+        return error.MissingRule;
+    };
+    const all_intro_rule = &meta.env.rules.items[all_intro_id];
+    const all_intro_freshen =
+        meta.freshen_bindings.get(all_intro_id) orelse {
+            return error.MissingFreshenDecl;
+        };
+    try std.testing.expectEqual(@as(usize, 1), all_intro_freshen.len);
+    try std.testing.expect(hasFreshenDecl(
+        all_intro_freshen,
+        try ruleArgIndex(all_intro_rule, "g"),
+        try ruleArgIndex(all_intro_rule, "x"),
+    ));
+
+    const ex_intro_id = meta.env.getRuleId("ex_intro") orelse {
+        return error.MissingRule;
+    };
+    const ex_intro_rule = &meta.env.rules.items[ex_intro_id];
+    const ex_intro_freshen = meta.freshen_bindings.get(ex_intro_id) orelse {
+        return error.MissingFreshenDecl;
+    };
+    try std.testing.expectEqual(@as(usize, 1), ex_intro_freshen.len);
+    try std.testing.expect(hasFreshenDecl(
+        ex_intro_freshen,
+        try ruleArgIndex(ex_intro_rule, "g"),
+        try ruleArgIndex(ex_intro_rule, "x"),
+    ));
+
+    const ex_elim_id = meta.env.getRuleId("ex_elim") orelse {
+        return error.MissingRule;
+    };
+    const ex_elim_rule = &meta.env.rules.items[ex_elim_id];
+    const ex_elim_freshen = meta.freshen_bindings.get(ex_elim_id) orelse {
+        return error.MissingFreshenDecl;
+    };
+    try std.testing.expectEqual(@as(usize, 1), ex_elim_freshen.len);
+    try std.testing.expect(hasFreshenDecl(
+        ex_elim_freshen,
+        try ruleArgIndex(ex_elim_rule, "c"),
+        try ruleArgIndex(ex_elim_rule, "x"),
+    ));
+}
+
+test "pass_alpha_freshen metadata registers alpha and freshen annotations" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_alpha_freshen",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const meta = try processAnnotatedMetadata(arena.allocator(), mm0_src);
+
+    const all_term_id = meta.env.term_names.get("all") orelse {
+        return error.MissingTerm;
+    };
+    const ex_term_id = meta.env.term_names.get("ex") orelse {
+        return error.MissingTerm;
+    };
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        meta.registry.getAlphaRules(all_term_id).len,
+    );
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        meta.registry.getAlphaRules(ex_term_id).len,
+    );
+
+    const quantifier_rules = [_][]const u8{
+        "all_left",
+        "all_right",
+        "ex_left",
+        "ex_right",
+    };
+    for (quantifier_rules) |rule_name| {
+        const rule_id = meta.env.getRuleId(rule_name) orelse {
+            return error.MissingRule;
+        };
+        const rule = &meta.env.rules.items[rule_id];
+        const decls = meta.freshen_bindings.get(rule_id) orelse {
+            return error.MissingFreshenDecl;
+        };
+        try std.testing.expectEqual(@as(usize, 2), decls.len);
+        try std.testing.expect(hasFreshenDecl(
+            decls,
+            try ruleArgIndex(rule, "g"),
+            try ruleArgIndex(rule, "x"),
+        ));
+        try std.testing.expect(hasFreshenDecl(
+            decls,
+            try ruleArgIndex(rule, "d"),
+            try ruleArgIndex(rule, "x"),
+        ));
+    }
 }
 
 test "joint structural cover conflicts fail before missing binders" {

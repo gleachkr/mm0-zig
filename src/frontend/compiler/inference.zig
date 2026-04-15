@@ -47,6 +47,11 @@ const ExprInfo = struct {
     deps: u55,
 };
 
+pub const DepViolationDetail = struct {
+    first_arg_idx: usize,
+    second_arg_idx: usize,
+};
+
 pub const HiddenWitnessFreshContext = struct {
     parser: *MM0Parser,
     theorem_vars: *NameExprMap,
@@ -583,29 +588,6 @@ fn inferBindingsByMatchSeedState(
     );
 }
 
-fn validateInferredBindings(
-    self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    line: ProofLine,
-    rule: *const RuleDecl,
-    bindings: []const ExprId,
-) ![]const ExprId {
-    errdefer allocator.free(bindings);
-    try validateResolvedBindings(
-        self,
-        env,
-        theorem,
-        assertion,
-        line,
-        rule,
-        bindings,
-    );
-    return bindings;
-}
-
 pub fn shouldUseAdvancedInference(
     rule_id: u32,
     maybe_view: ?ViewDecl,
@@ -704,16 +686,7 @@ pub fn inferBindings(
                 seeded_bindings_storage = seeded;
 
                 if (!hasOmittedBindings(seeded)) {
-                    return try validateInferredBindings(
-                        self,
-                        allocator,
-                        env,
-                        theorem,
-                        assertion,
-                        line,
-                        rule,
-                        try requireConcreteBindings(allocator, seeded),
-                    );
+                    return try requireConcreteBindings(allocator, seeded);
                 }
 
                 const semantic_mask = try derivedViewRuleSeedMask(
@@ -797,16 +770,7 @@ pub fn inferBindings(
         scratch.discard(match_mark);
         switch (match_result) {
             .concrete => |bindings| {
-                return try validateInferredBindings(
-                    self,
-                    allocator,
-                    env,
-                    theorem,
-                    assertion,
-                    line,
-                    rule,
-                    bindings,
-                );
+                return bindings;
             },
             .no_match => {},
             .unresolved_dummy_witness => {
@@ -851,16 +815,6 @@ pub fn inferBindings(
             return err;
         };
 
-        const validated = try validateInferredBindings(
-            self,
-            allocator,
-            env,
-            theorem,
-            assertion,
-            line,
-            rule,
-            bindings,
-        );
         if (solver.hadAmbiguityWarning()) {
             self.addWarning(.{
                 .severity = .warning,
@@ -873,7 +827,7 @@ pub fn inferBindings(
                 .span = line.ruleApplicationSpan(),
             });
         }
-        return validated;
+        return bindings;
     }
 
     if (strictInferBindings(
@@ -915,16 +869,7 @@ pub fn inferBindings(
                 break :blk null;
             };
             if (transparent) |bindings| {
-                return try validateInferredBindings(
-                    self,
-                    allocator,
-                    env,
-                    theorem,
-                    assertion,
-                    line,
-                    rule,
-                    bindings,
-                );
+                return bindings;
             }
         }
         CompilerDiag.setProof(self, .{
@@ -1010,13 +955,13 @@ pub fn strictInferBindings(
         };
         bindings[idx] = binding;
     }
-    if (!try bindingsRespectRuleDeps(
+    if (try firstDepViolation(
         env,
         theorem,
         assertion.args,
         rule.args,
         bindings,
-    )) {
+    )) |_| {
         allocator.free(bindings);
         CompilerDiag.maybeSetProof(self, .{
             .kind = .generic,
@@ -1060,13 +1005,13 @@ pub fn validateResolvedBindings(
             return err;
         };
     }
-    if (!try bindingsRespectRuleDeps(
+    if (try firstDepViolation(
         env,
         theorem,
         assertion.args,
         rule.args,
         bindings,
-    )) {
+    )) |_| {
         CompilerDiag.setProof(self, .{
             .kind = .generic,
             .err = error.DepViolation,
@@ -1086,30 +1031,60 @@ pub fn bindingsRespectRuleDeps(
     rule_args: []const ArgInfo,
     bindings: []const ExprId,
 ) !bool {
+    return (try firstDepViolation(
+        env,
+        theorem,
+        theorem_args,
+        rule_args,
+        bindings,
+    )) == null;
+}
+
+pub fn firstDepViolation(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    theorem_args: []const ArgInfo,
+    rule_args: []const ArgInfo,
+    bindings: []const ExprId,
+) !?DepViolationDetail {
     var bound_deps: [56]u55 = undefined;
+    var bound_arg_indices: [56]usize = undefined;
     var bound_len: usize = 0;
     var prev_deps: [56]u55 = undefined;
+    var prev_arg_indices: [56]usize = undefined;
     var prev_len: usize = 0;
 
-    for (bindings, rule_args) |binding, expected| {
+    for (bindings, rule_args, 0..) |binding, expected, idx| {
         const info = try exprInfo(env, theorem, theorem_args, binding);
         if (expected.bound) {
             for (0..prev_len) |k| {
-                if (prev_deps[k] & info.deps != 0) return false;
+                if (prev_deps[k] & info.deps != 0) {
+                    return .{
+                        .first_arg_idx = prev_arg_indices[k],
+                        .second_arg_idx = idx,
+                    };
+                }
             }
             bound_deps[bound_len] = info.deps;
+            bound_arg_indices[bound_len] = idx;
             bound_len += 1;
         } else {
             for (0..bound_len) |k| {
                 if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0)
                     continue;
-                if (bound_deps[k] & info.deps != 0) return false;
+                if (bound_deps[k] & info.deps != 0) {
+                    return .{
+                        .first_arg_idx = bound_arg_indices[k],
+                        .second_arg_idx = idx,
+                    };
+                }
             }
         }
         prev_deps[prev_len] = info.deps;
+        prev_arg_indices[prev_len] = idx;
         prev_len += 1;
     }
-    return true;
+    return null;
 }
 
 // Inference only solves equalities. We still need the same sort, boundness,
