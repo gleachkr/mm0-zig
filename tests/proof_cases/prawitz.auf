@@ -20,3 +20,210 @@ l16: $ _ ⊢ ∀ z ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $ by all_intr
 l17: $ _ ⊢ ∀ y ∀ z ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $ by all_intro [l16]
 l18: $ _ ⊢ ∀ x ∀ y ∀ z ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $ by all_intro [l17]
 l19: $ _ ⊢ ∀ w ∀ x ∀ y ∀ z ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $ by all_intro [l18]
+
+identity
+--------
+
+l1: $ a ⊢ a $ by ax []
+l2: $ _ ⊢ a → a $ by imp_intro [l1]
+
+explosion
+---------
+
+l1: $ ⊥ ⊢ ⊥ $ by ax []
+l2: $ ⊥ ⊢ a $ by bot_elim [l1]
+l3: $ _ ⊢ ⊥ → a $ by imp_intro [l2]
+
+double_neg_intro
+----------------
+
+l1: $ ¬ a ⊢ ¬ a $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ ¬ a , a ⊢ ⊥ $ by not_elim [l1, l2]
+l4: $ a ⊢ ¬ ¬ a $ by not_intro [l3]
+l5: $ _ ⊢ a → ¬ ¬ a $ by imp_intro [l4]
+
+modus_tollens
+-------------
+
+l1: $ (a → b) ⊢ a → b $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ (a → b) , a ⊢ b $ by imp_elim [l1, l2]
+l4: $ ¬ b ⊢ ¬ b $ by ax []
+l5: $ ¬ b , (a → b) , a ⊢ ⊥ $ by not_elim [l4, l3]
+l6: $ ¬ b , (a → b) ⊢ ¬ a $ by not_intro [l5]
+l7: $ (a → b) ⊢ ¬ b → ¬ a $ by imp_intro [l6]
+l8: $ _ ⊢ (a → b) → ¬ b → ¬ a $ by imp_intro [l7]
+
+and_comm_iff
+------------
+
+-- Forward: (a /\ b) -> (b /\ a)
+l1: $ (a ∧ b) ⊢ a ∧ b $ by ax []
+l2: $ (a ∧ b) ⊢ a $ by and_elim_l [l1]
+l3: $ (a ∧ b) ⊢ b $ by and_elim_r [l1]
+l4: $ (a ∧ b) ⊢ b ∧ a $ by and_intro [l3, l2]
+l5: $ _ ⊢ (a ∧ b) → (b ∧ a) $ by imp_intro [l4]
+-- Backward: (b /\ a) -> (a /\ b)
+l6: $ (b ∧ a) ⊢ b ∧ a $ by ax []
+l7: $ (b ∧ a) ⊢ b $ by and_elim_l [l6]
+l8: $ (b ∧ a) ⊢ a $ by and_elim_r [l6]
+l9: $ (b ∧ a) ⊢ a ∧ b $ by and_intro [l8, l7]
+l10: $ _ ⊢ (b ∧ a) → (a ∧ b) $ by imp_intro [l9]
+-- Combine
+l11: $ _ ⊢ (a ∧ b) ↔ (b ∧ a) $ by iff_intro [l5, l10]
+
+or_comm
+-------
+
+l1: $ (a ∨ b) ⊢ a ∨ b $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ a ⊢ b ∨ a $ by or_intro_r [l2]
+l4: $ b ⊢ b $ by ax []
+l5: $ b ⊢ b ∨ a $ by or_intro_l [l4]
+l6: $ (a ∨ b) ⊢ b ∨ a $ by or_elim [l1, l3, l5]
+l7: $ _ ⊢ (a ∨ b) → (b ∨ a) $ by imp_intro [l6]
+
+disjunctive_syllogism
+---------------------
+
+l1: $ (a ∨ b) ⊢ a ∨ b $ by ax []
+l2: $ ¬ a ⊢ ¬ a $ by ax []
+l3: $ a ⊢ a $ by ax []
+l4: $ ¬ a , a ⊢ ⊥ $ by not_elim [l2, l3]
+l5: $ ¬ a , a ⊢ b $ by bot_elim [l4]
+l6: $ b ⊢ b $ by ax []
+l7: $ ¬ a , (a ∨ b) ⊢ b $ by or_elim [l1, l5, l6]
+l8: $ (a ∨ b) ⊢ ¬ a → b $ by imp_intro [l7]
+l9: $ _ ⊢ (a ∨ b) → ¬ a → b $ by imp_intro [l8]
+
+de_morgan_or
+------------
+
+-- Forward: ~(a \/ b) -> (~a /\ ~b)
+l1: $ ¬ (a ∨ b) ⊢ ¬ (a ∨ b) $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ a ⊢ a ∨ b $ by or_intro_l [l2]
+l4: $ ¬ (a ∨ b) , a ⊢ ⊥ $ by not_elim [l1, l3]
+l5: $ ¬ (a ∨ b) ⊢ ¬ a $ by not_intro [l4]
+l6: $ b ⊢ b $ by ax []
+l7: $ b ⊢ a ∨ b $ by or_intro_r [l6]
+l8: $ ¬ (a ∨ b) , b ⊢ ⊥ $ by not_elim [l1, l7]
+l9: $ ¬ (a ∨ b) ⊢ ¬ b $ by not_intro [l8]
+l10: $ ¬ (a ∨ b) ⊢ ¬ a ∧ ¬ b $ by and_intro [l5, l9]
+l11: $ _ ⊢ ¬ (a ∨ b) → (¬ a ∧ ¬ b) $ by imp_intro [l10]
+-- Backward: (~a /\ ~b) -> ~(a \/ b)
+l12: $ (¬ a ∧ ¬ b) ⊢ ¬ a ∧ ¬ b $ by ax []
+l13: $ (¬ a ∧ ¬ b) ⊢ ¬ a $ by and_elim_l [l12]
+l14: $ (¬ a ∧ ¬ b) ⊢ ¬ b $ by and_elim_r [l12]
+l15: $ (a ∨ b) ⊢ a ∨ b $ by ax []
+l16: $ a ⊢ a $ by ax []
+l17: $ (¬ a ∧ ¬ b) , a ⊢ ⊥ $ by not_elim [l13, l16]
+l18: $ b ⊢ b $ by ax []
+l19: $ (¬ a ∧ ¬ b) , b ⊢ ⊥ $ by not_elim [l14, l18]
+l20: $ (¬ a ∧ ¬ b) , (a ∨ b) ⊢ ⊥ $ by or_elim [l15, l17, l19]
+l21: $ (¬ a ∧ ¬ b) ⊢ ¬ (a ∨ b) $ by not_intro [l20]
+l22: $ _ ⊢ (¬ a ∧ ¬ b) → ¬ (a ∨ b) $ by imp_intro [l21]
+-- Combine
+l23: $ _ ⊢ ¬ (a ∨ b) ↔ (¬ a ∧ ¬ b) $ by iff_intro [l11, l22]
+
+curry_iff
+---------
+
+-- Forward: ((a /\ b) -> c) -> (a -> b -> c)
+l1: $ (a ∧ b) → c ⊢ (a ∧ b) → c $ by ax []
+l2: $ a , b ⊢ a $ by ax []
+l3: $ a , b ⊢ b $ by ax []
+l4: $ a , b ⊢ a ∧ b $ by and_intro [l2, l3]
+l5: $ (a ∧ b) → c , a , b ⊢ c $ by imp_elim [l1, l4]
+l6: $ (a ∧ b) → c , a ⊢ b → c $ by imp_intro [l5]
+l7: $ (a ∧ b) → c ⊢ a → b → c $ by imp_intro [l6]
+l8: $ _ ⊢ ((a ∧ b) → c) → (a → b → c) $ by imp_intro [l7]
+-- Backward: (a -> b -> c) -> ((a /\ b) -> c)
+l9: $ a → b → c ⊢ a → b → c $ by ax []
+l10: $ (a ∧ b) ⊢ a ∧ b $ by ax []
+l11: $ (a ∧ b) ⊢ a $ by and_elim_l [l10]
+l12: $ (a ∧ b) ⊢ b $ by and_elim_r [l10]
+l13: $ (a → b → c) , (a ∧ b) ⊢ b → c $ by imp_elim [l9, l11]
+l14: $ (a → b → c) , (a ∧ b) ⊢ c $ by imp_elim [l13, l12]
+l15: $ (a → b → c) ⊢ (a ∧ b) → c $ by imp_intro [l14]
+l16: $ _ ⊢ (a → b → c) → ((a ∧ b) → c) $ by imp_intro [l15]
+-- Combine
+l17: $ _ ⊢ ((a ∧ b) → c) ↔ (a → b → c) $ by iff_intro [l8, l16]
+
+imp_trans
+---------
+
+l1: $ (a → b) ⊢ a → b $ by ax []
+l2: $ (b → c) ⊢ b → c $ by ax []
+l3: $ a ⊢ a $ by ax []
+l4: $ (a → b) , a ⊢ b $ by imp_elim [l1, l3]
+l5: $ (b → c) , (a → b) , a ⊢ c $ by imp_elim [l2, l4]
+l6: $ (b → c) , (a → b) ⊢ a → c $ by imp_intro [l5]
+l7: $ (a → b) ⊢ (b → c) → (a → c) $ by imp_intro [l6]
+l8: $ _ ⊢ (a → b) → (b → c) → (a → c) $ by imp_intro [l7]
+
+not_not_lem
+-----------
+
+-- Proof that ~~(a \/ ~a) is intuitionistically valid
+l1: $ ¬ (a ∨ ¬ a) ⊢ ¬ (a ∨ ¬ a) $ by ax []
+-- Derive ~a from ~(a \/ ~a)
+l2: $ a ⊢ a $ by ax []
+l3: $ a ⊢ a ∨ ¬ a $ by or_intro_l [l2]
+l4: $ ¬ (a ∨ ¬ a) , a ⊢ ⊥ $ by not_elim [l1, l3]
+l5: $ ¬ (a ∨ ¬ a) ⊢ ¬ a $ by not_intro [l4]
+-- Now a \/ ~a from ~a
+l6: $ ¬ (a ∨ ¬ a) ⊢ a ∨ ¬ a $ by or_intro_r [l5]
+-- Contradiction
+l7: $ ¬ (a ∨ ¬ a) ⊢ ⊥ $ by not_elim [l1, l6]
+-- Conclude ~~(a \/ ~a)
+l8: $ _ ⊢ ¬ ¬ (a ∨ ¬ a) $ by not_intro [l7]
+
+forall_swap
+-----------
+
+l1: $ _ ⊢ ∀ b (F a b) $ by all_elim [#1]
+l2: $ _ ⊢ F a b $ by all_elim [l1]
+l3: $ _ ⊢ ∀ a (F a b) $ by all_intro [l2]
+l4: $ _ ⊢ ∀ b ∀ a (F a b) $ by all_intro [l3]
+
+forall_specialize
+-----------------
+
+l1: $ _ ⊢ ∀ b (F c b) $ by all_elim [#1]
+l2: $ _ ⊢ F c a $ by all_elim [l1]
+
+forall_and_combine
+------------------
+
+l1: $ _ ⊢ F a b $ by all_elim [#1]
+l2: $ _ ⊢ F b a $ by all_elim [#2]
+l3: $ _ ⊢ F a b ∧ F b a $ by and_intro [l1, l2]
+l4: $ _ ⊢ ∀ a (F a b ∧ F b a) $ by all_intro [l3]
+
+exists_from_forall
+------------------
+
+l1: $ _ ⊢ F a b $ by all_elim [#1]
+l2: $ _ ⊢ ∃ a (F a b) $ by ex_intro [l1]
+
+forall_imp_distribute
+---------------------
+
+l1: $ _ ⊢ (F a b) → (F b a) $ by all_elim [#1]
+l2: $ _ ⊢ F a b $ by all_elim [#2]
+l3: $ _ ⊢ F b a $ by imp_elim [l1, l2]
+l4: $ _ ⊢ ∀ a (F b a) $ by all_intro [l3]
+
+forall_not_to_not_exists
+------------------------
+
+l1: $ (∀ a (¬ (F a b))) ⊢ ∀ a (¬ (F a b)) $ by ax []
+l2: $ (∀ a (¬ (F a b))) ⊢ ¬ (F a b) $ by all_elim [l1]
+l3: $ (F a b) ⊢ F a b $ by ax []
+l4: $ (∀ a (¬ (F a b))) , (F a b) ⊢ ⊥ $ by not_elim [l2, l3]
+l5: $ (∃ a (F a b)) ⊢ ∃ a (F a b) $ by ax []
+l6: $ (∀ a (¬ (F a b))) , (∃ a (F a b)) ⊢ ⊥ $ by ex_elim [l5, l4]
+l7: $ (∀ a (¬ (F a b))) ⊢ ¬ (∃ a (F a b)) $ by not_intro [l6]
+l8: $ _ ⊢ (∀ a (¬ (F a b))) → ¬ (∃ a (F a b)) $ by imp_intro [l7]

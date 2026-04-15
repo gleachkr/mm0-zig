@@ -8,13 +8,26 @@ infixr imp: $→$ prec 25;
 infixr imp: $->$ prec 25;
 term and (a b: wff): wff;
 infixr and: $∧$ prec 30;
-infixr and: $/\\$ prec 30;
+infixr and: $/\$ prec 30;
 term iff (a b: wff): wff;
 infixr iff: $↔$ prec 20;
 infixr iff: $<->$ prec 20;
+term or (a b: wff): wff;
+infixr or: $∨$ prec 28;
+infixr or: $\/$ prec 28;
+term not (a: wff): wff;
+prefix not: $¬$ prec 40;
+prefix not: $~$ prec 40;
+term bot: wff;
+notation bot: wff = ($⊥$:max);
+term top: wff;
+notation top: wff = ($⊤$:max);
 term all {x: obj} (p: wff x): wff;
 prefix all: $∀$ prec 41;
 prefix all: $A.$ prec 41;
+term ex {x: obj} (p: wff x): wff;
+prefix ex: $∃$ prec 41;
+prefix ex: $E.$ prec 41;
 
 term eq (a b: obj): wff;
 infixl eq: $=$ prec 35;
@@ -45,6 +58,8 @@ infixl nd: $⊢$ prec 0;
 -- This is how the ∀-intro side condition is represented here:
 -- `g: ctx` cannot depend on `x`, while the goal `p: wff x` may.
 
+-- ===== Equivalence relations =====
+
 --| @relation wff iff iff_refl iff_trans iff_sym iff_mp
 axiom iff_refl (a: wff): $ a ↔ a $;
 axiom iff_trans (a b c: wff):
@@ -68,6 +83,8 @@ axiom ctx_assoc (g h i: ctx):
 axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
 axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
 axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+-- ===== Congruence rules =====
 
 --| @congr
 axiom join_congr (g1 g2 h1 h2: ctx):
@@ -106,12 +123,26 @@ axiom and_congr (a b c d: wff):
   $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
 
 --| @congr
+axiom or_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∨ c) ↔ (b ∨ d) $;
+
+--| @congr
+axiom not_congr (a b: wff):
+  $ a ↔ b $ > $ ¬ a ↔ ¬ b $;
+
+--| @congr
 axiom iff_congr (a b c d: wff):
   $ a ↔ b $ > $ c ↔ d $ > $ (a ↔ c) ↔ (b ↔ d) $;
 
 --| @congr
 axiom all_congr {x: obj} (p q: wff x):
   $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @congr
+axiom ex_congr {x: obj} (p q: wff x):
+  $ p ↔ q $ > $ ∃ x p ↔ ∃ x q $;
+
+-- ===== Substitution rewrite rules =====
 
 --| @rewrite
 axiom sb_t_var {x: obj} (t: obj x): $ subst x / t x = t $;
@@ -144,6 +175,14 @@ axiom sb_f_and {x: obj} (t: obj x) (p q: wff x):
   $ [x/t] (p ∧ q) ↔ ([x/t] p ∧ [x/t] q) $;
 
 --| @rewrite
+axiom sb_f_or {x: obj} (t: obj x) (p q: wff x):
+  $ [x/t] (p ∨ q) ↔ ([x/t] p ∨ [x/t] q) $;
+
+--| @rewrite
+axiom sb_f_not {x: obj} (t: obj x) (p: wff x):
+  $ [x/t] (¬ p) ↔ ¬ ([x/t] p) $;
+
+--| @rewrite
 axiom sb_f_iff {x: obj} (t: obj x) (p q: wff x):
   $ [x/t] (p ↔ q) ↔ ([x/t] p ↔ [x/t] q) $;
 
@@ -151,9 +190,17 @@ axiom sb_f_iff {x: obj} (t: obj x) (p q: wff x):
 axiom sb_f_all {x y: obj} (t: obj x) (p: wff x y):
   $ [x/t] (∀ y p) ↔ ∀ y ([x/t] p) $;
 
+--| @rewrite
+axiom sb_f_ex {x y: obj} (t: obj x) (p: wff x y):
+  $ [x/t] (∃ y p) ↔ ∃ y ([x/t] p) $;
+
+-- ===== Natural deduction rules =====
+
+-- Axiom (hypothesis)
 --| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 
+-- Implication
 --| @normalize hyp0 hyp1 conc
 axiom imp_intro (g: ctx) (a b: wff):
   $ g , a ⊢ b $ > $ g ⊢ a → b $;
@@ -162,6 +209,7 @@ axiom imp_intro (g: ctx) (a b: wff):
 axiom imp_elim (g h: ctx) (a b: wff):
   $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
+-- Conjunction
 --| @normalize hyp0 hyp1 conc
 axiom and_intro (g: ctx) (a b: wff):
   $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
@@ -174,6 +222,24 @@ axiom and_elim_l (g: ctx) (a b: wff):
 axiom and_elim_r (g: ctx) (a b: wff):
   $ g ⊢ a ∧ b $ > $ g ⊢ b $;
 
+-- Disjunction
+--| @normalize hyp0 conc
+axiom or_intro_l (g: ctx) (a b: wff):
+  $ g ⊢ a $ > $ g ⊢ a ∨ b $;
+
+--| @normalize hyp0 conc
+axiom or_intro_r (g: ctx) (a b: wff):
+  $ g ⊢ b $ > $ g ⊢ a ∨ b $;
+
+--| @normalize hyp0 hyp1 hyp2 conc
+axiom or_elim (g h i: ctx) (a b c: wff):
+  $ g ⊢ a ∨ b $ > $ h , a ⊢ c $ > $ i , b ⊢ c $ > $ g , h , i ⊢ c $;
+
+-- Biconditional introduction
+--| @normalize hyp0 hyp1 conc
+axiom iff_intro (g h: ctx) (a b: wff):
+  $ g ⊢ a → b $ > $ h ⊢ b → a $ > $ g , h ⊢ a ↔ b $;
+
 --| @view (g h _k : ctx) (a b: wff): $ g ⊢ a ↔ b $ > $ h ⊢ a $ > $ _k ⊢ b $
 --| @normalize hyp0 hyp1 conc
 axiom iff_elim_l (g h : ctx) (a b: wff):
@@ -184,6 +250,25 @@ axiom iff_elim_l (g h : ctx) (a b: wff):
 axiom iff_elim_r (g h : ctx) (a b: wff):
   $ g ⊢ a ↔ b $ > $ h ⊢ b $ > $ g , h ⊢ a $;
 
+-- Negation
+--| @normalize hyp0 conc
+axiom not_intro (g: ctx) (a: wff):
+  $ g , a ⊢ ⊥ $ > $ g ⊢ ¬ a $;
+
+--| @normalize hyp0 hyp1 conc
+axiom not_elim (g h: ctx) (a: wff):
+  $ g ⊢ ¬ a $ > $ h ⊢ a $ > $ g , h ⊢ ⊥ $;
+
+-- Absurdity
+--| @normalize hyp0 conc
+axiom bot_elim (g: ctx) (a: wff):
+  $ g ⊢ ⊥ $ > $ g ⊢ a $;
+
+-- Truth
+--| @normalize conc
+axiom top_intro (g: ctx): $ g ⊢ ⊤ $;
+
+-- Equality
 --| @normalize conc
 axiom eq_intro (g: ctx) (a: obj): $ g ⊢ a = a $;
 
@@ -195,6 +280,7 @@ axiom eq_symm (g: ctx) (a b: obj):
 axiom eq_transitivity (g: ctx) (a b c: obj):
   $ g ⊢ a = b $ > $ g ⊢ b = c $ > $ g ⊢ a = c $;
 
+-- Universal quantification
 --| @normalize hyp0 conc
 axiom all_intro (g: ctx) {x: obj} (p: wff x):
   $ g ⊢ p $ > $ g ⊢ ∀ x p $;
@@ -202,10 +288,95 @@ axiom all_intro (g: ctx) {x: obj} (p: wff x):
 --| @view  {x: obj} (g: ctx x) (t: obj x) (p: wff x) (q: wff): $ g ⊢ ∀ x p $ > $ g ⊢ q $
 --| @recover t q p x
 --| @normalize conc
-axiom all_elim {x: obj} (g: ctx) (t: obj x) (p: wff x):
+axiom all_elim {x: obj} (g: ctx x) (t: obj x) (p: wff x):
   $ g ⊢ ∀ x p $ > $ g ⊢ [x/t] p $;
 
+-- Existential quantification
+--| @view {x: obj} (g: ctx) (t: obj x) (p: wff x) (q: wff): $ g ⊢ q $ > $ g ⊢ ∃ x p $
+--| @recover t q p x
+--| @normalize hyp0 conc
+axiom ex_intro {x: obj} (g: ctx) (t: obj x) (p: wff x):
+  $ g ⊢ [x/t] p $ > $ g ⊢ ∃ x p $;
+
+--| @normalize hyp0 hyp1 conc
+axiom ex_elim {x: obj} (g: ctx x) (h: ctx x) (p: wff x) (c: wff):
+  $ g ⊢ ∃ x p $ > $ h , p ⊢ c $ > $ g , h ⊢ c $;
+
+-- ===== Theorems =====
+
+-- Existing theorem
 theorem quant_functionality {w x y z: obj}:
   $ emp ⊢ ∀ x ∀ y ∀ z (F x (g y z) ↔ h x y = h x z) $
   > $ emp ⊢ ∀ w ∀ x ∀ y ∀ z
       ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $;
+
+-- Identity
+theorem identity (a: wff): $ emp ⊢ a → a $;
+
+-- Ex falso quodlibet
+theorem explosion (a: wff): $ emp ⊢ ⊥ → a $;
+
+-- Double negation introduction (intuitionistically valid)
+theorem double_neg_intro (a: wff): $ emp ⊢ a → ¬ ¬ a $;
+
+-- Modus tollens / contraposition
+theorem modus_tollens (a b: wff):
+  $ emp ⊢ (a → b) → ¬ b → ¬ a $;
+
+-- Conjunction is commutative
+theorem and_comm_iff (a b: wff): $ emp ⊢ (a ∧ b) ↔ (b ∧ a) $;
+
+-- Disjunction is commutative
+theorem or_comm (a b: wff): $ emp ⊢ (a ∨ b) → (b ∨ a) $;
+
+-- Disjunctive syllogism
+theorem disjunctive_syllogism (a b: wff):
+  $ emp ⊢ (a ∨ b) → ¬ a → b $;
+
+-- De Morgan's law for disjunction
+theorem de_morgan_or (a b: wff):
+  $ emp ⊢ ¬ (a ∨ b) ↔ (¬ a ∧ ¬ b) $;
+
+-- Currying / uncurrying
+theorem curry_iff (a b c: wff):
+  $ emp ⊢ ((a ∧ b) → c) ↔ (a → b → c) $;
+
+-- Hypothetical syllogism (transitivity of implication)
+theorem imp_trans (a b c: wff):
+  $ emp ⊢ (a → b) → (b → c) → (a → c) $;
+
+-- Double negation of excluded middle (intuitionistically valid!)
+theorem not_not_lem (a: wff): $ emp ⊢ ¬ ¬ (a ∨ ¬ a) $;
+
+-- ===== Quantifier theorems =====
+
+-- Swapping universal quantifiers
+theorem forall_swap {a b: obj}:
+  $ emp ⊢ ∀ a ∀ b (F a b) $
+  > $ emp ⊢ ∀ b ∀ a (F a b) $;
+
+-- Instantiation with variable swapping
+theorem forall_specialize {a b c: obj}:
+  $ emp ⊢ ∀ a ∀ b (F a b) $
+  > $ emp ⊢ F c a $;
+
+-- Combining two universals into a conjunction
+theorem forall_and_combine {a b: obj}:
+  $ emp ⊢ ∀ a (F a b) $
+  > $ emp ⊢ ∀ a (F b a) $
+  > $ emp ⊢ ∀ a (F a b ∧ F b a) $;
+
+-- Universal implies existential (via witness)
+theorem exists_from_forall {a b: obj}:
+  $ emp ⊢ ∀ a (F a b) $
+  > $ emp ⊢ ∃ a (F a b) $;
+
+-- Distributing universal over implication
+theorem forall_imp_distribute {a b: obj}:
+  $ emp ⊢ ∀ a ((F a b) → (F b a)) $
+  > $ emp ⊢ ∀ a (F a b) $
+  > $ emp ⊢ ∀ a (F b a) $;
+
+-- If nothing satisfies P, then there is no witness for P
+theorem forall_not_to_not_exists {a b: obj}:
+  $ emp ⊢ (∀ a (¬ (F a b))) → ¬ (∃ a (F a b)) $;
