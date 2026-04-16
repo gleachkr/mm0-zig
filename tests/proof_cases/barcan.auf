@@ -1,54 +1,54 @@
 barcan
 ------
 
-l1: $ w : (∀ x (□ p)) , w R v ⊢ w : (∀ x (□ p)) $ by ax
-l2: $ w : (∀ x (□ p)) , w R v ⊢ w : (□ ([x/z] p)) $ by all_elim [l1]
-l3: $ w : (∀ x (□ p)) , w R v ⊢ w R v $ by ax
-l4: $ w : (∀ x (□ p)) , w R v ⊢ v : ([x/z] p) $ by box_elim [l2, l3]
-l5: $ w : (∀ x (□ p)) , w R v ⊢ v : (∀ z ([x/z] p)) $ by all_intro [l4]
-l6: $ w : (∀ x (□ p)) ⊢ w : (□ (∀ z ([x/z] p))) $ by box_intro [l5]
-l7: $ _ ⊢ w : ((∀ x (□ p)) → □ (∀ z ([x/z] p))) $ by imp_intro [l6]
+l1: $ w : ∀ x (□ p) , w R v ⊢ w : ∀ x (□ p) $ by ax
+l2: $ w : ∀ x (□ p) , w R v ⊢ w : □ [x/z] p $ by all_elim [l1]
+l3: $ w : ∀ x (□ p) , w R v ⊢ w R v $ by ax
+l4: $ w : ∀ x (□ p) , w R v ⊢ v : [x/z] p $ by box_elim [l2, l3]
+l5: $ w : ∀ x (□ p) , w R v ⊢ v : ∀ z ([x/z] p) $ by all_intro [l4]
+l6: $ w : ∀ x (□ p) ⊢ w : □ ∀ z ([x/z] p) $ by box_intro [l5]
+l7: $ _ ⊢ w : ∀ x (□ p) → □ ∀ z ([x/z] p) $ by imp_intro [l6]
 
 converse_barcan
 ----------------
 
-l1: $ w : (□ (∀ x p)) , w R v ⊢ w : (□ (∀ x p)) $ by ax
-l2: $ w : (□ (∀ x p)) , w R v ⊢ w R v $ by ax
-l3: $ w : (□ (∀ x p)) , w R v ⊢ v : (∀ x p) $ by box_elim [l1, l2]
-l4: $ w : (□ (∀ x p)) , w R v ⊢ v : ([x/z] p) $ by all_elim [l3]
-l5: $ w : (□ (∀ x p)) ⊢ w : (□ ([x/z] p)) $ by box_intro [l4]
-l6: $ w : (□ (∀ x p)) ⊢ w : (∀ z (□ ([x/z] p))) $ by all_intro [l5]
+l1: $ w : □ ∀ x p , w R v ⊢ w : □ ∀ x p $ by ax
+l2: $ w : □ ∀ x p , w R v ⊢ w R v $ by ax
+l3: $ w : □ ∀ x p , w R v ⊢ v : ∀ x p $ by box_elim [l1, l2]
+l4: $ w : □ ∀ x p , w R v ⊢ v : [x/z] p $ by all_elim [l3]
+l5: $ w : □ ∀ x p ⊢ w : □ [x/z] p $ by box_intro [l4]
+l6: $ w : □ ∀ x p ⊢ w : ∀ z (□ [x/z] p) $ by all_intro [l5]
 l7: $ _ ⊢ w : ((□ (∀ x p)) → ∀ z (□ ([x/z] p))) $ by imp_intro [l6]
 
 box_all_elim
 ------------
 
-l1: $ w : (□ (∀ x p)) , w R v ⊢ w : (□ (∀ x p)) $ by ax
-l2: $ w : (□ (∀ x p)) , w R v ⊢ w R v $ by ax
-l3: $ w : (□ (∀ x p)) , w R v ⊢ v : (∀ x p) $ by box_elim [l1, l2]
-l4: $ w : (□ (∀ x p)) , w R v ⊢ v : ([x/t] p) $ by all_elim [l3]
-l5: $ w : (□ (∀ x p)) ⊢ w : (□ ([x/t] p)) $ by box_intro [l4]
-l6: $ _ ⊢ w : ((□ (∀ x p)) → □ ([x/t] p)) $ by imp_intro [l5]
+l1: $ w : □ (∀ x p) , w R v ⊢ w : □ (∀ x p) $ by ax
+l2: $ w : □ (∀ x p) , w R v ⊢ w R v $ by ax
+l3: $ w : □ (∀ x p) , w R v ⊢ v : ∀ x p $ by box_elim [l1, l2]
+l4: $ w : □ (∀ x p) , w R v ⊢ v : [x/t] p $ by all_elim [l3]
+l5: $ w : □ (∀ x p) ⊢ w : □ [x/t] p $ by box_intro [l4]
+l6: $ _ ⊢ w : □ (∀ x p) → □ [x/t] p $ by imp_intro [l5]
 
 box_k
 -----
 
-l1: $ w : (□ (p → q)) , w : (□ p) , w R v ⊢ w : (□ (p → q)) $ by ax
-l2: $ w : (□ (p → q)) , w : (□ p) , w R v ⊢ w : (□ p) $ by ax
-l3: $ w : (□ (p → q)) , w : (□ p) , w R v ⊢ w R v $ by ax
-l4: $ w : (□ (p → q)) , w : (□ p) , w R v ⊢ v : (p → q) $ by box_elim [l1, l3]
-l5: $ w : (□ (p → q)) , w : (□ p) , w R v ⊢ v : p $ by box_elim [l2, l3]
-l6: $ w : (□ (p → q)) , w : (□ p) , w R v ⊢ v : q $ by imp_elim [l4, l5]
-l7: $ w : (□ (p → q)) , w : (□ p) ⊢ w : (□ q) $ by box_intro [l6]
-l8: $ w : (□ (p → q)) ⊢ w : ((□ p) → □ q) $ by imp_intro [l7]
-l9: $ _ ⊢ w : ((□ (p → q)) → ((□ p) → □ q)) $ by imp_intro [l8]
+l1: $ w : □ (p → q) , w : □ p , w R v ⊢ w : □ (p → q) $ by ax
+l2: $ w : □ (p → q) , w : □ p , w R v ⊢ w : □ p $ by ax
+l3: $ w : □ (p → q) , w : □ p , w R v ⊢ w R v $ by ax
+l4: $ w : □ (p → q) , w : □ p , w R v ⊢ v : p → q $ by box_elim [l1, l3]
+l5: $ w : □ (p → q) , w : □ p , w R v ⊢ v : p $ by box_elim [l2, l3]
+l6: $ w : □ (p → q) , w : □ p , w R v ⊢ v : q $ by imp_elim [l4, l5]
+l7: $ w : □ (p → q) , w : □ p ⊢ w : □ q $ by box_intro [l6]
+l8: $ w : □ (p → q) ⊢ w : □ p → □ q $ by imp_intro [l7]
+l9: $ _ ⊢ w : □ (p → q) → (□ p → □ q) $ by imp_intro [l8]
 
 nec_id
 ------
 
-l1: $ w : (x = y) ⊢ w : (x = y) $ by ax
-l2: $ w : (x = y) , w R v ⊢ w : (x = y) $ by ax
-l3: $ w : (x = y) , w R v ⊢ v : (x = x) $ by eq_refl_nd
-l4: $ w : (x = y) ⊢ w : (□ (x = x)) $ by box_intro [l3]
-l5: $ w : (x = y) ⊢ w : (□ (x = y)) $ by eq_replace [l1, l4]
-l6: $ _ ⊢ w : ((x = y) → □ (x = y)) $ by imp_intro [l5]
+l1: $ w : x = y ⊢ w : x = y $ by ax
+l2: $ w : x = y , w R v ⊢ w : x = y $ by ax
+l3: $ w : x = y , w R v ⊢ v : x = x $ by eq_refl_nd
+l4: $ w : x = y ⊢ w : □ (x = x) $ by box_intro [l3]
+l5: $ w : x = y ⊢ w : □ (x = y) $ by eq_replace [l1, l4]
+l6: $ _ ⊢ w : x = y → □ (x = y) $ by imp_intro [l5]
