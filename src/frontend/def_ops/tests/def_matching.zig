@@ -74,6 +74,101 @@ fn expectCompareTransparent(
     try std.testing.expect((try def_ops.compareTransparent(rhs, lhs)) != null);
 }
 
+test "transparent comparison unfolds bic and allc under coercion" {
+    const src =
+        \\strict provable sort wff;
+        \\delimiter $ ( @ [ / ! $ $ . : ; ) ] $;
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\sort term;
+        \\term app: term > term > term;
+        \\infixl app: $·$ prec 1000;
+        \\term lam {x: term}: type > term x > term;
+        \\notation lam {x: term} (A: type) (t: term x): term =
+        \\  ($λ$:20) x ($:$:2) A ($.$:0) t;
+        \\term eq: type > term;
+        \\def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+        \\notation eqc (A: type) (t u: term): term =
+        \\  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+        \\term thm: term > wff;
+        \\coercion thm: term > wff;
+        \\def bic (p q: term): term = $ ≃[𝔹] p = q $;
+        \\infixr bic: $⇔$ prec 20;
+        \\term all: type > term;
+        \\def allc {x: term} (A: type) (t: term x): term =
+        \\  $ all A · (λ x: A. t) $;
+        \\notation allc {x: term} (A: type) (t: term x): term =
+        \\  ($!$:20) x ($:$:2) A ($.$:0) t;
+        \\theorem host (A: type) {x: term} (t u: term x):
+        \\  $ (!x: A. t) ⇔ (!x: A. u) $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(
+        arena.allocator(),
+    );
+    defer theorem_vars.deinit();
+    var host_assertion: ?@import("../../../trusted/parse.zig").AssertionStmt = null;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem) continue;
+                if (!std.mem.eql(u8, value.name, "host")) continue;
+                try theorem.seedAssertion(value);
+                host_assertion = value;
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                break;
+            },
+            else => {},
+        }
+    }
+
+    const assertion = host_assertion orelse return error.MissingAssertion;
+    const theorem_concl = try theorem.internParsedExpr(assertion.concl);
+    const rhs_expr = try parser.parseFormulaText(
+        " ≃[𝔹] all A · (λ x: A. t) = all A · (λ x: A. u) ",
+        &theorem_vars,
+    );
+    const rhs = try theorem.internParsedExpr(rhs_expr);
+    const rule_id = env.getRuleId("all_bic_raw") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+    const final_line = try theorem.instantiateTemplate(
+        rule.concl,
+        theorem.theorem_vars.items,
+    );
+
+    try std.testing.expectEqual(rhs, final_line);
+
+    var def_ops = DefOps.Context.init(
+        arena.allocator(),
+        &theorem,
+        &env,
+    );
+    defer def_ops.deinit();
+
+    try std.testing.expect((try def_ops.compareTransparent(
+        theorem_concl,
+        final_line,
+    )) != null);
+    try std.testing.expect((try def_ops.compareTransparent(
+        final_line,
+        theorem_concl,
+    )) != null);
+}
+
 test "targeted def module has no standalone opening API" {
     try std.testing.expect(!@hasDecl(DefOps.Context, "openConcreteDef"));
 }

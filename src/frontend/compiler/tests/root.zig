@@ -1897,6 +1897,53 @@ test "transparent final line matching unfolds allc notation" {
     try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
 }
 
+test "transparent final line matching unfolds bic and allc under coercion" {
+    const mm0_src =
+        \\strict provable sort wff;
+        \\delimiter $ ( @ [ / ! $ $ . : ; ) ] $;
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\sort term;
+        \\term app: term > term > term;
+        \\infixl app: $·$ prec 1000;
+        \\term lam {x: term}: type > term x > term;
+        \\notation lam {x: term} (A: type) (t: term x): term =
+        \\  ($λ$:20) x ($:$:2) A ($.$:0) t;
+        \\term eq: type > term;
+        \\def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+        \\notation eqc (A: type) (t u: term): term =
+        \\  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+        \\term thm: term > wff;
+        \\coercion thm: term > wff;
+        \\def bic (p q: term): term = $ ≃[𝔹] p = q $;
+        \\infixr bic: $⇔$ prec 20;
+        \\term all: type > term;
+        \\def allc {x: term} (A: type) (t: term x): term =
+        \\  $ all A · (λ x: A. t) $;
+        \\notation allc {x: term} (A: type) (t: term x): term =
+        \\  ($!$:20) x ($:$:2) A ($.$:0) t;
+        \\axiom all_bic_raw (A: type) {x: term} (t u: term x):
+        \\  $ ≃[𝔹] all A · (λ x: A. t) = all A · (λ x: A. u) $;
+        \\theorem final_bic_allc (A: type) {x: term} (t u: term x):
+        \\  $ (!x: A. t) ⇔ (!x: A. u) $;
+    ;
+    const proof_src =
+        \\final_bic_allc
+        \\--------------
+        \\l1: $ ≃[𝔹] all A · (λ x: A. t) = all A · (λ x: A. u) $ by all_bic_raw []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
 test "transparent betacv matching handles quantified bic operands" {
     const mm0_src =
         \\strict provable sort wff;
