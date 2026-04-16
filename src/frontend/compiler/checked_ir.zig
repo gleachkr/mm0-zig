@@ -84,3 +84,12 @@ pub fn deinitLines(
         deinitLine(allocator, line);
     }
 }
+
+pub fn rollbackToMark(
+    allocator: std.mem.Allocator,
+    lines: *std.ArrayListUnmanaged(CheckedLine),
+    mark: usize,
+) void {
+    deinitLines(allocator, lines.items[mark..]);
+    lines.shrinkRetainingCapacity(mark);
+}

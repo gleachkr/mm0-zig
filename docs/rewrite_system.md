@@ -170,6 +170,12 @@ This search is intentionally narrow:
 - no backtracking over many alpha rules in v1
 - no new trusted alpha primitive
 
+The same `@alpha` lemmas may also be used at theorem boundaries during
+final-conclusion reconciliation. That lets a proof end at a convenient
+alpha-equivalent result and then transport back to the declared theorem
+conclusion, provided the compiler can build the needed conversion proof
+from the registered relation, rewrite, and congruence metadata.
+
 ---
 
 ## `@relation`

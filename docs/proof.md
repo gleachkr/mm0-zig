@@ -231,10 +231,19 @@ details.
 
 A public theorem block is accepted if and only if its final proof line
 proves the theorem conclusion from the corresponding `.mm0`
-declaration.
+declaration, either directly or after theorem-boundary reconciliation.
 
-A lemma block is accepted if and only if its final proof line proves the
-lemma conclusion from the lemma header.
+That reconciliation is proof-producing. The compiler may emit ordinary
+rule applications that convert the proved final line into the declared
+theorem conclusion using the same frontend machinery available
+elsewhere, including transparent defs, normalization, and
+alpha-renaming cleanup driven by relation, rewrite, and congruence
+metadata.
+
+This flexibility applies only at the outer theorem boundary. Interior
+proof lines are still checked in the ordinary way against the cited
+rule application, and a lemma block is accepted if and only if its
+final proof line proves the lemma conclusion from the lemma header.
 
 ## Internal representation note
 

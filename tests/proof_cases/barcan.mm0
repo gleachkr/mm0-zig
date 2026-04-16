@@ -157,6 +157,10 @@ axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 axiom imp_intro (g: ctx) (w: world) (a b: mform):
   $ g , w : a ⊢ w : b $ > $ g ⊢ w : (a → b) $;
 
+--| @normalize hyp0 hyp1 conc
+axiom imp_elim (g: ctx) (w: world) (a b: mform):
+  $ g ⊢ w : (a → b) $ > $ g ⊢ w : a $ > $ g ⊢ w : b $;
+
 -- Labelled equality and quantifier rules
 --| @normalize conc
 axiom eq_refl_nd (g: ctx) (w: world) (a: obj): $ g ⊢ w : a = a $;
@@ -166,7 +170,9 @@ axiom eq_refl_nd (g: ctx) (w: world) (a: obj): $ g ⊢ w : a = a $;
 axiom all_intro (g: ctx) (w: world) {x: obj} (p: mform x):
   $ g ⊢ w : p $ > $ g ⊢ w : ∀ x p $;
 
---| @normalize hyp0 conc
+--| @view {x: obj} (g: ctx x) (w: world) (t: obj x) (p: mform x) (q: mform): $ g ⊢ w : ∀ x p $ > $ g ⊢ w : q $
+--| @recover t q p x
+--| @normalize conc
 axiom all_elim {x: obj} (g: ctx x) (w: world) (t: obj x) (p: mform x):
   $ g ⊢ w : ∀ x p $ > $ g ⊢ w : [x/t] p $;
 
@@ -190,6 +196,15 @@ axiom eq_replace (g: ctx) (w: world) {z: obj} (a b: obj) (p: mform z):
 
 theorem barcan (w: world) {x: obj} (p: mform x):
   $ emp ⊢ w : ((∀ x (□ p)) → □ (∀ x p)) $;
+
+theorem converse_barcan (w: world) {x: obj} (p: mform x):
+  $ emp ⊢ w : ((□ (∀ x p)) → ∀ x (□ p)) $;
+
+theorem box_all_elim (w: world) {x: obj} (t: obj x) (p: mform x):
+  $ emp ⊢ w : ((□ (∀ x p)) → □ ([x/t] p)) $;
+
+theorem box_k (w: world) (p q: mform):
+  $ emp ⊢ w : ((□ (p → q)) → ((□ p) → □ q)) $;
 
 theorem nec_id (w: world) (x y: obj):
   $ emp ⊢ w : ((x = y) → □ (x = y)) $;

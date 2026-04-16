@@ -1,0 +1,6 @@
+opaque_alpha_all_right_demo
+--------------------------
+
+l1: $ P b ==> P b $ by ax
+l2: $ P b , ∀ a p ==> P b $ by weak_left (g := $ P b $, d := $ P b $, a := $ ∀ a p $) [l1]
+l3: $ P b , ∀ a p ==> ∀ a (P b) $ by all_right (g := $ P b , ∀ a p $, d := $_$, x := $ a $, p := $ P b $) [l2]

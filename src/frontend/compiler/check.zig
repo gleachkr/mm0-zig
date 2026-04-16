@@ -24,6 +24,7 @@ const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const Inference = @import("./inference.zig");
 const Matching = @import("./check/matching.zig");
+const TheoremBoundary = @import("./theorem_boundary.zig");
 const CompilerVars = @import("./vars.zig");
 const SortVarRegistry = CompilerVars.SortVarRegistry;
 
@@ -157,11 +158,11 @@ pub fn checkTheoremBlock(
                 &checked,
                 &diag_scratch,
             ) catch |err| {
-                CheckedIr.deinitLines(
+                CheckedIr.rollbackToMark(
                     allocator,
-                    checked.items[checked_mark..],
+                    &checked,
+                    checked_mark,
                 );
-                checked.shrinkRetainingCapacity(checked_mark);
                 attempt_theorem_vars.deinit();
                 attempt_theorem.deinit();
                 if (first_err == null) {
@@ -207,7 +208,7 @@ pub fn checkTheoremBlock(
     if (final_line != theorem_concl) {
         if (last_line_idx) |line_idx| {
             const final_mark = diag_scratch.mark();
-            if ((Matching.tryMatchFinalLine(
+            if ((TheoremBoundary.tryReconcileFinalConclusion(
                 allocator,
                 theorem,
                 registry,
