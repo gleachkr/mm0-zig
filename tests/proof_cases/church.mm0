@@ -13,7 +13,7 @@
 
 strict provable sort wff;
 
-delimiter $ ( @ [ / ! ~ $ $ . : ; ) ] $;
+delimiter $ ( @ [ / ! ? ~ $ $ . : ; ) ] $;
 
 term im: wff > wff > wff;
 infixr im: $⊢$ prec 0;
@@ -137,6 +137,10 @@ axiom eta (G: wff) (A B: type) {x: term} (e: term x):
   $ G ⊢ e: A → B $ >
   $ G ⊢ ≡[A → B] (λ x: A. e · x) = e $;
 
+axiom etat (G: wff) (A B: type) {x: term} (e: term x):
+  $ G ⊢ e: A → B $ >
+  $ G ⊢ ≃[A → B] (λ x: A. e · x) = e $;
+
 axiom eqsym (G: wff) (A: type) (a b: term):
   $ G ⊢ ≡[A] a = b $ > $ G ⊢ ≡[A] b = a $;
 
@@ -191,6 +195,10 @@ axiom sb_irrel {x: term} (t u: term): $ [x / t] u ≈ u $;
 --| @rewrite
 axiom sb_app {x: term} (t: term) (f a: term x):
   $ [x / t] (f · a) ≈ ([x / t] f) · ([x / t] a) $;
+
+--| @alpha x y
+axiom lam_alpha (A: type) {x y: term} (t: term x):
+  $ (λ x: A. t) ≈ (λ y: A. [x / y] t) $;
 
 -- Substitution rules. The raw binder `{x}` is hidden by normalization, so we
 -- expose a cleaner user-facing surface with `@view`, `@abstract`, and
@@ -298,6 +306,12 @@ theorem betacv (G: wff) (A B: type) {x: term} (t u v: term x):
   $ G ∧ ≃[A] x = t ⊢ ≃[B] u = v $ >
   $ G ⊢ ≃[B] (λ x: A. u) · t = v $;
 
+theorem cbv (G: wff) (A B: type) {x y: term} (t u: term x y):
+  $ G ∧ x: A ⊢ t: B $ >
+  $ G ∧ y: A ⊢ u: B $ >
+  $ G ∧ ≃[A] x = y ⊢ ≃[B] t = u $ >
+  $ G ⊢ ≃[A → B] (λ x: A. t) = (λ y: A. u) $;
+
 theorem id_bool_has_type (G: wff) {x: term}:
   $ G ⊢ λ x: 𝔹. x: 𝔹 → 𝔹 $;
 
@@ -393,6 +407,15 @@ theorem DISCH (G: wff) (p q: term):
 theorem UNDISCH (G: wff) (p q: term):
   $ G ⊢ p ⇒ q $ > $ G ∧ p ⊢ q $;
 
+theorem IMP_ANTISYM (G: wff) (p q: term):
+  $ G ⊢ p ⇒ q $ > $ G ⊢ q ⇒ p $ > $ G ⊢ p ⇔ q $;
+
+theorem EQ_IMP1 (G: wff) (p q: term):
+  $ G ⊢ p ⇔ q $ > $ G ⊢ p ⇒ q $;
+
+theorem EQ_IMP2 (G: wff) (p q: term):
+  $ G ⊢ p ⇔ q $ > $ G ⊢ q ⇒ p $;
+
 theorem IMP_ID (G: wff) (p: term):
   $ G ⊢ p: 𝔹 $ > $ G ⊢ p ⇒ p $;
 
@@ -431,6 +454,84 @@ theorem alleq (G: wff) (A: type) {x: term} (t u: term x):
   $ G ∧ x: A ⊢ t ⇔ u $ >
   $ G ⊢ all A · (λ x: A. t) ⇔ (all A · (λ x: A. u)) $;
 
+theorem all_def (G: wff) (A: type) {x: term} (P: term):
+  $ G ⊢ P: A → 𝔹 $ >
+  $ G ⊢ all A · P ⇔ (≃[A → 𝔹] P = (λ x: A. T)) $;
+
+theorem specp (G: wff) (A: type) (P t: term):
+  $ G ⊢ t: A $ >
+  $ G ⊢ all A · P $ >
+  $ G ⊢ P · t $;
+
+theorem spec (G: wff) (A: type) {x: term} (t a b: term x):
+  $ G ∧ x: A ⊢ a: 𝔹 $ >
+  $ G ⊢ t: A $ >
+  $ G ⊢ b: 𝔹 $ >
+  $ G ∧ ≃[A] x = t ⊢ a ⇔ b $ >
+  $ G ⊢ (!x: A. a) ⇒ b $;
+
+theorem SPEC (G: wff) (A: type) {x: term} (t a b: term x):
+  $ G ⊢ t: A $ >
+  $ G ⊢ b: 𝔹 $ >
+  $ G ∧ ≃[A] x = t ⊢ a ⇔ b $ >
+  $ G ⊢ !x: A. a $ >
+  $ G ⊢ b $;
+
+theorem GEN (G: wff) (A: type) {x: term} (a: term x):
+  $ G ∧ x: A ⊢ a $ >
+  $ G ⊢ !x: A. a $;
+
+def ex (A: type) {.P .q .x: term}: term =
+  $ λ P: A → 𝔹. !q: 𝔹. (!x: A. P · x ⇒ q) ⇒ q $;
+
+theorem EXISTS_DEF (G: wff) (A: type) {P q x: term}:
+  $ G ⊢ ≃[(A → 𝔹) → 𝔹] ex A =
+      (λ P: A → 𝔹. !q: 𝔹. (!x: A. P · x ⇒ q) ⇒ q) $;
+
+theorem exT (G: wff) (A: type):
+  $ G ⊢ ex A: (A → 𝔹) → 𝔹 $;
+
+--| @freshen P x
+theorem ex_def (G: wff) (A: type) {x q: term} (P: term):
+  $ G ⊢ P: A → 𝔹 $ >
+  $ G ⊢ ex A · P ⇔ (!q: 𝔹. (!x: A. P · x ⇒ q) ⇒ q) $;
+
+def exc {x: term} (A: type) (t: term x): term =
+  $ ex A · (λ x: A. t) $;
+notation exc {x: term} (A: type) (t: term x): term =
+  ($?$:20) x ($:$:2) A ($.$:0) t;
+
+theorem excT (G: wff) (A: type) {x: term} (t: term x):
+  $ G ∧ x: A ⊢ t: 𝔹 $ >
+  $ G ⊢ ex A · (λ x: A. t): 𝔹 $;
+
+theorem exeq (G: wff) (A: type) {x: term} (t u: term x):
+  $ G ∧ x: A ⊢ t ⇔ u $ >
+  $ G ⊢ ex A · (λ x: A. t) ⇔ (ex A · (λ x: A. u)) $;
+
+theorem exc_def (G: wff) (A: type) {x q: term} (p: term x):
+  $ G ∧ x: A ⊢ p: 𝔹 $ >
+  $ G ⊢ ex A · (λ x: A. p) ⇔ (!q: 𝔹. (!x: A. p ⇒ q) ⇒ q) $;
+
+theorem existsp (G: wff) (A: type) (P x: term):
+  $ G ⊢ P: A → 𝔹 $ >
+  $ G ⊢ x: A $ >
+  $ G ⊢ P · x $ >
+  $ G ⊢ ex A · P $;
+
+theorem CHOOSE (G: wff) (A: type) {x: term} (p: term x) (q: term):
+  $ G ⊢ q: 𝔹 $ >
+  $ G ⊢ ex A · (λ x: A. p) $ >
+  $ G ∧ x: A ∧ p ⊢ q $ >
+  $ G ⊢ q $;
+
+theorem EXISTS (G: wff) (A: type) {x: term} (t a b: term x):
+  $ G ∧ x: A ⊢ a: 𝔹 $ >
+  $ G ⊢ t: A $ >
+  $ G ∧ ≃[A] x = t ⊢ a ⇔ b $ >
+  $ G ⊢ b $ >
+  $ G ⊢ ex A · (λ x: A. a) $;
+
 def or {.p .q .r: term}: term =
   $ λ p: 𝔹. λ q: 𝔹. !r: 𝔹. (p ⇒ r) ⇒ (q ⇒ r) ⇒ r $;
 
@@ -455,6 +556,19 @@ theorem ORC_DEF (G: wff) (a b: term) {r: term}:
 theorem orR (G: wff) (p q: term):
   $ G ⊢ p ∨ q $ > $ G ⊢ p: 𝔹 ∧ q: 𝔹 $;
 
+theorem DISJ1 (G: wff) (p q: term):
+  $ G ⊢ p $ > $ G ⊢ q: 𝔹 $ > $ G ⊢ p ∨ q $;
+
+theorem DISJ2 (G: wff) (p q: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ q $ > $ G ⊢ p ∨ q $;
+
+theorem DISJ_CASES (G: wff) (p q r: term):
+  $ G ⊢ p ∨ q $ >
+  $ G ⊢ r: 𝔹 $ >
+  $ G ∧ p ⊢ r $ >
+  $ G ∧ q ⊢ r $ >
+  $ G ⊢ r $;
+
 def F {.p: term}: term =
   $ !p: 𝔹. p $;
 
@@ -463,6 +577,9 @@ theorem F_DEF (G: wff) {p: term}:
 
 theorem FT (G: wff):
   $ G ⊢ F: 𝔹 $;
+
+theorem CONTR (G: wff) (p: term):
+  $ G ⊢ p: 𝔹 $ > $ G ⊢ F $ > $ G ⊢ p $;
 
 def not {.p: term}: term =
   $ λ p: 𝔹. p ⇒ F $;
@@ -491,3 +608,12 @@ theorem NOT_ELIM (G: wff) (p: term):
 
 theorem NOT_INTRO (G: wff) (p: term):
   $ G ⊢ p ⇒ F $ > $ G ⊢ ¬ p $;
+
+theorem EQF_INTRO (G: wff) (p: term):
+  $ G ⊢ ¬ p $ > $ G ⊢ p ⇔ F $;
+
+theorem EQF_ELIM (G: wff) (p: term):
+  $ G ⊢ p ⇔ F $ > $ G ⊢ ¬ p $;
+
+theorem NOT_FALSE (G: wff):
+  $ G ⊢ ¬ F $;
