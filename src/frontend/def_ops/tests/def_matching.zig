@@ -3,9 +3,12 @@ const std = @import("std");
 const DefOps = @import("../../def_ops.zig");
 const FrontendEnv = @import("../../env.zig");
 const FrontendExpr = @import("../../expr.zig");
+const BindingMode = @import("../types.zig").BindingMode;
 const Expr = @import("../../../trusted/expressions.zig").Expr;
 const MM0Parser = @import("../../../trusted/parse.zig").MM0Parser;
 const allocNoneSeeds = @import("./fixtures.zig").allocNoneSeeds;
+const Testing = DefOps.Testing;
+const MatchSession = Testing.MatchSession;
 
 fn readProofCaseFile(
     allocator: std.mem.Allocator,
@@ -72,6 +75,66 @@ fn expectCompareTransparent(
 
     try std.testing.expect((try def_ops.compareTransparent(lhs, rhs)) != null);
     try std.testing.expect((try def_ops.compareTransparent(rhs, lhs)) != null);
+}
+
+fn expectConcreteExprsMatchMode(
+    src: []const u8,
+    lhs_text: []const u8,
+    rhs_text: []const u8,
+    mode: BindingMode,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const lhs_expr = try parser.parseFormulaText(lhs_text, &theorem_vars);
+    const rhs_expr = try parser.parseFormulaText(rhs_text, &theorem_vars);
+    const lhs = try theorem.internParsedExpr(lhs_expr);
+    const rhs = try theorem.internParsedExpr(rhs_expr);
+
+    var def_ops = DefOps.Context.init(
+        arena.allocator(),
+        &theorem,
+        &env,
+    );
+    defer def_ops.deinit();
+
+    var state = try MatchSession.init(arena.allocator(), 0);
+    defer state.deinit(arena.allocator());
+
+    try std.testing.expect(
+        try Testing.concreteExprsMatchMode(
+            &def_ops,
+            lhs,
+            rhs,
+            &state,
+            mode,
+        ),
+    );
 }
 
 test "transparent comparison unfolds bic and allc under coercion" {
@@ -167,6 +230,40 @@ test "transparent comparison unfolds bic and allc under coercion" {
         final_line,
         theorem_concl,
     )) != null);
+}
+
+test "normalized concrete comparison treats bic as bool equality" {
+    const src =
+        \\strict provable sort wff;
+        \\delimiter $ ( @ [ / ! $ $ . : ; ) ] $;
+        \\strict sort type;
+        \\term bool: type;
+        \\notation bool: type = ($𝔹$:max);
+        \\sort term;
+        \\term eq: type > term;
+        \\def eqc (A: type) (t u: term): term = $ eq A · t · u $;
+        \\notation eqc (A: type) (t u: term): term =
+        \\  ($≃[$:50) A ($]$:0) t ($=$:50) u;
+        \\term thm: term > wff;
+        \\coercion thm: term > wff;
+        \\def bic (p q: term): term = $ ≃[𝔹] p = q $;
+        \\infixr bic: $⇔$ prec 20;
+        \\theorem host (p q: term):
+        \\  $ p ⇔ q $;
+    ;
+
+    try expectConcreteExprsMatchMode(
+        src,
+        " ≃[𝔹] p = q ",
+        " p ⇔ q ",
+        .normalized,
+    );
+    try expectConcreteExprsMatchMode(
+        src,
+        " p ⇔ q ",
+        " ≃[𝔹] p = q ",
+        .normalized,
+    );
 }
 
 test "targeted def module has no standalone opening API" {

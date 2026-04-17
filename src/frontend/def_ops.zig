@@ -498,6 +498,22 @@ pub const Testing = struct {
         return try ctx.chooseRepresentativeSymbolic(expr_id, state, mode);
     }
 
+    pub fn concreteExprsMatchMode(
+        ctx: *Context,
+        lhs: ExprId,
+        rhs: ExprId,
+        state: *MatchState.MatchSession,
+        mode: BindingMode,
+    ) anyerror!bool {
+        var symbolic_engine = ctx.symbolicEngine();
+        return try symbolic_engine.concreteExprsMatchMode(
+            lhs,
+            rhs,
+            state,
+            mode,
+        );
+    }
+
     pub fn symbolicExprEql(
         ctx: *Context,
         lhs: *const Types.SymbolicExpr,

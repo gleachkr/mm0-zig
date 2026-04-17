@@ -628,6 +628,7 @@ pub const RuleMatchSession = struct {
                 assignment.expr_id,
                 info,
             );
+            SymbolicEngine.invalidateRepresentativeCaches(&self.state);
         }
     }
 

@@ -71,6 +71,8 @@ pub const SymbolicEngine = struct {
         WitnessState.makeSymbolicBoundValue;
     pub const concreteExprsMatchMode =
         WitnessState.concreteExprsMatchMode;
+    pub const invalidateRepresentativeCaches =
+        WitnessState.invalidateRepresentativeCaches;
     pub const matchSymbolicDummyState =
         WitnessState.matchSymbolicDummyState;
     pub const matchDummyToSymbolic = WitnessState.matchDummyToSymbolic;

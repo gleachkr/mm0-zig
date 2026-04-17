@@ -100,6 +100,11 @@ pub fn makeSymbolicBoundValue(
     } };
 }
 
+pub fn invalidateRepresentativeCaches(state: *MatchSession) void {
+    state.transparent_representatives.clearRetainingCapacity();
+    state.normalized_representatives.clearRetainingCapacity();
+}
+
 pub fn assignBinderFromExpr(
     self: anytype,
     idx: usize,
@@ -127,6 +132,7 @@ pub fn assignBinderFromExpr(
                     state,
                     mode,
                 );
+                invalidateRepresentativeCaches(state);
             },
         }
         return true;
@@ -137,6 +143,7 @@ pub fn assignBinderFromExpr(
         state,
         mode,
     );
+    invalidateRepresentativeCaches(state);
     return true;
 }
 
@@ -157,6 +164,7 @@ pub fn assignBinderFromSymbolic(
         );
     }
     state.bindings[idx] = makeSymbolicBoundValue(self, symbolic, mode);
+    invalidateRepresentativeCaches(state);
     return true;
 }
 
@@ -191,6 +199,7 @@ pub fn assignBinderValue(
         };
     }
     state.bindings[idx] = value;
+    invalidateRepresentativeCaches(state);
     return true;
 }
 
@@ -791,6 +800,7 @@ pub fn slotForWitness(
         witness,
         info,
     );
+    invalidateRepresentativeCaches(state);
     return slot;
 }
 
@@ -826,6 +836,7 @@ pub fn putWitnessForDummySlot(
 ) anyerror!void {
     const root = try resolveDummySlot(self, slot, state);
     try state.witnesses.put(self.shared.allocator, root, actual);
+    invalidateRepresentativeCaches(state);
 }
 
 pub fn alignDummySlots(
@@ -892,6 +903,7 @@ pub fn alignDummySlots(
     }
 
     try state.dummy_aliases.put(self.shared.allocator, loser, winner);
+    invalidateRepresentativeCaches(state);
     return true;
 }
 
@@ -1174,7 +1186,27 @@ pub fn concreteExprsMatchMode(
         state,
         mode,
     );
-    return symbolicExprEql(self, lhs_repr, rhs_repr);
+    if (symbolicExprEql(self, lhs_repr, rhs_repr)) {
+        return true;
+    }
+
+    if (mode != .normalized) return false;
+
+    const lhs_compare = (try symbolicToConcreteIfPlain(
+        self,
+        lhs_repr,
+        state,
+    )) orelse lhs;
+    const rhs_compare = (try symbolicToConcreteIfPlain(
+        self,
+        rhs_repr,
+        state,
+    )) orelse rhs;
+    return (try TransparentMatch.compareTransparent(
+        self,
+        lhs_compare,
+        rhs_compare,
+    )) != null;
 }
 
 pub fn concreteBindingMatchesExpr(
@@ -1186,20 +1218,22 @@ pub fn concreteBindingMatchesExpr(
     if (concrete.mode == .exact) {
         return concrete.raw == actual;
     }
-    if (concrete.mode == .transparent) {
-        const concrete_expr = (try concreteBindingMatchExpr(
-            self,
-            concrete,
-            state,
-        )) orelse return false;
-        if ((try TransparentMatch.compareTransparent(
+
+    const concrete_expr = (try concreteBindingMatchExpr(
+        self,
+        concrete,
+        state,
+    )) orelse return false;
+    if ((concrete.mode == .transparent or concrete.mode == .normalized) and
+        (try TransparentMatch.compareTransparent(
             self,
             concrete_expr,
             actual,
-        )) != null) {
-            return true;
-        }
+        )) != null)
+    {
+        return true;
     }
+
     const actual_repr = try chooseRepresentativeSymbolic(
         self,
         actual,
