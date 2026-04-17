@@ -250,12 +250,9 @@ const Handler = struct {
                 doc.version,
                 doc.text,
                 switch (err) {
-                    error.InvalidFormat =>
-                        "document URI is not a valid URI",
-                    UnsupportedUriScheme.UnsupportedUriScheme =>
-                        "document URI must use the file scheme",
-                    UnsupportedUriHost.UnsupportedUriHost =>
-                        "file URI host must be empty or localhost",
+                    error.InvalidFormat => "document URI is not a valid URI",
+                    UnsupportedUriScheme.UnsupportedUriScheme => "document URI must use the file scheme",
+                    UnsupportedUriHost.UnsupportedUriHost => "file URI host must be empty or localhost",
                     else => @errorName(err),
                 },
             );
@@ -338,8 +335,7 @@ const Handler = struct {
         };
         const mm0_loaded = self.loadTextPreferOpenDocument(arena, mm0_path) catch |err| {
             const message = switch (err) {
-                error.FileNotFound =>
-                    "could not find sibling .mm0 file for this proof",
+                error.FileNotFound => "could not find sibling .mm0 file for this proof",
                 else => try std.fmt.allocPrint(
                     arena,
                     "could not read sibling .mm0 file: {s}",
@@ -753,6 +749,12 @@ fn compilerDiagnosticMessage(
             try mm0.writeCompilerMissingCongruenceRuleSummary(&writer, detail);
             try appendNamedLine(&writer, "sort", detail.sort_name);
         },
+        .related_rule => |detail| {
+            try writer.print(
+                "\ndeclared later in: {s}",
+                .{@tagName(detail.source)},
+            );
+        },
         .hypothesis_ref => |detail| {
             try writer.print("\nhypothesis ref: #{d}", .{detail.index});
         },
@@ -794,7 +796,6 @@ test "document kind" {
     try std.testing.expectEqual(DocumentKind.proof, documentKind("/tmp/a.auf"));
     try std.testing.expectEqual(DocumentKind.other, documentKind("/tmp/a.txt"));
 }
-
 
 test "compiler diagnostic severity maps to LSP severity" {
     try std.testing.expectEqual(

@@ -239,6 +239,29 @@ fn writeDiagnosticDetailField(
             try writeOptionalUsizeField(writer, "argIndex", info.arg_index);
             try writer.writeAll("}");
         },
+        .related_rule => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(writer, "kind", "related_rule");
+            try writer.writeByte(',');
+            try writeJsonStringField(
+                writer,
+                "source",
+                @tagName(info.source),
+            );
+            try writer.writeByte(',');
+            try writeOptionalUsizeField(
+                writer,
+                "spanStart",
+                info.span.start,
+            );
+            try writer.writeByte(',');
+            try writeOptionalUsizeField(
+                writer,
+                "spanEnd",
+                info.span.end,
+            );
+            try writer.writeAll("}");
+        },
         .hypothesis_ref => |info| {
             try writer.writeAll("{");
             try writeJsonStringField(writer, "kind", "hypothesis_ref");

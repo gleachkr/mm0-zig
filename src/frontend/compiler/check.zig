@@ -14,6 +14,7 @@ const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerViews = @import("./views.zig");
 const CompilerFresh = @import("./fresh.zig");
 const CompilerFreshen = @import("./freshen.zig");
+const RuleCatalog = @import("./rule_catalog.zig");
 const ViewDecl = CompilerViews.ViewDecl;
 const FreshDecl = CompilerFresh.FreshDecl;
 const FreshenDecl = CompilerFresh.FreshenDecl;
@@ -43,6 +44,7 @@ pub fn checkTheoremBlock(
     parser: *MM0Parser,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
+    rule_catalog: *const RuleCatalog.Catalog,
     fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
     freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
@@ -94,17 +96,13 @@ pub fn checkTheoremBlock(
             base_ref_exprs,
         );
 
-        const initial_rule_id = env.getRuleId(line.rule_name) orelse {
-            CompilerDiag.setProof(self, .{
-                .kind = .unknown_rule,
-                .err = error.UnknownRule,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.rule_span,
-            });
-            return error.UnknownRule;
-        };
+        const initial_rule_id = try lookupRuleId(
+            self,
+            env,
+            rule_catalog,
+            assertion,
+            line,
+        );
 
         const saved_diag = getDiagnostic(self);
         var first_diag: ?Diagnostic = null;
@@ -386,6 +384,7 @@ fn tryApplyLineWithCandidate(
             diag_scratch,
             theorem,
             assertion,
+            rule_id,
             rule,
             line,
             partial_bindings,
@@ -788,6 +787,46 @@ fn applyFreshenedRuleLine(
         .line => |line_idx| line_idx,
         .hyp => error.ConclusionMismatch,
     };
+}
+
+fn lookupRuleId(
+    self: anytype,
+    env: *const GlobalEnv,
+    rule_catalog: *const RuleCatalog.Catalog,
+    assertion: AssertionStmt,
+    line: ProofLine,
+) !u32 {
+    if (env.getRuleId(line.rule_name)) |rule_id| return rule_id;
+
+    if (rule_catalog.get(line.rule_name)) |entry| {
+        if (entry.ordinal >= env.rules.items.len) {
+            CompilerDiag.setProof(self, .{
+                .kind = .rule_not_yet_available,
+                .err = error.RuleNotYetAvailable,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .span = line.rule_span,
+                .detail = .{
+                    .related_rule = .{
+                        .source = .mm0,
+                        .span = entry.name_span,
+                    },
+                },
+            });
+            return error.RuleNotYetAvailable;
+        }
+    }
+
+    CompilerDiag.setProof(self, .{
+        .kind = .unknown_rule,
+        .err = error.UnknownRule,
+        .theorem_name = assertion.name,
+        .line_label = line.label,
+        .rule_name = line.rule_name,
+        .span = line.rule_span,
+    });
+    return error.UnknownRule;
 }
 
 fn resolveBaseRefs(

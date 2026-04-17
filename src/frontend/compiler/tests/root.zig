@@ -778,6 +778,62 @@ test "compiler pinpoints unknown proof rules" {
     );
 }
 
+test "compiler distinguishes rules declared later in mm0 order" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem first: $ top $;
+        \\theorem second: $ top $;
+    ;
+    const proof_src =
+        \\first
+        \\-----
+        \\l1: $ top $ by second []
+        \\
+        \\second
+        \\------
+        \\l1: $ top $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.RuleNotYetAvailable,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.RuleNotYetAvailable, diag.err);
+    try std.testing.expectEqual(.rule_not_yet_available, diag.kind);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
+    try std.testing.expectEqualStrings("first", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("second", diag.rule_name.?);
+    try std.testing.expectEqualStrings(
+        "rule is declared later and is not yet available here",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("second", proof_src[span.start..span.end]);
+    switch (diag.detail) {
+        .related_rule => |detail| {
+            try std.testing.expectEqual(
+                mm0.CompilerDiagnosticSource.mm0,
+                detail.source,
+            );
+            try std.testing.expectEqualStrings(
+                "second",
+                mm0_src[detail.span.start..detail.span.end],
+            );
+        },
+        else => return error.ExpectedDiagnosticDetail,
+    }
+}
+
 test "compiler retries theorem lines through fallback chains" {
     const mm0_src =
         \\provable sort wff;

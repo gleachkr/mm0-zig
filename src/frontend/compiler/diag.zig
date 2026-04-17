@@ -20,6 +20,7 @@ pub const DiagnosticKind = enum {
     parse_fresh,
     inference_failed,
     unknown_rule,
+    rule_not_yet_available,
     unknown_binder_name,
     duplicate_binder_assignment,
     missing_binder_assignment,
@@ -52,6 +53,10 @@ pub const DiagnosticDetail = union(enum) {
         binder_name: []const u8,
     },
     missing_congruence_rule: MissingCongruenceRuleDetail,
+    related_rule: struct {
+        source: DiagnosticSource,
+        span: Span,
+    },
     hypothesis_ref: struct {
         index: usize,
     },
@@ -472,6 +477,7 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
         .parse_fresh => compilerErrorSummary(diag.err),
         .inference_failed => compilerErrorSummary(diag.err),
         .unknown_rule => "unknown rule in proof line",
+        .rule_not_yet_available => "rule is declared later and is not yet available here",
         .unknown_binder_name => "unknown binder name in rule application",
         .duplicate_binder_assignment => "duplicate binder assignment in rule application",
         .missing_binder_assignment => "missing binder assignment in rule application",
@@ -501,6 +507,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         // this for ambiguity across AU, ACU, AUI, and ACUI matching.
         error.AmbiguousAcuiMatch => "omitted rule arguments remain ambiguous after structural " ++
             "or def-aware matching",
+        error.RuleNotYetAvailable => "rule is declared later and is not yet available here",
         error.UnknownTheoremVariable => "binding refers to a theorem variable that is not in scope",
         error.DuplicateRuleName => "duplicate rule name",
         error.DuplicateViewAnnotation => "multiple @view annotations were attached to one rule",

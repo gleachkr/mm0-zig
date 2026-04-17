@@ -16,6 +16,7 @@ const Span = @import("../proof_script.zig").Span;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerEmit = @import("./emit.zig");
 const Check = @import("./check.zig");
+const RuleCatalog = @import("./rule_catalog.zig");
 const CompilerVars = @import("./vars.zig");
 const CompilerDiag = @import("./diag.zig");
 const DiagnosticSource = CompilerDiag.DiagnosticSource;
@@ -39,6 +40,8 @@ pub fn run(
     emit: ?*Output,
 ) !void {
     var parser = MM0Parser.init(self.source, allocator);
+    var rule_catalog = RuleCatalog.build(allocator, self.source) catch
+        RuleCatalog.Catalog.init(allocator);
     var env = GlobalEnv.init(allocator);
     var registry = RewriteRegistry.init(allocator);
     var fresh_bindings = std.AutoHashMap(u32, []const FreshDecl).init(
@@ -187,6 +190,7 @@ pub fn run(
                     &parser,
                     &env,
                     &registry,
+                    &rule_catalog,
                     &fresh_bindings,
                     &freshen_bindings,
                     &views,
@@ -242,6 +246,7 @@ fn processAssertion(
     parser: *MM0Parser,
     env: *GlobalEnv,
     registry: *RewriteRegistry,
+    rule_catalog: *const RuleCatalog.Catalog,
     fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
     freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
     views: *std.AutoHashMap(u32, ViewDecl),
@@ -257,6 +262,7 @@ fn processAssertion(
             parser,
             env,
             registry,
+            rule_catalog,
             fresh_bindings,
             freshen_bindings,
             views,
@@ -277,6 +283,7 @@ fn processAssertion(
             parser,
             env,
             registry,
+            rule_catalog,
             fresh_bindings,
             freshen_bindings,
             views,
@@ -292,6 +299,7 @@ fn processAssertion(
             parser,
             env,
             registry,
+            rule_catalog,
             fresh_bindings,
             freshen_bindings,
             views,
@@ -385,6 +393,7 @@ fn processNonTheoremAssertion(
     parser: *MM0Parser,
     env: *GlobalEnv,
     registry: *RewriteRegistry,
+    _: *const RuleCatalog.Catalog,
     fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
     freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
     views: *std.AutoHashMap(u32, ViewDecl),
@@ -455,6 +464,7 @@ fn nextTheoremBlock(
     parser: *MM0Parser,
     env: *GlobalEnv,
     registry: *RewriteRegistry,
+    rule_catalog: *const RuleCatalog.Catalog,
     fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
     freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
@@ -486,6 +496,7 @@ fn nextTheoremBlock(
                 parser,
                 env,
                 registry,
+                rule_catalog,
                 fresh_bindings,
                 freshen_bindings,
                 views,
@@ -534,6 +545,7 @@ fn processLocalProofBlock(
     parser: *MM0Parser,
     env: *GlobalEnv,
     registry: *RewriteRegistry,
+    rule_catalog: *const RuleCatalog.Catalog,
     fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
     freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
     views: *const std.AutoHashMap(u32, ViewDecl),
@@ -554,6 +566,7 @@ fn processLocalProofBlock(
         parser,
         env,
         registry,
+        rule_catalog,
         fresh_bindings,
         freshen_bindings,
         views,

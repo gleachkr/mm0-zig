@@ -191,7 +191,7 @@ pub const Compiler = struct {
         if (diag.expected_name) |name| {
             std.debug.print("  expected: {s}\n", .{name});
         }
-        reportDiagnosticDetail(diag.detail);
+        reportDiagnosticDetail(self, diag.detail);
         self.reportDiagnosticLocation(diag);
     }
 
@@ -243,7 +243,10 @@ pub const Compiler = struct {
 
 pub const diagnosticSummary = CompilerDiag.diagnosticSummary;
 
-fn reportDiagnosticDetail(detail: DiagnosticDetail) void {
+fn reportDiagnosticDetail(
+    compiler: *const Compiler,
+    detail: DiagnosticDetail,
+) void {
     switch (detail) {
         .none => {},
         .unknown_math_token => |info| {
@@ -263,6 +266,23 @@ fn reportDiagnosticDetail(detail: DiagnosticDetail) void {
             if (info.sort_name) |sort_name| {
                 std.debug.print("  sort: {s}\n", .{sort_name});
             }
+        },
+        .related_rule => |info| {
+            const source = switch (info.source) {
+                .mm0 => SourceInfo{
+                    .label = "source",
+                    .text = compiler.source,
+                },
+                .proof => SourceInfo{
+                    .label = "proof",
+                    .text = compiler.proof_source orelse return,
+                },
+            };
+            const loc = lineCol(source.text, info.span.start);
+            std.debug.print(
+                "  declared later in {s}:{d}:{d}\n",
+                .{ source.label, loc.line, loc.column },
+            );
         },
         .hypothesis_ref => |info| {
             std.debug.print("  hypothesis ref: #{d}\n", .{info.index});

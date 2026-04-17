@@ -605,6 +605,7 @@ pub fn inferBindings(
     scratch: *CompilerDiag.Scratch,
     theorem: *TheoremContext,
     assertion: AssertionStmt,
+    rule_id: u32,
     rule: *const RuleDecl,
     line: ProofLine,
     partial_bindings: []const ?ExprId,
@@ -615,17 +616,6 @@ pub fn inferBindings(
     use_advanced_inference: bool,
 ) ![]const ExprId {
     if (use_advanced_inference) {
-        const rule_id = env.getRuleId(line.rule_name) orelse {
-            CompilerDiag.setProof(self, .{
-                .kind = .unknown_rule,
-                .err = error.UnknownRule,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.rule_span,
-            });
-            return error.UnknownRule;
-        };
         var seeded_bindings_storage: ?[]?ExprId = null;
         defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
         var view_seed_state: ?DefOps.MatchSeedState = null;
