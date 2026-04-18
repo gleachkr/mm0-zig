@@ -236,6 +236,25 @@ fn writeDiagnosticDetailField(
             );
             try writer.writeByte(',');
             try writeJsonStringField(writer, "binder", info.binder_name);
+            try writer.writeByte(',');
+            try writeJsonStringField(
+                writer,
+                "path",
+                @tagName(info.path),
+            );
+            try writer.writeAll("}");
+        },
+        .inference_failure => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(writer, "kind", "inference_failure");
+            try writer.writeByte(',');
+            try writeJsonStringField(writer, "path", @tagName(info.path));
+            try writer.writeByte(',');
+            try writeOptionalStringField(
+                writer,
+                "firstUnsolvedBinder",
+                info.first_unsolved_binder_name,
+            );
             try writer.writeAll("}");
         },
         .dep_violation => |info| {

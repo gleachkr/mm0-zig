@@ -340,8 +340,15 @@ pub const Compiler = struct {
             .missing_binder_assignment => |info| .{
                 .missing_binder_assignment = .{
                     .binder_name = self.stableRequiredString(info.binder_name),
+                    .path = info.path,
                 },
             },
+            .inference_failure => |info| .{ .inference_failure = .{
+                .path = info.path,
+                .first_unsolved_binder_name = self.stableString(
+                    info.first_unsolved_binder_name,
+                ),
+            } },
             .dep_violation => |info| .{ .dep_violation = .{
                 .first_arg_idx = info.first_arg_idx,
                 .second_arg_idx = info.second_arg_idx,
@@ -406,7 +413,26 @@ fn reportDiagnosticDetail(
             std.debug.print("  token: {s}\n", .{info.token});
         },
         .missing_binder_assignment => |info| {
-            std.debug.print("  missing binder: {s}\n", .{info.binder_name});
+            std.debug.print(
+                "  missing binder: {s}\n",
+                .{info.binder_name},
+            );
+            std.debug.print(
+                "  inference path: {s}\n",
+                .{CompilerDiag.inferencePathName(info.path)},
+            );
+        },
+        .inference_failure => |info| {
+            std.debug.print(
+                "  inference path: {s}\n",
+                .{CompilerDiag.inferencePathName(info.path)},
+            );
+            if (info.first_unsolved_binder_name) |binder_name| {
+                std.debug.print(
+                    "  first unsolved binder: {s}\n",
+                    .{binder_name},
+                );
+            }
         },
         .dep_violation => |info| {
             var stderr = std.fs.File.stderr().deprecatedWriter();

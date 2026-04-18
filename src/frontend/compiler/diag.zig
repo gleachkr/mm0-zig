@@ -55,6 +55,17 @@ pub const DepViolationDiagnosticDetail = struct {
     second_bound: bool,
 };
 
+pub const InferencePath = enum {
+    strict_replay,
+    transparent_fallback,
+    structural_solver,
+};
+
+pub const InferenceDiagnosticDetail = struct {
+    path: InferencePath,
+    first_unsolved_binder_name: ?[]const u8 = null,
+};
+
 pub const DiagnosticDetail = union(enum) {
     none,
     unknown_math_token: struct {
@@ -62,7 +73,9 @@ pub const DiagnosticDetail = union(enum) {
     },
     missing_binder_assignment: struct {
         binder_name: []const u8,
+        path: InferencePath = .strict_replay,
     },
+    inference_failure: InferenceDiagnosticDetail,
     dep_violation: DepViolationDiagnosticDetail,
     missing_congruence_rule: MissingCongruenceRuleDetail,
     hypothesis_ref: struct {
@@ -89,7 +102,7 @@ pub const DiagnosticPhase = enum {
     final_reconciliation,
 };
 
-pub const max_diagnostic_notes = 4;
+pub const max_diagnostic_notes = 8;
 pub const max_diagnostic_related = 4;
 
 pub const DiagnosticNote = struct {
@@ -198,6 +211,14 @@ pub fn addRelated(
         .span = span,
     };
     diag.related_count += 1;
+}
+
+pub fn inferencePathName(path: InferencePath) []const u8 {
+    return switch (path) {
+        .strict_replay => "strict replay",
+        .transparent_fallback => "transparent fallback",
+        .structural_solver => "structural or def-aware solver",
+    };
 }
 
 pub fn diagnosticPhaseName(phase: DiagnosticPhase) []const u8 {

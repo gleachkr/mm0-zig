@@ -28,6 +28,77 @@ pub const ExpectedNormalization = struct {
     normalizer: Normalizer,
 };
 
+pub const ComparisonSnapshot = struct {
+    normalized_expected: ?ExprId = null,
+    normalized_actual: ?ExprId = null,
+};
+
+pub fn maybeBuildComparisonSnapshot(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    scratch: *CompilerDiag.Scratch,
+    expected: ExprId,
+    actual: ExprId,
+) ComparisonSnapshot {
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer checked.deinit(allocator);
+
+    const normalized_expected = normalizeExprForSnapshot(
+        allocator,
+        theorem,
+        registry,
+        env,
+        &checked,
+        scratch,
+        expected,
+    ) catch return .{};
+    const normalized_actual = normalizeExprForSnapshot(
+        allocator,
+        theorem,
+        registry,
+        env,
+        &checked,
+        scratch,
+        actual,
+    ) catch return .{};
+
+    if (normalized_expected == expected and normalized_actual == actual) {
+        return .{};
+    }
+    return .{
+        .normalized_expected = normalized_expected,
+        .normalized_actual = normalized_actual,
+    };
+}
+
+fn normalizeExprForSnapshot(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
+    expr: ExprId,
+) !ExprId {
+    var normalizer = Normalizer.initWithScratch(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        scratch,
+    );
+    const mark = scratch.mark();
+    const normalized = normalizer.normalize(expr) catch |err| {
+        scratch.discard(mark);
+        return err;
+    };
+    scratch.discard(mark);
+    return normalized.result_expr;
+}
+
 pub fn buildNormalizedConversion(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,

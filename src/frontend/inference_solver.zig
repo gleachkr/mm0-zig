@@ -22,6 +22,12 @@ const MatchConstraint = types.MatchConstraint;
 const StructuralJointObligation = types.StructuralJointObligation;
 const BranchState = types.BranchState;
 
+pub const AmbiguityReport = struct {
+    distinct_solution_count: usize = 0,
+    chosen_bindings: ?[]const u8 = null,
+    alternative_bindings: ?[]const u8 = null,
+};
+
 pub const Solver = struct {
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
@@ -32,6 +38,7 @@ pub const Solver = struct {
     canonicalizer: Canonicalizer,
     debug_inference: bool,
     ambiguity_warning: bool = false,
+    ambiguity_report: AmbiguityReport = .{},
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -59,8 +66,23 @@ pub const Solver = struct {
         };
     }
 
+    pub fn deinit(self: *Solver) void {
+        if (self.ambiguity_report.chosen_bindings) |summary| {
+            self.allocator.free(summary);
+        }
+        if (self.ambiguity_report.alternative_bindings) |summary| {
+            self.allocator.free(summary);
+        }
+        self.canonicalizer.cache.deinit();
+    }
+
     pub fn hadAmbiguityWarning(self: *const Solver) bool {
         return self.ambiguity_warning;
+    }
+
+    pub fn getAmbiguityReport(self: *const Solver) ?AmbiguityReport {
+        if (!self.ambiguity_warning) return null;
+        return self.ambiguity_report;
     }
 
     pub fn structuralSupport(self: *Solver) AcuiSupport.Context {
@@ -421,6 +443,7 @@ pub const Solver = struct {
 
         if (distinct_idxs.items.len > 1) {
             self.ambiguity_warning = true;
+            try self.captureAmbiguityReport(states, distinct_idxs.items);
             if (self.debug_inference) {
                 try self.debugPrintAmbiguousSolutions(
                     states,
@@ -435,6 +458,64 @@ pub const Solver = struct {
             result[idx] = binding.?;
         }
         return result;
+    }
+
+    fn captureAmbiguityReport(
+        self: *Solver,
+        states: []const BranchState,
+        distinct_idxs: []const usize,
+    ) !void {
+        self.ambiguity_report.distinct_solution_count = distinct_idxs.len;
+        if (distinct_idxs.len == 0) return;
+
+        self.ambiguity_report.chosen_bindings = try self.formatBindingSummary(
+            states[distinct_idxs[0]].rule_bindings,
+        );
+        if (distinct_idxs.len > 1) {
+            self.ambiguity_report.alternative_bindings = try self.formatBindingSummary(
+                states[distinct_idxs[1]].rule_bindings,
+            );
+        }
+    }
+
+    fn formatBindingSummary(
+        self: *Solver,
+        bindings: []const ?ExprId,
+    ) ![]const u8 {
+        var out = std.ArrayListUnmanaged(u8){};
+        errdefer out.deinit(self.allocator);
+
+        var emitted: usize = 0;
+        for (bindings, 0..) |binding, idx| {
+            if (emitted == 3) break;
+            if (emitted != 0) {
+                try out.appendSlice(self.allocator, "; ");
+            }
+
+            const name = self.rule.arg_names[idx] orelse "_";
+            try out.writer(self.allocator).print("{s} = ", .{name});
+            if (binding) |expr_id| {
+                const text = try ViewTrace.formatExpr(
+                    self.allocator,
+                    self.theorem,
+                    self.env,
+                    expr_id,
+                );
+                defer self.allocator.free(text);
+                try appendTruncatedText(&out, self.allocator, text, 48);
+            } else {
+                try out.appendSlice(self.allocator, "<unsolved>");
+            }
+            emitted += 1;
+        }
+
+        if (bindings.len > emitted) {
+            try out.writer(self.allocator).print(
+                "; +{d} more",
+                .{bindings.len - emitted},
+            );
+        }
+        return try out.toOwnedSlice(self.allocator);
     }
 
     fn debugPrintAmbiguousSolutions(
@@ -492,4 +573,22 @@ pub const Solver = struct {
 fn debugPrint(comptime fmt: []const u8, args: anytype) void {
     if (comptime builtin.target.os.tag == .freestanding) return;
     std.debug.print(fmt, args);
+}
+
+fn appendTruncatedText(
+    out: *std.ArrayListUnmanaged(u8),
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    limit: usize,
+) !void {
+    if (text.len <= limit) {
+        try out.appendSlice(allocator, text);
+        return;
+    }
+    if (limit <= 1) {
+        try out.appendSlice(allocator, text[0..limit]);
+        return;
+    }
+    try out.appendSlice(allocator, text[0 .. limit - 1]);
+    try out.appendSlice(allocator, "...");
 }

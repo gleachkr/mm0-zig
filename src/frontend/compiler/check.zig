@@ -19,6 +19,8 @@ const ViewDecl = CompilerViews.ViewDecl;
 const FreshDecl = CompilerFresh.FreshDecl;
 const FreshenDecl = CompilerFresh.FreshenDecl;
 const CompilerDiag = @import("./diag.zig");
+const Normalize = @import("./normalize.zig");
+const ViewTrace = @import("../view_trace.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
 const CheckedIr = @import("./checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
@@ -588,7 +590,7 @@ fn tryApplyLineWithCandidate(
             .hyp => |hyp| hyp.span,
             .line => |label| label.span,
         };
-        CompilerDiag.setProof(self, switch (ref) {
+        var diag = switch (ref) {
             .hyp => |hyp| CompilerDiag.withPhase(Diagnostic{
                 .kind = .hypothesis_mismatch,
                 .err = error.HypothesisMismatch,
@@ -611,7 +613,22 @@ fn tryApplyLineWithCandidate(
                 .name = label.label,
                 .span = span,
             }, .theorem_application),
-        });
+        };
+        try addComparisonSnapshotNotes(
+            allocator,
+            &diag,
+            theorem,
+            env,
+            registry,
+            diag_scratch,
+            expected,
+            actual,
+            if (norm_spec) |spec|
+                Normalize.isHypMarkedForNormalize(spec, idx)
+            else
+                false,
+        );
+        CompilerDiag.setProof(self, diag);
         return error.HypothesisMismatch;
     }
 
@@ -654,14 +671,26 @@ fn tryApplyLineWithCandidate(
         return err;
     }) orelse {
         diag_scratch.discard(concl_mark);
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        var diag = CompilerDiag.withPhase(.{
             .kind = .conclusion_mismatch,
             .err = error.ConclusionMismatch,
             .theorem_name = assertion.name,
             .line_label = line.label,
             .rule_name = line.rule_name,
             .span = line.assertion.span,
-        }, .theorem_application));
+        }, .theorem_application);
+        try addComparisonSnapshotNotes(
+            allocator,
+            &diag,
+            theorem,
+            env,
+            registry,
+            diag_scratch,
+            expected_line,
+            line_expr,
+            if (norm_spec) |spec| spec.concl else false,
+        );
+        CompilerDiag.setProof(self, diag);
         return error.ConclusionMismatch;
     };
     diag_scratch.discard(concl_mark);
@@ -1135,6 +1164,95 @@ fn applyFreshBindings(
         bindings[fresh.target_arg_idx] = selection.expr_id;
         reserved_deps |= selection.deps;
     }
+}
+
+fn addComparisonSnapshotNotes(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
+    expected: ExprId,
+    actual: ExprId,
+    attempted_normalized: bool,
+) !void {
+    const expected_text = try ViewTrace.formatExpr(
+        allocator,
+        theorem,
+        env,
+        expected,
+    );
+    defer allocator.free(expected_text);
+    try addFormattedProofNote(
+        allocator,
+        diag,
+        "expected: {s}",
+        .{truncateSnapshot(expected_text)},
+    );
+
+    const actual_text = try ViewTrace.formatExpr(
+        allocator,
+        theorem,
+        env,
+        actual,
+    );
+    defer allocator.free(actual_text);
+    try addFormattedProofNote(
+        allocator,
+        diag,
+        "actual: {s}",
+        .{truncateSnapshot(actual_text)},
+    );
+
+    if (!attempted_normalized) return;
+
+    addStaticProofNote(diag, "attempted normalized comparison");
+    const snapshot = Normalize.maybeBuildComparisonSnapshot(
+        allocator,
+        @constCast(theorem),
+        registry,
+        env,
+        scratch,
+        expected,
+        actual,
+    );
+    if (snapshot.normalized_expected) |normalized_expected| {
+        const normalized_expected_text = try ViewTrace.formatExpr(
+            allocator,
+            theorem,
+            env,
+            normalized_expected,
+        );
+        defer allocator.free(normalized_expected_text);
+        try addFormattedProofNote(
+            allocator,
+            diag,
+            "normalized expected: {s}",
+            .{truncateSnapshot(normalized_expected_text)},
+        );
+    }
+    if (snapshot.normalized_actual) |normalized_actual| {
+        const normalized_actual_text = try ViewTrace.formatExpr(
+            allocator,
+            theorem,
+            env,
+            normalized_actual,
+        );
+        defer allocator.free(normalized_actual_text);
+        try addFormattedProofNote(
+            allocator,
+            diag,
+            "normalized actual: {s}",
+            .{truncateSnapshot(normalized_actual_text)},
+        );
+    }
+}
+
+fn truncateSnapshot(text: []const u8) []const u8 {
+    const limit = 64;
+    if (text.len <= limit) return text;
+    return text[0..limit];
 }
 
 fn addFreshenAttemptNotes(

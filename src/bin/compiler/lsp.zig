@@ -864,6 +864,22 @@ fn compilerDiagnosticMessage(
                 "\nmissing binder: {s}",
                 .{detail.binder_name},
             );
+            try writer.print(
+                "\ninference path: {s}",
+                .{mm0.compilerInferencePathName(detail.path)},
+            );
+        },
+        .inference_failure => |detail| {
+            try writer.print(
+                "\ninference path: {s}",
+                .{mm0.compilerInferencePathName(detail.path)},
+            );
+            if (detail.first_unsolved_binder_name) |binder_name| {
+                try writer.print(
+                    "\nfirst unsolved binder: {s}",
+                    .{binder_name},
+                );
+            }
         },
         .dep_violation => |detail| {
             try writer.writeAll("\ndependency violation: ");

@@ -25,6 +25,8 @@ pub const writeCompilerMissingCongruenceRuleSummary =
     @import("./frontend/compiler/diag.zig").writeMissingCongruenceRuleSummary;
 pub const writeCompilerDepViolationSummary =
     @import("./frontend/compiler/diag.zig").writeDepViolationSummary;
+pub const compilerInferencePathName =
+    @import("./frontend/compiler/diag.zig").inferencePathName;
 pub const Frontend = struct {
     pub const Env = @import("./frontend/env.zig");
     pub const Expr = @import("./frontend/expr.zig");

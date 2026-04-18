@@ -23,7 +23,9 @@ const ViewDecl = CompilerViews.ViewDecl;
 const CompilerDiag = @import("./diag.zig");
 const CompilerFresh = @import("./fresh.zig");
 const CompilerVars = @import("./vars.zig");
+const ViewTrace = @import("../view_trace.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
+const InferencePath = CompilerDiag.InferencePath;
 const SortVarRegistry = CompilerVars.SortVarRegistry;
 const NameExprMap = std.StringHashMap(*const Expr);
 const CheckedIr = @import("./checked_ir.zig");
@@ -48,6 +50,21 @@ const ExprInfo = struct {
 };
 
 pub const DepViolationDetail = CompilerDiag.DepViolationDiagnosticDetail;
+
+const StrictReplayFailure = struct {
+    err: anyerror,
+    partial_bindings: []const ?ExprId,
+};
+
+const StrictReplayResult = union(enum) {
+    complete: []const ExprId,
+    failed: StrictReplayFailure,
+};
+
+const BindingSummaryMode = enum {
+    explicit,
+    inferred,
+};
 
 pub const HiddenWitnessFreshContext = struct {
     parser: *MM0Parser,
@@ -138,6 +155,313 @@ pub const InferenceContext = struct {
         try self.ustack.append(self.allocator, self.hyps[self.next_hyp]);
     }
 };
+
+fn buildInferenceFailureDiagnostic(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    path: InferencePath,
+    err: anyerror,
+    explicit_bindings: []const ?ExprId,
+    current_bindings: []const ?ExprId,
+) !Diagnostic {
+    var diag = CompilerDiag.withPhase(.{
+        .kind = .inference_failed,
+        .err = err,
+        .theorem_name = assertion.name,
+        .line_label = line.label,
+        .rule_name = line.rule_name,
+        .span = line.ruleApplicationSpan(),
+        .detail = .{ .inference_failure = .{
+            .path = path,
+            .first_unsolved_binder_name = firstUnsolvedNamedBinder(rule, current_bindings),
+        } },
+    }, .inference);
+    try addInferenceNotes(
+        allocator,
+        &diag,
+        env,
+        theorem,
+        rule,
+        path,
+        explicit_bindings,
+        current_bindings,
+    );
+    return diag;
+}
+
+fn buildMissingBinderDiagnostic(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    path: InferencePath,
+    explicit_bindings: []const ?ExprId,
+    current_bindings: []const ?ExprId,
+    missing_idx: usize,
+) !Diagnostic {
+    const binder_name = rule.arg_names[missing_idx] orelse "_";
+    var diag = CompilerDiag.withPhase(.{
+        .kind = .missing_binder_assignment,
+        .err = error.MissingBinderAssignment,
+        .theorem_name = assertion.name,
+        .line_label = line.label,
+        .rule_name = line.rule_name,
+        .name = rule.arg_names[missing_idx],
+        .span = line.binding_list_span orelse line.rule_span,
+        .detail = .{ .missing_binder_assignment = .{
+            .binder_name = binder_name,
+            .path = path,
+        } },
+    }, .inference);
+    try addInferenceNotes(
+        allocator,
+        &diag,
+        env,
+        theorem,
+        rule,
+        path,
+        explicit_bindings,
+        current_bindings,
+    );
+    return diag;
+}
+
+fn addInferenceNotes(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    rule: *const RuleDecl,
+    path: InferencePath,
+    explicit_bindings: []const ?ExprId,
+    current_bindings: []const ?ExprId,
+) !void {
+    try addFormattedInferenceNote(
+        allocator,
+        diag,
+        "inference path: {s}",
+        .{CompilerDiag.inferencePathName(path)},
+    );
+
+    const explicit_summary = try buildBindingSummary(
+        allocator,
+        theorem,
+        env,
+        rule,
+        explicit_bindings,
+        current_bindings,
+        .explicit,
+    );
+    defer allocator.free(explicit_summary);
+    try addFormattedInferenceNote(
+        allocator,
+        diag,
+        "explicit bindings: {s}",
+        .{explicit_summary},
+    );
+
+    const inferred_summary = try buildBindingSummary(
+        allocator,
+        theorem,
+        env,
+        rule,
+        explicit_bindings,
+        current_bindings,
+        .inferred,
+    );
+    defer allocator.free(inferred_summary);
+    try addFormattedInferenceNote(
+        allocator,
+        diag,
+        "inferred bindings before failure: {s}",
+        .{inferred_summary},
+    );
+
+    if (firstUnsolvedBinderLabel(rule, current_bindings)) |label| {
+        try addFormattedInferenceNote(
+            allocator,
+            diag,
+            "first unsolved binder: {s}",
+            .{label},
+        );
+    }
+}
+
+fn addAmbiguityWarningNotes(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    report: @import("../inference_solver.zig").AmbiguityReport,
+) !void {
+    if (report.chosen_bindings) |summary| {
+        try addFormattedInferenceNote(
+            allocator,
+            diag,
+            "chosen bindings: {s}",
+            .{summary},
+        );
+    }
+    if (report.alternative_bindings) |summary| {
+        try addFormattedInferenceNote(
+            allocator,
+            diag,
+            "alternative bindings: {s}",
+            .{summary},
+        );
+    }
+    try addFormattedInferenceNote(
+        allocator,
+        diag,
+        "distinct solutions considered: {d}",
+        .{report.distinct_solution_count},
+    );
+}
+
+fn addFormattedInferenceNote(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    const message = try std.fmt.allocPrint(allocator, fmt, args);
+    CompilerDiag.addNote(diag, message, .proof, null);
+}
+
+fn buildBindingSummary(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    rule: *const RuleDecl,
+    explicit_bindings: []const ?ExprId,
+    current_bindings: []const ?ExprId,
+    mode: BindingSummaryMode,
+) ![]const u8 {
+    var out = std.ArrayListUnmanaged(u8){};
+    errdefer out.deinit(allocator);
+
+    var emitted: usize = 0;
+    var remaining: usize = 0;
+    for (current_bindings, 0..) |binding, idx| {
+        const is_explicit = idx < explicit_bindings.len and
+            explicit_bindings[idx] != null;
+        const include = switch (mode) {
+            .explicit => is_explicit,
+            .inferred => !is_explicit and binding != null,
+        };
+        if (!include) continue;
+
+        if (emitted == 3) {
+            remaining += 1;
+            continue;
+        }
+        if (emitted != 0) {
+            try out.appendSlice(allocator, "; ");
+        }
+        try appendBindingEntry(
+            &out,
+            allocator,
+            theorem,
+            env,
+            rule,
+            idx,
+            binding,
+        );
+        emitted += 1;
+    }
+
+    if (emitted == 0) {
+        try out.appendSlice(allocator, "none");
+    } else if (remaining != 0) {
+        try out.writer(allocator).print(
+            "; +{d} more",
+            .{remaining},
+        );
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+fn appendBindingEntry(
+    out: *std.ArrayListUnmanaged(u8),
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    rule: *const RuleDecl,
+    idx: usize,
+    binding: ?ExprId,
+) !void {
+    try out.appendSlice(allocator, binderLabel(rule, idx));
+    try out.appendSlice(allocator, " = ");
+    if (binding) |expr_id| {
+        const text = try ViewTrace.formatExpr(
+            allocator,
+            theorem,
+            env,
+            expr_id,
+        );
+        defer allocator.free(text);
+        try appendInferenceTruncatedText(out, allocator, text, 48);
+        return;
+    }
+    try out.appendSlice(allocator, "<unsolved>");
+}
+
+fn appendInferenceTruncatedText(
+    out: *std.ArrayListUnmanaged(u8),
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    limit: usize,
+) !void {
+    if (text.len <= limit) {
+        try out.appendSlice(allocator, text);
+        return;
+    }
+    if (limit <= 1) {
+        try out.appendSlice(allocator, text[0..limit]);
+        return;
+    }
+    try out.appendSlice(allocator, text[0 .. limit - 1]);
+    try out.appendSlice(allocator, "...");
+}
+
+fn firstUnsolvedNamedBinder(
+    rule: *const RuleDecl,
+    bindings: []const ?ExprId,
+) ?[]const u8 {
+    for (bindings, 0..) |binding, idx| {
+        if (binding != null) continue;
+        if (idx < rule.arg_names.len) {
+            if (rule.arg_names[idx]) |name| return name;
+        }
+        return null;
+    }
+    return null;
+}
+
+fn firstUnsolvedBinderLabel(
+    rule: *const RuleDecl,
+    bindings: []const ?ExprId,
+) ?[]const u8 {
+    return firstUnsolvedNamedBinder(rule, bindings);
+}
+
+fn binderLabel(rule: *const RuleDecl, idx: usize) []const u8 {
+    if (idx < rule.arg_names.len) {
+        if (rule.arg_names[idx]) |name| return name;
+    }
+    return "_";
+}
+
+fn clonePartialBindings(
+    allocator: std.mem.Allocator,
+    bindings: []const ?ExprId,
+) ![]const ?ExprId {
+    return try allocator.dupe(?ExprId, bindings);
+}
 
 pub fn canConvertTransparent(
     allocator: std.mem.Allocator,
@@ -762,14 +1086,24 @@ pub fn inferBindings(
             },
             .no_match => {},
             .unresolved_dummy_witness => {
-                CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
-                    .kind = .inference_failed,
-                    .err = error.UnresolvedDummyWitness,
-                    .theorem_name = assertion.name,
-                    .line_label = line.label,
-                    .rule_name = line.rule_name,
-                    .span = line.ruleApplicationSpan(),
-                }, .inference));
+                CompilerDiag.setProof(
+                    self,
+                    try buildInferenceFailureDiagnostic(
+                        allocator,
+                        env,
+                        theorem,
+                        assertion,
+                        rule,
+                        line,
+                        .structural_solver,
+                        error.UnresolvedDummyWitness,
+                        partial_bindings,
+                        if (seeded_bindings_storage) |seeded|
+                            seeded
+                        else
+                            partial_bindings,
+                    ),
+                );
                 return error.UnresolvedDummyWitness;
             },
         }
@@ -783,6 +1117,7 @@ pub fn inferBindings(
             if (maybe_view) |*view| view else null,
             self.debug.inference,
         );
+        defer solver.deinit();
         const solver_bindings = if (seeded_bindings_storage) |seeded|
             seeded
         else
@@ -792,19 +1127,26 @@ pub fn inferBindings(
             ref_exprs,
             line_expr,
         ) catch |err| {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
-                .kind = .inference_failed,
-                .err = err,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.ruleApplicationSpan(),
-            }, .inference));
+            CompilerDiag.setProof(
+                self,
+                try buildInferenceFailureDiagnostic(
+                    allocator,
+                    env,
+                    theorem,
+                    assertion,
+                    rule,
+                    line,
+                    .structural_solver,
+                    err,
+                    partial_bindings,
+                    solver_bindings,
+                ),
+            );
             return err;
         };
 
         if (solver.hadAmbiguityWarning()) {
-            self.addWarning(CompilerDiag.withPhase(.{
+            var diag = CompilerDiag.withPhase(.{
                 .severity = .warning,
                 .kind = .inference_failed,
                 .err = error.AmbiguousAcuiMatch,
@@ -813,12 +1155,26 @@ pub fn inferBindings(
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .span = line.ruleApplicationSpan(),
-            }, .inference));
+                .detail = .{ .inference_failure = .{
+                    .path = .structural_solver,
+                    .first_unsolved_binder_name = null,
+                } },
+            }, .inference);
+            try addFormattedInferenceNote(
+                allocator,
+                &diag,
+                "inference path: {s}",
+                .{CompilerDiag.inferencePathName(.structural_solver)},
+            );
+            if (solver.getAmbiguityReport()) |report| {
+                try addAmbiguityWarningNotes(allocator, &diag, report);
+            }
+            self.addWarning(diag);
         }
         return bindings;
     }
 
-    if (strictInferBindings(
+    const strict_result = try strictInferBindingsDetailed(
         self,
         allocator,
         env,
@@ -829,47 +1185,232 @@ pub fn inferBindings(
         partial_bindings,
         ref_exprs,
         line_expr,
-    )) |b| {
-        return b;
-    } else |err| {
-        if (self.last_diagnostic != null) return err;
-        if (maybe_view == null) {
-            const transparent = inferBindingsTransparent(
+    );
+    switch (strict_result) {
+        .complete => |bindings| return bindings,
+        .failed => |strict_failure| {
+            defer allocator.free(strict_failure.partial_bindings);
+            if (self.last_diagnostic != null) return strict_failure.err;
+            if (maybe_view == null) {
+                const transparent = inferBindingsTransparent(
+                    allocator,
+                    env,
+                    theorem,
+                    rule,
+                    partial_bindings,
+                    ref_exprs,
+                    line_expr,
+                ) catch |transparent_err| blk: {
+                    if (transparent_err == error.UnresolvedDummyWitness) {
+                        CompilerDiag.setProof(
+                            self,
+                            try buildInferenceFailureDiagnostic(
+                                allocator,
+                                env,
+                                theorem,
+                                assertion,
+                                rule,
+                                line,
+                                .transparent_fallback,
+                                transparent_err,
+                                partial_bindings,
+                                strict_failure.partial_bindings,
+                            ),
+                        );
+                        return transparent_err;
+                    }
+                    break :blk null;
+                };
+                if (transparent) |bindings| {
+                    return bindings;
+                }
+                CompilerDiag.setProof(
+                    self,
+                    try buildInferenceFailureDiagnostic(
+                        allocator,
+                        env,
+                        theorem,
+                        assertion,
+                        rule,
+                        line,
+                        .transparent_fallback,
+                        strict_failure.err,
+                        partial_bindings,
+                        strict_failure.partial_bindings,
+                    ),
+                );
+                return strict_failure.err;
+            }
+            CompilerDiag.setProof(
+                self,
+                try buildInferenceFailureDiagnostic(
+                    allocator,
+                    env,
+                    theorem,
+                    assertion,
+                    rule,
+                    line,
+                    .strict_replay,
+                    strict_failure.err,
+                    partial_bindings,
+                    strict_failure.partial_bindings,
+                ),
+            );
+            return strict_failure.err;
+        },
+    }
+}
+
+fn strictInferBindingsDetailed(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) !StrictReplayResult {
+    const unify = try Emit.buildRuleUnifyStream(allocator, rule);
+
+    var inference = try InferenceContext.init(
+        allocator,
+        theorem,
+        partial_bindings,
+        ref_exprs,
+        line_expr,
+    );
+    defer inference.deinit();
+
+    UnifyReplay.run(unify, 0, &inference) catch |err| {
+        return .{ .failed = .{
+            .err = err,
+            .partial_bindings = try clonePartialBindings(
                 allocator,
+                inference.uheap.items[0..rule.args.len],
+            ),
+        } };
+    };
+    if (inference.ustack.items.len != 0) {
+        return .{ .failed = .{
+            .err = error.UnifyStackNotEmpty,
+            .partial_bindings = try clonePartialBindings(
+                allocator,
+                inference.uheap.items[0..rule.args.len],
+            ),
+        } };
+    }
+    if (inference.next_hyp != 0) {
+        return .{ .failed = .{
+            .err = error.HypCountMismatch,
+            .partial_bindings = try clonePartialBindings(
+                allocator,
+                inference.uheap.items[0..rule.args.len],
+            ),
+        } };
+    }
+
+    const snapshot = try clonePartialBindings(
+        allocator,
+        inference.uheap.items[0..rule.args.len],
+    );
+    errdefer allocator.free(snapshot);
+
+    const bindings = try allocator.alloc(ExprId, rule.args.len);
+    errdefer allocator.free(bindings);
+
+    for (0..rule.args.len) |idx| {
+        const binding = snapshot[idx] orelse {
+            CompilerDiag.maybeSetProof(
+                self,
+                try buildMissingBinderDiagnostic(
+                    allocator,
+                    env,
+                    theorem,
+                    assertion,
+                    rule,
+                    line,
+                    .strict_replay,
+                    partial_bindings,
+                    snapshot,
+                    idx,
+                ),
+            );
+            return .{ .failed = .{
+                .err = error.MissingBinderAssignment,
+                .partial_bindings = snapshot,
+            } };
+        };
+        validateBindingExpr(
+            env,
+            theorem,
+            assertion.args,
+            rule.args[idx],
+            binding,
+        ) catch |err| {
+            var diag = CompilerDiag.withPhase(.{
+                .kind = .generic,
+                .err = err,
+                .theorem_name = assertion.name,
+                .line_label = line.label,
+                .rule_name = line.rule_name,
+                .name = rule.arg_names[idx],
+                .span = CompilerDiag.proofBindingDiagnosticSpan(
+                    line,
+                    rule.arg_names[idx],
+                ),
+                .detail = .{ .inference_failure = .{
+                    .path = .strict_replay,
+                    .first_unsolved_binder_name = firstUnsolvedNamedBinder(
+                        rule,
+                        snapshot,
+                    ),
+                } },
+            }, .inference);
+            try addInferenceNotes(
+                allocator,
+                &diag,
                 env,
                 theorem,
                 rule,
+                .strict_replay,
                 partial_bindings,
-                ref_exprs,
-                line_expr,
-            ) catch |transparent_err| blk: {
-                if (transparent_err == error.UnresolvedDummyWitness) {
-                    CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
-                        .kind = .inference_failed,
-                        .err = transparent_err,
-                        .theorem_name = assertion.name,
-                        .line_label = line.label,
-                        .rule_name = line.rule_name,
-                        .span = line.ruleApplicationSpan(),
-                    }, .inference));
-                    return transparent_err;
-                }
-                break :blk null;
-            };
-            if (transparent) |bindings| {
-                return bindings;
-            }
-        }
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
-            .kind = .inference_failed,
-            .err = err,
+                snapshot,
+            );
+            CompilerDiag.maybeSetProof(self, diag);
+            return .{ .failed = .{
+                .err = err,
+                .partial_bindings = snapshot,
+            } };
+        };
+        bindings[idx] = binding;
+    }
+    if (try firstDepViolation(
+        env,
+        theorem,
+        assertion.args,
+        rule.args,
+        rule.arg_names,
+        bindings,
+    )) |detail| {
+        CompilerDiag.maybeSetProof(self, CompilerDiag.withPhase(.{
+            .kind = .generic,
+            .err = error.DepViolation,
             .theorem_name = assertion.name,
             .line_label = line.label,
             .rule_name = line.rule_name,
             .span = line.ruleApplicationSpan(),
-        }, .inference));
-        return err;
+            .detail = .{ .dep_violation = detail },
+        }, .theorem_application));
+        return .{ .failed = .{
+            .err = error.DepViolation,
+            .partial_bindings = snapshot,
+        } };
     }
+    allocator.free(snapshot);
+    return .{ .complete = bindings };
 }
 
 pub fn strictInferBindings(
@@ -884,86 +1425,25 @@ pub fn strictInferBindings(
     ref_exprs: []const ExprId,
     line_expr: ExprId,
 ) ![]const ExprId {
-    const unify = try Emit.buildRuleUnifyStream(allocator, rule);
-
-    var inference = try InferenceContext.init(
+    const result = try strictInferBindingsDetailed(
+        self,
         allocator,
+        env,
         theorem,
+        assertion,
+        rule,
+        line,
         partial_bindings,
         ref_exprs,
         line_expr,
     );
-    defer inference.deinit();
-
-    try UnifyReplay.run(unify, 0, &inference);
-    if (inference.ustack.items.len != 0) {
-        return error.UnifyStackNotEmpty;
-    }
-    if (inference.next_hyp != 0) {
-        return error.HypCountMismatch;
-    }
-
-    const bindings = try allocator.alloc(ExprId, rule.args.len);
-    for (0..rule.args.len) |idx| {
-        const binding = inference.uheap.items[idx] orelse {
-            const binder_name = rule.arg_names[idx] orelse "_";
-            CompilerDiag.maybeSetProof(self, CompilerDiag.withPhase(.{
-                .kind = .missing_binder_assignment,
-                .err = error.MissingBinderAssignment,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .name = rule.arg_names[idx],
-                .span = line.binding_list_span orelse line.rule_span,
-                .detail = .{
-                    .missing_binder_assignment = .{
-                        .binder_name = binder_name,
-                    },
-                },
-            }, .inference));
-            return error.MissingBinderAssignment;
-        };
-        validateBindingExpr(
-            env,
-            theorem,
-            assertion.args,
-            rule.args[idx],
-            binding,
-        ) catch |err| {
-            CompilerDiag.maybeSetProof(self, CompilerDiag.withPhase(.{
-                .kind = .generic,
-                .err = err,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .name = rule.arg_names[idx],
-                .span = CompilerDiag.proofBindingDiagnosticSpan(line, rule.arg_names[idx]),
-            }, .inference));
-            return err;
-        };
-        bindings[idx] = binding;
-    }
-    if (try firstDepViolation(
-        env,
-        theorem,
-        assertion.args,
-        rule.args,
-        rule.arg_names,
-        bindings,
-    )) |detail| {
-        allocator.free(bindings);
-        CompilerDiag.maybeSetProof(self, CompilerDiag.withPhase(.{
-            .kind = .generic,
-            .err = error.DepViolation,
-            .theorem_name = assertion.name,
-            .line_label = line.label,
-            .rule_name = line.rule_name,
-            .span = line.ruleApplicationSpan(),
-            .detail = .{ .dep_violation = detail },
-        }, .theorem_application));
-        return error.DepViolation;
-    }
-    return bindings;
+    return switch (result) {
+        .complete => |bindings| bindings,
+        .failed => |failure| {
+            defer allocator.free(failure.partial_bindings);
+            return failure.err;
+        },
+    };
 }
 
 pub fn validateResolvedBindings(

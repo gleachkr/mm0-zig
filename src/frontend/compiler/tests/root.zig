@@ -1017,6 +1017,15 @@ test "compiler preserves the first fallback failure diagnostic" {
     try std.testing.expectEqualStrings("bad_fallback", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("step_a", diag.rule_name.?);
+    try std.testing.expectEqual(@as(usize, 2), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "expected: top",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqualStrings(
+        "actual: mid",
+        diag.noteSlice()[1].message,
+    );
 }
 
 test "compiler pinpoints proof parser identifier errors" {
@@ -1121,6 +1130,18 @@ test "compiler records inference diagnostics for omitted arguments" {
     try std.testing.expectEqualStrings("keep_bad", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("ax_keep", diag.rule_name.?);
+    switch (diag.detail) {
+        .inference_failure => |detail| {
+            try std.testing.expectEqual(.transparent_fallback, detail.path);
+            try std.testing.expect(detail.first_unsolved_binder_name == null);
+        },
+        else => return error.ExpectedInferenceFailureDetail,
+    }
+    try std.testing.expectEqual(@as(usize, 3), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "inference path: transparent fallback",
+        diag.noteSlice()[0].message,
+    );
     const span = diag.span orelse return error.ExpectedDiagnosticSpan;
     try std.testing.expectEqualStrings(
         "ax_keep",
@@ -1204,9 +1225,27 @@ test "compiler reports which binder assignment is missing" {
     switch (diag.detail) {
         .missing_binder_assignment => |detail| {
             try std.testing.expectEqualStrings("b", detail.binder_name);
+            try std.testing.expectEqual(.strict_replay, detail.path);
         },
         else => return error.ExpectedMissingBinderDetail,
     }
+    try std.testing.expectEqual(@as(usize, 4), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "inference path: strict replay",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqualStrings(
+        "explicit bindings: a = v0",
+        diag.noteSlice()[1].message,
+    );
+    try std.testing.expectEqualStrings(
+        "inferred bindings before failure: none",
+        diag.noteSlice()[2].message,
+    );
+    try std.testing.expectEqualStrings(
+        "first unsolved binder: b",
+        diag.noteSlice()[3].message,
+    );
 }
 
 test "compiler reports conflicting dependency binders by name" {
@@ -1702,6 +1741,31 @@ test "compiler reports structural ambiguity without ACUI-only wording" {
             "or def-aware matching",
         mm0.compilerDiagnosticSummary(diag),
     );
+    switch (diag.detail) {
+        .inference_failure => |detail| {
+            try std.testing.expectEqual(.structural_solver, detail.path);
+        },
+        else => return error.ExpectedInferenceFailureDetail,
+    }
+    try std.testing.expectEqual(@as(usize, 4), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "inference path: structural or def-aware solver",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expect(std.mem.startsWith(
+        u8,
+        diag.noteSlice()[1].message,
+        "chosen bindings: ",
+    ));
+    try std.testing.expect(std.mem.startsWith(
+        u8,
+        diag.noteSlice()[2].message,
+        "alternative bindings: ",
+    ));
+    try std.testing.expectEqualStrings(
+        "distinct solutions considered: 3",
+        diag.noteSlice()[3].message,
+    );
 }
 
 test "-Werror upgrades ambiguity warnings into errors" {
@@ -1930,6 +1994,78 @@ test "compiler points binding validation errors at explicit assignments" {
     try std.testing.expectEqualStrings(
         "(x := $ top $)",
         proof_src[span.start..span.end],
+    );
+}
+
+test "compiler reports normalized comparison snapshots on mismatch" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term im (a b: wff): wff; infixr im: $->$ prec 25;
+        \\term bi (a b: wff): wff; infixr bi: $<->$ prec 20;
+        \\term sb (a b: wff): wff;
+        \\term P: wff;
+        \\term Q: wff;
+        \\term R: wff;
+        \\--| @relation wff bi biid bitr bisym mpbi
+        \\axiom biid (a: wff): $ a <-> a $;
+        \\axiom bitr (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+        \\axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
+        \\axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+        \\--| @rewrite
+        \\axiom sb_im (a b c: wff): $ sb a (b -> c) <-> (sb a b -> sb a c) $;
+        \\--| @rewrite
+        \\axiom sb_P (a: wff): $ sb a P <-> a $;
+        \\--| @congr
+        \\axiom im_congr (a b c d: wff):
+        \\  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+        \\--| @normalize conc
+        \\axiom all_elim (a b: wff): $ sb a b $;
+        \\theorem test_normalize_bad: $ R -> R $;
+    ;
+    const proof_src =
+        \\test_normalize_bad
+        \\------------------
+        \\l1: $ R -> R $ by all_elim (a := $ Q $, b := $ P -> P $)
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.ConclusionMismatch,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.ConclusionMismatch, diag.err);
+    try std.testing.expectEqual(.conclusion_mismatch, diag.kind);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.theorem_application,
+        diag.phase.?,
+    );
+    try std.testing.expectEqual(@as(usize, 5), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "expected: sb(Q, im(P, P))",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqualStrings(
+        "actual: im(R, R)",
+        diag.noteSlice()[1].message,
+    );
+    try std.testing.expectEqualStrings(
+        "attempted normalized comparison",
+        diag.noteSlice()[2].message,
+    );
+    try std.testing.expectEqualStrings(
+        "normalized expected: im(Q, Q)",
+        diag.noteSlice()[3].message,
+    );
+    try std.testing.expectEqualStrings(
+        "normalized actual: im(R, R)",
+        diag.noteSlice()[4].message,
     );
 }
 
