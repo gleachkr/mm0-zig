@@ -339,6 +339,17 @@ fn writeDiagnosticDetailField(
             try writer.print("{d}", .{info.index});
             try writer.writeAll("}");
         },
+        .unused_parameter => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(writer, "kind", "unused_parameter");
+            try writer.writeByte(',');
+            try writeJsonStringField(
+                writer,
+                "parameter",
+                info.parameter_name,
+            );
+            try writer.writeAll("}");
+        },
     }
 }
 

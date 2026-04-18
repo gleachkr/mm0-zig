@@ -1805,6 +1805,164 @@ test "-Werror upgrades ambiguity warnings into errors" {
     try std.testing.expectEqual(error.AmbiguousAcuiMatch, diag.err);
 }
 
+test "compiler warns on unused theorem parameters" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\sort obj;
+        \\provable sort wff;
+        \\term P: wff;
+        \\theorem unused_theorem {x: obj}: $ P $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.check();
+
+    const warnings = compiler.warningDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), warnings.len);
+    const diag = warnings[0];
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSeverity.warning,
+        diag.severity,
+    );
+    try std.testing.expectEqual(.unused_theorem_parameter, diag.kind);
+    try std.testing.expectEqual(error.UnusedTheoremParameter, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("unused_theorem", diag.name.?);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        mm0.compilerDiagnosticSummary(diag),
+        "@vars",
+    ) != null);
+    switch (diag.detail) {
+        .unused_parameter => |detail| {
+            try std.testing.expectEqualStrings("x", detail.parameter_name);
+        },
+        else => return error.ExpectedUnusedParameterDetail,
+    }
+}
+
+test "dependency-only theorem parameter use suppresses warning" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\sort obj;
+        \\provable sort wff;
+        \\theorem dep_only {x: obj} (p: wff x): $ p $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.check();
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        compiler.warningDiagnostics().len,
+    );
+}
+
+test "compiler warns on unused proof-local theorem parameters" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\axiom hp: $ P $;
+        \\theorem top: $ P $;
+    ;
+    const proof_src =
+        \\lemma unused_local (q: wff): $ P $
+        \\--------------------------------
+        \\l1: $ P $ by hp []
+        \\
+        \\top
+        \\---
+        \\l1: $ P $ by hp []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+
+    const warnings = compiler.warningDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), warnings.len);
+    const diag = warnings[0];
+    try std.testing.expectEqual(.unused_theorem_parameter, diag.kind);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSource.proof,
+        diag.source,
+    );
+    try std.testing.expectEqualStrings("unused_local", diag.name.?);
+    switch (diag.detail) {
+        .unused_parameter => |detail| {
+            try std.testing.expectEqualStrings("q", detail.parameter_name);
+        },
+        else => return error.ExpectedUnusedParameterDetail,
+    }
+}
+
+test "compiler warns on unused definition parameters" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\sort obj;
+        \\provable sort wff;
+        \\term P: wff;
+        \\def unused_def {x: obj}: wff = $ P $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.check();
+
+    const warnings = compiler.warningDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), warnings.len);
+    const diag = warnings[0];
+    try std.testing.expectEqual(.unused_definition_parameter, diag.kind);
+    try std.testing.expectEqual(error.UnusedDefinitionParameter, diag.err);
+    try std.testing.expect(std.mem.indexOf(
+        u8,
+        mm0.compilerDiagnosticSummary(diag),
+        "remove",
+    ) != null);
+    switch (diag.detail) {
+        .unused_parameter => |detail| {
+            try std.testing.expectEqualStrings("x", detail.parameter_name);
+        },
+        else => return error.ExpectedUnusedParameterDetail,
+    }
+}
+
+test "-Werror upgrades unused theorem parameter warnings into errors" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\sort obj;
+        \\provable sort wff;
+        \\term P: wff;
+        \\theorem unused_theorem {x: obj}: $ P $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    compiler.warnings_as_errors = true;
+    try std.testing.expectError(
+        error.UnusedTheoremParameter,
+        compiler.check(),
+    );
+
+    const warnings = compiler.warningDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), warnings.len);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSeverity.warning,
+        warnings[0].severity,
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSeverity.@"error",
+        diag.severity,
+    );
+    try std.testing.expectEqual(.unused_theorem_parameter, diag.kind);
+    try std.testing.expectEqual(error.UnusedTheoremParameter, diag.err);
+}
+
 test "robinson demo uses omitted binders across two ACUI sorts" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(

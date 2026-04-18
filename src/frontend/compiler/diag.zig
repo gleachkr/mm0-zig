@@ -32,6 +32,8 @@ pub const DiagnosticKind = enum {
     duplicate_label,
     empty_proof_block,
     final_line_mismatch,
+    unused_theorem_parameter,
+    unused_definition_parameter,
 };
 
 pub const Scratch = DiagScratch.Scratch;
@@ -80,6 +82,9 @@ pub const DiagnosticDetail = union(enum) {
     missing_congruence_rule: MissingCongruenceRuleDetail,
     hypothesis_ref: struct {
         index: usize,
+    },
+    unused_parameter: struct {
+        parameter_name: []const u8,
     },
 };
 
@@ -610,6 +615,8 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
         .duplicate_label => "duplicate proof line label",
         .empty_proof_block => "proof block is empty",
         .final_line_mismatch => "last proof line does not prove the theorem conclusion",
+        .unused_theorem_parameter => "theorem parameter is unused; if it is only needed during proofs, use @vars and an explicit theorem-local dummy instead",
+        .unused_definition_parameter => "definition parameter is unused; remove it if it is not part of the definition",
     };
 }
 

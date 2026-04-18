@@ -366,6 +366,11 @@ pub const Compiler = struct {
                 .arg_index = info.arg_index,
             } },
             .hypothesis_ref => |info| .{ .hypothesis_ref = info },
+            .unused_parameter => |info| .{ .unused_parameter = .{
+                .parameter_name = self.stableRequiredString(
+                    info.parameter_name,
+                ),
+            } },
         };
     }
 
@@ -462,6 +467,9 @@ fn reportDiagnosticDetail(
         },
         .hypothesis_ref => |info| {
             std.debug.print("  hypothesis ref: #{d}\n", .{info.index});
+        },
+        .unused_parameter => |info| {
+            std.debug.print("  parameter: {s}\n", .{info.parameter_name});
         },
     }
 }

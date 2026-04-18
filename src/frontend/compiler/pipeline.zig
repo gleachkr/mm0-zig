@@ -19,6 +19,7 @@ const Check = @import("./check.zig");
 const RuleCatalog = @import("./rule_catalog.zig");
 const CompilerVars = @import("./vars.zig");
 const CompilerDiag = @import("./diag.zig");
+const CompilerLints = @import("./lints.zig");
 const DiagnosticSource = CompilerDiag.DiagnosticSource;
 
 const ViewDecl = Metadata.ViewDecl;
@@ -166,6 +167,18 @@ pub fn run(
                     );
                     return err;
                 };
+                if (term_stmt.is_def) {
+                    const term_id = env.term_names.get(term_stmt.name) orelse {
+                        return error.UnknownTerm;
+                    };
+                    try CompilerLints.lintUnusedDefinitionParameters(
+                        self,
+                        allocator,
+                        &env.terms.items[term_id],
+                        CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+                        .mm0,
+                    );
+                }
                 Metadata.processTermMetadata(
                     &env,
                     &registry,
@@ -371,6 +384,16 @@ fn processAssertion(
         env,
         assertion,
         assertion.name,
+        CompilerDiag.mathSpanToSpan(assertion.name_span),
+        .mm0,
+    );
+    const rule_id = env.getRuleId(assertion.name) orelse {
+        return error.MissingRule;
+    };
+    try CompilerLints.lintUnusedTheoremParameters(
+        self,
+        allocator,
+        &env.rules.items[rule_id],
         CompilerDiag.mathSpanToSpan(assertion.name_span),
         .mm0,
     );
@@ -638,6 +661,16 @@ fn processLocalProofBlock(
         env,
         assertion,
         block.name,
+        block.name_span,
+        .proof,
+    );
+    const rule_id = env.getRuleId(assertion.name) orelse {
+        return error.MissingRule;
+    };
+    try CompilerLints.lintUnusedTheoremParameters(
+        self,
+        allocator,
+        &env.rules.items[rule_id],
         block.name_span,
         .proof,
     );

@@ -901,6 +901,12 @@ fn compilerDiagnosticMessage(
         .hypothesis_ref => |detail| {
             try writer.print("\nhypothesis ref: #{d}", .{detail.index});
         },
+        .unused_parameter => |detail| {
+            try writer.print(
+                "\nparameter: {s}",
+                .{detail.parameter_name},
+            );
+        },
     }
 
     for (diag.noteSlice()) |note| {
