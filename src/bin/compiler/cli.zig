@@ -34,10 +34,22 @@ pub fn usage() !void {
             "  abc lsp\n" ++
             "\nOptions:\n" ++
             "  --debug SYSTEMS  Enable debug output (comma-separated:\n" ++
-            "                   inference,views,dependency,freshen,normalization,boundary,all)\n" ++
+            "                   " ++
+            mm0.advertised_channel_list ++
+            ")\n" ++
             "  -Werror          Treat compiler warnings as errors\n",
     );
     try stdout.flush();
+}
+
+fn appendPositionalArg(
+    positional: *std.ArrayListUnmanaged([]const u8),
+    arg: []const u8,
+) !void {
+    if (positional.items.len >= positional.capacity) {
+        return UsageError.InvalidUsage;
+    }
+    positional.appendAssumeCapacity(arg);
 }
 
 fn parseCompileArgs(argv: []const []const u8) !Command {
@@ -59,7 +71,7 @@ fn parseCompileArgs(argv: []const []const u8) !Command {
         } else if (std.mem.eql(u8, argv[i], "-Werror")) {
             warnings_as_errors = true;
         } else {
-            positional.appendAssumeCapacity(argv[i]);
+            try appendPositionalArg(&positional, argv[i]);
         }
     }
 
@@ -155,4 +167,61 @@ pub fn main() !void {
         },
         else => std.process.exit(1),
     };
+}
+
+test "parse compile command accepts maintained debug channels" {
+    const cmd = try parseArgs(&.{
+        "compile",
+        "input.mm0",
+        "proof.auf",
+        "output.mmb",
+        "--debug",
+        "views,dependency",
+    });
+    switch (cmd) {
+        .compile => |compile| {
+            try std.testing.expectEqualStrings(
+                "input.mm0",
+                compile.paths.input,
+            );
+            try std.testing.expect(compile.debug.views);
+            try std.testing.expect(compile.debug.dependency);
+            try std.testing.expect(!compile.warnings_as_errors);
+        },
+        else => return error.TestUnexpectedCommand,
+    }
+}
+
+test "parse compile command accepts aliases and Werror in any order" {
+    const cmd = try parseArgs(&.{
+        "--debug",
+        "check,emission",
+        "compile",
+        "input.mm0",
+        "proof.auf",
+        "output.mmb",
+        "-Werror",
+    });
+    switch (cmd) {
+        .compile => |compile| {
+            try std.testing.expect(compile.debug.boundary);
+            try std.testing.expect(compile.debug.normalization);
+            try std.testing.expect(compile.warnings_as_errors);
+        },
+        else => return error.TestUnexpectedCommand,
+    }
+}
+
+test "parse compile command rejects invalid debug flags" {
+    try std.testing.expectError(
+        UsageError.InvalidUsage,
+        parseArgs(&.{
+            "compile",
+            "input.mm0",
+            "proof.auf",
+            "output.mmb",
+            "--debug",
+            "wat",
+        }),
+    );
 }

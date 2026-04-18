@@ -10,15 +10,37 @@ pub const DebugChannel = enum {
     boundary,
 };
 
-pub const advertised_channels = [_][]const u8{
-    "inference",
-    "views",
-    "dependency",
-    "freshen",
-    "normalization",
-    "boundary",
-    "all",
-};
+pub const advertised_channel_list =
+    "inference,views,dependency,freshen,normalization,boundary,all";
+
+fn parseChannelFlag(flag: []const u8) ?DebugChannel {
+    if (std.mem.eql(u8, flag, "inference") or
+        std.mem.eql(u8, flag, "unfolding"))
+    {
+        return .inference;
+    }
+    if (std.mem.eql(u8, flag, "views")) {
+        return .views;
+    }
+    if (std.mem.eql(u8, flag, "dependency")) {
+        return .dependency;
+    }
+    if (std.mem.eql(u8, flag, "freshen")) {
+        return .freshen;
+    }
+    if (std.mem.eql(u8, flag, "normalization") or
+        std.mem.eql(u8, flag, "emission"))
+    {
+        return .normalization;
+    }
+    if (std.mem.eql(u8, flag, "boundary") or
+        std.mem.eql(u8, flag, "reconciliation") or
+        std.mem.eql(u8, flag, "check"))
+    {
+        return .boundary;
+    }
+    return null;
+}
 
 /// Extensible debug configuration. Each field corresponds to a maintained
 /// trace category with stable CLI spellings.
@@ -42,48 +64,11 @@ pub const DebugConfig = struct {
             if (std.mem.eql(u8, flag, "all")) {
                 return all();
             }
-            if (std.mem.eql(u8, flag, "inference")) {
-                config.inference = true;
-                continue;
-            }
-            if (std.mem.eql(u8, flag, "views")) {
-                config.views = true;
-                continue;
-            }
-            if (std.mem.eql(u8, flag, "dependency")) {
-                config.dependency = true;
-                continue;
-            }
-            if (std.mem.eql(u8, flag, "freshen")) {
-                config.freshen = true;
-                continue;
-            }
-            if (std.mem.eql(u8, flag, "normalization")) {
-                config.normalization = true;
-                continue;
-            }
-            if (std.mem.eql(u8, flag, "boundary") or
-                std.mem.eql(u8, flag, "reconciliation"))
-            {
-                config.boundary = true;
-                continue;
-            }
 
-            // Legacy aliases kept for compatibility with earlier docs.
-            if (std.mem.eql(u8, flag, "unfolding")) {
-                config.inference = true;
-                continue;
-            }
-            if (std.mem.eql(u8, flag, "emission")) {
-                config.normalization = true;
-                continue;
-            }
-            if (std.mem.eql(u8, flag, "check")) {
-                config.boundary = true;
-                continue;
-            }
-
-            return error.InvalidDebugFlag;
+            const channel = parseChannelFlag(flag) orelse {
+                return error.InvalidDebugFlag;
+            };
+            config.enable(channel);
         }
         return config;
     }
@@ -116,6 +101,17 @@ pub const DebugConfig = struct {
             .normalization => self.normalization,
             .boundary => self.boundary,
         };
+    }
+
+    pub fn enable(self: *DebugConfig, channel: DebugChannel) void {
+        switch (channel) {
+            .inference => self.inference = true,
+            .views => self.views = true,
+            .dependency => self.dependency = true,
+            .freshen => self.freshen = true,
+            .normalization => self.normalization = true,
+            .boundary => self.boundary = true,
+        }
     }
 };
 
@@ -211,6 +207,23 @@ test "debug config accepts compatibility aliases" {
     try std.testing.expect(config.inference);
     try std.testing.expect(config.normalization);
     try std.testing.expect(config.boundary);
+}
+
+test "debug config trims whitespace and ignores empty entries" {
+    const config = try DebugConfig.parse(
+        " views , , dependency , freshen ",
+    );
+    try std.testing.expect(config.views);
+    try std.testing.expect(config.dependency);
+    try std.testing.expect(config.freshen);
+    try std.testing.expect(!config.inference);
+}
+
+test "debug config rejects unknown channels" {
+    try std.testing.expectError(
+        error.InvalidDebugFlag,
+        DebugConfig.parse("views,wat"),
+    );
 }
 
 test "debug config all enables every maintained channel" {
