@@ -22,6 +22,8 @@ pub const appendTransportLine = CheckedIr.appendTransportLine;
 
 pub const Compiler = struct {
     pub const max_warnings = 32;
+    const diagnostic_storage_size = 4096;
+    const truncated_diagnostic_string = "<diagnostic string truncated>";
 
     allocator: std.mem.Allocator,
     source: []const u8,
@@ -32,6 +34,8 @@ pub const Compiler = struct {
     dropped_warning_count: usize = 0,
     warnings_as_errors: bool = false,
     debug: DebugConfig,
+    diagnostic_storage: [diagnostic_storage_size]u8 = undefined,
+    diagnostic_storage_len: usize = 0,
 
     const PipelineOutput = Pipeline.Output;
 
@@ -39,17 +43,7 @@ pub const Compiler = struct {
         allocator: std.mem.Allocator,
         source: []const u8,
     ) Compiler {
-        return .{
-            .allocator = allocator,
-            .source = source,
-            .proof_source = null,
-            .last_diagnostic = null,
-            .warning_storage = undefined,
-            .warning_count = 0,
-            .dropped_warning_count = 0,
-            .warnings_as_errors = false,
-            .debug = DebugConfig.none,
-        };
+        return initInternal(allocator, source, null);
     }
 
     pub fn initWithProof(
@@ -57,7 +51,15 @@ pub const Compiler = struct {
         source: []const u8,
         proof_source: []const u8,
     ) Compiler {
-        return .{
+        return initInternal(allocator, source, proof_source);
+    }
+
+    fn initInternal(
+        allocator: std.mem.Allocator,
+        source: []const u8,
+        proof_source: ?[]const u8,
+    ) Compiler {
+        const compiler: Compiler = .{
             .allocator = allocator,
             .source = source,
             .proof_source = proof_source,
@@ -67,7 +69,10 @@ pub const Compiler = struct {
             .dropped_warning_count = 0,
             .warnings_as_errors = false,
             .debug = DebugConfig.none,
+            .diagnostic_storage = undefined,
+            .diagnostic_storage_len = 0,
         };
+        return compiler;
     }
 
     pub fn check(self: *Compiler) !void {
@@ -115,7 +120,7 @@ pub const Compiler = struct {
     }
 
     pub fn addWarning(self: *Compiler, diag: Diagnostic) void {
-        var warning = diag;
+        var warning = self.stableDiagnostic(diag);
         warning.severity = .warning;
         if (self.warning_count >= self.warning_storage.len) {
             self.dropped_warning_count += 1;
@@ -148,6 +153,7 @@ pub const Compiler = struct {
     }
 
     fn clearDiagnostics(self: *Compiler) void {
+        self.diagnostic_storage_len = 0;
         self.last_diagnostic = null;
         self.warning_count = 0;
         self.dropped_warning_count = 0;
@@ -160,7 +166,7 @@ pub const Compiler = struct {
 
         var diag = warnings[0];
         diag.severity = .@"error";
-        self.last_diagnostic = diag;
+        self.setDiagnostic(diag);
         return diag.err;
     }
 
@@ -237,7 +243,75 @@ pub const Compiler = struct {
     }
 
     pub fn setDiagnostic(self: *Compiler, diag: Diagnostic) void {
-        self.last_diagnostic = diag;
+        self.last_diagnostic = self.stableDiagnostic(diag);
+    }
+
+    fn stableDiagnostic(self: *Compiler, diag: Diagnostic) Diagnostic {
+        var stable = diag;
+        stable.theorem_name = self.stableString(diag.theorem_name);
+        stable.block_name = self.stableString(diag.block_name);
+        stable.line_label = self.stableString(diag.line_label);
+        stable.rule_name = self.stableString(diag.rule_name);
+        stable.name = self.stableString(diag.name);
+        stable.expected_name = self.stableString(diag.expected_name);
+        stable.detail = self.stableDiagnosticDetail(diag.detail);
+        return stable;
+    }
+
+    fn stableDiagnosticDetail(
+        self: *Compiler,
+        detail: DiagnosticDetail,
+    ) DiagnosticDetail {
+        return switch (detail) {
+            .none => .none,
+            .unknown_math_token => |info| .{ .unknown_math_token = .{
+                .token = self.stableRequiredString(info.token),
+            } },
+            .missing_binder_assignment => |info| .{
+                .missing_binder_assignment = .{
+                    .binder_name = self.stableRequiredString(info.binder_name),
+                },
+            },
+            .missing_congruence_rule => |info| .{ .missing_congruence_rule = .{
+                .reason = info.reason,
+                .term_name = self.stableString(info.term_name),
+                .sort_name = self.stableString(info.sort_name),
+                .arg_index = info.arg_index,
+            } },
+            .related_rule => |info| .{ .related_rule = info },
+            .hypothesis_ref => |info| .{ .hypothesis_ref = info },
+        };
+    }
+
+    fn stableString(
+        self: *Compiler,
+        value: ?[]const u8,
+    ) ?[]const u8 {
+        const actual = value orelse return null;
+        return self.stableRequiredString(actual);
+    }
+
+    fn stableRequiredString(
+        self: *Compiler,
+        value: []const u8,
+    ) []const u8 {
+        if (self.isStableSourceSlice(value)) return value;
+        const remaining = diagnostic_storage_size - self.diagnostic_storage_len;
+        if (value.len > remaining) return truncated_diagnostic_string;
+
+        const start = self.diagnostic_storage_len;
+        const end = start + value.len;
+        @memcpy(self.diagnostic_storage[start..end], value);
+        self.diagnostic_storage_len = end;
+        return self.diagnostic_storage[start..end];
+    }
+
+    fn isStableSourceSlice(self: *const Compiler, value: []const u8) bool {
+        if (isSubslice(self.source, value)) return true;
+        if (self.proof_source) |proof_source| {
+            if (isSubslice(proof_source, value)) return true;
+        }
+        return false;
     }
 };
 
@@ -301,6 +375,14 @@ const LineCol = struct {
     line_start: usize,
     line_end: usize,
 };
+
+fn isSubslice(owner: []const u8, value: []const u8) bool {
+    const owner_start = @intFromPtr(owner.ptr);
+    const owner_end = owner_start + owner.len;
+    const value_start = @intFromPtr(value.ptr);
+    const value_end = value_start + value.len;
+    return value_start >= owner_start and value_end <= owner_end;
+}
 
 fn lineCol(src: []const u8, pos_raw: usize) LineCol {
     const pos = @min(pos_raw, src.len);

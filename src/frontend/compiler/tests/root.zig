@@ -626,6 +626,41 @@ test "compiler rejects theorem names that collide with earlier lemmas" {
     try std.testing.expectEqualStrings("helper", diag.name.?);
 }
 
+test "compiler preserves local lemma diagnostics after check returns" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\lemma helper: $ top $
+        \\--------------------
+        \\l1: $ top $ by missing_rule []
+        \\
+        \\target
+        \\------
+        \\l1: $ top $ by helper []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.UnknownRule, compiler.check());
+
+    var churn_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer churn_arena.deinit();
+    const churn = try churn_arena.allocator().alloc(u8, 4096);
+    @memset(churn, 0xaa);
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnknownRule, diag.err);
+    try std.testing.expectEqualStrings("helper", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("missing_rule", diag.rule_name.?);
+}
+
 test "compiler rejects out-of-order and extra proof blocks" {
     const mm0_src =
         \\provable sort wff;
