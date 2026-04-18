@@ -206,6 +206,7 @@ pub fn checkTheoremBlock(
     if (final_line != theorem_concl) {
         if (last_line_idx) |line_idx| {
             const final_mark = diag_scratch.mark();
+            var final_report: TheoremBoundary.ReconciliationReport = .{};
             if ((TheoremBoundary.tryReconcileFinalConclusion(
                 allocator,
                 theorem,
@@ -216,20 +217,24 @@ pub fn checkTheoremBlock(
                 theorem_concl,
                 final_line,
                 line_idx,
+                &final_report,
             ) catch |err| {
-                if (CompilerDiag.setProofScratchDiagnosticIfPresent(
-                    self,
+                if (CompilerDiag.takeScratchDetail(
                     &diag_scratch,
                     final_mark,
                     env,
-                    .final_reconciliation,
-                    .generic,
                     err,
-                    assertion.name,
-                    last_label,
-                    null,
-                    last_span,
-                )) {
+                )) |detail| {
+                    var diag = CompilerDiag.withPhase(.{
+                        .kind = .generic,
+                        .err = err,
+                        .theorem_name = assertion.name,
+                        .line_label = last_label,
+                        .span = last_span,
+                        .detail = detail,
+                    }, .final_reconciliation);
+                    addBoundaryAttemptNotes(&diag, final_report);
+                    CompilerDiag.setProof(self, diag);
                     return err;
                 }
                 diag_scratch.discard(final_mark);
@@ -239,6 +244,16 @@ pub fn checkTheoremBlock(
                 return try checked.toOwnedSlice(allocator);
             }
             diag_scratch.discard(final_mark);
+            var diag = CompilerDiag.withPhase(.{
+                .kind = .final_line_mismatch,
+                .err = error.FinalLineMismatch,
+                .theorem_name = assertion.name,
+                .line_label = last_label,
+                .span = last_span,
+            }, .final_reconciliation);
+            addBoundaryAttemptNotes(&diag, final_report);
+            CompilerDiag.setProof(self, diag);
+            return error.FinalLineMismatch;
         }
         CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
             .kind = .final_line_mismatch,
@@ -421,8 +436,10 @@ fn tryApplyLineWithCandidate(
             theorem,
             assertion.args,
             rule.args,
+            rule.arg_names,
             resolved_bindings,
         )) orelse return err;
+        var freshen_report: CompilerFreshen.FreshenAttemptReport = .{};
         freshened_bindings = CompilerFreshen.tryFreshenBindings(
             allocator,
             parser,
@@ -439,33 +456,41 @@ fn tryApplyLineWithCandidate(
             dep_detail,
             checked,
             diag_scratch,
+            &freshen_report,
         ) catch |fresh_err| {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            var diag = CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = fresh_err,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .span = line.ruleApplicationSpan(),
-            }, .theorem_application));
+                .detail = .{ .dep_violation = dep_detail },
+            }, .theorem_application);
+            try addFreshenAttemptNotes(allocator, &diag, rule, freshen_report);
+            CompilerDiag.setProof(self, diag);
             return fresh_err;
         } orelse return err;
         resolved_bindings = freshened_bindings.?.bindings;
-        if ((try Inference.firstDepViolation(
+        if (try Inference.firstDepViolation(
             env,
             theorem,
             assertion.args,
             rule.args,
+            rule.arg_names,
             resolved_bindings,
-        )) != null) {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        )) |remaining_dep_detail| {
+            var diag = CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = error.AlphaRewriteSearchFailed,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .span = line.ruleApplicationSpan(),
-            }, .theorem_application));
+                .detail = .{ .dep_violation = remaining_dep_detail },
+            }, .theorem_application);
+            try addFreshenAttemptNotes(allocator, &diag, rule, freshen_report);
+            CompilerDiag.setProof(self, diag);
             return error.AlphaRewriteSearchFailed;
         }
         restoreDiagnostic(self, null);
@@ -1110,6 +1135,84 @@ fn applyFreshBindings(
         bindings[fresh.target_arg_idx] = selection.expr_id;
         reserved_deps |= selection.deps;
     }
+}
+
+fn addFreshenAttemptNotes(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    rule: *const RuleDecl,
+    report: CompilerFreshen.FreshenAttemptReport,
+) !void {
+    if (!report.attempted) return;
+
+    const target_name = rule.arg_names[report.target_arg_idx] orelse "_";
+    const blocker_name = rule.arg_names[report.blocker_arg_idx] orelse "_";
+    try addFormattedProofNote(
+        allocator,
+        diag,
+        "attempted @freshen for target binder {s}",
+        .{target_name},
+    );
+    try addFormattedProofNote(
+        allocator,
+        diag,
+        "freshen blocker binder: {s}",
+        .{blocker_name},
+    );
+    if (report.replacement_name) |replacement_name| {
+        try addFormattedProofNote(
+            allocator,
+            diag,
+            "chosen replacement binder: {s}",
+            .{replacement_name},
+        );
+    }
+    if (report.blocker_dependency_remaining) |remaining| {
+        if (remaining) {
+            try addFormattedProofNote(
+                allocator,
+                diag,
+                "rewritten target still depends on blocker binder {s}",
+                .{blocker_name},
+            );
+        } else {
+            try addFormattedProofNote(
+                allocator,
+                diag,
+                "rewritten target no longer depends on blocker binder {s}",
+                .{blocker_name},
+            );
+        }
+    }
+}
+
+fn addBoundaryAttemptNotes(
+    diag: *Diagnostic,
+    report: TheoremBoundary.ReconciliationReport,
+) void {
+    if (report.attempted_transparent) {
+        addStaticProofNote(diag, "attempted transparent final reconciliation");
+    }
+    if (report.attempted_normalized) {
+        addStaticProofNote(diag, "attempted normalized final reconciliation");
+    }
+    if (report.attempted_alpha_cleanup) {
+        addStaticProofNote(diag, "attempted alpha-cleanup final reconciliation");
+    }
+}
+
+fn addStaticProofNote(diag: *Diagnostic, message: []const u8) void {
+    CompilerDiag.addNote(diag, message, .proof, null);
+}
+
+fn addFormattedProofNote(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    const message = try std.fmt.allocPrint(allocator, fmt, args);
+    CompilerDiag.addNote(diag, message, .proof, null);
 }
 
 fn refSpan(ref: Ref) Span {

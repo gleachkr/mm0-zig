@@ -24,6 +24,7 @@ pub const FreshenDecl = struct {
 pub const FreshSelection = struct {
     expr_id: ExprId,
     deps: u55,
+    token: []const u8,
 };
 
 pub const HiddenRootNeed = struct {
@@ -127,6 +128,7 @@ pub fn chooseFreshBinding(
                     return .{
                         .expr_id = try theorem.interner.internVar(var_id),
                         .deps = dummy_info.deps,
+                        .token = token,
                     };
                 },
                 .theorem_var => continue,
@@ -154,6 +156,7 @@ pub fn chooseFreshBinding(
         .dummy_var => |dummy_id| .{
             .expr_id = try theorem.interner.internVar(var_id),
             .deps = theorem.theorem_dummies.items[dummy_id].deps,
+            .token = token,
         },
         .theorem_var => error.FreshNoAvailableVar,
     };

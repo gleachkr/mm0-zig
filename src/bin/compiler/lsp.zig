@@ -865,6 +865,18 @@ fn compilerDiagnosticMessage(
                 .{detail.binder_name},
             );
         },
+        .dep_violation => |detail| {
+            try writer.writeAll("\ndependency violation: ");
+            try mm0.writeCompilerDepViolationSummary(&writer, detail);
+            try writer.print(
+                "\nfirst binder: deps=0x{x} bound={}",
+                .{ detail.first_deps, detail.first_bound },
+            );
+            try writer.print(
+                "\nsecond binder: deps=0x{x} bound={}",
+                .{ detail.second_deps, detail.second_bound },
+            );
+        },
         .missing_congruence_rule => |detail| {
             try writer.writeAll("\nmissing congruence: ");
             try mm0.writeCompilerMissingCongruenceRuleSummary(&writer, detail);
@@ -1075,5 +1087,69 @@ test "compiler diagnostics publish related information" {
         lsp_diag.message,
         1,
         "phase: theorem application",
+    ));
+}
+
+test "compiler dependency diagnostics render detail in LSP messages" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const proof_text =
+        \\rel_bad
+        \\-------
+        \\l1: $ rel z z $ by rel_ax (x := $ z $, y := $ z $) []
+    ;
+
+    const diag_context: DiagnosticContext = .{
+        .proof = .{
+            .uri = "file:///tmp/test.auf",
+            .text = proof_text,
+            .version = 1,
+        },
+    };
+    const lsp_diag = try compilerDiagnosticToLsp(
+        allocator,
+        diag_context,
+        .{
+            .kind = .generic,
+            .err = error.DepViolation,
+            .source = .proof,
+            .phase = .theorem_application,
+            .theorem_name = "rel_bad",
+            .line_label = "l1",
+            .rule_name = "rel_ax",
+            .span = .{ .start = 17, .end = 23 },
+            .detail = .{ .dep_violation = .{
+                .first_arg_idx = 0,
+                .second_arg_idx = 1,
+                .first_arg_name = "x",
+                .second_arg_name = "y",
+                .first_deps = 1,
+                .second_deps = 1,
+                .first_bound = true,
+                .second_bound = true,
+            } },
+        },
+        .@"utf-16",
+    );
+
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        lsp_diag.message,
+        1,
+        "dependency violation: conflicting binders x and y",
+    ));
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        lsp_diag.message,
+        1,
+        "first binder: deps=0x1 bound=true",
+    ));
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        lsp_diag.message,
+        1,
+        "second binder: deps=0x1 bound=true",
     ));
 }

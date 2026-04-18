@@ -342,6 +342,16 @@ pub const Compiler = struct {
                     .binder_name = self.stableRequiredString(info.binder_name),
                 },
             },
+            .dep_violation => |info| .{ .dep_violation = .{
+                .first_arg_idx = info.first_arg_idx,
+                .second_arg_idx = info.second_arg_idx,
+                .first_arg_name = self.stableString(info.first_arg_name),
+                .second_arg_name = self.stableString(info.second_arg_name),
+                .first_deps = info.first_deps,
+                .second_deps = info.second_deps,
+                .first_bound = info.first_bound,
+                .second_bound = info.second_bound,
+            } },
             .missing_congruence_rule => |info| .{ .missing_congruence_rule = .{
                 .reason = info.reason,
                 .term_name = self.stableString(info.term_name),
@@ -397,6 +407,20 @@ fn reportDiagnosticDetail(
         },
         .missing_binder_assignment => |info| {
             std.debug.print("  missing binder: {s}\n", .{info.binder_name});
+        },
+        .dep_violation => |info| {
+            var stderr = std.fs.File.stderr().deprecatedWriter();
+            stderr.writeAll("  dependency violation: ") catch return;
+            CompilerDiag.writeDepViolationSummary(stderr, info) catch return;
+            stderr.writeByte('\n') catch return;
+            std.debug.print(
+                "  first binder: deps=0x{x} bound={}\n",
+                .{ info.first_deps, info.first_bound },
+            );
+            std.debug.print(
+                "  second binder: deps=0x{x} bound={}\n",
+                .{ info.second_deps, info.second_bound },
+            );
         },
         .missing_congruence_rule => |info| {
             var stderr = std.fs.File.stderr().deprecatedWriter();

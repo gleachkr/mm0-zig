@@ -238,6 +238,55 @@ fn writeDiagnosticDetailField(
             try writeJsonStringField(writer, "binder", info.binder_name);
             try writer.writeAll("}");
         },
+        .dep_violation => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(writer, "kind", "dep_violation");
+            try writer.writeByte(',');
+            try writer.writeAll("\"summary\":\"");
+            try mm0.writeCompilerDepViolationSummary(writer, info);
+            try writer.writeByte('"');
+            try writer.writeByte(',');
+            try writeOptionalStringField(
+                writer,
+                "firstArgName",
+                info.first_arg_name,
+            );
+            try writer.writeByte(',');
+            try writeOptionalStringField(
+                writer,
+                "secondArgName",
+                info.second_arg_name,
+            );
+            try writer.writeByte(',');
+            try writeOptionalUsizeField(
+                writer,
+                "firstArgIndex",
+                info.first_arg_idx,
+            );
+            try writer.writeByte(',');
+            try writeOptionalUsizeField(
+                writer,
+                "secondArgIndex",
+                info.second_arg_idx,
+            );
+            try writer.writeByte(',');
+            try writeOptionalUsizeField(
+                writer,
+                "firstDeps",
+                info.first_deps,
+            );
+            try writer.writeByte(',');
+            try writeOptionalUsizeField(
+                writer,
+                "secondDeps",
+                info.second_deps,
+            );
+            try writer.writeByte(',');
+            try writer.print("\"firstBound\":{}", .{info.first_bound});
+            try writer.writeByte(',');
+            try writer.print("\"secondBound\":{}", .{info.second_bound});
+            try writer.writeAll("}");
+        },
         .missing_congruence_rule => |info| {
             try writer.writeAll("{");
             try writeJsonStringField(

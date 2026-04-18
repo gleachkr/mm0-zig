@@ -15,6 +15,12 @@ const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
 const appendTransportLine = CheckedIr.appendTransportLine;
 
+pub const ReconciliationReport = struct {
+    attempted_transparent: bool = false,
+    attempted_normalized: bool = false,
+    attempted_alpha_cleanup: bool = false,
+};
+
 pub fn tryReconcileFinalConclusion(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
@@ -25,7 +31,9 @@ pub fn tryReconcileFinalConclusion(
     theorem_concl: ExprId,
     final_line: ExprId,
     line_idx: usize,
+    report: *ReconciliationReport,
 ) !bool {
+    report.attempted_transparent = true;
     if (try buildTransparentReconciliation(
         allocator,
         theorem,
@@ -38,6 +46,7 @@ pub fn tryReconcileFinalConclusion(
         return true;
     }
 
+    report.attempted_normalized = true;
     if (try buildNormalizedReconciliation(
         allocator,
         theorem,
@@ -52,6 +61,7 @@ pub fn tryReconcileFinalConclusion(
         return true;
     }
 
+    report.attempted_alpha_cleanup = true;
     if (try buildAlphaCleanupReconciliation(
         allocator,
         theorem,

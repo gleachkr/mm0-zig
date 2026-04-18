@@ -907,6 +907,52 @@ test "compiler retries theorem lines through fallback chains" {
     try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
 }
 
+test "final mismatch reports reconciliation attempts" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\term mid: wff;
+        \\axiom top_i: $ top $;
+        \\theorem need_mid: $ mid $;
+    ;
+    const proof_src =
+        \\need_mid
+        \\--------
+        \\l1: $ top $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.FinalLineMismatch,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.FinalLineMismatch, diag.err);
+    try std.testing.expectEqual(.final_line_mismatch, diag.kind);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.final_reconciliation,
+        diag.phase.?,
+    );
+    try std.testing.expectEqual(@as(usize, 3), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "attempted transparent final reconciliation",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqualStrings(
+        "attempted normalized final reconciliation",
+        diag.noteSlice()[1].message,
+    );
+    try std.testing.expectEqualStrings(
+        "attempted alpha-cleanup final reconciliation",
+        diag.noteSlice()[2].message,
+    );
+}
+
 test "compiler reports fallback cycles when every candidate fails" {
     const mm0_src =
         \\provable sort wff;
@@ -1163,6 +1209,56 @@ test "compiler reports which binder assignment is missing" {
     }
 }
 
+test "compiler reports conflicting dependency binders by name" {
+    const mm0_src =
+        \\provable sort wff;
+        \\sort obj;
+        \\term rel {x y: obj}: wff;
+        \\axiom rel_ax {x y: obj}: $ rel x y $;
+        \\theorem rel_bad {z: obj}: $ rel z z $;
+    ;
+    const proof_src =
+        \\rel_bad
+        \\-------
+        \\l1: $ rel z z $ by rel_ax (x := $ z $, y := $ z $) []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.DepViolation,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DepViolation, diag.err);
+    try std.testing.expectEqual(.generic, diag.kind);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.theorem_application,
+        diag.phase.?,
+    );
+    try std.testing.expectEqualStrings(
+        "binder assignments violate the rule's dependency constraints",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    switch (diag.detail) {
+        .dep_violation => |detail| {
+            try std.testing.expectEqual(@as(usize, 0), detail.first_arg_idx);
+            try std.testing.expectEqual(@as(usize, 1), detail.second_arg_idx);
+            try std.testing.expectEqualStrings("x", detail.first_arg_name.?);
+            try std.testing.expectEqualStrings("y", detail.second_arg_name.?);
+            try std.testing.expectEqual(@as(u55, 1), detail.first_deps);
+            try std.testing.expectEqual(@as(u55, 1), detail.second_deps);
+            try std.testing.expect(detail.first_bound);
+            try std.testing.expect(detail.second_bound);
+        },
+        else => return error.ExpectedDepViolationDetail,
+    }
+}
+
 test "multi-remainder inference handles a simple ACUI cover" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
@@ -1253,6 +1349,53 @@ test "prawitz alpha freshen proof compiles and verifies" {
     const mmb = try compiler.compileMmb(allocator);
     defer allocator.free(mmb);
     try mm0.verifyPair(allocator, mm0_src, mmb);
+}
+
+test "compiler reports freshen attempt notes on failure" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "fail_alpha_freshen_opaque_theorem_arg",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "fail_alpha_freshen_opaque_theorem_arg",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    try std.testing.expectError(
+        error.AlphaRewriteSearchFailed,
+        compiler.compileMmb(allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.AlphaRewriteSearchFailed, diag.err);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.theorem_application,
+        diag.phase.?,
+    );
+    try std.testing.expectEqual(@as(usize, 4), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "attempted @freshen for target binder g",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqualStrings(
+        "freshen blocker binder: x",
+        diag.noteSlice()[1].message,
+    );
+    try std.testing.expect(std.mem.startsWith(
+        u8,
+        diag.noteSlice()[2].message,
+        "chosen replacement binder:",
+    ));
+    try std.testing.expectEqualStrings(
+        "rewritten target still depends on blocker binder x",
+        diag.noteSlice()[3].message,
+    );
 }
 
 test "compiler pinpoints invalid @freshen binder kinds" {

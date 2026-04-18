@@ -34,6 +34,14 @@ pub const FreshenResult = struct {
     target_conv_line_idx: usize,
 };
 
+pub const FreshenAttemptReport = struct {
+    attempted: bool = false,
+    target_arg_idx: usize = 0,
+    blocker_arg_idx: usize = 0,
+    replacement_name: ?[]const u8 = null,
+    blocker_dependency_remaining: ?bool = null,
+};
+
 const NormalizeResult = @import("../normalizer/types.zig").NormalizeResult;
 
 pub fn tryFreshenBindings(
@@ -52,11 +60,18 @@ pub fn tryFreshenBindings(
     dep_detail: DepViolationDetail,
     checked: *std.ArrayListUnmanaged(CheckedLine),
     scratch: *CompilerDiag.Scratch,
+    report: *FreshenAttemptReport,
 ) !?FreshenResult {
     const decl = matchingFreshenDecl(
         freshen_decls,
         dep_detail,
     ) orelse return null;
+
+    report.* = .{
+        .attempted = true,
+        .target_arg_idx = decl.target_arg_idx,
+        .blocker_arg_idx = decl.blocker_arg_idx,
+    };
 
     const blocker_expr = bindings[decl.blocker_arg_idx];
     const optional_bindings = try allocator.alloc(?ExprId, bindings.len);
@@ -90,14 +105,22 @@ pub fn tryFreshenBindings(
         checked,
         scratch,
     );
-    const freshened = try freshenExpr(
+    report.replacement_name = selection.token;
+
+    const freshened = freshenExpr(
         &normalizer,
         bindings[decl.target_arg_idx],
         blocker_expr,
         selection.expr_id,
-    ) orelse return error.NoAlphaRewriteAvailable;
+    ) catch |err| {
+        if (err == error.AlphaRewriteSearchFailed) {
+            report.blocker_dependency_remaining = true;
+        }
+        return err;
+    } orelse return error.NoAlphaRewriteAvailable;
 
     if (freshened.result_expr == bindings[decl.target_arg_idx]) {
+        report.blocker_dependency_remaining = true;
         return error.AlphaRewriteSearchFailed;
     }
     const new_info = try Inference.exprInfo(
@@ -112,7 +135,9 @@ pub fn tryFreshenBindings(
         theorem.arg_infos,
         blocker_expr,
     );
-    if (new_info.deps & blocker_info.deps != 0) {
+    report.blocker_dependency_remaining =
+        (new_info.deps & blocker_info.deps) != 0;
+    if (report.blocker_dependency_remaining.?) {
         return error.AlphaRewriteSearchFailed;
     }
     const conv_idx = freshened.conv_line_idx orelse {
@@ -550,4 +575,3 @@ fn matchingFreshenDecl(
     }
     return null;
 }
-

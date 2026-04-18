@@ -44,6 +44,17 @@ pub const MissingCongruenceRuleDetail = struct {
     arg_index: ?usize = null,
 };
 
+pub const DepViolationDiagnosticDetail = struct {
+    first_arg_idx: usize,
+    second_arg_idx: usize,
+    first_arg_name: ?[]const u8 = null,
+    second_arg_name: ?[]const u8 = null,
+    first_deps: u55,
+    second_deps: u55,
+    first_bound: bool,
+    second_bound: bool,
+};
+
 pub const DiagnosticDetail = union(enum) {
     none,
     unknown_math_token: struct {
@@ -52,6 +63,7 @@ pub const DiagnosticDetail = union(enum) {
     missing_binder_assignment: struct {
         binder_name: []const u8,
     },
+    dep_violation: DepViolationDiagnosticDetail,
     missing_congruence_rule: MissingCongruenceRuleDetail,
     hypothesis_ref: struct {
         index: usize,
@@ -652,6 +664,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
             "available",
         error.NoAlphaRewriteAvailable => "no matching @alpha rule was available for this @freshen step",
         error.AlphaRewriteSearchFailed => "the available @alpha rules did not remove the blocker dependency",
+        error.DepViolation => "binder assignments violate the rule's dependency constraints",
         error.FreshenMissingRelation => "freshening needs a registered relation on the affected sort",
         error.FreshenTransportFailed => "freshening could not lift the alpha rewrite through the rule formula",
         error.InvalidVarsAnnotation => "@vars expects one or more raw math tokens",
@@ -792,6 +805,36 @@ pub fn writeMissingCongruenceRuleSummary(
             try writer.writeAll("normalization used an unknown term");
         },
     }
+}
+
+pub fn writeDepViolationSummary(
+    writer: anytype,
+    info: DepViolationDiagnosticDetail,
+) !void {
+    try writer.writeAll("conflicting binders ");
+    try writeDepViolationArgLabel(
+        writer,
+        info.first_arg_name,
+        info.first_arg_idx,
+    );
+    try writer.writeAll(" and ");
+    try writeDepViolationArgLabel(
+        writer,
+        info.second_arg_name,
+        info.second_arg_idx,
+    );
+}
+
+fn writeDepViolationArgLabel(
+    writer: anytype,
+    name: ?[]const u8,
+    idx: usize,
+) !void {
+    if (name) |actual_name| {
+        try writer.writeAll(actual_name);
+        return;
+    }
+    try writer.print("#{d}", .{idx + 1});
 }
 
 pub fn buildCapturedDiagnosticDetail(

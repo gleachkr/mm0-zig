@@ -47,10 +47,7 @@ const ExprInfo = struct {
     deps: u55,
 };
 
-pub const DepViolationDetail = struct {
-    first_arg_idx: usize,
-    second_arg_idx: usize,
-};
+pub const DepViolationDetail = CompilerDiag.DepViolationDiagnosticDetail;
 
 pub const HiddenWitnessFreshContext = struct {
     parser: *MM0Parser,
@@ -951,8 +948,9 @@ pub fn strictInferBindings(
         theorem,
         assertion.args,
         rule.args,
+        rule.arg_names,
         bindings,
-    )) |_| {
+    )) |detail| {
         allocator.free(bindings);
         CompilerDiag.maybeSetProof(self, CompilerDiag.withPhase(.{
             .kind = .generic,
@@ -961,7 +959,8 @@ pub fn strictInferBindings(
             .line_label = line.label,
             .rule_name = line.rule_name,
             .span = line.ruleApplicationSpan(),
-        }, .inference));
+            .detail = .{ .dep_violation = detail },
+        }, .theorem_application));
         return error.DepViolation;
     }
     return bindings;
@@ -1001,8 +1000,9 @@ pub fn validateResolvedBindings(
         theorem,
         assertion.args,
         rule.args,
+        rule.arg_names,
         bindings,
-    )) |_| {
+    )) |detail| {
         CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
             .kind = .generic,
             .err = error.DepViolation,
@@ -1010,7 +1010,8 @@ pub fn validateResolvedBindings(
             .line_label = line.label,
             .rule_name = line.rule_name,
             .span = line.ruleApplicationSpan(),
-        }, .inference));
+            .detail = .{ .dep_violation = detail },
+        }, .theorem_application));
         return error.DepViolation;
     }
 }
@@ -1020,6 +1021,7 @@ pub fn bindingsRespectRuleDeps(
     theorem: *const TheoremContext,
     theorem_args: []const ArgInfo,
     rule_args: []const ArgInfo,
+    rule_arg_names: []const ?[]const u8,
     bindings: []const ExprId,
 ) !bool {
     return (try firstDepViolation(
@@ -1027,6 +1029,7 @@ pub fn bindingsRespectRuleDeps(
         theorem,
         theorem_args,
         rule_args,
+        rule_arg_names,
         bindings,
     )) == null;
 }
@@ -1036,13 +1039,16 @@ pub fn firstDepViolation(
     theorem: *const TheoremContext,
     theorem_args: []const ArgInfo,
     rule_args: []const ArgInfo,
+    rule_arg_names: []const ?[]const u8,
     bindings: []const ExprId,
 ) !?DepViolationDetail {
     var bound_deps: [56]u55 = undefined;
     var bound_arg_indices: [56]usize = undefined;
+    var bound_infos: [56]ExprInfo = undefined;
     var bound_len: usize = 0;
     var prev_deps: [56]u55 = undefined;
     var prev_arg_indices: [56]usize = undefined;
+    var prev_infos: [56]ExprInfo = undefined;
     var prev_len: usize = 0;
 
     for (bindings, rule_args, 0..) |binding, expected, idx| {
@@ -1050,32 +1056,65 @@ pub fn firstDepViolation(
         if (expected.bound) {
             for (0..prev_len) |k| {
                 if (prev_deps[k] & info.deps != 0) {
-                    return .{
-                        .first_arg_idx = prev_arg_indices[k],
-                        .second_arg_idx = idx,
-                    };
+                    return depViolationDetail(
+                        rule_arg_names,
+                        prev_arg_indices[k],
+                        prev_infos[k],
+                        idx,
+                        info,
+                    );
                 }
             }
             bound_deps[bound_len] = info.deps;
             bound_arg_indices[bound_len] = idx;
+            bound_infos[bound_len] = info;
             bound_len += 1;
         } else {
             for (0..bound_len) |k| {
                 if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0)
                     continue;
                 if (bound_deps[k] & info.deps != 0) {
-                    return .{
-                        .first_arg_idx = bound_arg_indices[k],
-                        .second_arg_idx = idx,
-                    };
+                    return depViolationDetail(
+                        rule_arg_names,
+                        bound_arg_indices[k],
+                        bound_infos[k],
+                        idx,
+                        info,
+                    );
                 }
             }
         }
         prev_deps[prev_len] = info.deps;
         prev_arg_indices[prev_len] = idx;
+        prev_infos[prev_len] = info;
         prev_len += 1;
     }
     return null;
+}
+
+fn depViolationDetail(
+    rule_arg_names: []const ?[]const u8,
+    first_idx: usize,
+    first_info: ExprInfo,
+    second_idx: usize,
+    second_info: ExprInfo,
+) DepViolationDetail {
+    return .{
+        .first_arg_idx = first_idx,
+        .second_arg_idx = second_idx,
+        .first_arg_name = if (first_idx < rule_arg_names.len)
+            rule_arg_names[first_idx]
+        else
+            null,
+        .second_arg_name = if (second_idx < rule_arg_names.len)
+            rule_arg_names[second_idx]
+        else
+            null,
+        .first_deps = first_info.deps,
+        .second_deps = second_info.deps,
+        .first_bound = first_info.bound,
+        .second_bound = second_info.bound,
+    };
 }
 
 // Inference only solves equalities. We still need the same sort, boundness,
