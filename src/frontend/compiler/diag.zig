@@ -714,6 +714,12 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.ExpectedCloseParen => "expected closing parenthesis in math string",
         error.TrailingMathTokens => "unexpected trailing tokens in math string",
         error.NotationMismatch => "token sequence does not match declared notation",
+        error.AnonymousNotationBinder =>
+            "anonymous binders are not permitted in notation declarations",
+        error.DummyNotationBinder =>
+            "dummy binders are not permitted in notation declarations",
+        error.InvalidNotationVariables =>
+            "notation must mention each declared argument exactly once",
         error.PrecMismatch => "operator precedence does not allow this parse",
         error.NotProvable => "math string does not have a provable sort",
         error.ExpectedMathString,

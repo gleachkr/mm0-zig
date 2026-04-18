@@ -317,6 +317,85 @@ test "compiler pinpoints unknown terms in notation statements" {
     try std.testing.expectEqualStrings("succ", mm0_src[span.start..span.end]);
 }
 
+test "compiler rejects anonymous notation binders" {
+    const mm0_src =
+        \\sort obj;
+        \\provable sort wff;
+        \\term sb_f {x: obj} (t: obj x) (p: wff x): wff;
+        \\notation sb_f {_: obj} (t: obj x) (p: wff x): wff =
+        \\  ($L$:10) x ($/$:0) t ($R$:0) p;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(
+        error.AnonymousNotationBinder,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.AnonymousNotationBinder, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("sb_f", diag.name.?);
+    try std.testing.expectEqualStrings(
+        "anonymous binders are not permitted in notation declarations",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("_", mm0_src[span.start..span.end]);
+}
+
+test "compiler rejects dummy notation binders" {
+    const mm0_src =
+        \\sort obj;
+        \\provable sort wff;
+        \\term sb_f {x: obj} (t: obj x) (p: wff x): wff;
+        \\notation sb_f {.x: obj} (t: obj x) (p: wff x): wff =
+        \\  ($L$:10) x ($/$:0) t ($R$:0) p;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(
+        error.DummyNotationBinder,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DummyNotationBinder, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("sb_f", diag.name.?);
+    try std.testing.expectEqualStrings(
+        "dummy binders are not permitted in notation declarations",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(".x", mm0_src[span.start..span.end]);
+}
+
+test "compiler rejects notation declarations that omit arguments" {
+    const mm0_src =
+        \\sort obj;
+        \\provable sort wff;
+        \\term sb_f {x: obj} (t: obj x) (p: wff x): wff;
+        \\notation sb_f {x: obj} (t: obj x) (p: wff x): wff =
+        \\  ($L$:10) x ($/$:0) t ($R$:0);
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(
+        error.InvalidNotationVariables,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.InvalidNotationVariables, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("sb_f", diag.name.?);
+    try std.testing.expectEqualStrings(
+        "notation must mention each declared argument exactly once",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+}
+
 test "compiler rejects unexpected top-level mm0 keywords" {
     const mm0_src =
         \\trict sort obj;

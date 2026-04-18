@@ -920,6 +920,7 @@ pub const MM0Parser = struct {
         self.skipWhitespaceAndComments();
         const name_info = try self.consumeRequiredIdentInfo();
         const term_id = try self.lookupRecordedTermId(name_info);
+        const term = self.terms.items[term_id];
         var var_names = std.StringHashMap(usize).init(self.allocator);
         var arg_index: usize = 0;
         while (self.peek() == '(' or self.peek() == '{') {
@@ -932,8 +933,22 @@ pub const MM0Parser = struct {
             while (true) {
                 self.skipWhitespaceAndComments();
                 if (self.peek() == ':') break;
-                const ident = try self.consumeRequiredIdent();
-                try names.append(self.allocator, ident);
+                const dummy_start = self.pos;
+                const is_dummy = self.peek() == '.';
+                if (is_dummy) self.pos += 1;
+                const ident_info = try self.consumeRequiredIdentInfo();
+                if (is_dummy) {
+                    self.last_error_span = .{
+                        .start = dummy_start,
+                        .end = ident_info.span.end,
+                    };
+                    return error.DummyNotationBinder;
+                }
+                if (std.mem.eql(u8, ident_info.text, "_")) {
+                    self.last_error_span = ident_info.span;
+                    return error.AnonymousNotationBinder;
+                }
+                try names.append(self.allocator, ident_info.text);
             }
             self.pos += 1;
             _ = try self.parseSortExpr(&.{});
@@ -952,6 +967,13 @@ pub const MM0Parser = struct {
         _ = try self.parseSortExpr(&.{});
         self.skipWhitespaceAndComments();
         try self.expect('=');
+
+        if (arg_index != term.args.len) {
+            return error.InvalidNotationVariables;
+        }
+        const arg_coverage = try self.allocator.alloc(bool, term.args.len);
+        defer self.allocator.free(arg_coverage);
+        @memset(arg_coverage, false);
 
         const first = try self.parsePrecConstant();
         // Only the first constant is a leading token. Later constants become
@@ -981,6 +1003,11 @@ pub const MM0Parser = struct {
                     self.last_error_span = ident_info.span;
                     return error.UnknownVariable;
                 };
+                if (mapped >= arg_coverage.len or arg_coverage[mapped]) {
+                    self.last_error_span = ident_info.span;
+                    return error.InvalidNotationVariables;
+                }
+                arg_coverage[mapped] = true;
                 try lits.append(self.allocator, .{ .variable = .{
                     .arg_index = mapped,
                     .prec = MAX_PRECEDENCE,
@@ -990,6 +1017,12 @@ pub const MM0Parser = struct {
         }
         if (pending_var_index) |idx| {
             lits.items[idx].variable.prec = first.prec;
+        }
+        for (arg_coverage) |seen| {
+            if (!seen) {
+                self.last_error_span = name_info.span;
+                return error.InvalidNotationVariables;
+            }
         }
 
         try self.expect(';');
@@ -1211,7 +1244,9 @@ pub const MM0Parser = struct {
         prefix: PrefixEnv,
     ) anyerror!*const Expr {
         const term = self.terms.items[prefix.term_id];
-        var args = try self.allocator.alloc(*const Expr, term.args.len);
+        const args = try self.allocator.alloc(?*const Expr, term.args.len);
+        defer self.allocator.free(args);
+        @memset(args, null);
         for (prefix.lits) |lit| {
             switch (lit) {
                 .constant => |expected| {
@@ -1230,11 +1265,23 @@ pub const MM0Parser = struct {
                 },
                 .variable => |info| {
                     const parsed = try self.parseExpr(cursor, vars, info.prec);
+                    if (info.arg_index >= args.len or args[info.arg_index] != null) {
+                        self.last_error_span = self.last_math_span;
+                        return error.InvalidNotationVariables;
+                    }
                     args[info.arg_index] = parsed;
                 },
             }
         }
-        return try self.applyTerm(prefix.term_id, args);
+        const filled_args = try self.allocator.alloc(*const Expr, term.args.len);
+        defer self.allocator.free(filled_args);
+        for (args, 0..) |arg, idx| {
+            filled_args[idx] = arg orelse {
+                self.last_error_span = self.last_math_span;
+                return error.InvalidNotationVariables;
+            };
+        }
+        return try self.applyTerm(prefix.term_id, filled_args);
     }
 
     fn applyTerm(

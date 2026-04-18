@@ -192,13 +192,20 @@ fn writeOptionalStringField(
 fn writeOptionalUsizeField(
     writer: anytype,
     name: []const u8,
-    value: ?usize,
+    value: anytype,
 ) !void {
     try writer.print("\"{s}\":", .{name});
-    if (value) |actual| {
-        try writer.print("{d}", .{actual});
-    } else {
-        try writer.writeAll("null");
+    switch (@typeInfo(@TypeOf(value))) {
+        .optional => {
+            if (value) |actual| {
+                try writer.print("{d}", .{actual});
+            } else {
+                try writer.writeAll("null");
+            }
+        },
+        else => {
+            try writer.print("{d}", .{value});
+        },
     }
 }
 
