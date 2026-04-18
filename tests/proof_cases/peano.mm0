@@ -69,6 +69,7 @@ theorem mt (a b: wff): $ b -> a $ > $ ~ a $ > $ ~ b $;
 -- definitions + unfolding here.
 -- ---------------------------------------------------------------
 
+--| @vars x y z
 sort nat;
 
 term d0: nat; prefix d0: $0$ prec max;
@@ -113,3 +114,222 @@ theorem zero_ne_one: $ ~ 0 = suc 0 $;
 -- Double-successor injection via peano2 twice.
 theorem suc_cancel (a b: nat):
   $ suc (suc a) = suc (suc b) $ > $ a = b $;
+
+-- ---------------------------------------------------------------
+-- Biconditional + @relation bundle for wff-level rewriting.
+-- Enables the @congr / @rewrite / @normalize automation below.
+-- ---------------------------------------------------------------
+
+term bi (a b: wff): wff; infixl bi: $<->$ prec 20;
+
+--| @relation wff bi biid bitr bisym mpbi
+axiom biid (a: wff): $ a <-> a $;
+axiom bitr (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+-- ---------------------------------------------------------------
+-- Nat-level equivalence relation (for term-level rewriting under
+-- substitution).
+-- ---------------------------------------------------------------
+
+term nat_eq (a b: nat): wff;
+
+--| @relation nat nat_eq nat_eq_refl nat_eq_trans nat_eq_sym _
+axiom nat_eq_refl (a: nat): $ nat_eq a a $;
+axiom nat_eq_trans (a b c: nat):
+  $ nat_eq a b $ > $ nat_eq b c $ > $ nat_eq a c $;
+axiom nat_eq_sym (a b: nat): $ nat_eq a b $ > $ nat_eq b a $;
+
+-- ---------------------------------------------------------------
+-- Congruence rules for connectives and Peano term constructors.
+-- ---------------------------------------------------------------
+
+--| @congr
+axiom im_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+
+--| @congr
+axiom not_congr (a b: wff):
+  $ a <-> b $ > $ ~ a <-> ~ b $;
+
+--| @congr
+axiom eq_congr (a b c d: nat):
+  $ nat_eq a b $ > $ nat_eq c d $ > $ (a = c) <-> (b = d) $;
+
+--| @congr
+axiom suc_congr (a b: nat):
+  $ nat_eq a b $ > $ nat_eq (suc a) (suc b) $;
+
+-- ---------------------------------------------------------------
+-- Quantifiers over nat (Hilbert-style, following peano.mm1's
+-- ax_gen / ax_4 / ax_5 fragment).
+-- ---------------------------------------------------------------
+
+term all {x: nat} (p: wff x): wff; prefix all: $A.$ prec 41;
+
+--| @congr
+axiom all_congr {x: nat} (p q: wff x):
+  $ p <-> q $ > $ A. x p <-> A. x q $;
+
+-- Generalization: from |- p, derive |- A. x p.
+axiom ax_gen {x: nat} (p: wff x): $ p $ > $ A. x p $;
+
+-- Distribution of A. over implication.
+axiom ax_4 {x: nat} (p q: wff x):
+  $ A. x (p -> q) -> A. x p -> A. x q $;
+
+-- Vacuous quantification: a formula with no free x is implied by A. x.
+axiom ax_5 {x: nat} (p: wff): $ p -> A. x p $;
+
+-- ---------------------------------------------------------------
+-- Explicit substitution and its rewrite rules.  sb_t is nat-level
+-- (pushed through suc / var / 0); sb_f is wff-level (pushed through
+-- -> / ~ / =).  Instantiation via ax_inst + @normalize collapses
+-- sb_f at a concrete term into its already-substituted form.
+-- ---------------------------------------------------------------
+
+term sb_t {x: nat} (t: nat x) (a: nat x): nat;
+term sb_f {x: nat} (t: nat x) (p: wff x): wff;
+
+--| @rewrite
+axiom sb_f_im {x: nat} (t: nat x) (p q: wff x):
+  $ sb_f x t (p -> q) <-> (sb_f x t p -> sb_f x t q) $;
+
+--| @rewrite
+axiom sb_f_not {x: nat} (t: nat x) (p: wff x):
+  $ sb_f x t (~ p) <-> ~ (sb_f x t p) $;
+
+--| @rewrite
+axiom sb_f_eq {x: nat} (t: nat x) (a b: nat x):
+  $ sb_f x t (a = b) <-> (sb_t x t a = sb_t x t b) $;
+
+--| @rewrite
+axiom sb_t_var {x: nat} (t: nat x): $ nat_eq (sb_t x t x) t $;
+
+--| @rewrite
+axiom sb_t_zer {x: nat} (t: nat x): $ nat_eq (sb_t x t 0) 0 $;
+
+--| @rewrite
+axiom sb_t_suc {x: nat} (t: nat x) (a: nat x):
+  $ nat_eq (sb_t x t (suc a)) (suc (sb_t x t a)) $;
+
+-- If the substituted term has no free x, the substitution is trivial.
+--| @rewrite
+axiom sb_t_irrel {x: nat} (t: nat x) (a: nat):
+  $ nat_eq (sb_t x t a) a $;
+
+--| @view {x: nat} (t: nat x) (p: wff x) (q: wff): $ A. x p $ > $ q $
+--| @recover t q p x
+--| @normalize conc
+axiom ax_inst {x: nat} (t: nat x) (p: wff x):
+  $ A. x p $ > $ sb_f x t p $;
+
+-- ---------------------------------------------------------------
+-- Definition:  ne a b   :=   ~ a = b.  Used below to demonstrate
+-- automatic def-unfolding at theorem-application boundaries.
+-- ---------------------------------------------------------------
+
+def ne (a b: nat): wff = $ ~ a = b $;
+
+-- ---------------------------------------------------------------
+-- Quantifier and def-unfolding theorems.
+-- ---------------------------------------------------------------
+
+-- Every nat is equal to itself, under a universal binder.
+theorem gen_refl {x: nat}: $ A. x (x = x) $;
+
+-- A.-elim + modus ponens, Russell-flavoured.
+theorem alim {x: nat} (p q: wff x):
+  $ A. x (p -> q) $ > $ A. x p $ > $ A. x q $;
+
+-- Monotonicity:  p -> q  lifts under A. x.
+theorem gen_mono {x: nat} (p q: wff x):
+  $ p -> q $ > $ A. x p -> A. x q $;
+
+-- Universally quantified peano1.
+theorem peano1_all {x: nat}: $ A. x ~ suc x = 0 $;
+
+-- Specialisation via ax_inst's @normalize conc: sb_f folds through
+-- the rewrite rules down to the instantiated claim.
+theorem inst_refl {x: nat}: $ A. x (x = x) $ > $ suc 0 = suc 0 $;
+
+theorem inst_suc_suc {x: nat}:
+  $ A. x (suc x = suc x) $ > $ suc (suc 0) = suc (suc 0) $;
+
+-- Def-unfolding: feeds a raw `~ 0 = suc 0` into a goal stated as `ne 0 (suc 0)`.
+theorem zero_ne_one_def: $ ne 0 (suc 0) $;
+
+-- Def-unfolding in the reverse direction: consumer expects an unfolded
+-- shape while the producer's claim uses the def.
+theorem ne_implies_neq (a b: nat): $ ne a b $ > $ ~ a = b $;
+
+-- ---------------------------------------------------------------
+-- Peano5 (induction) + addition.  We axiomatise addition by its
+-- defining equations, push substitution through +, and state
+-- induction with sb_f explicit so @normalize hyp0 hyp1 lets the
+-- proof consumer supply the already-reduced base and step forms.
+-- ---------------------------------------------------------------
+
+term add (a b: nat): nat; infixl add: $+$ prec 60;
+
+--| @congr
+axiom add_congr (a b c d: nat):
+  $ nat_eq a b $ > $ nat_eq c d $ > $ nat_eq (a + c) (b + d) $;
+
+--| @rewrite
+axiom sb_t_add {x: nat} (t: nat x) (a b: nat x):
+  $ nat_eq (sb_t x t (a + b)) (sb_t x t a + sb_t x t b) $;
+
+axiom add_0 (a: nat): $ a + 0 = a $;
+axiom add_suc (a b: nat): $ a + suc b = suc (a + b) $;
+
+-- Induction: base + step give a universally quantified conclusion.
+-- @normalize on the hypotheses unfolds sb_f at the user's supplied
+-- shape down to the explicitly-substituted terms in the base and
+-- step arguments.  The @view exposes the user-facing shape so `p` is
+-- recoverable directly from the line and references; phantom binders
+-- `base` and `step` absorb the post-normalization hypothesis shapes
+-- without constraining anything else.
+--| @view {x: nat} (p: wff x) (base step: wff): $ base $ > $ A. x (p -> step) $ > $ A. x p $
+--| @normalize hyp0 hyp1
+axiom peano5 {x: nat} (p: wff x):
+  $ sb_f x 0 p $ >
+  $ A. x (p -> sb_f x (suc x) p) $ >
+  $ A. x p $;
+
+-- Helper view for peano5 at a concrete base 0 and inductive step suc x:
+-- lets the normalizer see through the sb_f forms.
+
+-- Left-identity of addition:  A. x (0 + x = x).  Classical induction
+-- on x:  0 + 0 = 0 (add_0), and 0 + x = x implies 0 + suc x = suc x
+-- (add_suc + peano2r through eq_trans).
+theorem add_0_left {x: nat}: $ A. x (0 + x = x) $;
+
+-- Step-recursion for addition on the left argument.
+theorem add_suc_left (a: nat) {x: nat}:
+  $ A. x (suc a + x = suc (a + x)) $;
+
+-- Specialise add_0_left at x := suc 0 to rederive 1 + 0 = 1 modulo
+-- the canonical form; exercises @normalize conc on ax_inst at a
+-- compound term.
+theorem one_zero_eq {x: nat}: $ A. x (0 + x = x) $ > $ 0 + suc 0 = suc 0 $;
+
+-- Specialisation wrappers for downstream use.  No phantom {x: nat}: the
+-- proof bodies pull `x` from the sort's @vars pool via auto-dummy.
+theorem add_0_left_inst (a: nat): $ 0 + a = a $;
+theorem add_suc_left_inst (a b: nat): $ suc a + b = suc (a + b) $;
+
+-- Commutativity of addition by induction on the right argument.
+theorem add_comm (a: nat) {x: nat}: $ A. x (a + x = x + a) $;
+
+-- Equality is preserved by addition on the left (proved by induction
+-- on the outer argument).  Universal form is the inductive shape;
+-- the inst version uses ax_inst to specialise.
+theorem add_eq_left_all (a b: nat) {x: nat}: $ A. x (a = b -> x + a = x + b) $;
+theorem add_eq_left (c a b: nat): $ a = b -> c + a = c + b $;
+
+-- Associativity of addition by induction on x, with add_eq_left
+-- providing the congruence under `a + _` needed in the step.
+theorem add_assoc (a b: nat) {x: nat}: $ A. x (a + (b + x) = (a + b) + x) $;
+theorem add_assoc_inst (a b c: nat): $ a + (b + c) = (a + b) + c $;

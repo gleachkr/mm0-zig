@@ -240,3 +240,255 @@ l1: $ suc (suc a) = suc (suc b) -> suc a = suc b $ by peano2
 l2: $ suc a = suc b $ by ax_mp [l1, #1]
 l3: $ suc a = suc b -> a = b $ by peano2
 l4: $ a = b $ by ax_mp [l3, l2]
+
+gen_refl
+--------
+-- eq_refl at x, then generalise over x.
+l1: $ x = x $ by eq_refl
+l2: $ A. x (x = x) $ by ax_gen [l1]
+
+alim
+----
+-- ax_4, then two ax_mp's pull the quantifier goals through.
+l1: $ A. x (p -> q) -> A. x p -> A. x q $ by ax_4
+l2: $ A. x p -> A. x q $ by ax_mp [l1, #1]
+l3: $ A. x q $ by ax_mp [l2, #2]
+
+gen_mono
+--------
+-- Lift #1 under the quantifier, then use alim-style dispatch.
+l1: $ A. x (p -> q) $ by ax_gen [#1]
+l2: $ A. x (p -> q) -> A. x p -> A. x q $ by ax_4
+l3: $ A. x p -> A. x q $ by ax_mp [l2, l1]
+
+peano1_all
+----------
+-- peano1 already has no visible use-site of x beyond `suc x`, so
+-- ax_gen directly universally-closes it.
+l1: $ ~ suc x = 0 $ by peano1
+l2: $ A. x ~ suc x = 0 $ by ax_gen [l1]
+
+inst_refl
+---------
+-- sb_f (suc 0) x (x = x)  normalises via sb_f_eq + sb_t_var to
+-- (suc 0 = suc 0), so @normalize conc accepts the plain claim.
+l1: $ suc 0 = suc 0 $ by ax_inst [#1]
+
+inst_suc_suc
+------------
+-- Normalisation pushes sb_f through = and then sb_t through suc,
+-- landing on (suc (suc 0) = suc (suc 0)).
+l1: $ suc (suc 0) = suc (suc 0) $ by ax_inst [#1]
+
+zero_ne_one_def
+---------------
+-- Reuse the pre-existing zero_ne_one theorem; the goal `ne 0 (suc 0)`
+-- is accepted because `ne` unfolds to `~ 0 = suc 0` automatically.
+l1: $ ne 0 (suc 0) $ by zero_ne_one
+
+ne_implies_neq
+--------------
+-- Hypothesis `#1: ne a b` is unfolded to `~ a = b` when matched
+-- against what `id` returns.
+l1: $ ne a b -> ne a b $ by id
+l2: $ ~ a = b $ by ax_mp [l1, #1]
+
+add_0_left
+----------
+-- Base: 0 + 0 = 0  (add_0 at 0).
+l1: $ 0 + 0 = 0 $ by add_0
+-- Step body: 0 + x = x  ->  0 + suc x = suc x.
+-- add_suc gives 0 + suc x = suc (0 + x).
+l2: $ 0 + suc x = suc (0 + x) $ by add_suc
+-- Use eq_trans to chain a = b and b = c.
+l3: $ 0 + suc x = suc (0 + x) -> suc (0 + x) = suc x -> 0 + suc x = suc x $ by eq_trans
+l4: $ suc (0 + x) = suc x -> 0 + suc x = suc x $ by ax_mp [l3, l2]
+-- peano2r lifts 0 + x = x into suc (0 + x) = suc x.
+l5: $ 0 + x = x -> suc (0 + x) = suc x $ by peano2r
+-- Compose: 0 + x = x -> 0 + suc x = suc x.
+l6: $ 0 + x = x -> 0 + suc x = suc x $ by syl [l4, l5]
+-- Generalise the step over x.
+l7: $ A. x (0 + x = x -> 0 + suc x = suc x) $ by ax_gen [l6]
+-- peano5 closes the induction; @normalize hyp0 hyp1 matches l1/l7
+-- against sb_f 0 x (0 + x = x) and A. x ((0 + x = x) -> sb_f (suc x) x (0 + x = x)).
+l8: $ A. x (0 + x = x) $ by peano5 [l1, l7]
+
+add_suc_left
+------------
+-- Base:  suc a + 0 = suc (a + 0).  Chain add_0 at (suc a) and at a.
+l1: $ suc a + 0 = suc a $ by add_0
+l2: $ a + 0 = a $ by add_0
+l3: $ a + 0 = a -> suc (a + 0) = suc a $ by peano2r
+l4: $ suc (a + 0) = suc a $ by ax_mp [l3, l2]
+l5: $ suc (a + 0) = suc a -> suc a = suc (a + 0) $ by eq_sym
+l6: $ suc a = suc (a + 0) $ by ax_mp [l5, l4]
+l7: $ suc a + 0 = suc a -> suc a = suc (a + 0) -> suc a + 0 = suc (a + 0) $ by eq_trans
+l8: $ suc a = suc (a + 0) -> suc a + 0 = suc (a + 0) $ by ax_mp [l7, l1]
+l9: $ suc a + 0 = suc (a + 0) $ by ax_mp [l8, l6]
+
+-- Step body:  h: suc a + x = suc (a + x)  implies  suc a + suc x = suc (a + suc x).
+-- Rename: A := suc a + suc x, B := suc (suc a + x), C := suc (suc (a + x)), D := suc (a + suc x).
+-- add_suc at (suc a, x) gives A = B; l11 with peano2r gives C = D; l12 with peano2r
+-- lifts h into B = C.
+l10: $ suc a + suc x = suc (suc a + x) $ by add_suc
+l11: $ a + suc x = suc (a + x) $ by add_suc
+l12: $ suc a + x = suc (a + x) -> suc (suc a + x) = suc (suc (a + x)) $ by peano2r
+-- h -> A = C:  eq_trans at (A, B, C), then syl h through B = C.
+l13: $ suc a + suc x = suc (suc a + x) -> suc (suc a + x) = suc (suc (a + x)) -> suc a + suc x = suc (suc (a + x)) $ by eq_trans
+l14: $ suc (suc a + x) = suc (suc (a + x)) -> suc a + suc x = suc (suc (a + x)) $ by ax_mp [l13, l10]
+l15: $ suc a + x = suc (a + x) -> suc a + suc x = suc (suc (a + x)) $ by syl [l14, l12]
+-- C = D:  flip l11 and lift with peano2r.
+l16: $ a + suc x = suc (a + x) -> suc (a + x) = a + suc x $ by eq_sym
+l17: $ suc (a + x) = a + suc x $ by ax_mp [l16, l11]
+l18: $ suc (a + x) = a + suc x -> suc (suc (a + x)) = suc (a + suc x) $ by peano2r
+l19: $ suc (suc (a + x)) = suc (a + suc x) $ by ax_mp [l18, l17]
+-- (A = C) -> (A = D):  eq_trans at (A, C, D), then ax_mp the C = D piece.
+l20: $ suc a + suc x = suc (suc (a + x)) -> suc (suc (a + x)) = suc (a + suc x) -> suc a + suc x = suc (a + suc x) $ by eq_trans
+l21: $ suc a + suc x = suc (suc (a + x)) -> suc a + suc x = suc (a + suc x) $ by mpi [l19, l20]
+-- Compose h -> A = C with (A = C) -> (A = D):  h -> A = D.
+l22: $ suc a + x = suc (a + x) -> suc a + suc x = suc (a + suc x) $ by syl [l21, l15]
+l23: $ A. x (suc a + x = suc (a + x) -> suc a + suc x = suc (a + suc x)) $ by ax_gen [l22]
+l24: $ A. x (suc a + x = suc (a + x)) $ by peano5 [l9, l23]
+
+one_zero_eq
+-----------
+-- ax_inst at t := suc 0, p := (0 + x = x).  Normalisation gives
+-- sb_f (suc 0) x (0 + x = x) -> 0 + suc 0 = suc 0.
+l1: $ 0 + suc 0 = suc 0 $ by ax_inst [#1]
+
+add_0_left_inst
+---------------
+-- Specialise add_0_left at t := a.  @normalize conc on ax_inst pushes
+-- sb_f through = and sb_t via sb_t_zer / sb_t_var / sb_t_irrel to
+-- land on (0 + a = a).
+l1: $ A. x (0 + x = x) $ by add_0_left
+l2: $ 0 + a = a $ by ax_inst [l1]
+
+add_suc_left_inst
+-----------------
+-- Specialise add_suc_left at t := b with outer a := a.
+l1: $ A. x (suc a + x = suc (a + x)) $ by add_suc_left
+l2: $ suc a + b = suc (a + b) $ by ax_inst [l1]
+
+add_comm
+--------
+-- Induction on the right argument x of (a + x = x + a).
+-- Base:  a + 0 = 0 + a.  Chain add_0 and add_0_left_inst via eq_sym + eq_trans.
+l1: $ a + 0 = a $ by add_0
+l2: $ 0 + a = a $ by add_0_left_inst
+l3: $ 0 + a = a -> a = 0 + a $ by eq_sym
+l4: $ a = 0 + a $ by ax_mp [l3, l2]
+l5: $ a + 0 = a -> a = 0 + a -> a + 0 = 0 + a $ by eq_trans
+l6: $ a = 0 + a -> a + 0 = 0 + a $ by ax_mp [l5, l1]
+l7: $ a + 0 = 0 + a $ by ax_mp [l6, l4]
+
+-- Step body:  h: a + x = x + a  implies  a + suc x = suc x + a.
+-- Let A := a + suc x, B := suc (a + x), C := suc (x + a), D := suc x + a.
+-- add_suc at (a, x)          gives A = B.
+-- peano2r h                  gives B = C.
+-- add_suc_left_inst at (x,a) gives D = C; eq_sym gives C = D.
+-- Chain eq_trans twice:  A = B, B = C  ⇒  A = C;  A = C, C = D  ⇒  A = D.
+l8: $ a + suc x = suc (a + x) $ by add_suc
+l9: $ a + x = x + a -> suc (a + x) = suc (x + a) $ by peano2r
+l10: $ suc x + a = suc (x + a) $ by add_suc_left_inst
+l11: $ suc x + a = suc (x + a) -> suc (x + a) = suc x + a $ by eq_sym
+l12: $ suc (x + a) = suc x + a $ by ax_mp [l11, l10]
+-- A = B, B = C  ⇒  A = C.
+l13: $ a + suc x = suc (a + x) -> suc (a + x) = suc (x + a) -> a + suc x = suc (x + a) $ by eq_trans
+l14: $ suc (a + x) = suc (x + a) -> a + suc x = suc (x + a) $ by ax_mp [l13, l8]
+l15: $ a + x = x + a -> a + suc x = suc (x + a) $ by syl [l14, l9]
+-- A = C, C = D  ⇒  A = D.
+l16: $ a + suc x = suc (x + a) -> suc (x + a) = suc x + a -> a + suc x = suc x + a $ by eq_trans
+l17: $ a + suc x = suc (x + a) -> a + suc x = suc x + a $ by mpi [l12, l16]
+l18: $ a + x = x + a -> a + suc x = suc x + a $ by syl [l17, l15]
+-- Generalise and close with peano5.
+l19: $ A. x (a + x = x + a -> a + suc x = suc x + a) $ by ax_gen [l18]
+l20: $ A. x (a + x = x + a) $ by peano5 [l7, l19]
+
+add_eq_left_all
+---------------
+-- Induction on x of (a = b -> x + a = x + b).
+-- Base: a = b -> 0 + a = 0 + b.  Use add_0_left_inst on both sides
+-- and chain via eq_sym + eq_trans.
+l1: $ 0 + a = a $ by add_0_left_inst
+l2: $ 0 + b = b $ by add_0_left_inst
+l3: $ 0 + b = b -> b = 0 + b $ by eq_sym
+l4: $ b = 0 + b $ by ax_mp [l3, l2]
+l5: $ 0 + a = a -> a = b -> 0 + a = b $ by eq_trans
+l6: $ a = b -> 0 + a = b $ by ax_mp [l5, l1]
+l7: $ 0 + a = b -> b = 0 + b -> 0 + a = 0 + b $ by eq_trans
+l8: $ 0 + a = b -> 0 + a = 0 + b $ by mpi [l4, l7]
+l9: $ a = b -> 0 + a = 0 + b $ by syl [l8, l6]
+
+-- Step: prove (x + a = x + b -> suc x + a = suc x + b), then lift via imim2i.
+l10: $ suc x + a = suc (x + a) $ by add_suc_left_inst
+l11: $ suc x + b = suc (x + b) $ by add_suc_left_inst
+l12: $ x + a = x + b -> suc (x + a) = suc (x + b) $ by peano2r
+l13: $ suc x + a = suc (x + a) -> suc (x + a) = suc (x + b) -> suc x + a = suc (x + b) $ by eq_trans
+l14: $ suc (x + a) = suc (x + b) -> suc x + a = suc (x + b) $ by ax_mp [l13, l10]
+l15: $ x + a = x + b -> suc x + a = suc (x + b) $ by syl [l14, l12]
+l16: $ suc x + b = suc (x + b) -> suc (x + b) = suc x + b $ by eq_sym
+l17: $ suc (x + b) = suc x + b $ by ax_mp [l16, l11]
+l18: $ suc x + a = suc (x + b) -> suc (x + b) = suc x + b -> suc x + a = suc x + b $ by eq_trans
+l19: $ suc x + a = suc (x + b) -> suc x + a = suc x + b $ by mpi [l17, l18]
+l20: $ x + a = x + b -> suc x + a = suc x + b $ by syl [l19, l15]
+-- Lift through (a = b -> _).
+l21: $ (a = b -> x + a = x + b) -> (a = b -> suc x + a = suc x + b) $ by imim2i [l20]
+l22: $ A. x ((a = b -> x + a = x + b) -> (a = b -> suc x + a = suc x + b)) $ by ax_gen [l21]
+l23: $ A. x (a = b -> x + a = x + b) $ by peano5 [l9, l22]
+
+add_eq_left
+-----------
+-- Specialise add_eq_left_all at t := c.
+l1: $ A. x (a = b -> x + a = x + b) $ by add_eq_left_all
+l2: $ a = b -> c + a = c + b $ by ax_inst [l1]
+
+add_assoc
+---------
+-- Induction on x of (a + (b + x) = (a + b) + x).
+-- Base: a + (b + 0) = (a + b) + 0.
+-- (b + 0) = b lifted through `a + _` gives a + (b + 0) = a + b.
+l1: $ b + 0 = b $ by add_0
+l2: $ b + 0 = b -> a + (b + 0) = a + b $ by add_eq_left
+l3: $ a + (b + 0) = a + b $ by ax_mp [l2, l1]
+l4: $ (a + b) + 0 = a + b $ by add_0
+l5: $ (a + b) + 0 = a + b -> a + b = (a + b) + 0 $ by eq_sym
+l6: $ a + b = (a + b) + 0 $ by ax_mp [l5, l4]
+l7: $ a + (b + 0) = a + b -> a + b = (a + b) + 0 -> a + (b + 0) = (a + b) + 0 $ by eq_trans
+l8: $ a + b = (a + b) + 0 -> a + (b + 0) = (a + b) + 0 $ by ax_mp [l7, l3]
+l9: $ a + (b + 0) = (a + b) + 0 $ by ax_mp [l8, l6]
+
+-- Step: prove (a + (b + x) = (a + b) + x) -> (a + (b + suc x) = (a + b) + suc x).
+-- Chain:  a + (b + suc x) = a + suc (b + x)        via add_eq_left + add_suc
+--      = suc (a + (b + x))                          via add_suc
+--      = suc ((a + b) + x)                          via peano2r on the IH
+--      = (a + b) + suc x                            via eq_sym on add_suc.
+l10: $ b + suc x = suc (b + x) $ by add_suc
+l11: $ b + suc x = suc (b + x) -> a + (b + suc x) = a + suc (b + x) $ by add_eq_left
+l12: $ a + (b + suc x) = a + suc (b + x) $ by ax_mp [l11, l10]
+l13: $ a + suc (b + x) = suc (a + (b + x)) $ by add_suc
+l14: $ a + (b + suc x) = a + suc (b + x) -> a + suc (b + x) = suc (a + (b + x)) -> a + (b + suc x) = suc (a + (b + x)) $ by eq_trans
+l15: $ a + suc (b + x) = suc (a + (b + x)) -> a + (b + suc x) = suc (a + (b + x)) $ by ax_mp [l14, l12]
+l16: $ a + (b + suc x) = suc (a + (b + x)) $ by ax_mp [l15, l13]
+-- Lift the IH through suc.
+l17: $ a + (b + x) = (a + b) + x -> suc (a + (b + x)) = suc ((a + b) + x) $ by peano2r
+-- (a + b) + suc x = suc ((a + b) + x), reversed for chaining.
+l18: $ (a + b) + suc x = suc ((a + b) + x) $ by add_suc
+l19: $ (a + b) + suc x = suc ((a + b) + x) -> suc ((a + b) + x) = (a + b) + suc x $ by eq_sym
+l20: $ suc ((a + b) + x) = (a + b) + suc x $ by ax_mp [l19, l18]
+-- (a + (b + suc x) = suc (a + (b + x))) ∘ (suc(...) = suc((a+b)+x))  ⇒  a + (b + suc x) = suc ((a+b) + x).
+l21: $ a + (b + suc x) = suc (a + (b + x)) -> suc (a + (b + x)) = suc ((a + b) + x) -> a + (b + suc x) = suc ((a + b) + x) $ by eq_trans
+l22: $ suc (a + (b + x)) = suc ((a + b) + x) -> a + (b + suc x) = suc ((a + b) + x) $ by ax_mp [l21, l16]
+l23: $ a + (b + x) = (a + b) + x -> a + (b + suc x) = suc ((a + b) + x) $ by syl [l22, l17]
+-- Then chain to (a + b) + suc x via l20.
+l24: $ a + (b + suc x) = suc ((a + b) + x) -> suc ((a + b) + x) = (a + b) + suc x -> a + (b + suc x) = (a + b) + suc x $ by eq_trans
+l25: $ a + (b + suc x) = suc ((a + b) + x) -> a + (b + suc x) = (a + b) + suc x $ by mpi [l20, l24]
+l26: $ a + (b + x) = (a + b) + x -> a + (b + suc x) = (a + b) + suc x $ by syl [l25, l23]
+l27: $ A. x (a + (b + x) = (a + b) + x -> a + (b + suc x) = (a + b) + suc x) $ by ax_gen [l26]
+l28: $ A. x (a + (b + x) = (a + b) + x) $ by peano5 [l9, l27]
+
+add_assoc_inst
+--------------
+-- Specialise add_assoc at x := c.
+l1: $ A. x (a + (b + x) = (a + b) + x) $ by add_assoc
+l2: $ a + (b + c) = (a + b) + c $ by ax_inst [l1]
