@@ -2,6 +2,7 @@ const std = @import("std");
 const MmbWriter = @import("./mmb_writer.zig");
 const CompilerDiag = @import("./compiler/diag.zig");
 const DiagnosticDetail = CompilerDiag.DiagnosticDetail;
+const Span = @import("./proof_script.zig").Span;
 const Metadata = @import("./compiler/metadata.zig");
 const CompilerVars = @import("./compiler/vars.zig");
 const CheckedIr = @import("./compiler/checked_ir.zig");
@@ -15,6 +16,9 @@ pub const SortVarRegistry = CompilerVars.SortVarRegistry;
 pub const Diagnostic = CompilerDiag.Diagnostic;
 pub const DiagnosticSeverity = CompilerDiag.DiagnosticSeverity;
 pub const DiagnosticSource = CompilerDiag.DiagnosticSource;
+pub const DiagnosticPhase = CompilerDiag.DiagnosticPhase;
+pub const DiagnosticNote = CompilerDiag.DiagnosticNote;
+pub const DiagnosticRelated = CompilerDiag.DiagnosticRelated;
 pub const CheckedRef = CheckedIr.CheckedRef;
 pub const CheckedLine = CheckedIr.CheckedLine;
 pub const appendRuleLine = CheckedIr.appendRuleLine;
@@ -197,7 +201,15 @@ pub const Compiler = struct {
         if (diag.expected_name) |name| {
             std.debug.print("  expected: {s}\n", .{name});
         }
+        if (diag.phase) |phase| {
+            std.debug.print(
+                "  phase: {s}\n",
+                .{CompilerDiag.diagnosticPhaseName(phase)},
+            );
+        }
         reportDiagnosticDetail(self, diag.detail);
+        self.reportDiagnosticNotes(diag);
+        self.reportDiagnosticRelated(diag);
         self.reportDiagnosticLocation(diag);
     }
 
@@ -206,23 +218,51 @@ pub const Compiler = struct {
         diag: Diagnostic,
     ) void {
         const span = diag.span orelse return;
-        const source_info = switch (diag.source) {
-            .mm0 => SourceInfo{
-                .label = "source",
-                .text = self.source,
-            },
-            .proof => SourceInfo{
-                .label = "proof",
-                .text = self.proof_source orelse return,
-            },
-        };
+        const source_info = self.sourceInfo(diag.source) orelse return;
+        self.reportSpanLocation("", source_info, span);
+    }
+
+    fn reportDiagnosticNotes(self: *const Compiler, diag: Diagnostic) void {
+        for (diag.noteSlice()) |note| {
+            std.debug.print("  note: {s}\n", .{note.message});
+            const span = note.span orelse continue;
+            const source_info = self.sourceInfo(note.source) orelse continue;
+            self.reportSpanLocation("note", source_info, span);
+        }
+    }
+
+    fn reportDiagnosticRelated(
+        self: *const Compiler,
+        diag: Diagnostic,
+    ) void {
+        for (diag.relatedSlice()) |related| {
+            std.debug.print("  related: {s}\n", .{related.label});
+            const source_info = self.sourceInfo(related.source) orelse continue;
+            self.reportSpanLocation("related", source_info, related.span);
+        }
+    }
+
+    fn reportSpanLocation(
+        self: *const Compiler,
+        prefix: []const u8,
+        source_info: SourceInfo,
+        span: Span,
+    ) void {
+        _ = self;
         const info = lineCol(source_info.text, span.start);
         const line = source_info.text[info.line_start..info.line_end];
 
-        std.debug.print(
-            "  --> {s}:{d}:{d}\n",
-            .{ source_info.label, info.line, info.column },
-        );
+        if (prefix.len == 0) {
+            std.debug.print(
+                "  --> {s}:{d}:{d}\n",
+                .{ source_info.label, info.line, info.column },
+            );
+        } else {
+            std.debug.print(
+                "  {s} --> {s}:{d}:{d}\n",
+                .{ prefix, source_info.label, info.line, info.column },
+            );
+        }
         std.debug.print("  | {s}\n", .{line});
         std.debug.print("  | ", .{});
 
@@ -242,6 +282,22 @@ pub const Compiler = struct {
         std.debug.print("\n", .{});
     }
 
+    fn sourceInfo(
+        self: *const Compiler,
+        source: DiagnosticSource,
+    ) ?SourceInfo {
+        return switch (source) {
+            .mm0 => .{
+                .label = "source",
+                .text = self.source,
+            },
+            .proof => .{
+                .label = "proof",
+                .text = self.proof_source orelse return null,
+            },
+        };
+    }
+
     pub fn setDiagnostic(self: *Compiler, diag: Diagnostic) void {
         self.last_diagnostic = self.stableDiagnostic(diag);
     }
@@ -255,6 +311,20 @@ pub const Compiler = struct {
         stable.name = self.stableString(diag.name);
         stable.expected_name = self.stableString(diag.expected_name);
         stable.detail = self.stableDiagnosticDetail(diag.detail);
+        for (diag.noteSlice(), 0..) |note, idx| {
+            stable.notes[idx] = .{
+                .message = self.stableRequiredString(note.message),
+                .source = note.source,
+                .span = note.span,
+            };
+        }
+        for (diag.relatedSlice(), 0..) |related, idx| {
+            stable.related[idx] = .{
+                .label = self.stableRequiredString(related.label),
+                .source = related.source,
+                .span = related.span,
+            };
+        }
         return stable;
     }
 
@@ -278,7 +348,6 @@ pub const Compiler = struct {
                 .sort_name = self.stableString(info.sort_name),
                 .arg_index = info.arg_index,
             } },
-            .related_rule => |info| .{ .related_rule = info },
             .hypothesis_ref => |info| .{ .hypothesis_ref = info },
         };
     }
@@ -318,7 +387,7 @@ pub const Compiler = struct {
 pub const diagnosticSummary = CompilerDiag.diagnosticSummary;
 
 fn reportDiagnosticDetail(
-    compiler: *const Compiler,
+    _: *const Compiler,
     detail: DiagnosticDetail,
 ) void {
     switch (detail) {
@@ -340,23 +409,6 @@ fn reportDiagnosticDetail(
             if (info.sort_name) |sort_name| {
                 std.debug.print("  sort: {s}\n", .{sort_name});
             }
-        },
-        .related_rule => |info| {
-            const source = switch (info.source) {
-                .mm0 => SourceInfo{
-                    .label = "source",
-                    .text = compiler.source,
-                },
-                .proof => SourceInfo{
-                    .label = "proof",
-                    .text = compiler.proof_source orelse return,
-                },
-            };
-            const loc = lineCol(source.text, info.span.start);
-            std.debug.print(
-                "  declared later in {s}:{d}:{d}\n",
-                .{ source.label, loc.line, loc.column },
-            );
         },
         .hypothesis_ref => |info| {
             std.debug.print("  hypothesis ref: #{d}\n", .{info.index});

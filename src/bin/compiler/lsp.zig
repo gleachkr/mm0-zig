@@ -20,6 +20,27 @@ const LoadedText = struct {
     version: ?i32,
 };
 
+const DiagnosticDocument = struct {
+    uri: []const u8,
+    text: []const u8,
+    version: ?i32,
+};
+
+const DiagnosticContext = struct {
+    mm0: ?DiagnosticDocument = null,
+    proof: ?DiagnosticDocument = null,
+
+    fn sourceDocument(
+        self: DiagnosticContext,
+        source: mm0.CompilerDiagnosticSource,
+    ) ?DiagnosticDocument {
+        return switch (source) {
+            .mm0 => self.mm0,
+            .proof => self.proof,
+        };
+    }
+};
+
 const Handler = struct {
     allocator: std.mem.Allocator,
     transport: *lsp.Transport,
@@ -284,14 +305,20 @@ const Handler = struct {
         version: i32,
         text: []const u8,
     ) !void {
+        const diag_context: DiagnosticContext = .{
+            .mm0 = .{
+                .uri = uri,
+                .text = text,
+                .version = version,
+            },
+        };
+
         var compiler = mm0.Compiler.init(arena, text);
         compiler.check() catch |err| {
             if (compiler.last_diagnostic) |diag| {
                 try self.publishCompilerDiagnostic(
                     arena,
-                    uri,
-                    version,
-                    text,
+                    diag_context,
                     diag,
                 );
             } else {
@@ -307,9 +334,7 @@ const Handler = struct {
         };
         try self.publishCompilerWarnings(
             arena,
-            uri,
-            version,
-            text,
+            diag_context,
             compiler.warningDiagnostics(),
             .mm0,
         );
@@ -354,6 +379,19 @@ const Handler = struct {
             return;
         };
 
+        const diag_context: DiagnosticContext = .{
+            .mm0 = .{
+                .uri = mm0_loaded.uri,
+                .text = mm0_loaded.text,
+                .version = mm0_loaded.version,
+            },
+            .proof = .{
+                .uri = proof_uri,
+                .text = proof_text,
+                .version = proof_version,
+            },
+        };
+
         var compiler = mm0.Compiler.initWithProof(
             arena,
             mm0_loaded.text,
@@ -365,9 +403,7 @@ const Handler = struct {
                     .mm0 => {
                         try self.publishCompilerDiagnostic(
                             arena,
-                            mm0_loaded.uri,
-                            mm0_loaded.version,
-                            mm0_loaded.text,
+                            diag_context,
                             diag,
                         );
                         try self.clearDiagnostics(
@@ -379,9 +415,7 @@ const Handler = struct {
                     .proof => {
                         try self.publishCompilerDiagnostic(
                             arena,
-                            proof_uri,
-                            proof_version,
-                            proof_text,
+                            diag_context,
                             diag,
                         );
                         try self.clearDiagnostics(
@@ -410,17 +444,13 @@ const Handler = struct {
 
         try self.publishCompilerWarnings(
             arena,
-            proof_uri,
-            proof_version,
-            proof_text,
+            diag_context,
             compiler.warningDiagnostics(),
             .proof,
         );
         try self.publishCompilerWarnings(
             arena,
-            mm0_loaded.uri,
-            mm0_loaded.version,
-            mm0_loaded.text,
+            diag_context,
             compiler.warningDiagnostics(),
             .mm0,
         );
@@ -450,42 +480,50 @@ const Handler = struct {
     fn publishCompilerDiagnostic(
         self: *Handler,
         arena: std.mem.Allocator,
-        uri: []const u8,
-        version: ?i32,
-        text: []const u8,
+        diag_context: DiagnosticContext,
         diag: mm0.CompilerDiagnostic,
     ) !void {
+        const doc = diag_context.sourceDocument(diag.source) orelse return;
         const diagnostics = try arena.alloc(types.Diagnostic, 1);
         diagnostics[0] = try compilerDiagnosticToLsp(
             arena,
-            text,
+            diag_context,
             diag,
             self.offset_encoding,
         );
-        try self.publishDiagnostics(arena, uri, version, diagnostics);
+        try self.publishDiagnostics(
+            arena,
+            doc.uri,
+            doc.version,
+            diagnostics,
+        );
     }
 
     fn publishCompilerWarnings(
         self: *Handler,
         arena: std.mem.Allocator,
-        uri: []const u8,
-        version: ?i32,
-        text: []const u8,
+        diag_context: DiagnosticContext,
         diags: []const mm0.CompilerDiagnostic,
         source: mm0.CompilerDiagnosticSource,
     ) !void {
+        const doc = diag_context.sourceDocument(source) orelse return;
         const diagnostics = try compilerDiagnosticsToLsp(
             arena,
-            text,
+            diag_context,
             diags,
             source,
             self.offset_encoding,
         );
         if (diagnostics.len == 0) {
-            try self.clearDiagnostics(arena, uri, version);
+            try self.clearDiagnostics(arena, doc.uri, doc.version);
             return;
         }
-        try self.publishDiagnostics(arena, uri, version, diagnostics);
+        try self.publishDiagnostics(
+            arena,
+            doc.uri,
+            doc.version,
+            diagnostics,
+        );
     }
 
     fn publishMessageDiagnostic(
@@ -645,7 +683,7 @@ fn readFileAlloc(
 
 fn compilerDiagnosticsToLsp(
     arena: std.mem.Allocator,
-    text: []const u8,
+    diag_context: DiagnosticContext,
     diags: []const mm0.CompilerDiagnostic,
     source: mm0.CompilerDiagnosticSource,
     encoding: lsp.offsets.Encoding,
@@ -660,7 +698,7 @@ fn compilerDiagnosticsToLsp(
         if (diag.source != source) continue;
         result[out_idx] = try compilerDiagnosticToLsp(
             arena,
-            text,
+            diag_context,
             diag,
             encoding,
         );
@@ -671,15 +709,24 @@ fn compilerDiagnosticsToLsp(
 
 fn compilerDiagnosticToLsp(
     arena: std.mem.Allocator,
-    text: []const u8,
+    diag_context: DiagnosticContext,
     diag: mm0.CompilerDiagnostic,
     encoding: lsp.offsets.Encoding,
 ) !types.Diagnostic {
+    const doc = diag_context.sourceDocument(diag.source) orelse {
+        return error.MissingDiagnosticDocument;
+    };
     return .{
-        .range = rangeForDiagnostic(text, diag, encoding),
+        .range = rangeForDiagnostic(doc.text, diag, encoding),
         .severity = diagnosticSeverityToLsp(diag.severity),
         .source = "abc",
         .message = try compilerDiagnosticMessage(arena, diag),
+        .relatedInformation = try compilerDiagnosticRelatedInformation(
+            arena,
+            diag_context,
+            diag,
+            encoding,
+        ),
     };
 }
 
@@ -718,6 +765,74 @@ fn zeroRange(
     );
 }
 
+fn compilerDiagnosticRelatedInformation(
+    arena: std.mem.Allocator,
+    diag_context: DiagnosticContext,
+    diag: mm0.CompilerDiagnostic,
+    encoding: lsp.offsets.Encoding,
+) !?[]const types.DiagnosticRelatedInformation {
+    var count: usize = 0;
+    for (diag.noteSlice()) |note| {
+        if (note.span != null and
+            diag_context.sourceDocument(note.source) != null)
+        {
+            count += 1;
+        }
+    }
+    for (diag.relatedSlice()) |related| {
+        if (diag_context.sourceDocument(related.source) != null) {
+            count += 1;
+        }
+    }
+    if (count == 0) return null;
+
+    const result = try arena.alloc(types.DiagnosticRelatedInformation, count);
+    var idx: usize = 0;
+    for (diag.noteSlice()) |note| {
+        const span = note.span orelse continue;
+        const doc = diag_context.sourceDocument(note.source) orelse continue;
+        result[idx] = .{
+            .location = .{
+                .uri = doc.uri,
+                .range = lsp.offsets.locToRange(
+                    doc.text,
+                    .{ .start = span.start, .end = span.end },
+                    encoding,
+                ),
+            },
+            .message = note.message,
+        };
+        idx += 1;
+    }
+    for (diag.relatedSlice()) |related| {
+        const doc = diag_context.sourceDocument(related.source) orelse continue;
+        result[idx] = .{
+            .location = .{
+                .uri = doc.uri,
+                .range = lsp.offsets.locToRange(
+                    doc.text,
+                    .{ .start = related.span.start, .end = related.span.end },
+                    encoding,
+                ),
+            },
+            .message = related.label,
+        };
+        idx += 1;
+    }
+    return result;
+}
+
+fn diagnosticPhaseName(phase: mm0.CompilerDiagnosticPhase) []const u8 {
+    return switch (phase) {
+        .parse => "parse",
+        .inference => "inference",
+        .theorem_application => "theorem application",
+        .freshen => "freshen",
+        .normalization => "normalization",
+        .final_reconciliation => "final reconciliation",
+    };
+}
+
 fn compilerDiagnosticMessage(
     arena: std.mem.Allocator,
     diag: mm0.CompilerDiagnostic,
@@ -732,6 +847,12 @@ fn compilerDiagnosticMessage(
     try appendNamedLine(&writer, "rule", diag.rule_name);
     try appendNamedLine(&writer, "name", diag.name);
     try appendNamedLine(&writer, "expected", diag.expected_name);
+    if (diag.phase) |phase| {
+        try writer.print(
+            "\nphase: {s}",
+            .{diagnosticPhaseName(phase)},
+        );
+    }
 
     switch (diag.detail) {
         .none => {},
@@ -749,15 +870,16 @@ fn compilerDiagnosticMessage(
             try mm0.writeCompilerMissingCongruenceRuleSummary(&writer, detail);
             try appendNamedLine(&writer, "sort", detail.sort_name);
         },
-        .related_rule => |detail| {
-            try writer.print(
-                "\ndeclared later in: {s}",
-                .{@tagName(detail.source)},
-            );
-        },
         .hypothesis_ref => |detail| {
             try writer.print("\nhypothesis ref: #{d}", .{detail.index});
         },
+    }
+
+    for (diag.noteSlice()) |note| {
+        try writer.print("\nnote: {s}", .{note.message});
+    }
+    for (diag.relatedSlice()) |related| {
+        try writer.print("\nrelated: {s}", .{related.label});
     }
 
     return buf.items;
@@ -826,9 +948,21 @@ test "compiler diagnostics filter by source for LSP publishing" {
             .source = .mm0,
         },
     };
+    const diag_context: DiagnosticContext = .{
+        .mm0 = .{
+            .uri = "file:///tmp/test.mm0",
+            .text = "",
+            .version = 1,
+        },
+        .proof = .{
+            .uri = "file:///tmp/test.auf",
+            .text = "",
+            .version = 1,
+        },
+    };
     const proof = try compilerDiagnosticsToLsp(
         allocator,
-        "",
+        diag_context,
         &diags,
         .proof,
         .@"utf-16",
@@ -841,7 +975,7 @@ test "compiler diagnostics filter by source for LSP publishing" {
 
     const mm0_diags = try compilerDiagnosticsToLsp(
         allocator,
-        "",
+        diag_context,
         &diags,
         .mm0,
         .@"utf-16",
@@ -851,4 +985,95 @@ test "compiler diagnostics filter by source for LSP publishing" {
         types.DiagnosticSeverity.Warning,
         mm0_diags[0].severity.?,
     );
+}
+
+test "compiler diagnostics publish related information" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem first: $ top $;
+        \\theorem second: $ top $;
+    ;
+    const proof_text =
+        \\first
+        \\-----
+        \\l1: $ top $ by second []
+    ;
+
+    const rule_start = std.mem.indexOf(u8, mm0_text, "second") orelse {
+        return error.MissingNeedle;
+    };
+    const use_start = std.mem.lastIndexOf(u8, proof_text, "second") orelse {
+        return error.MissingNeedle;
+    };
+
+    var diag: mm0.CompilerDiagnostic = .{
+        .kind = .rule_not_yet_available,
+        .err = error.RuleNotYetAvailable,
+        .source = .proof,
+        .phase = .theorem_application,
+        .theorem_name = "first",
+        .line_label = "l1",
+        .rule_name = "second",
+        .span = .{
+            .start = use_start,
+            .end = use_start + "second".len,
+        },
+    };
+    diag.note_count = 1;
+    diag.notes[0] = .{
+        .message = "rule is declared later in the mm0 file",
+        .source = .mm0,
+    };
+    diag.related_count = 1;
+    diag.related[0] = .{
+        .label = "rule declaration is here",
+        .source = .mm0,
+        .span = .{
+            .start = rule_start,
+            .end = rule_start + "second".len,
+        },
+    };
+
+    const diag_context: DiagnosticContext = .{
+        .mm0 = .{
+            .uri = "file:///tmp/test.mm0",
+            .text = mm0_text,
+            .version = 1,
+        },
+        .proof = .{
+            .uri = "file:///tmp/test.auf",
+            .text = proof_text,
+            .version = 1,
+        },
+    };
+
+    const lsp_diag = try compilerDiagnosticToLsp(
+        allocator,
+        diag_context,
+        diag,
+        .@"utf-16",
+    );
+    const related = lsp_diag.relatedInformation orelse {
+        return error.ExpectedRelatedInformation;
+    };
+    try std.testing.expectEqual(@as(usize, 1), related.len);
+    try std.testing.expectEqualStrings(
+        "file:///tmp/test.mm0",
+        related[0].location.uri,
+    );
+    try std.testing.expectEqualStrings(
+        "rule declaration is here",
+        related[0].message,
+    );
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        lsp_diag.message,
+        1,
+        "phase: theorem application",
+    ));
 }

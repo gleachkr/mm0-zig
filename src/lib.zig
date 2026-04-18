@@ -13,6 +13,12 @@ pub const CompilerDiagnosticSeverity =
     @import("./frontend/compiler.zig").DiagnosticSeverity;
 pub const CompilerDiagnosticSource =
     @import("./frontend/compiler.zig").DiagnosticSource;
+pub const CompilerDiagnosticPhase =
+    @import("./frontend/compiler.zig").DiagnosticPhase;
+pub const CompilerDiagnosticNote =
+    @import("./frontend/compiler.zig").DiagnosticNote;
+pub const CompilerDiagnosticRelated =
+    @import("./frontend/compiler.zig").DiagnosticRelated;
 pub const compilerDiagnosticSummary =
     @import("./frontend/compiler.zig").diagnosticSummary;
 pub const writeCompilerMissingCongruenceRuleSummary =

@@ -53,10 +53,6 @@ pub const DiagnosticDetail = union(enum) {
         binder_name: []const u8,
     },
     missing_congruence_rule: MissingCongruenceRuleDetail,
-    related_rule: struct {
-        source: DiagnosticSource,
-        span: Span,
-    },
     hypothesis_ref: struct {
         index: usize,
     },
@@ -72,11 +68,36 @@ pub const DiagnosticSeverity = enum {
     warning,
 };
 
+pub const DiagnosticPhase = enum {
+    parse,
+    inference,
+    theorem_application,
+    freshen,
+    normalization,
+    final_reconciliation,
+};
+
+pub const max_diagnostic_notes = 4;
+pub const max_diagnostic_related = 4;
+
+pub const DiagnosticNote = struct {
+    message: []const u8,
+    source: DiagnosticSource,
+    span: ?Span = null,
+};
+
+pub const DiagnosticRelated = struct {
+    label: []const u8,
+    source: DiagnosticSource,
+    span: Span,
+};
+
 pub const Diagnostic = struct {
     severity: DiagnosticSeverity = .@"error",
     kind: DiagnosticKind,
     err: anyerror,
     source: DiagnosticSource = .mm0,
+    phase: ?DiagnosticPhase = null,
     theorem_name: ?[]const u8 = null,
     block_name: ?[]const u8 = null,
     line_label: ?[]const u8 = null,
@@ -85,6 +106,18 @@ pub const Diagnostic = struct {
     expected_name: ?[]const u8 = null,
     span: ?Span = null,
     detail: DiagnosticDetail = .none,
+    note_count: u8 = 0,
+    notes: [max_diagnostic_notes]DiagnosticNote = undefined,
+    related_count: u8 = 0,
+    related: [max_diagnostic_related]DiagnosticRelated = undefined,
+
+    pub fn noteSlice(self: *const Diagnostic) []const DiagnosticNote {
+        return self.notes[0..self.note_count];
+    }
+
+    pub fn relatedSlice(self: *const Diagnostic) []const DiagnosticRelated {
+        return self.related[0..self.related_count];
+    }
 };
 
 pub fn setIfMissing(self: anytype, diag: Diagnostic) void {
@@ -113,6 +146,57 @@ pub fn maybeSetProof(self: anytype, diag: Diagnostic) void {
         },
         else => {},
     }
+}
+
+pub fn setPhase(diag: *Diagnostic, phase: DiagnosticPhase) void {
+    diag.phase = phase;
+}
+
+pub fn withPhase(diag: Diagnostic, phase: DiagnosticPhase) Diagnostic {
+    var result = diag;
+    result.phase = phase;
+    return result;
+}
+
+pub fn addNote(
+    diag: *Diagnostic,
+    message: []const u8,
+    source: DiagnosticSource,
+    span: ?Span,
+) void {
+    if (diag.note_count >= max_diagnostic_notes) return;
+    diag.notes[diag.note_count] = .{
+        .message = message,
+        .source = source,
+        .span = span,
+    };
+    diag.note_count += 1;
+}
+
+pub fn addRelated(
+    diag: *Diagnostic,
+    label: []const u8,
+    source: DiagnosticSource,
+    span: Span,
+) void {
+    if (diag.related_count >= max_diagnostic_related) return;
+    diag.related[diag.related_count] = .{
+        .label = label,
+        .source = source,
+        .span = span,
+    };
+    diag.related_count += 1;
+}
+
+pub fn diagnosticPhaseName(phase: DiagnosticPhase) []const u8 {
+    return switch (phase) {
+        .parse => "parse",
+        .inference => "inference",
+        .theorem_application => "theorem application",
+        .freshen => "freshen",
+        .normalization => "normalization",
+        .final_reconciliation => "final reconciliation",
+    };
 }
 
 pub fn mathSpanToSpan(span: MathSpan) Span {
@@ -272,7 +356,7 @@ pub fn proofMathParseDiagnostic(
     name: ?[]const u8,
     math_span: Span,
 ) Diagnostic {
-    const diag = Diagnostic{
+    var diag = Diagnostic{
         .kind = kind,
         .err = err,
         .source = .proof,
@@ -282,6 +366,7 @@ pub fn proofMathParseDiagnostic(
         .name = name,
         .span = math_span,
     };
+    setPhase(&diag, .parse);
     const math_err = parser.last_math_error orelse return diag;
     return proofMathErrorDiagnostic(diag, math_err, math_span);
 }
@@ -298,6 +383,7 @@ pub fn setProofScratchDiagnosticIfPresent(
     scratch: *Scratch,
     mark: Scratch.Mark,
     env: *const GlobalEnv,
+    phase: ?DiagnosticPhase,
     kind: DiagnosticKind,
     err: anyerror,
     theorem_name: []const u8,
@@ -313,7 +399,7 @@ pub fn setProofScratchDiagnosticIfPresent(
     ) orelse {
         return false;
     };
-    maybeSetProof(self, .{
+    var diag: Diagnostic = .{
         .kind = kind,
         .err = err,
         .theorem_name = theorem_name,
@@ -321,7 +407,9 @@ pub fn setProofScratchDiagnosticIfPresent(
         .rule_name = rule_name,
         .span = span,
         .detail = detail,
-    });
+    };
+    if (phase) |actual_phase| setPhase(&diag, actual_phase);
+    maybeSetProof(self, diag);
     return true;
 }
 

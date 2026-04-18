@@ -70,14 +70,14 @@ pub fn checkTheoremBlock(
 
     for (block.lines) |line| {
         if (labels.contains(line.label)) {
-            CompilerDiag.setProof(self, .{
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .duplicate_label,
                 .err = error.DuplicateLabel,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .name = line.label,
                 .span = line.label_span,
-            });
+            }, .theorem_application));
             return error.DuplicateLabel;
         }
 
@@ -114,14 +114,14 @@ pub fn checkTheoremBlock(
         while (true) {
             const seen = try seen_candidates.getOrPut(candidate_rule_id);
             if (seen.found_existing) {
-                CompilerDiag.setProof(self, .{
+                CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                     .kind = .generic,
                     .err = error.FallbackCycle,
                     .theorem_name = assertion.name,
                     .line_label = line.label,
                     .rule_name = line.rule_name,
                     .span = line.rule_span,
-                });
+                }, .theorem_application));
                 return error.FallbackCycle;
             }
 
@@ -194,13 +194,13 @@ pub fn checkTheoremBlock(
     }
 
     const final_line = last_line orelse {
-        CompilerDiag.setProof(self, .{
+        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
             .kind = .empty_proof_block,
             .err = error.EmptyProofBlock,
             .theorem_name = assertion.name,
             .block_name = block.name,
             .span = block.name_span,
-        });
+        }, .final_reconciliation));
         return error.EmptyProofBlock;
     };
     if (final_line != theorem_concl) {
@@ -222,6 +222,7 @@ pub fn checkTheoremBlock(
                     &diag_scratch,
                     final_mark,
                     env,
+                    .final_reconciliation,
                     .generic,
                     err,
                     assertion.name,
@@ -239,13 +240,13 @@ pub fn checkTheoremBlock(
             }
             diag_scratch.discard(final_mark);
         }
-        CompilerDiag.setProof(self, .{
+        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
             .kind = .final_line_mismatch,
             .err = error.FinalLineMismatch,
             .theorem_name = assertion.name,
             .line_label = last_label,
             .span = last_span,
-        });
+        }, .final_reconciliation));
         return error.FinalLineMismatch;
     }
     return try checked.toOwnedSlice(allocator);
@@ -293,14 +294,14 @@ fn tryApplyLineWithCandidate(
 
     const rule = &env.rules.items[rule_id];
     if (line.refs.len != rule.hyps.len) {
-        CompilerDiag.setProof(self, .{
+        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
             .kind = .ref_count_mismatch,
             .err = error.RefCountMismatch,
             .theorem_name = assertion.name,
             .line_label = line.label,
             .rule_name = line.rule_name,
             .span = line.refsOrRuleSpan(),
-        });
+        }, .theorem_application));
         return error.RefCountMismatch;
     }
 
@@ -356,14 +357,14 @@ fn tryApplyLineWithCandidate(
                 null,
                 self.debug.views,
             ) catch |err| {
-                CompilerDiag.setProof(self, .{
+                CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                     .kind = .generic,
                     .err = err,
                     .theorem_name = assertion.name,
                     .line_label = line.label,
                     .rule_name = line.rule_name,
                     .span = line.ruleApplicationSpan(),
-                });
+                }, .theorem_application));
                 return err;
             };
         }
@@ -439,14 +440,14 @@ fn tryApplyLineWithCandidate(
             checked,
             diag_scratch,
         ) catch |fresh_err| {
-            CompilerDiag.setProof(self, .{
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = fresh_err,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .span = line.ruleApplicationSpan(),
-            });
+            }, .theorem_application));
             return fresh_err;
         } orelse return err;
         resolved_bindings = freshened_bindings.?.bindings;
@@ -457,14 +458,14 @@ fn tryApplyLineWithCandidate(
             rule.args,
             resolved_bindings,
         )) != null) {
-            CompilerDiag.setProof(self, .{
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = error.AlphaRewriteSearchFailed,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .span = line.ruleApplicationSpan(),
-            });
+            }, .theorem_application));
             return error.AlphaRewriteSearchFailed;
         }
         restoreDiagnostic(self, null);
@@ -499,14 +500,14 @@ fn tryApplyLineWithCandidate(
             refs,
             base_ref_exprs,
         ) catch |err| {
-            CompilerDiag.setProof(self, .{
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = err,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .span = line.ruleApplicationSpan(),
-            });
+            }, .theorem_application));
             return err;
         };
         return .{
@@ -540,6 +541,7 @@ fn tryApplyLineWithCandidate(
                 diag_scratch,
                 match_mark,
                 env,
+                .theorem_application,
                 .generic,
                 err,
                 assertion.name,
@@ -562,7 +564,7 @@ fn tryApplyLineWithCandidate(
             .line => |label| label.span,
         };
         CompilerDiag.setProof(self, switch (ref) {
-            .hyp => |hyp| Diagnostic{
+            .hyp => |hyp| CompilerDiag.withPhase(Diagnostic{
                 .kind = .hypothesis_mismatch,
                 .err = error.HypothesisMismatch,
                 .theorem_name = assertion.name,
@@ -574,8 +576,8 @@ fn tryApplyLineWithCandidate(
                         .index = hyp.index,
                     },
                 },
-            },
-            .line => |label| Diagnostic{
+            }, .theorem_application),
+            .line => |label| CompilerDiag.withPhase(Diagnostic{
                 .kind = .hypothesis_mismatch,
                 .err = error.HypothesisMismatch,
                 .theorem_name = assertion.name,
@@ -583,7 +585,7 @@ fn tryApplyLineWithCandidate(
                 .rule_name = line.rule_name,
                 .name = label.label,
                 .span = span,
-            },
+            }, .theorem_application),
         });
         return error.HypothesisMismatch;
     }
@@ -613,6 +615,7 @@ fn tryApplyLineWithCandidate(
             diag_scratch,
             concl_mark,
             env,
+            .theorem_application,
             .generic,
             err,
             assertion.name,
@@ -626,14 +629,14 @@ fn tryApplyLineWithCandidate(
         return err;
     }) orelse {
         diag_scratch.discard(concl_mark);
-        CompilerDiag.setProof(self, .{
+        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
             .kind = .conclusion_mismatch,
             .err = error.ConclusionMismatch,
             .theorem_name = assertion.name,
             .line_label = line.label,
             .rule_name = line.rule_name,
             .span = line.assertion.span,
-        });
+        }, .theorem_application));
         return error.ConclusionMismatch;
     };
     diag_scratch.discard(concl_mark);
@@ -800,32 +803,40 @@ fn lookupRuleId(
 
     if (rule_catalog.get(line.rule_name)) |entry| {
         if (entry.ordinal >= env.rules.items.len) {
-            CompilerDiag.setProof(self, .{
+            var diag: Diagnostic = .{
                 .kind = .rule_not_yet_available,
                 .err = error.RuleNotYetAvailable,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .span = line.rule_span,
-                .detail = .{
-                    .related_rule = .{
-                        .source = .mm0,
-                        .span = entry.name_span,
-                    },
-                },
-            });
+            };
+            CompilerDiag.setPhase(&diag, .theorem_application);
+            CompilerDiag.addNote(
+                &diag,
+                "rule is declared later in the mm0 file",
+                .mm0,
+                null,
+            );
+            CompilerDiag.addRelated(
+                &diag,
+                "rule declaration is here",
+                .mm0,
+                entry.name_span,
+            );
+            CompilerDiag.setProof(self, diag);
             return error.RuleNotYetAvailable;
         }
     }
 
-    CompilerDiag.setProof(self, .{
+    CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
         .kind = .unknown_rule,
         .err = error.UnknownRule,
         .theorem_name = assertion.name,
         .line_label = line.label,
         .rule_name = line.rule_name,
         .span = line.rule_span,
-    });
+    }, .theorem_application));
     return error.UnknownRule;
 }
 
@@ -845,7 +856,7 @@ fn resolveBaseRefs(
                 if (hyp.index == 0 or
                     hyp.index > theorem.theorem_hyps.items.len)
                 {
-                    CompilerDiag.setProof(self, .{
+                    CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                         .kind = .unknown_hypothesis_ref,
                         .err = error.UnknownHypothesisRef,
                         .theorem_name = assertion.name,
@@ -856,7 +867,7 @@ fn resolveBaseRefs(
                                 .index = hyp.index,
                             },
                         },
-                    });
+                    }, .theorem_application));
                     return error.UnknownHypothesisRef;
                 }
                 refs[idx] = .{ .hyp = hyp.index - 1 };
@@ -864,14 +875,14 @@ fn resolveBaseRefs(
             },
             .line => |label| blk: {
                 const line_idx = labels.get(label.label) orelse {
-                    CompilerDiag.setProof(self, .{
+                    CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                         .kind = .unknown_label,
                         .err = error.UnknownLabel,
                         .theorem_name = assertion.name,
                         .line_label = line.label,
                         .name = label.label,
                         .span = label.span,
-                    });
+                    }, .theorem_application));
                     return error.UnknownLabel;
                 };
                 refs[idx] = .{ .line = line_idx };
@@ -975,14 +986,14 @@ fn parseBindings(
 ) ![]?ExprId {
     for (rule.arg_names) |arg_name| {
         if (arg_name == null) {
-            CompilerDiag.setProof(self, .{
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = error.UnnamedRuleBinder,
                 .theorem_name = theorem_name,
                 .line_label = line.label,
                 .rule_name = line.rule_name,
                 .span = line.ruleApplicationSpan(),
-            });
+            }, .theorem_application));
             return error.UnnamedRuleBinder;
         }
     }
@@ -992,7 +1003,7 @@ fn parseBindings(
 
     for (line.arg_bindings) |binding| {
         const arg_index = findRuleArgIndex(rule, binding.name) orelse {
-            CompilerDiag.setProof(self, .{
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .unknown_binder_name,
                 .err = error.UnknownBinderName,
                 .theorem_name = theorem_name,
@@ -1000,11 +1011,11 @@ fn parseBindings(
                 .rule_name = line.rule_name,
                 .name = binding.name,
                 .span = binding.span,
-            });
+            }, .theorem_application));
             return error.UnknownBinderName;
         };
         if (bindings[arg_index] != null) {
-            CompilerDiag.setProof(self, .{
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .duplicate_binder_assignment,
                 .err = error.DuplicateBinderAssignment,
                 .theorem_name = theorem_name,
@@ -1012,7 +1023,7 @@ fn parseBindings(
                 .rule_name = line.rule_name,
                 .name = binding.name,
                 .span = binding.span,
-            });
+            }, .theorem_application));
             return error.DuplicateBinderAssignment;
         }
 
@@ -1085,7 +1096,7 @@ fn applyFreshBindings(
             used_deps,
             reserved_deps,
         ) catch |err| {
-            CompilerDiag.setProof(self, .{
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .parse_fresh,
                 .err = err,
                 .theorem_name = theorem_name,
@@ -1093,7 +1104,7 @@ fn applyFreshBindings(
                 .rule_name = line.rule_name,
                 .name = rule.arg_names[fresh.target_arg_idx].?,
                 .span = line.ruleApplicationSpan(),
-            });
+            }, .theorem_application));
             return err;
         };
         bindings[fresh.target_arg_idx] = selection.expr_id;

@@ -852,21 +852,30 @@ test "compiler distinguishes rules declared later in mm0 order" {
         "rule is declared later and is not yet available here",
         mm0.compilerDiagnosticSummary(diag),
     );
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.theorem_application,
+        diag.phase.?,
+    );
     const span = diag.span orelse return error.ExpectedDiagnosticSpan;
     try std.testing.expectEqualStrings("second", proof_src[span.start..span.end]);
-    switch (diag.detail) {
-        .related_rule => |detail| {
-            try std.testing.expectEqual(
-                mm0.CompilerDiagnosticSource.mm0,
-                detail.source,
-            );
-            try std.testing.expectEqualStrings(
-                "second",
-                mm0_src[detail.span.start..detail.span.end],
-            );
-        },
-        else => return error.ExpectedDiagnosticDetail,
-    }
+    try std.testing.expectEqual(@as(usize, 1), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "rule is declared later in the mm0 file",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqual(@as(usize, 1), diag.relatedSlice().len);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSource.mm0,
+        diag.relatedSlice()[0].source,
+    );
+    try std.testing.expectEqualStrings(
+        "rule declaration is here",
+        diag.relatedSlice()[0].label,
+    );
+    try std.testing.expectEqualStrings(
+        "second",
+        mm0_src[diag.relatedSlice()[0].span.start..diag.relatedSlice()[0].span.end],
+    );
 }
 
 test "compiler retries theorem lines through fallback chains" {
@@ -1136,6 +1145,7 @@ test "compiler reports which binder assignment is missing" {
     const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.MissingBinderAssignment, diag.err);
     try std.testing.expectEqual(.missing_binder_assignment, diag.kind);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticPhase.inference, diag.phase.?);
     try std.testing.expectEqualStrings("vacuous", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
     try std.testing.expectEqualStrings("ax_vacuous", diag.rule_name.?);
@@ -1543,6 +1553,7 @@ test "compiler reports structural ambiguity without ACUI-only wording" {
     );
     try std.testing.expectEqual(error.AmbiguousAcuiMatch, diag.err);
     try std.testing.expectEqual(.inference_failed, diag.kind);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticPhase.inference, diag.phase.?);
     try std.testing.expectEqualStrings(
         "omitted rule arguments remain ambiguous after structural " ++
             "or def-aware matching",

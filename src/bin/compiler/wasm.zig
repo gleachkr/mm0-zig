@@ -133,6 +133,15 @@ fn writeCompileFailure(
             diag.expected_name,
         );
         try out.writer.writeByte(',');
+        try writeOptionalStringField(
+            &out.writer,
+            "phase",
+            if (diag.phase) |phase|
+                diagnosticPhaseName(phase)
+            else
+                null,
+        );
+        try out.writer.writeByte(',');
         try writeOptionalUsizeField(
             &out.writer,
             "spanStart",
@@ -146,6 +155,10 @@ fn writeCompileFailure(
         );
         try out.writer.writeByte(',');
         try writeDiagnosticDetailField(&out.writer, diag);
+        try out.writer.writeByte(',');
+        try writeDiagnosticNotesField(&out.writer, diag);
+        try out.writer.writeByte(',');
+        try writeDiagnosticRelatedField(&out.writer, diag);
         try out.writer.writeAll("}}");
     } else {
         try writeJsonStringField(&out.writer, "message", @errorName(err));
@@ -187,6 +200,17 @@ fn writeOptionalUsizeField(
     } else {
         try writer.writeAll("null");
     }
+}
+
+fn diagnosticPhaseName(phase: mm0.CompilerDiagnosticPhase) []const u8 {
+    return switch (phase) {
+        .parse => "parse",
+        .inference => "inference",
+        .theorem_application => "theorem_application",
+        .freshen => "freshen",
+        .normalization => "normalization",
+        .final_reconciliation => "final_reconciliation",
+    };
 }
 
 fn writeDiagnosticDetailField(
@@ -239,29 +263,6 @@ fn writeDiagnosticDetailField(
             try writeOptionalUsizeField(writer, "argIndex", info.arg_index);
             try writer.writeAll("}");
         },
-        .related_rule => |info| {
-            try writer.writeAll("{");
-            try writeJsonStringField(writer, "kind", "related_rule");
-            try writer.writeByte(',');
-            try writeJsonStringField(
-                writer,
-                "source",
-                @tagName(info.source),
-            );
-            try writer.writeByte(',');
-            try writeOptionalUsizeField(
-                writer,
-                "spanStart",
-                info.span.start,
-            );
-            try writer.writeByte(',');
-            try writeOptionalUsizeField(
-                writer,
-                "spanEnd",
-                info.span.end,
-            );
-            try writer.writeAll("}");
-        },
         .hypothesis_ref => |info| {
             try writer.writeAll("{");
             try writeJsonStringField(writer, "kind", "hypothesis_ref");
@@ -271,4 +272,56 @@ fn writeDiagnosticDetailField(
             try writer.writeAll("}");
         },
     }
+}
+
+fn writeDiagnosticNotesField(
+    writer: anytype,
+    diag: mm0.CompilerDiagnostic,
+) !void {
+    try writer.writeAll("\"notes\":[");
+    for (diag.noteSlice(), 0..) |note, idx| {
+        if (idx != 0) try writer.writeByte(',');
+        try writer.writeAll("{");
+        try writeJsonStringField(writer, "message", note.message);
+        try writer.writeByte(',');
+        try writeJsonStringField(writer, "source", @tagName(note.source));
+        try writer.writeByte(',');
+        try writeOptionalUsizeField(
+            writer,
+            "spanStart",
+            if (note.span) |span| span.start else null,
+        );
+        try writer.writeByte(',');
+        try writeOptionalUsizeField(
+            writer,
+            "spanEnd",
+            if (note.span) |span| span.end else null,
+        );
+        try writer.writeAll("}");
+    }
+    try writer.writeByte(']');
+}
+
+fn writeDiagnosticRelatedField(
+    writer: anytype,
+    diag: mm0.CompilerDiagnostic,
+) !void {
+    try writer.writeAll("\"related\":[");
+    for (diag.relatedSlice(), 0..) |related, idx| {
+        if (idx != 0) try writer.writeByte(',');
+        try writer.writeAll("{");
+        try writeJsonStringField(writer, "label", related.label);
+        try writer.writeByte(',');
+        try writeJsonStringField(
+            writer,
+            "source",
+            @tagName(related.source),
+        );
+        try writer.writeByte(',');
+        try writeOptionalUsizeField(writer, "spanStart", related.span.start);
+        try writer.writeByte(',');
+        try writeOptionalUsizeField(writer, "spanEnd", related.span.end);
+        try writer.writeAll("}");
+    }
+    try writer.writeByte(']');
 }
