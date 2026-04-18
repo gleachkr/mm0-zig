@@ -11,6 +11,8 @@ const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
 const AcuiSupport = @import("./acui_support.zig");
 const DerivedBindings = @import("./derived_bindings.zig");
 const ViewTrace = @import("./view_trace.zig");
+const DebugConfig = @import("./debug.zig").DebugConfig;
+const DebugTrace = @import("./debug.zig");
 const BranchStateOps = @import("./inference_solver/branch_state.zig");
 const SemanticCompare = @import("./inference_solver/semantic_compare.zig");
 const StructuralIntervals =
@@ -36,7 +38,7 @@ pub const Solver = struct {
     rule: *const RuleDecl,
     view: ?*const ViewDecl,
     canonicalizer: Canonicalizer,
-    debug_inference: bool,
+    debug: DebugConfig,
     ambiguity_warning: bool = false,
     ambiguity_report: AmbiguityReport = .{},
 
@@ -47,7 +49,7 @@ pub const Solver = struct {
         registry: *RewriteRegistry,
         rule: *const RuleDecl,
         view: ?*const ViewDecl,
-        debug_inference: bool,
+        debug: DebugConfig,
     ) Solver {
         return .{
             .allocator = allocator,
@@ -62,7 +64,7 @@ pub const Solver = struct {
                 registry,
                 env,
             ),
-            .debug_inference = debug_inference,
+            .debug = debug,
         };
     }
 
@@ -444,7 +446,7 @@ pub const Solver = struct {
         if (distinct_idxs.items.len > 1) {
             self.ambiguity_warning = true;
             try self.captureAmbiguityReport(states, distinct_idxs.items);
-            if (self.debug_inference) {
+            if (self.debug.inference) {
                 try self.debugPrintAmbiguousSolutions(
                     states,
                     distinct_idxs.items,
@@ -525,14 +527,16 @@ pub const Solver = struct {
     ) !void {
         if (comptime builtin.target.os.tag == .freestanding) return;
 
-        debugPrint(
-            "[debug:inference] omitted binders left {d} distinct final " ++
-                "solutions; choosing the first\n",
+        DebugTrace.traceInference(
+            self.debug,
+            "omitted binders left {d} distinct final solutions; " ++
+                "choosing the first",
             .{distinct_idxs.len},
         );
         for (distinct_idxs, 0..) |state_idx, choice_idx| {
-            debugPrint(
-                "[debug:inference]   solution {d}{s}\n",
+            DebugTrace.traceInference(
+                self.debug,
+                "  solution {d}{s}",
                 .{
                     choice_idx + 1,
                     if (choice_idx == 0) " (chosen)" else "",
@@ -556,24 +560,21 @@ pub const Solver = struct {
                     expr_id,
                 );
                 defer self.allocator.free(text);
-                debugPrint(
-                    "[debug:inference]     {s}#{d} = {s}\n",
+                DebugTrace.traceInference(
+                    self.debug,
+                    "    {s}#{d} = {s}",
                     .{ name, idx, text },
                 );
             } else {
-                debugPrint(
-                    "[debug:inference]     {s}#{d} = <null>\n",
+                DebugTrace.traceInference(
+                    self.debug,
+                    "    {s}#{d} = <null>",
                     .{ name, idx },
                 );
             }
         }
     }
 };
-
-fn debugPrint(comptime fmt: []const u8, args: anytype) void {
-    if (comptime builtin.target.os.tag == .freestanding) return;
-    std.debug.print(fmt, args);
-}
 
 fn appendTruncatedText(
     out: *std.ArrayListUnmanaged(u8),

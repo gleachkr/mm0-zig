@@ -34,7 +34,7 @@ pub fn usage() !void {
             "  abc lsp\n" ++
             "\nOptions:\n" ++
             "  --debug SYSTEMS  Enable debug output (comma-separated:\n" ++
-            "                   inference,views,unfolding,normalization,emission,check,all)\n" ++
+            "                   inference,views,dependency,freshen,normalization,boundary,all)\n" ++
             "  -Werror          Treat compiler warnings as errors\n",
     );
     try stdout.flush();

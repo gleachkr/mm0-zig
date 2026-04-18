@@ -18,6 +18,9 @@ const SortVarRegistry = @import("./vars.zig").SortVarRegistry;
 const Inference = @import("./inference.zig");
 const DepViolationDetail = Inference.DepViolationDetail;
 const CompilerDiag = @import("./diag.zig");
+const DebugConfig = @import("../debug.zig").DebugConfig;
+const DebugTrace = @import("../debug.zig");
+const ViewTrace = @import("../view_trace.zig");
 const CheckedIr = @import("./checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
@@ -60,6 +63,7 @@ pub fn tryFreshenBindings(
     dep_detail: DepViolationDetail,
     checked: *std.ArrayListUnmanaged(CheckedLine),
     scratch: *CompilerDiag.Scratch,
+    debug: DebugConfig,
     report: *FreshenAttemptReport,
 ) !?FreshenResult {
     const decl = matchingFreshenDecl(
@@ -72,6 +76,15 @@ pub fn tryFreshenBindings(
         .target_arg_idx = decl.target_arg_idx,
         .blocker_arg_idx = decl.blocker_arg_idx,
     };
+    DebugTrace.traceFreshen(
+        debug,
+        "trying @freshen on rule {s}: target={s} blocker={s}",
+        .{
+            rule.name,
+            rule.arg_names[decl.target_arg_idx] orelse "_",
+            rule.arg_names[decl.blocker_arg_idx] orelse "_",
+        },
+    );
 
     const blocker_expr = bindings[decl.blocker_arg_idx];
     const optional_bindings = try allocator.alloc(?ExprId, bindings.len);
@@ -97,15 +110,21 @@ pub fn tryFreshenBindings(
         0,
     );
 
-    var normalizer = Normalizer.initWithScratch(
+    var normalizer = Normalizer.initWithDebugAndScratch(
         allocator,
         theorem,
         registry,
         env,
         checked,
         scratch,
+        debug,
     );
     report.replacement_name = selection.token;
+    DebugTrace.traceFreshen(
+        debug,
+        "selected replacement binder {s}",
+        .{selection.token},
+    );
 
     const freshened = freshenExpr(
         &normalizer,
@@ -116,11 +135,28 @@ pub fn tryFreshenBindings(
         if (err == error.AlphaRewriteSearchFailed) {
             report.blocker_dependency_remaining = true;
         }
+        DebugTrace.traceFreshen(
+            debug,
+            "freshen rewrite failed: {s}",
+            .{@errorName(err)},
+        );
         return err;
-    } orelse return error.NoAlphaRewriteAvailable;
+    } orelse {
+        DebugTrace.traceFreshen(
+            debug,
+            "no matching @alpha rewrite was available",
+            .{},
+        );
+        return error.NoAlphaRewriteAvailable;
+    };
 
     if (freshened.result_expr == bindings[decl.target_arg_idx]) {
         report.blocker_dependency_remaining = true;
+        DebugTrace.traceFreshen(
+            debug,
+            "freshen rewrite produced no target change",
+            .{},
+        );
         return error.AlphaRewriteSearchFailed;
     }
     const new_info = try Inference.exprInfo(
@@ -138,11 +174,38 @@ pub fn tryFreshenBindings(
     report.blocker_dependency_remaining =
         (new_info.deps & blocker_info.deps) != 0;
     if (report.blocker_dependency_remaining.?) {
+        DebugTrace.traceFreshen(
+            debug,
+            "freshened target still depends on the blocker binder",
+            .{},
+        );
         return error.AlphaRewriteSearchFailed;
     }
     const conv_idx = freshened.conv_line_idx orelse {
         return error.AlphaRewriteSearchFailed;
     };
+
+    const old_text = ViewTrace.formatExpr(
+        allocator,
+        theorem,
+        env,
+        bindings[decl.target_arg_idx],
+    ) catch null;
+    defer if (old_text) |text| allocator.free(text);
+    const new_text = ViewTrace.formatExpr(
+        allocator,
+        theorem,
+        env,
+        freshened.result_expr,
+    ) catch null;
+    defer if (new_text) |text| allocator.free(text);
+    if (old_text != null and new_text != null) {
+        DebugTrace.traceFreshen(
+            debug,
+            "target changed from {s} to {s}",
+            .{ old_text.?, new_text.? },
+        );
+    }
 
     const new_bindings = try allocator.dupe(ExprId, bindings);
     new_bindings[decl.target_arg_idx] = freshened.result_expr;

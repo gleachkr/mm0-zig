@@ -6,6 +6,7 @@ const RewriteRegistry = @import("../../rewrite_registry.zig").RewriteRegistry;
 const NormalizeSpec = @import("../../rewrite_registry.zig").NormalizeSpec;
 const Inference = @import("../inference.zig");
 const Normalize = @import("../normalize.zig");
+const DebugConfig = @import("../../debug.zig").DebugConfig;
 const CheckedIr = @import("../checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
@@ -21,6 +22,7 @@ pub fn tryMatchHypothesis(
     checked: *std.ArrayListUnmanaged(CheckedLine),
     scratch: *CompilerDiag.Scratch,
     norm_spec: ?NormalizeSpec,
+    debug: DebugConfig,
     hyp_idx: usize,
     actual_ref: CheckedRef,
     actual: ExprId,
@@ -47,7 +49,7 @@ pub fn tryMatchHypothesis(
     _ = norm_spec;
     _ = hyp_idx;
 
-    if (try Normalize.buildNormalizedConversion(
+    if (try Normalize.buildNormalizedConversionWithDebug(
         allocator,
         theorem,
         registry,
@@ -56,6 +58,7 @@ pub fn tryMatchHypothesis(
         scratch,
         actual,
         expected,
+        debug,
     )) |conversion| {
         var conversion_mut = conversion;
         if (conversion_mut.conv_line_idx) |conv_line_idx| {
@@ -70,7 +73,7 @@ pub fn tryMatchHypothesis(
         return actual_ref;
     }
 
-    return try Normalize.buildTransparentNormalizedHypRef(
+    return try Normalize.buildTransparentNormalizedHypRefWithDebug(
         allocator,
         theorem,
         registry,
@@ -80,6 +83,7 @@ pub fn tryMatchHypothesis(
         actual_ref,
         actual,
         expected,
+        debug,
     );
 }
 
@@ -91,6 +95,7 @@ pub fn tryBuildConclusionLine(
     checked: *std.ArrayListUnmanaged(CheckedLine),
     scratch: *CompilerDiag.Scratch,
     norm_spec: ?NormalizeSpec,
+    debug: DebugConfig,
     line_expr: ExprId,
     expected_line: ExprId,
     rule_id: u32,
@@ -134,7 +139,7 @@ pub fn tryBuildConclusionLine(
 
     if (norm_spec) |spec| {
         if (spec.concl) {
-            if (try Normalize.buildNormalizedConversion(
+            if (try Normalize.buildNormalizedConversionWithDebug(
                 allocator,
                 theorem,
                 registry,
@@ -143,6 +148,7 @@ pub fn tryBuildConclusionLine(
                 scratch,
                 expected_line,
                 line_expr,
+                debug,
             )) |conversion| {
                 var conversion_mut = conversion;
                 const raw_idx = try appendRuleLine(
@@ -165,7 +171,7 @@ pub fn tryBuildConclusionLine(
                 else
                     raw_idx;
             }
-            return try Normalize.buildTransparentNormalizedConclusionLine(
+            return try Normalize.buildTransparentNormalizedConclusionLineWithDebug(
                 allocator,
                 theorem,
                 registry,
@@ -177,6 +183,7 @@ pub fn tryBuildConclusionLine(
                 rule_id,
                 bindings,
                 refs,
+                debug,
             );
         }
     }

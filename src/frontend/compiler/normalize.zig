@@ -14,6 +14,9 @@ const appendTransportLine = CheckedIr.appendTransportLine;
 const appendRuleLine = CheckedIr.appendRuleLine;
 const Inference = @import("./inference.zig");
 const CompilerDiag = @import("./diag.zig");
+const DebugConfig = @import("../debug.zig").DebugConfig;
+const DebugTrace = @import("../debug.zig");
+const ViewTrace = @import("../view_trace.zig");
 
 pub const NormalizedConversion = struct {
     relation: ResolvedRelation,
@@ -42,6 +45,28 @@ pub fn maybeBuildComparisonSnapshot(
     expected: ExprId,
     actual: ExprId,
 ) ComparisonSnapshot {
+    return maybeBuildComparisonSnapshotWithDebug(
+        allocator,
+        theorem,
+        registry,
+        env,
+        scratch,
+        expected,
+        actual,
+        .none,
+    );
+}
+
+pub fn maybeBuildComparisonSnapshotWithDebug(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    scratch: *CompilerDiag.Scratch,
+    expected: ExprId,
+    actual: ExprId,
+    debug: DebugConfig,
+) ComparisonSnapshot {
     var checked = std.ArrayListUnmanaged(CheckedLine){};
     defer checked.deinit(allocator);
 
@@ -65,8 +90,22 @@ pub fn maybeBuildComparisonSnapshot(
     ) catch return .{};
 
     if (normalized_expected == expected and normalized_actual == actual) {
+        DebugTrace.traceNormalization(
+            debug,
+            "comparison snapshot found no normalized change",
+            .{},
+        );
         return .{};
     }
+    tryTraceComparison(
+        debug,
+        allocator,
+        theorem,
+        env,
+        "comparison snapshot",
+        expected,
+        actual,
+    );
     return .{
         .normalized_expected = normalized_expected,
         .normalized_actual = normalized_actual,
@@ -109,15 +148,56 @@ pub fn buildNormalizedConversion(
     actual: ExprId,
     expected: ExprId,
 ) !?NormalizedConversion {
-    var normalizer = Normalizer.initWithScratch(
+    return buildNormalizedConversionWithDebug(
         allocator,
         theorem,
         registry,
         env,
         checked,
         scratch,
+        actual,
+        expected,
+        .none,
     );
-    const relation = normalizer.resolveRelationForExpr(actual) orelse return null;
+}
+
+pub fn buildNormalizedConversionWithDebug(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
+    actual: ExprId,
+    expected: ExprId,
+    debug: DebugConfig,
+) !?NormalizedConversion {
+    tryTraceComparison(
+        debug,
+        allocator,
+        theorem,
+        env,
+        "trying normalized comparison",
+        expected,
+        actual,
+    );
+    var normalizer = Normalizer.initWithDebugAndScratch(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        scratch,
+        debug,
+    );
+    const relation = normalizer.resolveRelationForExpr(actual) orelse {
+        DebugTrace.traceNormalization(
+            debug,
+            "normalized comparison has no relation for the actual expr",
+            .{},
+        );
+        return null;
+    };
     const actual_mark = scratch.mark();
     const norm_actual = normalizer.normalize(actual) catch |err| {
         return err;
@@ -140,7 +220,14 @@ pub fn buildNormalizedConversion(
         (try normalizer.buildCommonTarget(
             norm_actual.result_expr,
             norm_expected.result_expr,
-        ) orelse return null);
+        ) orelse {
+            DebugTrace.traceNormalization(
+                debug,
+                "normalized comparison could not build a common target",
+                .{},
+            );
+            return null;
+        });
 
     const actual_to_common = try normalizer.composeTransitivity(
         relation,
@@ -186,6 +273,11 @@ pub fn buildNormalizedConversion(
     else
         null;
 
+    DebugTrace.traceNormalization(
+        debug,
+        "normalized comparison succeeded",
+        .{},
+    );
     return .{
         .relation = relation,
         .conv_line_idx = conv_line_idx,
@@ -202,13 +294,36 @@ pub fn buildExpectedNormalization(
     scratch: *CompilerDiag.Scratch,
     expected: ExprId,
 ) !?ExpectedNormalization {
-    var normalizer = Normalizer.initWithScratch(
+    return buildExpectedNormalizationWithDebug(
         allocator,
         theorem,
         registry,
         env,
         checked,
         scratch,
+        expected,
+        .none,
+    );
+}
+
+pub fn buildExpectedNormalizationWithDebug(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
+    expected: ExprId,
+    debug: DebugConfig,
+) !?ExpectedNormalization {
+    var normalizer = Normalizer.initWithDebugAndScratch(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        scratch,
+        debug,
     );
     const relation = normalizer.resolveRelationForExpr(expected) orelse {
         return null;
@@ -240,7 +355,33 @@ pub fn buildTransparentNormalizedHypRef(
     actual: ExprId,
     expected: ExprId,
 ) !?CheckedRef {
-    var normalization = try buildExpectedNormalization(
+    return buildTransparentNormalizedHypRefWithDebug(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        scratch,
+        actual_ref,
+        actual,
+        expected,
+        .none,
+    );
+}
+
+pub fn buildTransparentNormalizedHypRefWithDebug(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
+    actual_ref: CheckedRef,
+    actual: ExprId,
+    expected: ExprId,
+    debug: DebugConfig,
+) !?CheckedRef {
+    var normalization = try buildExpectedNormalizationWithDebug(
         allocator,
         theorem,
         registry,
@@ -248,6 +389,7 @@ pub fn buildTransparentNormalizedHypRef(
         checked,
         scratch,
         expected,
+        debug,
     ) orelse return null;
     if (!try Inference.canConvertTransparent(
         allocator,
@@ -256,6 +398,11 @@ pub fn buildTransparentNormalizedHypRef(
         normalization.normalized_expr,
         actual,
     )) {
+        DebugTrace.traceNormalization(
+            debug,
+            "transparent-normalized hypothesis comparison did not match",
+            .{},
+        );
         return null;
     }
 
@@ -301,7 +448,37 @@ pub fn buildTransparentNormalizedConclusionLine(
     bindings: []const ExprId,
     refs: []const CheckedRef,
 ) !?usize {
-    var normalization = try buildExpectedNormalization(
+    return buildTransparentNormalizedConclusionLineWithDebug(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        scratch,
+        line_expr,
+        expected_line,
+        rule_id,
+        bindings,
+        refs,
+        .none,
+    );
+}
+
+pub fn buildTransparentNormalizedConclusionLineWithDebug(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    registry: *RewriteRegistry,
+    env: *const GlobalEnv,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    scratch: *CompilerDiag.Scratch,
+    line_expr: ExprId,
+    expected_line: ExprId,
+    rule_id: u32,
+    bindings: []const ExprId,
+    refs: []const CheckedRef,
+    debug: DebugConfig,
+) !?usize {
+    var normalization = try buildExpectedNormalizationWithDebug(
         allocator,
         theorem,
         registry,
@@ -309,15 +486,17 @@ pub fn buildTransparentNormalizedConclusionLine(
         checked,
         scratch,
         expected_line,
+        debug,
     ) orelse return null;
 
-    var line_normalizer = Normalizer.initWithScratch(
+    var line_normalizer = Normalizer.initWithDebugAndScratch(
         allocator,
         theorem,
         registry,
         env,
         checked,
         scratch,
+        debug,
     );
     const mark = scratch.mark();
     const normalized_line = line_normalizer.normalize(line_expr) catch |err| {
@@ -333,6 +512,11 @@ pub fn buildTransparentNormalizedConclusionLine(
             normalization.normalized_expr,
         ))
     {
+        DebugTrace.traceNormalization(
+            debug,
+            "transparent-normalized conclusion comparison did not match",
+            .{},
+        );
         return null;
     }
 
@@ -364,6 +548,44 @@ pub fn buildTransparentNormalizedConclusionLine(
         line_expr,
         normalization.normalized_expr,
         .{ .line = normalized_idx },
+    );
+}
+
+fn tryTraceComparison(
+    debug: DebugConfig,
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    label: []const u8,
+    expected: ExprId,
+    actual: ExprId,
+) void {
+    if (!debug.normalization) return;
+
+    const expected_text = ViewTrace.formatExpr(
+        allocator,
+        theorem,
+        env,
+        expected,
+    ) catch return;
+    defer allocator.free(expected_text);
+    const actual_text = ViewTrace.formatExpr(
+        allocator,
+        theorem,
+        env,
+        actual,
+    ) catch return;
+    defer allocator.free(actual_text);
+
+    DebugTrace.traceNormalization(
+        debug,
+        "{s}: expected={s}",
+        .{ label, expected_text },
+    );
+    DebugTrace.traceNormalization(
+        debug,
+        "{s}: actual={s}",
+        .{ label, actual_text },
     );
 }
 

@@ -10,6 +10,8 @@ const Inference = @import("./inference.zig");
 const Normalize = @import("./normalize.zig");
 const BoundaryCleanup = @import("./theorem_boundary/cleanup.zig");
 const CompilerDiag = @import("./diag.zig");
+const DebugConfig = @import("../debug.zig").DebugConfig;
+const DebugTrace = @import("../debug.zig");
 const CheckedIr = @import("./checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
@@ -31,8 +33,15 @@ pub fn tryReconcileFinalConclusion(
     theorem_concl: ExprId,
     final_line: ExprId,
     line_idx: usize,
+    debug: DebugConfig,
     report: *ReconciliationReport,
 ) !bool {
+    DebugTrace.traceBoundary(
+        debug,
+        "reconciling final theorem line via transparent, normalized, then " ++
+            "alpha cleanup paths",
+        .{},
+    );
     report.attempted_transparent = true;
     if (try buildTransparentReconciliation(
         allocator,
@@ -42,10 +51,21 @@ pub fn tryReconcileFinalConclusion(
         theorem_concl,
         final_line,
         line_idx,
+        debug,
     )) {
+        DebugTrace.traceBoundary(
+            debug,
+            "transparent reconciliation succeeded",
+            .{},
+        );
         return true;
     }
 
+    DebugTrace.traceBoundary(
+        debug,
+        "transparent reconciliation failed; trying normalization",
+        .{},
+    );
     report.attempted_normalized = true;
     if (try buildNormalizedReconciliation(
         allocator,
@@ -57,10 +77,21 @@ pub fn tryReconcileFinalConclusion(
         theorem_concl,
         final_line,
         line_idx,
+        debug,
     )) {
+        DebugTrace.traceBoundary(
+            debug,
+            "normalized reconciliation succeeded",
+            .{},
+        );
         return true;
     }
 
+    DebugTrace.traceBoundary(
+        debug,
+        "normalized reconciliation failed; trying alpha cleanup",
+        .{},
+    );
     report.attempted_alpha_cleanup = true;
     if (try buildAlphaCleanupReconciliation(
         allocator,
@@ -72,10 +103,21 @@ pub fn tryReconcileFinalConclusion(
         theorem_concl,
         final_line,
         line_idx,
+        debug,
     )) {
+        DebugTrace.traceBoundary(
+            debug,
+            "alpha cleanup reconciliation succeeded",
+            .{},
+        );
         return true;
     }
 
+    DebugTrace.traceBoundary(
+        debug,
+        "final reconciliation failed on all paths",
+        .{},
+    );
     return false;
 }
 
@@ -87,6 +129,7 @@ fn buildTransparentReconciliation(
     theorem_concl: ExprId,
     final_line: ExprId,
     line_idx: usize,
+    debug: DebugConfig,
 ) !bool {
     if (!try Inference.canConvertTransparent(
         allocator,
@@ -95,6 +138,11 @@ fn buildTransparentReconciliation(
         theorem_concl,
         final_line,
     )) {
+        DebugTrace.traceBoundary(
+            debug,
+            "transparent reconciliation could not match the final line",
+            .{},
+        );
         return false;
     }
 
@@ -118,8 +166,9 @@ fn buildNormalizedReconciliation(
     theorem_concl: ExprId,
     final_line: ExprId,
     line_idx: usize,
+    debug: DebugConfig,
 ) !bool {
-    const conversion = (try Normalize.buildNormalizedConversion(
+    const conversion = (try Normalize.buildNormalizedConversionWithDebug(
         allocator,
         theorem,
         registry,
@@ -128,6 +177,7 @@ fn buildNormalizedReconciliation(
         scratch,
         final_line,
         theorem_concl,
+        debug,
     )) orelse return false;
     var conversion_mut = conversion;
     const conv_idx = conversion_mut.conv_line_idx orelse return false;
@@ -152,6 +202,7 @@ fn buildAlphaCleanupReconciliation(
     theorem_concl: ExprId,
     final_line: ExprId,
     line_idx: usize,
+    debug: DebugConfig,
 ) !bool {
     const cleanup = (try BoundaryCleanup.tryBuildFinalCleanupConversion(
         allocator,
@@ -162,6 +213,7 @@ fn buildAlphaCleanupReconciliation(
         scratch,
         theorem_concl,
         final_line,
+        debug,
     )) orelse return false;
 
     const conversion = try buildBoundaryTransport(
@@ -176,6 +228,7 @@ fn buildAlphaCleanupReconciliation(
         final_line,
         cleanup.declared_to_cleaned_line_idx,
         .{ .line = line_idx },
+        debug,
     );
     _ = conversion;
     return true;
@@ -193,14 +246,16 @@ fn buildBoundaryTransport(
     final_line: ExprId,
     theorem_to_final_idx: usize,
     final_ref: CheckedRef,
+    debug: DebugConfig,
 ) !usize {
-    var normalizer = Normalizer.initWithScratch(
+    var normalizer = Normalizer.initWithDebugAndScratch(
         allocator,
         theorem,
         registry,
         env,
         checked,
         scratch,
+        debug,
     );
     const final_to_theorem_idx = try normalizer.emitSymm(
         relation,

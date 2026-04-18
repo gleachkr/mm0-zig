@@ -219,6 +219,7 @@ pub fn checkTheoremBlock(
                 theorem_concl,
                 final_line,
                 line_idx,
+                self.debug,
                 &final_report,
             ) catch |err| {
                 if (CompilerDiag.takeScratchDetail(
@@ -422,8 +423,9 @@ fn tryApplyLineWithCandidate(
 
     var resolved_bindings = bindings;
     var freshened_bindings: ?CompilerFreshen.FreshenResult = null;
-    Inference.validateResolvedBindings(
+    Inference.validateResolvedBindingsWithDebug(
         self,
+        self.debug,
         env,
         theorem,
         assertion,
@@ -458,6 +460,7 @@ fn tryApplyLineWithCandidate(
             dep_detail,
             checked,
             diag_scratch,
+            self.debug,
             &freshen_report,
         ) catch |fresh_err| {
             var diag = CompilerDiag.withPhase(.{
@@ -496,8 +499,9 @@ fn tryApplyLineWithCandidate(
             return error.AlphaRewriteSearchFailed;
         }
         restoreDiagnostic(self, null);
-        try Inference.validateResolvedBindings(
+        try Inference.validateResolvedBindingsWithDebug(
             self,
+            self.debug,
             env,
             theorem,
             assertion,
@@ -558,6 +562,7 @@ fn tryApplyLineWithCandidate(
             checked,
             diag_scratch,
             norm_spec,
+            self.debug,
             idx,
             refs[idx],
             actual,
@@ -646,6 +651,7 @@ fn tryApplyLineWithCandidate(
         checked,
         diag_scratch,
         norm_spec,
+        self.debug,
         line_expr,
         expected_line,
         rule_id,
@@ -734,6 +740,7 @@ fn applyFreshenedRuleLine(
             checked,
             diag_scratch,
             norm_spec,
+            .none,
             idx,
             refs[idx],
             actual,
@@ -833,6 +840,7 @@ fn applyFreshenedRuleLine(
             checked,
             diag_scratch,
             norm_spec,
+            .none,
             0,
             result_ref,
             result_expr,
@@ -1208,7 +1216,7 @@ fn addComparisonSnapshotNotes(
     if (!attempted_normalized) return;
 
     addStaticProofNote(diag, "attempted normalized comparison");
-    const snapshot = Normalize.maybeBuildComparisonSnapshot(
+    const snapshot = Normalize.maybeBuildComparisonSnapshotWithDebug(
         allocator,
         @constCast(theorem),
         registry,
@@ -1216,6 +1224,7 @@ fn addComparisonSnapshotNotes(
         scratch,
         expected,
         actual,
+        .none,
     );
     if (snapshot.normalized_expected) |normalized_expected| {
         const normalized_expected_text = try ViewTrace.formatExpr(

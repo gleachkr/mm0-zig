@@ -10,6 +10,8 @@ const ResolvedRelation = @import("../rewrite_registry.zig").ResolvedRelation;
 const ResolvedStructuralCombiner =
     @import("../rewrite_registry.zig").ResolvedStructuralCombiner;
 const CheckedIr = @import("../compiler/checked_ir.zig");
+const DebugTrace = @import("../debug.zig");
+const ViewTrace = @import("../view_trace.zig");
 const Support = @import("./support.zig");
 
 const CheckedRef = CheckedIr.CheckedRef;
@@ -90,6 +92,12 @@ pub fn tryApplyRule(
         concrete,
         &.{},
     );
+    traceExprPair(
+        self,
+        "applied rewrite",
+        expr_id,
+        rhs_expr,
+    );
 
     return .{
         .result_expr = rhs_expr,
@@ -123,6 +131,11 @@ fn failMissingCongruence(
     arg_index: ?usize,
 ) error{MissingCongruenceRule} {
     setMissingCongruenceDetail(self, term_id, reason, sort_name, arg_index);
+    DebugTrace.traceNormalization(
+        self.debug,
+        "missing congruence detail recorded: reason={s}",
+        .{@tagName(reason)},
+    );
     return error.MissingCongruenceRule;
 }
 
@@ -245,7 +258,7 @@ pub fn emitCongruenceLine(
     };
     const expr = try buildRelExpr(self, parent_relation, old_expr, new_expr);
 
-    return try appendRuleLine(
+    const line_idx = try appendRuleLine(
         self.lines,
         self.allocator,
         expr,
@@ -253,6 +266,8 @@ pub fn emitCongruenceLine(
         bindings,
         refs,
     );
+    traceExprPair(self, "emitted congruence", old_expr, new_expr);
+    return line_idx;
 }
 
 pub fn emitRefl(
@@ -500,7 +515,7 @@ pub fn composeTransitivityLine(
     refs[0] = .{ .line = first_proof };
     refs[1] = .{ .line = second_proof };
 
-    return try appendRuleLine(
+    const line_idx = try appendRuleLine(
         self.lines,
         self.allocator,
         trans_expr,
@@ -508,6 +523,8 @@ pub fn composeTransitivityLine(
         bindings,
         refs,
     );
+    traceExprPair(self, "composed transitivity", original, final);
+    return line_idx;
 }
 
 pub fn buildRelExpr(
@@ -548,7 +565,7 @@ pub fn emitTransport(
     refs[0] = .{ .line = conv_line_idx };
     refs[1] = source_line;
 
-    return try appendRuleLine(
+    const line_idx = try appendRuleLine(
         self.lines,
         self.allocator,
         target_expr,
@@ -556,6 +573,8 @@ pub fn emitTransport(
         bindings,
         refs,
     );
+    traceExprPair(self, "emitted transport", source_expr, target_expr);
+    return line_idx;
 }
 
 pub fn emitSymm(
@@ -573,13 +592,45 @@ pub fn emitSymm(
     const refs = try self.allocator.alloc(CheckedRef, 1);
     refs[0] = .{ .line = proof_line_idx };
 
-    return try appendRuleLine(
+    const line_idx = try appendRuleLine(
         self.lines,
         self.allocator,
         symm_expr,
         relation.symm_id,
         bindings,
         refs,
+    );
+    traceExprPair(self, "emitted symmetry", a, b);
+    return line_idx;
+}
+
+fn traceExprPair(
+    self: anytype,
+    label: []const u8,
+    lhs: ExprId,
+    rhs: ExprId,
+) void {
+    if (!self.debug.normalization) return;
+
+    const lhs_text = ViewTrace.formatExpr(
+        self.allocator,
+        self.theorem,
+        self.env,
+        lhs,
+    ) catch return;
+    defer self.allocator.free(lhs_text);
+    const rhs_text = ViewTrace.formatExpr(
+        self.allocator,
+        self.theorem,
+        self.env,
+        rhs,
+    ) catch return;
+    defer self.allocator.free(rhs_text);
+
+    DebugTrace.traceNormalization(
+        self.debug,
+        "{s}: {s} ⇒ {s}",
+        .{ label, lhs_text, rhs_text },
     );
 }
 

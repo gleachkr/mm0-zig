@@ -6,6 +6,7 @@ const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const ResolvedRelation =
     @import("./rewrite_registry.zig").ResolvedRelation;
 const DiagScratch = @import("./diag_scratch.zig");
+const DebugConfig = @import("./debug.zig").DebugConfig;
 const CheckedLine = @import("./compiler/checked_ir.zig").CheckedLine;
 const CheckedRef = @import("./compiler/checked_ir.zig").CheckedRef;
 const Types = @import("./normalizer/types.zig");
@@ -24,6 +25,7 @@ pub const Normalizer = struct {
     registry: *RewriteRegistry,
     lines: *std.ArrayListUnmanaged(CheckedLine),
     diag_scratch: ?*DiagScratch.Scratch,
+    debug: DebugConfig = .none,
     cache: std.AutoHashMap(ExprId, NormalizeResult),
     step_count: usize = 0,
     step_limit: usize = 1000,
@@ -35,13 +37,33 @@ pub const Normalizer = struct {
         env: *const GlobalEnv,
         lines: *std.ArrayListUnmanaged(CheckedLine),
     ) Normalizer {
-        return initWithScratch(
+        return initWithDebugAndScratch(
             allocator,
             theorem,
             registry,
             env,
             lines,
             null,
+            .none,
+        );
+    }
+
+    pub fn initWithDebug(
+        allocator: std.mem.Allocator,
+        theorem: *TheoremContext,
+        registry: *RewriteRegistry,
+        env: *const GlobalEnv,
+        lines: *std.ArrayListUnmanaged(CheckedLine),
+        debug: DebugConfig,
+    ) Normalizer {
+        return initWithDebugAndScratch(
+            allocator,
+            theorem,
+            registry,
+            env,
+            lines,
+            null,
+            debug,
         );
     }
 
@@ -53,6 +75,26 @@ pub const Normalizer = struct {
         lines: *std.ArrayListUnmanaged(CheckedLine),
         diag_scratch: ?*DiagScratch.Scratch,
     ) Normalizer {
+        return initWithDebugAndScratch(
+            allocator,
+            theorem,
+            registry,
+            env,
+            lines,
+            diag_scratch,
+            .none,
+        );
+    }
+
+    pub fn initWithDebugAndScratch(
+        allocator: std.mem.Allocator,
+        theorem: *TheoremContext,
+        registry: *RewriteRegistry,
+        env: *const GlobalEnv,
+        lines: *std.ArrayListUnmanaged(CheckedLine),
+        diag_scratch: ?*DiagScratch.Scratch,
+        debug: DebugConfig,
+    ) Normalizer {
         return .{
             .allocator = allocator,
             .theorem = theorem,
@@ -60,6 +102,7 @@ pub const Normalizer = struct {
             .registry = registry,
             .lines = lines,
             .diag_scratch = diag_scratch,
+            .debug = debug,
             .cache = std.AutoHashMap(ExprId, NormalizeResult).init(
                 allocator,
             ),

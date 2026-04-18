@@ -11,6 +11,8 @@ const Normalizer = @import("../../normalizer.zig").Normalizer;
 const ProofEmit = @import("../../normalizer/proof_emit.zig");
 const Inference = @import("../inference.zig");
 const CompilerDiag = @import("../diag.zig");
+const DebugConfig = @import("../../debug.zig").DebugConfig;
+const DebugTrace = @import("../../debug.zig");
 const CheckedIr = @import("../checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
 const appendRuleLine = CheckedIr.appendRuleLine;
@@ -30,6 +32,7 @@ pub fn tryBuildFinalCleanupConversion(
     scratch: *CompilerDiag.Scratch,
     declared: ExprId,
     cleaned: ExprId,
+    debug: DebugConfig,
 ) anyerror!?CleanupConversion {
     var builder = Builder{
         .allocator = allocator,
@@ -38,6 +41,7 @@ pub fn tryBuildFinalCleanupConversion(
         .env = env,
         .checked = checked,
         .scratch = scratch,
+        .debug = debug,
     };
     const relation = builder.resolveRelationForExpr(declared) orelse return null;
     const line_idx = try builder.buildDeclaredToCleaned(
@@ -57,6 +61,7 @@ const Builder = struct {
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
     scratch: *CompilerDiag.Scratch,
+    debug: DebugConfig,
 
     fn buildDeclaredToCleaned(
         self: *Builder,
@@ -65,15 +70,37 @@ const Builder = struct {
     ) anyerror!?usize {
         if (declared == cleaned) return null;
 
+        DebugTrace.traceBoundary(
+            self.debug,
+            "cleanup builder trying transparent, root-alpha, and structural " ++
+                "proofs",
+            .{},
+        );
+
         if (try self.tryTransparentProof(declared, cleaned)) |proof_idx| {
+            DebugTrace.traceBoundary(
+                self.debug,
+                "cleanup builder found a transparent proof",
+                .{},
+            );
             return proof_idx;
         }
 
         if (try self.tryAlphaAtRoot(declared, cleaned)) |proof_idx| {
+            DebugTrace.traceBoundary(
+                self.debug,
+                "cleanup builder found a root alpha proof",
+                .{},
+            );
             return proof_idx;
         }
 
         if (try self.tryStructuralProof(declared, cleaned)) |proof_idx| {
+            DebugTrace.traceBoundary(
+                self.debug,
+                "cleanup builder found a structural proof",
+                .{},
+            );
             return proof_idx;
         }
 
@@ -367,13 +394,14 @@ const Builder = struct {
     }
 
     fn makeNormalizer(self: *Builder) Normalizer {
-        return Normalizer.initWithScratch(
+        return Normalizer.initWithDebugAndScratch(
             self.allocator,
             self.theorem,
             self.registry,
             self.env,
             self.checked,
             self.scratch,
+            self.debug,
         );
     }
 };

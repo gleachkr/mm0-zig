@@ -1,5 +1,6 @@
 const ExprId = @import("../expr.zig").ExprId;
 const ChildNorm = @import("./child_norm.zig");
+const DebugTrace = @import("../debug.zig");
 const Support = @import("./support.zig");
 const Acui = @import("./acui.zig");
 const ProofEmit = @import("./proof_emit.zig");
@@ -9,6 +10,11 @@ const NormalizeResult = Types.NormalizeResult;
 
 pub fn normalize(self: anytype, expr_id: ExprId) anyerror!NormalizeResult {
     if (self.cache.get(expr_id)) |cached| {
+        DebugTrace.traceNormalization(
+            self.debug,
+            "normalization cache hit for expr #{d}",
+            .{expr_id},
+        );
         return cached;
     }
 
@@ -21,6 +27,11 @@ pub fn normalizeUncached(
     self: anytype,
     expr_id: ExprId,
 ) anyerror!NormalizeResult {
+    DebugTrace.traceNormalization(
+        self.debug,
+        "normalizing expr #{d}",
+        .{expr_id},
+    );
     const node = self.theorem.interner.node(expr_id);
 
     const child_result = switch (node.*) {
@@ -32,6 +43,11 @@ pub fn normalizeUncached(
     };
 
     const relation = Support.resolveRelationForExpr(self, expr_id) orelse {
+        DebugTrace.traceNormalization(
+            self.debug,
+            "expr #{d} has no registered normalization relation",
+            .{expr_id},
+        );
         return child_result;
     };
 
@@ -108,6 +124,11 @@ pub fn normalizeUncached(
                     current_proof,
                     rhs_proof,
                 );
+                DebugTrace.traceNormalization(
+                    self.debug,
+                    "rewrite step advanced expr #{d} to expr #{d}",
+                    .{ current, rhs_norm.result_expr },
+                );
                 current = rhs_norm.result_expr;
                 applied = true;
                 break;
@@ -116,6 +137,11 @@ pub fn normalizeUncached(
         if (!applied) break;
     }
 
+    DebugTrace.traceNormalization(
+        self.debug,
+        "normalization finished: expr #{d} -> expr #{d}",
+        .{ expr_id, current },
+    );
     return .{
         .result_expr = current,
         .conv_line_idx = current_proof,

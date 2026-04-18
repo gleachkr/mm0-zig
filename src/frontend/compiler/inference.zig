@@ -1,4 +1,3 @@
-const builtin = @import("builtin");
 const std = @import("std");
 const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
@@ -24,6 +23,8 @@ const CompilerDiag = @import("./diag.zig");
 const CompilerFresh = @import("./fresh.zig");
 const CompilerVars = @import("./vars.zig");
 const ViewTrace = @import("../view_trace.zig");
+const DebugConfig = @import("../debug.zig").DebugConfig;
+const DebugTrace = @import("../debug.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
 const InferencePath = CompilerDiag.InferencePath;
 const SortVarRegistry = CompilerVars.SortVarRegistry;
@@ -330,6 +331,117 @@ fn addFormattedInferenceNote(
 ) !void {
     const message = try std.fmt.allocPrint(allocator, fmt, args);
     CompilerDiag.addNote(diag, message, .proof, null);
+}
+
+fn traceInferenceAttempt(
+    config: DebugConfig,
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    rule: *const RuleDecl,
+    path: InferencePath,
+    explicit_bindings: []const ?ExprId,
+    current_bindings: []const ?ExprId,
+) !void {
+    if (!config.inference) return;
+    DebugTrace.traceInference(
+        config,
+        "trying {s} for rule {s}",
+        .{ CompilerDiag.inferencePathName(path), rule.name },
+    );
+    try traceInferenceBindingSummaries(
+        config,
+        allocator,
+        theorem,
+        env,
+        rule,
+        explicit_bindings,
+        current_bindings,
+    );
+}
+
+fn traceInferenceFailure(
+    config: DebugConfig,
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    rule: *const RuleDecl,
+    path: InferencePath,
+    err: anyerror,
+    explicit_bindings: []const ?ExprId,
+    current_bindings: []const ?ExprId,
+) !void {
+    if (!config.inference) return;
+    DebugTrace.traceInference(
+        config,
+        "{s} failed for rule {s}: {s}",
+        .{
+            CompilerDiag.inferencePathName(path),
+            rule.name,
+            @errorName(err),
+        },
+    );
+    try traceInferenceBindingSummaries(
+        config,
+        allocator,
+        theorem,
+        env,
+        rule,
+        explicit_bindings,
+        current_bindings,
+    );
+}
+
+fn traceInferenceBindingSummaries(
+    config: DebugConfig,
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    env: *const GlobalEnv,
+    rule: *const RuleDecl,
+    explicit_bindings: []const ?ExprId,
+    current_bindings: []const ?ExprId,
+) !void {
+    if (!config.inference) return;
+
+    const explicit_summary = try buildBindingSummary(
+        allocator,
+        theorem,
+        env,
+        rule,
+        explicit_bindings,
+        current_bindings,
+        .explicit,
+    );
+    defer allocator.free(explicit_summary);
+    DebugTrace.traceInference(
+        config,
+        "  explicit bindings: {s}",
+        .{explicit_summary},
+    );
+
+    const inferred_summary = try buildBindingSummary(
+        allocator,
+        theorem,
+        env,
+        rule,
+        explicit_bindings,
+        current_bindings,
+        .inferred,
+    );
+    defer allocator.free(inferred_summary);
+    DebugTrace.traceInference(
+        config,
+        "  inferred bindings: {s}",
+        .{inferred_summary},
+    );
+
+    if (firstUnsolvedBinderLabel(rule, current_bindings)) |label| {
+        DebugTrace.traceInference(
+            config,
+            "  first unsolved binder: {s}",
+            .{label},
+        );
+    }
 }
 
 fn buildBindingSummary(
@@ -981,12 +1093,11 @@ pub fn inferBindings(
                 &view_seed_state,
                 self.debug.views,
             ) catch |err| {
-                if (self.debug.views) {
-                    debugPrint(
-                        "[debug:views] applyViewBindings failed: {s}\n",
-                        .{@errorName(err)},
-                    );
-                }
+                DebugTrace.traceViews(
+                    self.debug,
+                    "applyViewBindings failed for rule {s}: {s}",
+                    .{ rule.name, @errorName(err) },
+                );
                 allocator.free(seeded);
                 session_seeds = try exactBindingSeeds(
                     allocator,
@@ -1030,6 +1141,20 @@ pub fn inferBindings(
             session_seeds = try exactBindingSeeds(allocator, partial_bindings);
         }
 
+        try traceInferenceAttempt(
+            self.debug,
+            allocator,
+            theorem,
+            env,
+            rule,
+            .structural_solver,
+            partial_bindings,
+            if (seeded_bindings_storage) |seeded|
+                seeded
+            else
+                partial_bindings,
+        );
+
         const match_mark = scratch.mark();
         const match_result = (if (view_seed_state) |*seed_state|
             inferBindingsByMatchSeedState(
@@ -1061,6 +1186,20 @@ pub fn inferBindings(
                 line_expr,
                 partial_bindings,
             )) catch |err| {
+            try traceInferenceFailure(
+                self.debug,
+                allocator,
+                theorem,
+                env,
+                rule,
+                .structural_solver,
+                err,
+                partial_bindings,
+                if (seeded_bindings_storage) |seeded|
+                    seeded
+                else
+                    partial_bindings,
+            );
             if (CompilerDiag.setProofScratchDiagnosticIfPresent(
                 self,
                 scratch,
@@ -1086,6 +1225,21 @@ pub fn inferBindings(
             },
             .no_match => {},
             .unresolved_dummy_witness => {
+                const solver_bindings = if (seeded_bindings_storage) |seeded|
+                    seeded
+                else
+                    partial_bindings;
+                try traceInferenceFailure(
+                    self.debug,
+                    allocator,
+                    theorem,
+                    env,
+                    rule,
+                    .structural_solver,
+                    error.UnresolvedDummyWitness,
+                    partial_bindings,
+                    solver_bindings,
+                );
                 CompilerDiag.setProof(
                     self,
                     try buildInferenceFailureDiagnostic(
@@ -1098,10 +1252,7 @@ pub fn inferBindings(
                         .structural_solver,
                         error.UnresolvedDummyWitness,
                         partial_bindings,
-                        if (seeded_bindings_storage) |seeded|
-                            seeded
-                        else
-                            partial_bindings,
+                        solver_bindings,
                     ),
                 );
                 return error.UnresolvedDummyWitness;
@@ -1115,7 +1266,7 @@ pub fn inferBindings(
             registry,
             rule,
             if (maybe_view) |*view| view else null,
-            self.debug.inference,
+            self.debug,
         );
         defer solver.deinit();
         const solver_bindings = if (seeded_bindings_storage) |seeded|
@@ -1127,6 +1278,17 @@ pub fn inferBindings(
             ref_exprs,
             line_expr,
         ) catch |err| {
+            try traceInferenceFailure(
+                self.debug,
+                allocator,
+                theorem,
+                env,
+                rule,
+                .structural_solver,
+                err,
+                partial_bindings,
+                solver_bindings,
+            );
             CompilerDiag.setProof(
                 self,
                 try buildInferenceFailureDiagnostic(
@@ -1174,6 +1336,17 @@ pub fn inferBindings(
         return bindings;
     }
 
+    try traceInferenceAttempt(
+        self.debug,
+        allocator,
+        theorem,
+        env,
+        rule,
+        .strict_replay,
+        partial_bindings,
+        partial_bindings,
+    );
+
     const strict_result = try strictInferBindingsDetailed(
         self,
         allocator,
@@ -1192,6 +1365,27 @@ pub fn inferBindings(
             defer allocator.free(strict_failure.partial_bindings);
             if (self.last_diagnostic != null) return strict_failure.err;
             if (maybe_view == null) {
+                try traceInferenceFailure(
+                    self.debug,
+                    allocator,
+                    theorem,
+                    env,
+                    rule,
+                    .strict_replay,
+                    strict_failure.err,
+                    partial_bindings,
+                    strict_failure.partial_bindings,
+                );
+                try traceInferenceAttempt(
+                    self.debug,
+                    allocator,
+                    theorem,
+                    env,
+                    rule,
+                    .transparent_fallback,
+                    partial_bindings,
+                    strict_failure.partial_bindings,
+                );
                 const transparent = inferBindingsTransparent(
                     allocator,
                     env,
@@ -1202,6 +1396,17 @@ pub fn inferBindings(
                     line_expr,
                 ) catch |transparent_err| blk: {
                     if (transparent_err == error.UnresolvedDummyWitness) {
+                        try traceInferenceFailure(
+                            self.debug,
+                            allocator,
+                            theorem,
+                            env,
+                            rule,
+                            .transparent_fallback,
+                            transparent_err,
+                            partial_bindings,
+                            strict_failure.partial_bindings,
+                        );
                         CompilerDiag.setProof(
                             self,
                             try buildInferenceFailureDiagnostic(
@@ -1446,8 +1651,9 @@ pub fn strictInferBindings(
     };
 }
 
-pub fn validateResolvedBindings(
+pub fn validateResolvedBindingsWithDebug(
     self: anytype,
+    debug: DebugConfig,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
     assertion: AssertionStmt,
@@ -1483,6 +1689,26 @@ pub fn validateResolvedBindings(
         rule.arg_names,
         bindings,
     )) |detail| {
+        DebugTrace.traceDependency(
+            debug,
+            "rule {s} on line {s} violates dependency constraints",
+            .{ rule.name, line.label },
+        );
+        if (detail.first_arg_name) |first_name| {
+            DebugTrace.traceDependency(
+                debug,
+                "  conflicting binders: {s} and {s}",
+                .{
+                    first_name,
+                    detail.second_arg_name orelse "_",
+                },
+            );
+        }
+        DebugTrace.traceDependency(
+            debug,
+            "  deps: first=0x{x} second=0x{x}",
+            .{ detail.first_deps, detail.second_deps },
+        );
         CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
             .kind = .generic,
             .err = error.DepViolation,
@@ -1494,6 +1720,27 @@ pub fn validateResolvedBindings(
         }, .theorem_application));
         return error.DepViolation;
     }
+}
+
+pub fn validateResolvedBindings(
+    self: anytype,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    rule: *const RuleDecl,
+    bindings: []const ExprId,
+) !void {
+    return validateResolvedBindingsWithDebug(
+        self,
+        .none,
+        env,
+        theorem,
+        assertion,
+        line,
+        rule,
+        bindings,
+    );
 }
 
 pub fn bindingsRespectRuleDeps(
@@ -1659,11 +1906,6 @@ pub fn exprInfo(
             };
         },
     };
-}
-
-fn debugPrint(comptime fmt: []const u8, args: anytype) void {
-    if (comptime builtin.target.os.tag == .freestanding) return;
-    std.debug.print(fmt, args);
 }
 
 pub fn hasOmittedBindings(bindings: []const ?ExprId) bool {
