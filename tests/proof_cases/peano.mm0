@@ -57,6 +57,8 @@ theorem a3d (a b c: wff): $ a → ¬ b → ¬ c $ > $ a → c → b $;
 theorem imim2 (a b c: wff): $ (b → c) → (a → b) → a → c $;
 theorem imim2i (a b c: wff): $ b → c $ > $ (a → b) → a → c $;
 theorem com12 (a b c: wff): $ a → b → c $ > $ b → a → c $;
+theorem imim1 (a b c: wff): $ (a → b) → (b → c) → a → c $;
+theorem imim1i (a b c: wff): $ a → b $ > $ (b → c) → a → c $;
 theorem mpcom (a b: wff): $ a → (a → b) → b $;
 theorem absurd (a b: wff): $ ¬ a → a → b $;
 theorem imidm (a b: wff): $ (a → a → b) → a → b $;
@@ -71,6 +73,9 @@ theorem notnot1 (a: wff): $ a → ¬ ¬ a $;
 theorem con3 (a b: wff): $ (a → b) → ¬ b → ¬ a $;
 theorem con1 (a b: wff): $ (¬ a → b) → ¬ b → a $;
 theorem mt (a b: wff): $ b → a $ > $ ¬ a $ > $ ¬ b $;
+theorem mt2 (a b: wff): $ b → ¬ a $ > $ a $ > $ ¬ b $;
+theorem cases (a b: wff): $ a → b $ > $ ¬ a → b $ > $ b $;
+theorem mp2 (a b c: wff): $ a $ > $ b $ > $ a → b → c $ > $ c $;
 
 -- ---------------------------------------------------------------
 -- Peano arithmetic: zero, successor, equality.
@@ -104,6 +109,9 @@ axiom eq_trans (a b c: nat): $ a = b → b = c → a = c $;
 
 theorem eq_trans3 (a b c d: nat):
   $ a = b $ > $ b = c $ > $ c = d $ > $ a = d $;
+
+theorem eq_trans4 (a b c d e: nat):
+  $ a = b $ > $ b = c $ > $ c = d $ > $ d = e $ > $ a = e $;
 
 theorem eq_euclid (a b c: nat):
   $ a = b $ > $ a = c $ > $ b = c $;
@@ -243,11 +251,21 @@ axiom ax_inst {x: nat} (t: nat x) (p: wff x):
   $ ∀ x p $ > $ sb_f x t p $;
 
 -- ---------------------------------------------------------------
--- Definition:  ne a b  :=  ¬ a = b.  Used below to demonstrate
+-- Definition:  a ≠ b  :=  ¬ a = b.  Used below to demonstrate
 -- automatic def-unfolding at theorem-application boundaries.
 -- ---------------------------------------------------------------
 
 def ne (a b: nat): wff = $ ¬ a = b $;
+infixl ne: $≠$ prec 50;
+infixl ne: $!=$ prec 50;
+
+--| @congr
+axiom ne_congr (a b c d: nat):
+  $ nat_eq a b $ > $ nat_eq c d $ > $ a ≠ c ↔ b ≠ d $;
+
+--| @rewrite
+axiom sb_f_ne {x: nat} (t: nat x) (a b: nat x):
+  $ sb_f x t (a ≠ b) ↔ sb_t x t a ≠ sb_t x t b $;
 
 -- ---------------------------------------------------------------
 -- Quantifier and def-unfolding theorems.
@@ -274,12 +292,12 @@ theorem inst_refl {x: nat}: $ ∀ x (x = x) $ > $ suc 0 = suc 0 $;
 theorem inst_suc_suc {x: nat}:
   $ ∀ x (suc x = suc x) $ > $ suc (suc 0) = suc (suc 0) $;
 
--- Def-unfolding: feeds a raw `¬ 0 = suc 0` into a goal stated as `ne 0 (suc 0)`.
-theorem zero_ne_one_def: $ ne 0 (suc 0) $;
+-- Def-unfolding: feeds a raw `¬ 0 = suc 0` into a goal stated as `0 ≠ suc 0`.
+theorem zero_ne_one_def: $ 0 ≠ suc 0 $;
 
 -- Def-unfolding in the reverse direction: consumer expects an unfolded
 -- shape while the producer's claim uses the def.
-theorem ne_implies_neq (a b: nat): $ ne a b $ > $ ¬ a = b $;
+theorem ne_implies_neq (a b: nat): $ a ≠ b $ > $ ¬ a = b $;
 
 -- ---------------------------------------------------------------
 -- Peano5 (induction) + addition.  Addition is axiomatised by its
@@ -315,6 +333,11 @@ axiom peano5 {x: nat} (p: wff x):
   $ ∀ x (p → sb_f x (suc x) p) $ >
   $ ∀ x p $;
 
+-- Induction that stays on the unfolded `¬ _ = _` form: exercises
+-- the sb_f_ne rewrite so peano5's hypothesis matches through the
+-- def boundary.
+theorem ne_suc_self_all {x: nat}: $ ∀ x ¬ x = suc x $;
+
 -- Left-identity of addition:  ∀ x (0 + x = x).  Classical induction
 -- on x:  0 + 0 = 0 (add_0), and 0 + x = x implies 0 + suc x = suc x
 -- (add_suc + peano2r through eq_trans).
@@ -334,8 +357,14 @@ theorem one_zero_eq {x: nat}: $ ∀ x (0 + x = x) $ > $ 0 + suc 0 = suc 0 $;
 theorem add_0_left_inst (a: nat): $ 0 + a = a $;
 theorem add_suc_left_inst (a b: nat): $ suc a + b = suc (a + b) $;
 
+-- A suc can be moved from the left argument of + to the right
+-- (peano.mm1's `addSass`).  Direct consequence of add_suc and
+-- add_suc_left_inst.
+theorem add_suc_swap (a b: nat): $ suc a + b = a + suc b $;
+
 -- Commutativity of addition by induction on the right argument.
 theorem add_comm (a: nat) {x: nat}: $ ∀ x (a + x = x + a) $;
+theorem add_comm_inst (a b: nat): $ a + b = b + a $;
 
 -- Equality is preserved by addition on the left (proved by induction
 -- on the outer argument).  Universal form is the inductive shape;
@@ -343,7 +372,32 @@ theorem add_comm (a: nat) {x: nat}: $ ∀ x (a + x = x + a) $;
 theorem add_eq_left_all (a b: nat) {x: nat}: $ ∀ x (a = b → x + a = x + b) $;
 theorem add_eq_left (c a b: nat): $ a = b → c + a = c + b $;
 
+-- Mirror of add_eq_left: equality is preserved by addition on the
+-- right, proved by induction on the outer argument instead.
+theorem add_eq_right_all (a b: nat) {x: nat}: $ ∀ x (a = b → a + x = b + x) $;
+theorem add_eq_right (c a b: nat): $ a = b → a + c = b + c $;
+
+-- Right cancellation:  a + c = b + c  ⇒  a = b.  Induction on c,
+-- peeling a suc off both sides with peano2 at each step; the base
+-- case collapses via add_0.
+theorem add_cancel_right_all (a b: nat) {x: nat}:
+  $ ∀ x (a + x = b + x → a = b) $;
+theorem add_cancel_right (c a b: nat): $ a + c = b + c → a = b $;
+
+-- Left cancellation: rewrite both sides with add_comm_inst and
+-- dispatch to add_cancel_right.
+theorem add_cancel_left (a b c: nat): $ a + b = a + c → b = c $;
+
 -- Associativity of addition by induction on x, with add_eq_left
 -- providing the congruence under `a + _` needed in the step.
 theorem add_assoc (a b: nat) {x: nat}: $ ∀ x (a + (b + x) = (a + b) + x) $;
 theorem add_assoc_inst (a b c: nat): $ a + (b + c) = (a + b) + c $;
+
+-- Re-association variants:  swap the leading summand with the
+-- middle/right by chaining add_assoc_inst with a commuted step.
+theorem add_lass (a b c: nat): $ a + (b + c) = b + (a + c) $;
+theorem add_rass (a b c: nat): $ (a + b) + c = (a + c) + b $;
+
+-- Concrete arithmetic capstone: 2 + 2 = 4, from add_suc + add_0.
+theorem two_plus_two:
+  $ suc (suc 0) + suc (suc 0) = suc (suc (suc (suc 0))) $;
