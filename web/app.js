@@ -69,6 +69,11 @@ const examples = {
     mm0: "./fixtures/mac_lane.mm0",
     proof: "./fixtures/mac_lane.auf",
   },
+  peano: {
+    label: "peano",
+    mm0: "./fixtures/peano.mm0",
+    proof: "./fixtures/peano.auf",
+  },
 };
 
 const editorTheme = EditorView.theme({

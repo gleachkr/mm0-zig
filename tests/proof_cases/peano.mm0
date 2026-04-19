@@ -1,68 +1,81 @@
 -- Adaptation of third_party/mm0/examples/peano.mm1 into the
 -- ".mm0 + .auf" proof formalism used by this project.
 --
--- peano.mm1 is ~7000 lines of Lisp-tactic proofs built on the Lukasiewicz
--- + Peano axiom base.  This file replays a self-contained chunk of its
--- propositional layer (lines 431-482 of peano.mm1) in explicit,
--- line-by-line Hilbert style: every modus ponens application is a
--- separate step citing ax_mp.  The classical theorems (contra, dne,
--- con2, con3, con1, mt) all go through.
+-- A working slice of Peano arithmetic in explicit, line-by-line
+-- Hilbert style:
 --
--- The arithmetic section restricts itself to the algebraic fragment of
--- Peano (peano1 + peano2 + equality), since peano5 (induction) needs
--- universal quantifiers we haven't wired into this demo.
+--   * Lukasiewicz' propositional calculus, with the classical
+--     consequences (contra, dne, con2, con3, con1, mt) derived from
+--     ax_1 / ax_2 / ax_3.
+--   * Peano successor and equality, plus a handful of derived
+--     arithmetic lemmas.
+--   * Universal quantification (ax_gen / ax_4 / ax_5) together with
+--     explicit substitution (sb_t / sb_f) and ax_inst.
+--   * Induction (peano5) and addition, with left-identity,
+--     commutativity, and associativity proved from the axioms.
+--
+-- Annotations (@relation, @congr, @rewrite, @view, @normalize) drive
+-- the compiler's rewriting automation where helpful.
+--
+-- The math notation is unicode (→ ¬ ↔ ∀); ASCII aliases (->, ~, <->,
+-- A.) are also registered so either form parses.
 
 delimiter $ ( { ~ $  $ } ) , $;
 
 strict provable sort wff;
 
-term im (p q: wff): wff; infixr im: $->$ prec 25;
-term not (p: wff): wff; prefix not: $~$ prec 41;
+term im (p q: wff): wff;
+infixr im: $→$ prec 25;
+infixr im: $->$ prec 25;
+
+term not (p: wff): wff;
+prefix not: $¬$ prec 41;
+prefix not: $~$ prec 41;
 
 -- Lukasiewicz' axioms for classical propositional logic.
-axiom ax_1 (a b: wff): $ a -> b -> a $;
-axiom ax_2 (a b c: wff): $ (a -> b -> c) -> (a -> b) -> a -> c $;
-axiom ax_3 (a b: wff): $ (~ a -> ~ b) -> b -> a $;
-axiom ax_mp (a b: wff): $ a -> b $ > $ a $ > $ b $;
+axiom ax_1 (a b: wff): $ a → b → a $;
+axiom ax_2 (a b c: wff): $ (a → b → c) → (a → b) → a → c $;
+axiom ax_3 (a b: wff): $ (¬ a → ¬ b) → b → a $;
+axiom ax_mp (a b: wff): $ a → b $ > $ a $ > $ b $;
 
 -- ---------------------------------------------------------------
 -- Derived propositional theorems (replaying peano.mm1 lines 431+).
 -- ---------------------------------------------------------------
 
-theorem a1i (a b: wff): $ b $ > $ a -> b $;
-theorem a2i (a b c: wff): $ a -> b -> c $ > $ (a -> b) -> a -> c $;
-theorem mpd (a b c: wff): $ a -> b $ > $ a -> b -> c $ > $ a -> c $;
-theorem mpi (a b c: wff): $ b $ > $ a -> b -> c $ > $ a -> c $;
-theorem id (a: wff): $ a -> a $;
-theorem idd (a b: wff): $ a -> b -> b $;
-theorem syl (a b c: wff): $ b -> c $ > $ a -> b $ > $ a -> c $;
-theorem rsyl (a b c: wff): $ a -> b $ > $ b -> c $ > $ a -> c $;
-theorem a1d (a b c: wff): $ a -> b $ > $ a -> c -> b $;
+theorem a1i (a b: wff): $ b $ > $ a → b $;
+theorem a2i (a b c: wff): $ a → b → c $ > $ (a → b) → a → c $;
+theorem mpd (a b c: wff): $ a → b $ > $ a → b → c $ > $ a → c $;
+theorem mpi (a b c: wff): $ b $ > $ a → b → c $ > $ a → c $;
+theorem id (a: wff): $ a → a $;
+theorem idd (a b: wff): $ a → b → b $;
+theorem syl (a b c: wff): $ b → c $ > $ a → b $ > $ a → c $;
+theorem rsyl (a b c: wff): $ a → b $ > $ b → c $ > $ a → c $;
+theorem a1d (a b c: wff): $ a → b $ > $ a → c → b $;
 theorem a2d (a b c d: wff):
-  $ a -> b -> c -> d $ > $ a -> (b -> c) -> b -> d $;
-theorem a3d (a b c: wff): $ a -> ~ b -> ~ c $ > $ a -> c -> b $;
-theorem imim2 (a b c: wff): $ (b -> c) -> (a -> b) -> a -> c $;
-theorem imim2i (a b c: wff): $ b -> c $ > $ (a -> b) -> a -> c $;
-theorem com12 (a b c: wff): $ a -> b -> c $ > $ b -> a -> c $;
-theorem mpcom (a b: wff): $ a -> (a -> b) -> b $;
-theorem absurd (a b: wff): $ ~ a -> a -> b $;
-theorem imidm (a b: wff): $ (a -> a -> b) -> a -> b $;
-theorem contra (a: wff): $ (~ a -> a) -> a $;
+  $ a → b → c → d $ > $ a → (b → c) → b → d $;
+theorem a3d (a b c: wff): $ a → ¬ b → ¬ c $ > $ a → c → b $;
+theorem imim2 (a b c: wff): $ (b → c) → (a → b) → a → c $;
+theorem imim2i (a b c: wff): $ b → c $ > $ (a → b) → a → c $;
+theorem com12 (a b c: wff): $ a → b → c $ > $ b → a → c $;
+theorem mpcom (a b: wff): $ a → (a → b) → b $;
+theorem absurd (a b: wff): $ ¬ a → a → b $;
+theorem imidm (a b: wff): $ (a → a → b) → a → b $;
+theorem contra (a: wff): $ (¬ a → a) → a $;
 theorem syld (a b c d: wff):
-  $ a -> b -> c $ > $ a -> c -> d $ > $ a -> b -> d $;
+  $ a → b → c $ > $ a → c → d $ > $ a → b → d $;
 theorem syl5 (a b c d: wff):
-  $ b -> c $ > $ a -> c -> d $ > $ a -> b -> d $;
-theorem dne (a: wff): $ ~ ~ a -> a $;
-theorem con2 (a b: wff): $ (a -> ~ b) -> b -> ~ a $;
-theorem notnot1 (a: wff): $ a -> ~ ~ a $;
-theorem con3 (a b: wff): $ (a -> b) -> ~ b -> ~ a $;
-theorem con1 (a b: wff): $ (~ a -> b) -> ~ b -> a $;
-theorem mt (a b: wff): $ b -> a $ > $ ~ a $ > $ ~ b $;
+  $ b → c $ > $ a → c → d $ > $ a → b → d $;
+theorem dne (a: wff): $ ¬ ¬ a → a $;
+theorem con2 (a b: wff): $ (a → ¬ b) → b → ¬ a $;
+theorem notnot1 (a: wff): $ a → ¬ ¬ a $;
+theorem con3 (a b: wff): $ (a → b) → ¬ b → ¬ a $;
+theorem con1 (a b: wff): $ (¬ a → b) → ¬ b → a $;
+theorem mt (a b: wff): $ b → a $ > $ ¬ a $ > $ ¬ b $;
 
 -- ---------------------------------------------------------------
 -- Peano arithmetic: zero, successor, equality.
 --
--- We state the Peano/equality axioms in implication form so that the
+-- Peano/equality axioms are stated in implication form so that the
 -- contraposition machinery (con3) can lift peano2r into an inequality
 -- rule.  peano.mm0 uses iff for peano2; we split it into the two
 -- directions (peano2 forward, peano2r backward) to avoid needing
@@ -77,13 +90,13 @@ term suc (n: nat): nat;
 
 term eq (a b: nat): wff; infixl eq: $=$ prec 50;
 
-axiom peano1 (a: nat): $ ~ suc a = 0 $;
-axiom peano2 (a b: nat): $ suc a = suc b -> a = b $;
-axiom peano2r (a b: nat): $ a = b -> suc a = suc b $;
+axiom peano1 (a: nat): $ ¬ suc a = 0 $;
+axiom peano2 (a b: nat): $ suc a = suc b → a = b $;
+axiom peano2r (a b: nat): $ a = b → suc a = suc b $;
 
 axiom eq_refl (a: nat): $ a = a $;
-axiom eq_sym (a b: nat): $ a = b -> b = a $;
-axiom eq_trans (a b c: nat): $ a = b -> b = c -> a = c $;
+axiom eq_sym (a b: nat): $ a = b → b = a $;
+axiom eq_trans (a b c: nat): $ a = b → b = c → a = c $;
 
 -- ---------------------------------------------------------------
 -- Small arithmetic theorems built on top of the above.
@@ -105,11 +118,11 @@ theorem suc_chain (a b c: nat):
 
 -- Contrapositive flavour: con3 + peano2r gives an inequality rule, and
 -- peano1 gives that 0 is never a successor.
-theorem suc_inj_neg (a b: nat): $ ~ suc a = suc b $ > $ ~ a = b $;
+theorem suc_inj_neg (a b: nat): $ ¬ suc a = suc b $ > $ ¬ a = b $;
 
-theorem zero_ne_suc (a: nat): $ ~ 0 = suc a $;
+theorem zero_ne_suc (a: nat): $ ¬ 0 = suc a $;
 
-theorem zero_ne_one: $ ~ 0 = suc 0 $;
+theorem zero_ne_one: $ ¬ 0 = suc 0 $;
 
 -- Double-successor injection via peano2 twice.
 theorem suc_cancel (a b: nat):
@@ -120,13 +133,15 @@ theorem suc_cancel (a b: nat):
 -- Enables the @congr / @rewrite / @normalize automation below.
 -- ---------------------------------------------------------------
 
-term bi (a b: wff): wff; infixl bi: $<->$ prec 20;
+term bi (a b: wff): wff;
+infixl bi: $↔$ prec 20;
+infixl bi: $<->$ prec 20;
 
 --| @relation wff bi biid bitr bisym mpbi
-axiom biid (a: wff): $ a <-> a $;
-axiom bitr (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
-axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
-axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+axiom biid (a: wff): $ a ↔ a $;
+axiom bitr (a b c: wff): $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom bisym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom mpbi (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
 
 -- ---------------------------------------------------------------
 -- Nat-level equivalence relation (for term-level rewriting under
@@ -147,15 +162,15 @@ axiom nat_eq_sym (a b: nat): $ nat_eq a b $ > $ nat_eq b a $;
 
 --| @congr
 axiom im_congr (a b c d: wff):
-  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+  $ a ↔ b $ > $ c ↔ d $ > $ (a → c) ↔ (b → d) $;
 
 --| @congr
 axiom not_congr (a b: wff):
-  $ a <-> b $ > $ ~ a <-> ~ b $;
+  $ a ↔ b $ > $ ¬ a ↔ ¬ b $;
 
 --| @congr
 axiom eq_congr (a b c d: nat):
-  $ nat_eq a b $ > $ nat_eq c d $ > $ (a = c) <-> (b = d) $;
+  $ nat_eq a b $ > $ nat_eq c d $ > $ (a = c) ↔ (b = d) $;
 
 --| @congr
 axiom suc_congr (a b: nat):
@@ -166,26 +181,28 @@ axiom suc_congr (a b: nat):
 -- ax_gen / ax_4 / ax_5 fragment).
 -- ---------------------------------------------------------------
 
-term all {x: nat} (p: wff x): wff; prefix all: $A.$ prec 41;
+term all {x: nat} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+prefix all: $A.$ prec 41;
 
 --| @congr
 axiom all_congr {x: nat} (p q: wff x):
-  $ p <-> q $ > $ A. x p <-> A. x q $;
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
 
--- Generalization: from |- p, derive |- A. x p.
-axiom ax_gen {x: nat} (p: wff x): $ p $ > $ A. x p $;
+-- Generalization: from |- p, derive |- ∀ x p.
+axiom ax_gen {x: nat} (p: wff x): $ p $ > $ ∀ x p $;
 
--- Distribution of A. over implication.
+-- Distribution of ∀ over implication.
 axiom ax_4 {x: nat} (p q: wff x):
-  $ A. x (p -> q) -> A. x p -> A. x q $;
+  $ ∀ x (p → q) → ∀ x p → ∀ x q $;
 
--- Vacuous quantification: a formula with no free x is implied by A. x.
-axiom ax_5 {x: nat} (p: wff): $ p -> A. x p $;
+-- Vacuous quantification: a formula with no free x is implied by ∀ x.
+axiom ax_5 {x: nat} (p: wff): $ p → ∀ x p $;
 
 -- ---------------------------------------------------------------
 -- Explicit substitution and its rewrite rules.  sb_t is nat-level
 -- (pushed through suc / var / 0); sb_f is wff-level (pushed through
--- -> / ~ / =).  Instantiation via ax_inst + @normalize collapses
+-- → / ¬ / =).  Instantiation via ax_inst + @normalize collapses
 -- sb_f at a concrete term into its already-substituted form.
 -- ---------------------------------------------------------------
 
@@ -194,15 +211,15 @@ term sb_f {x: nat} (t: nat x) (p: wff x): wff;
 
 --| @rewrite
 axiom sb_f_im {x: nat} (t: nat x) (p q: wff x):
-  $ sb_f x t (p -> q) <-> (sb_f x t p -> sb_f x t q) $;
+  $ sb_f x t (p → q) ↔ (sb_f x t p → sb_f x t q) $;
 
 --| @rewrite
 axiom sb_f_not {x: nat} (t: nat x) (p: wff x):
-  $ sb_f x t (~ p) <-> ~ (sb_f x t p) $;
+  $ sb_f x t (¬ p) ↔ ¬ (sb_f x t p) $;
 
 --| @rewrite
 axiom sb_f_eq {x: nat} (t: nat x) (a b: nat x):
-  $ sb_f x t (a = b) <-> (sb_t x t a = sb_t x t b) $;
+  $ sb_f x t (a = b) ↔ (sb_t x t a = sb_t x t b) $;
 
 --| @rewrite
 axiom sb_t_var {x: nat} (t: nat x): $ nat_eq (sb_t x t x) t $;
@@ -219,55 +236,55 @@ axiom sb_t_suc {x: nat} (t: nat x) (a: nat x):
 axiom sb_t_irrel {x: nat} (t: nat x) (a: nat):
   $ nat_eq (sb_t x t a) a $;
 
---| @view {x: nat} (t: nat x) (p: wff x) (q: wff): $ A. x p $ > $ q $
+--| @view {x: nat} (t: nat x) (p: wff x) (q: wff): $ ∀ x p $ > $ q $
 --| @recover t q p x
 --| @normalize conc
 axiom ax_inst {x: nat} (t: nat x) (p: wff x):
-  $ A. x p $ > $ sb_f x t p $;
+  $ ∀ x p $ > $ sb_f x t p $;
 
 -- ---------------------------------------------------------------
--- Definition:  ne a b   :=   ~ a = b.  Used below to demonstrate
+-- Definition:  ne a b  :=  ¬ a = b.  Used below to demonstrate
 -- automatic def-unfolding at theorem-application boundaries.
 -- ---------------------------------------------------------------
 
-def ne (a b: nat): wff = $ ~ a = b $;
+def ne (a b: nat): wff = $ ¬ a = b $;
 
 -- ---------------------------------------------------------------
 -- Quantifier and def-unfolding theorems.
 -- ---------------------------------------------------------------
 
 -- Every nat is equal to itself, under a universal binder.
-theorem gen_refl {x: nat}: $ A. x (x = x) $;
+theorem gen_refl {x: nat}: $ ∀ x (x = x) $;
 
--- A.-elim + modus ponens, Russell-flavoured.
+-- ∀-elim + modus ponens, Russell-flavoured.
 theorem alim {x: nat} (p q: wff x):
-  $ A. x (p -> q) $ > $ A. x p $ > $ A. x q $;
+  $ ∀ x (p → q) $ > $ ∀ x p $ > $ ∀ x q $;
 
--- Monotonicity:  p -> q  lifts under A. x.
+-- Monotonicity:  p → q  lifts under ∀ x.
 theorem gen_mono {x: nat} (p q: wff x):
-  $ p -> q $ > $ A. x p -> A. x q $;
+  $ p → q $ > $ ∀ x p → ∀ x q $;
 
 -- Universally quantified peano1.
-theorem peano1_all {x: nat}: $ A. x ~ suc x = 0 $;
+theorem peano1_all {x: nat}: $ ∀ x ¬ suc x = 0 $;
 
 -- Specialisation via ax_inst's @normalize conc: sb_f folds through
 -- the rewrite rules down to the instantiated claim.
-theorem inst_refl {x: nat}: $ A. x (x = x) $ > $ suc 0 = suc 0 $;
+theorem inst_refl {x: nat}: $ ∀ x (x = x) $ > $ suc 0 = suc 0 $;
 
 theorem inst_suc_suc {x: nat}:
-  $ A. x (suc x = suc x) $ > $ suc (suc 0) = suc (suc 0) $;
+  $ ∀ x (suc x = suc x) $ > $ suc (suc 0) = suc (suc 0) $;
 
--- Def-unfolding: feeds a raw `~ 0 = suc 0` into a goal stated as `ne 0 (suc 0)`.
+-- Def-unfolding: feeds a raw `¬ 0 = suc 0` into a goal stated as `ne 0 (suc 0)`.
 theorem zero_ne_one_def: $ ne 0 (suc 0) $;
 
 -- Def-unfolding in the reverse direction: consumer expects an unfolded
 -- shape while the producer's claim uses the def.
-theorem ne_implies_neq (a b: nat): $ ne a b $ > $ ~ a = b $;
+theorem ne_implies_neq (a b: nat): $ ne a b $ > $ ¬ a = b $;
 
 -- ---------------------------------------------------------------
--- Peano5 (induction) + addition.  We axiomatise addition by its
--- defining equations, push substitution through +, and state
--- induction with sb_f explicit so @normalize hyp0 hyp1 lets the
+-- Peano5 (induction) + addition.  Addition is axiomatised by its
+-- defining equations, substitution is pushed through +, and induction
+-- is stated with sb_f explicit so that @normalize hyp0 hyp1 lets the
 -- proof consumer supply the already-reduced base and step forms.
 -- ---------------------------------------------------------------
 
@@ -291,29 +308,26 @@ axiom add_suc (a b: nat): $ a + suc b = suc (a + b) $;
 -- recoverable directly from the line and references; phantom binders
 -- `base` and `step` absorb the post-normalization hypothesis shapes
 -- without constraining anything else.
---| @view {x: nat} (p: wff x) (base step: wff): $ base $ > $ A. x (p -> step) $ > $ A. x p $
+--| @view {x: nat} (p: wff x) (base step: wff): $ base $ > $ ∀ x (p → step) $ > $ ∀ x p $
 --| @normalize hyp0 hyp1
 axiom peano5 {x: nat} (p: wff x):
   $ sb_f x 0 p $ >
-  $ A. x (p -> sb_f x (suc x) p) $ >
-  $ A. x p $;
+  $ ∀ x (p → sb_f x (suc x) p) $ >
+  $ ∀ x p $;
 
--- Helper view for peano5 at a concrete base 0 and inductive step suc x:
--- lets the normalizer see through the sb_f forms.
-
--- Left-identity of addition:  A. x (0 + x = x).  Classical induction
+-- Left-identity of addition:  ∀ x (0 + x = x).  Classical induction
 -- on x:  0 + 0 = 0 (add_0), and 0 + x = x implies 0 + suc x = suc x
 -- (add_suc + peano2r through eq_trans).
-theorem add_0_left {x: nat}: $ A. x (0 + x = x) $;
+theorem add_0_left {x: nat}: $ ∀ x (0 + x = x) $;
 
 -- Step-recursion for addition on the left argument.
 theorem add_suc_left (a: nat) {x: nat}:
-  $ A. x (suc a + x = suc (a + x)) $;
+  $ ∀ x (suc a + x = suc (a + x)) $;
 
 -- Specialise add_0_left at x := suc 0 to rederive 1 + 0 = 1 modulo
 -- the canonical form; exercises @normalize conc on ax_inst at a
 -- compound term.
-theorem one_zero_eq {x: nat}: $ A. x (0 + x = x) $ > $ 0 + suc 0 = suc 0 $;
+theorem one_zero_eq {x: nat}: $ ∀ x (0 + x = x) $ > $ 0 + suc 0 = suc 0 $;
 
 -- Specialisation wrappers for downstream use.  No phantom {x: nat}: the
 -- proof bodies pull `x` from the sort's @vars pool via auto-dummy.
@@ -321,15 +335,15 @@ theorem add_0_left_inst (a: nat): $ 0 + a = a $;
 theorem add_suc_left_inst (a b: nat): $ suc a + b = suc (a + b) $;
 
 -- Commutativity of addition by induction on the right argument.
-theorem add_comm (a: nat) {x: nat}: $ A. x (a + x = x + a) $;
+theorem add_comm (a: nat) {x: nat}: $ ∀ x (a + x = x + a) $;
 
 -- Equality is preserved by addition on the left (proved by induction
 -- on the outer argument).  Universal form is the inductive shape;
 -- the inst version uses ax_inst to specialise.
-theorem add_eq_left_all (a b: nat) {x: nat}: $ A. x (a = b -> x + a = x + b) $;
-theorem add_eq_left (c a b: nat): $ a = b -> c + a = c + b $;
+theorem add_eq_left_all (a b: nat) {x: nat}: $ ∀ x (a = b → x + a = x + b) $;
+theorem add_eq_left (c a b: nat): $ a = b → c + a = c + b $;
 
 -- Associativity of addition by induction on x, with add_eq_left
 -- providing the congruence under `a + _` needed in the step.
-theorem add_assoc (a b: nat) {x: nat}: $ A. x (a + (b + x) = (a + b) + x) $;
+theorem add_assoc (a b: nat) {x: nat}: $ ∀ x (a + (b + x) = (a + b) + x) $;
 theorem add_assoc_inst (a b c: nat): $ a + (b + c) = (a + b) + c $;

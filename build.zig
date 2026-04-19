@@ -194,6 +194,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/mac_lane.auf"),
         "web-demo/fixtures/mac_lane.auf",
     );
+    const install_peano_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/peano.mm0"),
+        "web-demo/fixtures/peano.mm0",
+    );
+    const install_peano_proof = b.addInstallFile(
+        b.path("tests/proof_cases/peano.auf"),
+        "web-demo/fixtures/peano.auf",
+    );
     web_demo_step.dependOn(&install_compiler_wasm.step);
     web_demo_step.dependOn(&install_verifier_wasm.step);
     web_demo_step.dependOn(&install_web_assets.step);
@@ -222,6 +230,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_calculus_product_rule_proof.step);
     web_demo_step.dependOn(&install_category_pullback_mm0.step);
     web_demo_step.dependOn(&install_category_pullback_proof.step);
+    web_demo_step.dependOn(&install_peano_mm0.step);
+    web_demo_step.dependOn(&install_peano_proof.step);
 
     const run_step = b.step("run", "Run the mm0-zig verifier");
     const run_cmd = b.addRunArtifact(verifier_exe);
