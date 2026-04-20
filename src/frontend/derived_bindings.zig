@@ -462,6 +462,7 @@ fn recoverBindingCandidateSymbolic(
             const source_node = theorem.interner.node(source_expr);
             const source_app = switch (source_node.*) {
                 .variable => return error.RecoverStructureMismatch,
+                .placeholder => return error.RecoverStructureMismatch,
                 .app => |app| app,
             };
             if (source_app.term_id != pattern_app.term_id) {
@@ -525,10 +526,17 @@ fn recoverBindingCandidate(
     return switch (pattern_node.*) {
         .variable => switch (source_node.*) {
             .variable => return false,
+            .placeholder => return false,
+            .app => return error.RecoverStructureMismatch,
+        },
+        .placeholder => switch (source_node.*) {
+            .variable => return false,
+            .placeholder => return false,
             .app => return error.RecoverStructureMismatch,
         },
         .app => |pattern_app| switch (source_node.*) {
             .variable => return error.RecoverStructureMismatch,
+            .placeholder => return error.RecoverStructureMismatch,
             .app => |source_app| blk: {
                 if (source_app.term_id != pattern_app.term_id) {
                     return error.RecoverStructureMismatch;
@@ -666,10 +674,26 @@ fn abstractContextExpr(
                 if (left_expr != right_expr) return error.AbstractStructureMismatch;
                 return left_expr;
             },
+            .placeholder => {
+                if (left_expr != right_expr) return error.AbstractStructureMismatch;
+                return left_expr;
+            },
+            .app => return error.AbstractStructureMismatch,
+        },
+        .placeholder => switch (right_node.*) {
+            .variable => {
+                if (left_expr != right_expr) return error.AbstractStructureMismatch;
+                return left_expr;
+            },
+            .placeholder => {
+                if (left_expr != right_expr) return error.AbstractStructureMismatch;
+                return left_expr;
+            },
             .app => return error.AbstractStructureMismatch,
         },
         .app => |left_app| switch (right_node.*) {
             .variable => return error.AbstractStructureMismatch,
+            .placeholder => return error.AbstractStructureMismatch,
             .app => |right_app| blk: {
                 if (left_app.term_id != right_app.term_id) {
                     return error.AbstractStructureMismatch;
@@ -748,6 +772,7 @@ fn preprocessDerivedExprInner(
     const node = theorem.interner.node(current);
     switch (node.*) {
         .variable => {},
+        .placeholder => {},
         .app => |app| {
             const args = try canonicalizer.allocator.alloc(ExprId, app.args.len);
             var any_changed = false;
@@ -792,6 +817,7 @@ fn expandConcreteDefForDerived(
     const app = switch (node.*) {
         .app => |value| value,
         .variable => return null,
+        .placeholder => return null,
     };
     if (app.term_id >= env.terms.items.len) return null;
 

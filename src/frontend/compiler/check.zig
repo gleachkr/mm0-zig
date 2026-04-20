@@ -138,7 +138,7 @@ pub fn checkTheoremBlock(
                 return err;
             };
 
-            const attempt = tryApplyLineWithCandidate(
+            var attempt = tryApplyLineWithCandidate(
                 self,
                 allocator,
                 parser,
@@ -179,6 +179,26 @@ pub fn checkTheoremBlock(
                 continue;
             };
 
+            validateAttemptCheckedIrRange(
+                self,
+                &attempt.theorem,
+                assertion.name,
+                checked.items[checked_mark..],
+                line.label,
+                line.span,
+                .theorem_application,
+                saved_diag,
+            ) catch |err| {
+                CheckedIr.rollbackToMark(
+                    allocator,
+                    &checked,
+                    checked_mark,
+                );
+                attempt.theorem_vars.deinit();
+                attempt.theorem.deinit();
+                return err;
+            };
+
             var old_theorem = theorem.*;
             theorem.* = attempt.theorem;
             old_theorem.deinit();
@@ -190,7 +210,7 @@ pub fn checkTheoremBlock(
             last_line = checked.items[attempt.line_idx].expr;
             last_line_idx = attempt.line_idx;
             last_label = line.label;
-            last_span = line.assertion.span;
+            last_span = line.span;
             break;
         }
     }
@@ -208,6 +228,7 @@ pub fn checkTheoremBlock(
     if (final_line != theorem_concl) {
         if (last_line_idx) |line_idx| {
             const final_mark = diag_scratch.mark();
+            const checked_mark = checked.items.len;
             var final_report: TheoremBoundary.ReconciliationReport = .{};
             if ((TheoremBoundary.tryReconcileFinalConclusion(
                 allocator,
@@ -244,6 +265,15 @@ pub fn checkTheoremBlock(
                 return err;
             })) {
                 diag_scratch.discard(final_mark);
+                try ensureConcreteCheckedIrRange(
+                    self,
+                    theorem,
+                    assertion.name,
+                    checked.items[checked_mark..],
+                    last_label,
+                    last_span,
+                    .final_reconciliation,
+                );
                 return try checked.toOwnedSlice(allocator);
             }
             diag_scratch.discard(final_mark);
@@ -852,6 +882,113 @@ fn applyFreshenedRuleLine(
         .line => |line_idx| line_idx,
         .hyp => error.ConclusionMismatch,
     };
+}
+
+fn ensureConcreteCheckedIrRange(
+    self: anytype,
+    theorem: *const TheoremContext,
+    theorem_name: []const u8,
+    lines: []const CheckedLine,
+    line_label: ?[]const u8,
+    span: ?Span,
+    phase: CompilerDiag.DiagnosticPhase,
+) !void {
+    if (lines.len == 0) return;
+
+    CheckedIr.validateLines(theorem, lines) catch |err| {
+        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            .kind = .generic,
+            .err = err,
+            .theorem_name = theorem_name,
+            .line_label = line_label,
+            .span = span,
+        }, phase));
+        return err;
+    };
+}
+
+// Preserve any new checked-IR validation diagnostic on failure, but restore
+// the caller's saved diagnostic on success so speculative attempts remain
+// diagnostically transparent.
+fn validateAttemptCheckedIrRange(
+    self: anytype,
+    theorem: *const TheoremContext,
+    theorem_name: []const u8,
+    lines: []const CheckedLine,
+    line_label: ?[]const u8,
+    span: ?Span,
+    phase: CompilerDiag.DiagnosticPhase,
+    saved_diag: ?Diagnostic,
+) !void {
+    try ensureConcreteCheckedIrRange(
+        self,
+        theorem,
+        theorem_name,
+        lines,
+        line_label,
+        span,
+        phase,
+    );
+    restoreDiagnostic(self, saved_diag);
+}
+
+test "checked ir leak diagnostics replace saved diagnostics" {
+    const Sink = struct {
+        last_diagnostic: ?Diagnostic = null,
+
+        pub fn setDiagnostic(self: *@This(), diag: Diagnostic) void {
+            self.last_diagnostic = diag;
+        }
+    };
+
+    var theorem = TheoremContext.init(std.testing.allocator);
+    defer theorem.deinit();
+    try theorem.seedBinderCount(1);
+
+    const placeholder = try theorem.addPlaceholderResolved("obj");
+    const lines = [_]CheckedLine{.{
+        .expr = placeholder,
+        .data = .{ .rule = .{
+            .rule_id = 0,
+            .bindings = &.{theorem.theorem_vars.items[0]},
+            .refs = &.{},
+        } },
+    }};
+
+    var sink = Sink{};
+    sink.last_diagnostic = CompilerDiag.withPhase(.{
+        .kind = .generic,
+        .err = error.UnknownRule,
+        .theorem_name = "stale",
+        .line_label = "old",
+    }, .theorem_application);
+    const saved_diag = getDiagnostic(&sink);
+    const span: Span = .{ .start = 3, .end = 11 };
+    try std.testing.expectError(
+        error.PlaceholderLeakage,
+        validateAttemptCheckedIrRange(
+            &sink,
+            &theorem,
+            "demo",
+            &lines,
+            "l2",
+            span,
+            .theorem_application,
+            saved_diag,
+        ),
+    );
+
+    const diag = sink.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.PlaceholderLeakage, diag.err);
+    try std.testing.expectEqualStrings("demo", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l2", diag.line_label.?);
+    try std.testing.expectEqual(span.start, diag.span.?.start);
+    try std.testing.expectEqual(span.end, diag.span.?.end);
+    try std.testing.expectEqual(
+        CompilerDiag.DiagnosticPhase.theorem_application,
+        diag.phase.?,
+    );
+    try std.testing.expectEqual(.proof, diag.source);
 }
 
 fn lookupRuleId(

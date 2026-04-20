@@ -1,5 +1,6 @@
 const std = @import("std");
 const ExprId = @import("../expr.zig").ExprId;
+const TheoremContext = @import("../expr.zig").TheoremContext;
 
 pub const CheckedRef = union(enum) {
     hyp: usize,
@@ -24,6 +25,56 @@ pub const CheckedLine = struct {
         source_expr: ExprId,
     };
 };
+
+pub fn validateNoPlaceholderExpr(
+    theorem: *const TheoremContext,
+    expr: ExprId,
+) error{PlaceholderLeakage}!void {
+    switch (theorem.interner.node(expr).*) {
+        .variable => {},
+        .placeholder => return error.PlaceholderLeakage,
+        .app => |app| {
+            for (app.args) |arg| {
+                try validateNoPlaceholderExpr(theorem, arg);
+            }
+        },
+    }
+}
+
+pub fn validateNoPlaceholderSlice(
+    theorem: *const TheoremContext,
+    exprs: []const ExprId,
+) error{PlaceholderLeakage}!void {
+    for (exprs) |expr| {
+        try validateNoPlaceholderExpr(theorem, expr);
+    }
+}
+
+pub fn validateLine(
+    theorem: *const TheoremContext,
+    line: CheckedLine,
+) error{PlaceholderLeakage}!void {
+    try validateNoPlaceholderExpr(theorem, line.expr);
+    switch (line.data) {
+        .rule => |rule| try validateNoPlaceholderSlice(
+            theorem,
+            rule.bindings,
+        ),
+        .transport => |transport| try validateNoPlaceholderExpr(
+            theorem,
+            transport.source_expr,
+        ),
+    }
+}
+
+pub fn validateLines(
+    theorem: *const TheoremContext,
+    lines: []const CheckedLine,
+) error{PlaceholderLeakage}!void {
+    for (lines) |line| {
+        try validateLine(theorem, line);
+    }
+}
 
 pub fn appendRuleLine(
     lines: *std.ArrayListUnmanaged(CheckedLine),
@@ -92,4 +143,46 @@ pub fn rollbackToMark(
 ) void {
     deinitLines(allocator, lines.items[mark..]);
     lines.shrinkRetainingCapacity(mark);
+}
+
+test "validateLines rejects placeholder bindings" {
+    var theorem = TheoremContext.init(std.testing.allocator);
+    defer theorem.deinit();
+    try theorem.seedBinderCount(1);
+
+    const placeholder = try theorem.addPlaceholderResolved("obj");
+    const bindings = [_]ExprId{placeholder};
+    const lines = [_]CheckedLine{.{
+        .expr = theorem.theorem_vars.items[0],
+        .data = .{ .rule = .{
+            .rule_id = 0,
+            .bindings = &bindings,
+            .refs = &.{},
+        } },
+    }};
+
+    try std.testing.expectError(
+        error.PlaceholderLeakage,
+        validateLines(&theorem, &lines),
+    );
+}
+
+test "validateLine rejects placeholder transports" {
+    var theorem = TheoremContext.init(std.testing.allocator);
+    defer theorem.deinit();
+    try theorem.seedBinderCount(1);
+
+    const placeholder = try theorem.addPlaceholderResolved("obj");
+    const line: CheckedLine = .{
+        .expr = theorem.theorem_vars.items[0],
+        .data = .{ .transport = .{
+            .source = .{ .hyp = 0 },
+            .source_expr = placeholder,
+        } },
+    };
+
+    try std.testing.expectError(
+        error.PlaceholderLeakage,
+        validateLine(&theorem, line),
+    );
 }

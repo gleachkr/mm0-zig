@@ -141,12 +141,12 @@ const Builder = struct {
         const declared_node = self.theorem.interner.node(declared);
         const declared_app = switch (declared_node.*) {
             .app => |app| app,
-            .variable => return null,
+            .variable, .placeholder => return null,
         };
         const cleaned_node = self.theorem.interner.node(cleaned);
         const cleaned_app = switch (cleaned_node.*) {
             .app => |app| app,
-            .variable => return null,
+            .variable, .placeholder => return null,
         };
         if (declared_app.term_id != cleaned_app.term_id or
             declared_app.args.len != cleaned_app.args.len)
@@ -213,11 +213,11 @@ const Builder = struct {
         const cleaned_node = self.theorem.interner.node(cleaned);
         const declared_app = switch (declared_node.*) {
             .app => |app| app,
-            .variable => return null,
+            .variable, .placeholder => return null,
         };
         const cleaned_app = switch (cleaned_node.*) {
             .app => |app| app,
-            .variable => return null,
+            .variable, .placeholder => return null,
         };
         if (declared_app.term_id != cleaned_app.term_id or
             declared_app.args.len != cleaned_app.args.len)
@@ -423,4 +423,3 @@ fn rootBinderArgIndex(
     }
     return null;
 }
-

@@ -39,6 +39,10 @@ pub fn buildAcuiRewriteConversion(
             .result_expr = replaced.result_expr,
             .conv_line_idx = null,
         },
+        .placeholder => NormalizeResult{
+            .result_expr = replaced.result_expr,
+            .conv_line_idx = null,
+        },
     };
     const exact = try Cover.normalizeStructuralExact(
         self,
@@ -108,6 +112,10 @@ pub fn normalizeStructural(
             rewritten_app,
         ),
         .variable => NormalizeResult{
+            .result_expr = replaced.result_expr,
+            .conv_line_idx = null,
+        },
+        .placeholder => NormalizeResult{
             .result_expr = replaced.result_expr,
             .conv_line_idx = null,
         },
@@ -254,6 +262,7 @@ pub fn rewriteAcuiLeaves(
             }
         },
         .variable => {},
+        .placeholder => {},
     }
 
     if (next_leaf.* >= leaves.len) return error.MissingStructuralMetadata;

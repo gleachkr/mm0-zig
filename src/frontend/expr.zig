@@ -9,6 +9,7 @@ const TermStmt = @import("../trusted/parse.zig").TermStmt;
 pub const ExprId = u32;
 pub const TheoremVarId = u32;
 pub const DummyVarId = u32;
+pub const PlaceholderId = u32;
 pub const tracked_bound_dep_limit: u32 = @bitSizeOf(u55);
 
 pub const VarId = union(enum) {
@@ -18,6 +19,7 @@ pub const VarId = union(enum) {
 
 pub const ExprNode = union(enum) {
     variable: VarId,
+    placeholder: PlaceholderId,
     app: App,
 
     pub const App = struct {
@@ -26,16 +28,21 @@ pub const ExprNode = union(enum) {
     };
 };
 
-pub const DummyKind = enum {
-    concrete,
-    placeholder,
-};
-
 pub const DummyInfo = struct {
     sort_name: []const u8,
     sort_id: u8,
     deps: u55,
-    kind: DummyKind,
+};
+
+pub const PlaceholderInfo = struct {
+    sort_name: []const u8,
+    deps: u55,
+};
+
+pub const ExprLeafInfo = struct {
+    sort_name: []const u8,
+    bound: bool,
+    deps: u55,
 };
 
 const ExprNodeContext = struct {
@@ -69,7 +76,7 @@ pub const ExprInterner = struct {
     pub fn deinit(self: *ExprInterner) void {
         for (self.nodes.items) |expr_node| {
             switch (expr_node) {
-                .variable => {},
+                .variable, .placeholder => {},
                 .app => |app| self.allocator.free(app.args),
             }
         }
@@ -92,14 +99,14 @@ pub const ExprInterner = struct {
 
         for (self.nodes.items, 0..) |expr_node, idx| {
             const cloned: ExprNode = switch (expr_node) {
-                .variable => expr_node,
+                .variable, .placeholder => expr_node,
                 .app => |app| .{ .app = .{
                     .term_id = app.term_id,
                     .args = try self.allocator.dupe(ExprId, app.args),
                 } },
             };
             errdefer switch (cloned) {
-                .variable => {},
+                .variable, .placeholder => {},
                 .app => |app| self.allocator.free(app.args),
             };
 
@@ -124,6 +131,13 @@ pub const ExprInterner = struct {
 
     pub fn internVar(self: *ExprInterner, var_id: VarId) !ExprId {
         return try self.internNode(.{ .variable = var_id });
+    }
+
+    pub fn internPlaceholder(
+        self: *ExprInterner,
+        placeholder_id: PlaceholderId,
+    ) !ExprId {
+        return try self.internNode(.{ .placeholder = placeholder_id });
     }
 
     pub fn internApp(
@@ -186,7 +200,13 @@ pub const TheoremContext = struct {
     theorem_vars: std.ArrayListUnmanaged(ExprId) = .{},
     theorem_hyps: std.ArrayListUnmanaged(ExprId) = .{},
     theorem_dummies: std.ArrayListUnmanaged(DummyInfo) = .{},
+    theorem_placeholders: std.ArrayListUnmanaged(PlaceholderInfo) = .{},
     next_dummy_id: DummyVarId = 0,
+    next_placeholder_id: PlaceholderId = 0,
+    // Placeholder deps are frontend-only synthetic masks. They must stay
+    // disjoint from real theorem dep bits because internal matching and
+    // freshening code still reasons over one shared u55 dep universe.
+    next_placeholder_dep: u32 = 0,
     next_dummy_dep: u32 = 0,
 
     pub fn init(allocator: std.mem.Allocator) TheoremContext {
@@ -201,6 +221,7 @@ pub const TheoremContext = struct {
         self.theorem_vars.deinit(self.allocator);
         self.theorem_hyps.deinit(self.allocator);
         self.theorem_dummies.deinit(self.allocator);
+        self.theorem_placeholders.deinit(self.allocator);
         self.parser_vars.deinit(self.allocator);
     }
 
@@ -222,7 +243,13 @@ pub const TheoremContext = struct {
             self.allocator,
             self.theorem_dummies.items,
         );
+        try copy.theorem_placeholders.appendSlice(
+            self.allocator,
+            self.theorem_placeholders.items,
+        );
         copy.next_dummy_id = self.next_dummy_id;
+        copy.next_placeholder_id = self.next_placeholder_id;
+        copy.next_placeholder_dep = self.next_placeholder_dep;
         copy.next_dummy_dep = self.next_dummy_dep;
 
         try copy.parser_vars.ensureTotalCapacity(
@@ -318,9 +345,7 @@ pub const TheoremContext = struct {
     /// - Explicit source/user dummies: seedTerm in this file for dot binders
     ///   declared in .mm0, plus named theorem-local vars created through
     ///   @vars / @fresh when a proof line needs them.
-    /// - Temporary mirror-context dummies in def_ops, including normalized
-    ///   matching placeholders, which do not consume real theorem dependency
-    ///   slots.
+    /// - Temporary mirror-context dummies in def_ops for copied real dummies.
     ///
     /// The accidental allocation site,
     /// materializeEscapingWitnessForDummySlot in
@@ -332,31 +357,6 @@ pub const TheoremContext = struct {
         sort_name: []const u8,
         sort_id: u8,
     ) !ExprId {
-        return try self.addDummyVarResolvedWithKind(
-            sort_name,
-            sort_id,
-            .concrete,
-        );
-    }
-
-    pub fn addPlaceholderDummyVarResolved(
-        self: *TheoremContext,
-        sort_name: []const u8,
-        sort_id: u8,
-    ) !ExprId {
-        return try self.addDummyVarResolvedWithKind(
-            sort_name,
-            sort_id,
-            .placeholder,
-        );
-    }
-
-    fn addDummyVarResolvedWithKind(
-        self: *TheoremContext,
-        sort_name: []const u8,
-        sort_id: u8,
-        kind: DummyKind,
-    ) !ExprId {
         if (self.next_dummy_dep >= tracked_bound_dep_limit) {
             return error.DependencySlotExhausted;
         }
@@ -367,10 +367,136 @@ pub const TheoremContext = struct {
             .sort_name = sort_name,
             .sort_id = sort_id,
             .deps = @as(u55, 1) << @intCast(self.next_dummy_dep),
-            .kind = kind,
         });
         self.next_dummy_dep = try std.math.add(u32, self.next_dummy_dep, 1);
         return try self.interner.internVar(.{ .dummy_var = dummy_id });
+    }
+
+    /// Allocate a frontend-only placeholder. These never reach emission, but
+    /// they still participate in internal dep-sensitive matching and freshening
+    /// logic. So they get synthetic dep bits from the top of the same u55 mask
+    /// space while remaining disjoint from real theorem dep bookkeeping.
+    pub fn addPlaceholderResolved(
+        self: *TheoremContext,
+        sort_name: []const u8,
+    ) !ExprId {
+        const total_dep_uses = try std.math.add(
+            u32,
+            self.next_dummy_dep,
+            self.next_placeholder_dep,
+        );
+        if (total_dep_uses >= tracked_bound_dep_limit) {
+            return error.DependencySlotExhausted;
+        }
+
+        const placeholder_id = self.next_placeholder_id;
+        self.next_placeholder_id = try std.math.add(
+            PlaceholderId,
+            placeholder_id,
+            1,
+        );
+        const dep_bit = tracked_bound_dep_limit - 1 - self.next_placeholder_dep;
+        self.next_placeholder_dep = try std.math.add(
+            u32,
+            self.next_placeholder_dep,
+            1,
+        );
+        try self.theorem_placeholders.append(self.allocator, .{
+            .sort_name = sort_name,
+            .deps = @as(u55, 1) << @intCast(dep_bit),
+        });
+        return try self.interner.internPlaceholder(placeholder_id);
+    }
+
+    pub fn placeholderInfo(
+        self: *const TheoremContext,
+        idx: usize,
+    ) ?PlaceholderInfo {
+        if (idx >= self.theorem_placeholders.items.len) return null;
+        return self.theorem_placeholders.items[idx];
+    }
+
+    pub fn requirePlaceholderInfo(
+        self: *const TheoremContext,
+        idx: usize,
+    ) !PlaceholderInfo {
+        return self.placeholderInfo(idx) orelse error.UnknownPlaceholder;
+    }
+
+    pub fn requireDummyInfo(
+        self: *const TheoremContext,
+        idx: usize,
+    ) !DummyInfo {
+        if (idx >= self.theorem_dummies.items.len) {
+            return error.UnknownDummyVar;
+        }
+        return self.theorem_dummies.items[idx];
+    }
+
+    pub fn requireTheoremArgInfo(
+        self: *const TheoremContext,
+        theorem_args: []const ArgInfo,
+        idx: usize,
+    ) !ArgInfo {
+        _ = self;
+        if (idx >= theorem_args.len) {
+            return error.UnknownTheoremVariable;
+        }
+        return theorem_args[idx];
+    }
+
+    pub fn leafInfoWithArgs(
+        self: *const TheoremContext,
+        theorem_args: []const ArgInfo,
+        expr_id: ExprId,
+    ) !?ExprLeafInfo {
+        return switch (self.interner.node(expr_id).*) {
+            .app => null,
+            .variable => |var_id| switch (var_id) {
+                .theorem_var => |idx| blk: {
+                    const arg = try self.requireTheoremArgInfo(
+                        theorem_args,
+                        idx,
+                    );
+                    break :blk .{
+                        .sort_name = arg.sort_name,
+                        .bound = arg.bound,
+                        .deps = arg.deps,
+                    };
+                },
+                .dummy_var => |idx| blk: {
+                    const dummy = try self.requireDummyInfo(idx);
+                    break :blk .{
+                        .sort_name = dummy.sort_name,
+                        .bound = true,
+                        .deps = dummy.deps,
+                    };
+                },
+            },
+            .placeholder => |idx| blk: {
+                const placeholder = try self.requirePlaceholderInfo(idx);
+                break :blk .{
+                    .sort_name = placeholder.sort_name,
+                    .bound = true,
+                    .deps = placeholder.deps,
+                };
+            },
+        };
+    }
+
+    pub fn currentLeafInfo(
+        self: *const TheoremContext,
+        expr_id: ExprId,
+    ) !?ExprLeafInfo {
+        return self.leafInfoWithArgs(self.arg_infos, expr_id);
+    }
+
+    pub fn currentLeafSortName(
+        self: *const TheoremContext,
+        expr_id: ExprId,
+    ) ?[]const u8 {
+        const info = self.currentLeafInfo(expr_id) catch return null;
+        return if (info) |leaf| leaf.sort_name else null;
     }
 
     pub fn ensureNamedDummyParserVar(
@@ -389,7 +515,7 @@ pub const TheoremContext = struct {
             .dummy_var => |id| id,
             else => unreachable,
         };
-        const dummy_info = self.theorem_dummies.items[dummy_id];
+        const dummy_info = try self.requireDummyInfo(dummy_id);
 
         const expr = try parser_allocator.create(Expr);
         expr.* = .{
@@ -495,8 +621,12 @@ fn hashExprNode(hasher: *std.hash.Wyhash, key: ExprNode) void {
             hasher.update(&[_]u8{0});
             hashVarId(hasher, var_id);
         },
-        .app => |app| {
+        .placeholder => |id| {
             hasher.update(&[_]u8{1});
+            hasher.update(std.mem.asBytes(&id));
+        },
+        .app => |app| {
+            hasher.update(&[_]u8{2});
             hasher.update(std.mem.asBytes(&app.term_id));
             for (app.args) |arg| {
                 hasher.update(std.mem.asBytes(&arg));
@@ -522,6 +652,10 @@ fn eqlExprNode(a: ExprNode, b: ExprNode) bool {
     return switch (a) {
         .variable => |lhs| switch (b) {
             .variable => |rhs| eqlVarId(lhs, rhs),
+            else => false,
+        },
+        .placeholder => |lhs| switch (b) {
+            .placeholder => |rhs| lhs == rhs,
             else => false,
         },
         .app => |lhs| switch (b) {

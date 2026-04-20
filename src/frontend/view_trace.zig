@@ -174,12 +174,12 @@ fn printSingleBinding(
     const name = binderLabel(view_arg_names, idx);
     if (idx < bindings.len) {
         if (bindings[idx]) |expr_id| {
-        const text = try formatExpr(allocator, theorem, env, expr_id);
-        defer allocator.free(text);
-        debugPrint(
-            "[debug:views]   {s} {s}#{d} = {s}\n",
-            .{ role, name, idx, text },
-        );
+            const text = try formatExpr(allocator, theorem, env, expr_id);
+            defer allocator.free(text);
+            debugPrint(
+                "[debug:views]   {s} {s}#{d} = {s}\n",
+                .{ role, name, idx, text },
+            );
         } else {
             debugPrint(
                 "[debug:views]   {s} {s}#{d} = <null>\n",
@@ -229,20 +229,11 @@ fn appendExpr(
                 try out.writer(allocator).print("v{d}", .{idx});
             },
             .dummy_var => |idx| {
-                if (idx < theorem.theorem_dummies.items.len) {
-                    const info = theorem.theorem_dummies.items[idx];
-                    const tag = switch (info.kind) {
-                        .concrete => ".d",
-                        .placeholder => ".p",
-                    };
-                    try out.writer(allocator).print(
-                        "{s}{d}",
-                        .{ tag, idx },
-                    );
-                } else {
-                    try out.writer(allocator).print(".d{d}", .{idx});
-                }
+                try out.writer(allocator).print(".d{d}", .{idx});
             },
+        },
+        .placeholder => |idx| {
+            try out.writer(allocator).print(".p{d}", .{idx});
         },
         .app => |app| {
             const term_name = if (app.term_id < env.terms.items.len)

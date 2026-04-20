@@ -137,6 +137,8 @@ pub fn collectConcreteStructuralItems(
     const node = self.theorem.interner.node(expr_id);
     switch (node.*) {
         .variable => try appendStructuralItem(self, profile, out, expr_id),
+        .placeholder =>
+            try appendStructuralItem(self, profile, out, expr_id),
         .app => |app| {
             if (app.term_id == profile.headTermId() and app.args.len == 2) {
                 try collectConcreteStructuralItems(

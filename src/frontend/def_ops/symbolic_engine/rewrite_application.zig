@@ -21,6 +21,7 @@ pub fn applyRewriteRuleToExpr(
     const app = switch (node.*) {
         .app => |value| value,
         .variable => return null,
+        .placeholder => return null,
     };
     if (app.term_id != rule.head_term_id) return null;
 
@@ -141,6 +142,7 @@ fn matchRewriteTemplateToExpr(
             const actual_app = switch (actual_node.*) {
                 .app => |value| value,
                 .variable => break :blk false,
+                .placeholder => break :blk false,
             };
             if (actual_app.term_id != tmpl_app.term_id or
                 actual_app.args.len != tmpl_app.args.len)
@@ -365,14 +367,10 @@ fn symbolicIsBound(
         .dummy => true,
         .app => false,
         .fixed => |expr_id| blk: {
-            const node = self.shared.theorem.interner.node(expr_id);
-            switch (node.*) {
-                .app => break :blk false,
-                .variable => break :blk (try WitnessState.getConcreteVarInfo(
-                    self,
-                    expr_id,
-                )).bound,
-            }
+            const info =
+                (try WitnessState.getConcreteLeafInfo(self, expr_id)) orelse
+                break :blk false;
+            break :blk info.bound;
         },
     };
 }

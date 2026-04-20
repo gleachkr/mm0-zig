@@ -28,19 +28,61 @@ const MatchSession = MatchState.MatchSession;
 
 const NormalizedPlaceholderTarget = union(enum) {
     binder: usize,
-    dummy: usize,
+    symbolic_slot: usize,
 };
 
 const NormalizedView = struct {
     mirror: MirroredTheoremContext,
     to_mirror: std.AutoHashMapUnmanaged(ExprId, ExprId) = .empty,
+    from_mirror: std.AutoHashMapUnmanaged(ExprId, ExprId) = .empty,
     placeholder_targets: std.AutoHashMapUnmanaged(
         ExprId,
         NormalizedPlaceholderTarget,
     ) = .empty,
     mirror_binders: []ExprId,
     binder_status: []u8,
-    dummy_values: []?ExprId,
+    symbolic_slot_values: []?ExprId,
+
+    fn isPlaceholder(
+        self: *const NormalizedView,
+        expr_id: ExprId,
+    ) bool {
+        return switch (self.mirror.theorem.interner.node(expr_id).*) {
+            .placeholder => true,
+            .variable, .app => false,
+        };
+    }
+
+    fn placeholderTarget(
+        self: *const NormalizedView,
+        expr_id: ExprId,
+    ) ?NormalizedPlaceholderTarget {
+        if (!self.isPlaceholder(expr_id)) return null;
+        return self.placeholder_targets.get(expr_id);
+    }
+
+    fn sourceExprForMirror(
+        self: *const NormalizedView,
+        expr_id: ExprId,
+    ) ?ExprId {
+        return self.from_mirror.get(expr_id);
+    }
+
+    fn copyFromSource(
+        self: *NormalizedView,
+        session: *RuleMatchSession,
+        source_expr: ExprId,
+    ) anyerror!ExprId {
+        return try copyExprBetweenTheorems(
+            session.shared.allocator,
+            session.shared.theorem,
+            &self.mirror.theorem,
+            source_expr,
+            self.mirror.source_dummy_map,
+            &self.to_mirror,
+            &self.from_mirror,
+        );
+    }
 
     fn init(session: *RuleMatchSession) !NormalizedView {
         var mirror = try MirroredTheoremContext.init(
@@ -59,20 +101,20 @@ const NormalizedView = struct {
             session.state.bindings.len,
         );
         errdefer session.shared.allocator.free(binder_status);
-        const dummy_values = try session.shared.allocator.alloc(
+        const symbolic_slot_values = try session.shared.allocator.alloc(
             ?ExprId,
             session.state.symbolic_dummy_infos.items.len,
         );
-        errdefer session.shared.allocator.free(dummy_values);
+        errdefer session.shared.allocator.free(symbolic_slot_values);
 
         @memset(binder_status, 0);
-        @memset(dummy_values, null);
+        @memset(symbolic_slot_values, null);
 
         var view = NormalizedView{
             .mirror = mirror,
             .mirror_binders = mirror_binders,
             .binder_status = binder_status,
-            .dummy_values = dummy_values,
+            .symbolic_slot_values = symbolic_slot_values,
         };
         errdefer view.deinit(session.shared.allocator);
 
@@ -87,10 +129,11 @@ const NormalizedView = struct {
         allocator: std.mem.Allocator,
     ) void {
         self.to_mirror.deinit(allocator);
+        self.from_mirror.deinit(allocator);
         self.placeholder_targets.deinit(allocator);
         allocator.free(self.mirror_binders);
         allocator.free(self.binder_status);
-        allocator.free(self.dummy_values);
+        allocator.free(self.symbolic_slot_values);
         self.mirror.deinit(allocator);
     }
 
@@ -114,15 +157,11 @@ const NormalizedView = struct {
         const value = if (session.state.bindings[idx]) |bound| blk: {
             break :blk try session.boundValueToMirror(bound, self);
         } else blk: {
-            const sort_id = session.shared.env.sort_names.get(
-                session.rule_args[idx].sort_name,
-            ) orelse return error.UnknownSort;
             // Mirror-only allocation: placeholder in temporary mirror context,
             // not the real theorem. Does not consume real dependency slots.
             const placeholder = try self.mirror.theorem
-                .addPlaceholderDummyVarResolved(
+                .addPlaceholderResolved(
                 session.rule_args[idx].sort_name,
-                sort_id,
             );
             try self.placeholder_targets.put(
                 session.shared.allocator,
@@ -136,13 +175,15 @@ const NormalizedView = struct {
         return value;
     }
 
-    fn ensureMirrorDummy(
+    fn ensureMirrorSymbolicSlot(
         self: *NormalizedView,
         session: *RuleMatchSession,
         slot: usize,
     ) anyerror!ExprId {
-        if (slot >= self.dummy_values.len) return error.UnknownDummyVar;
-        if (self.dummy_values[slot]) |existing| return existing;
+        if (slot >= self.symbolic_slot_values.len) {
+            return error.UnknownDummyVar;
+        }
+        if (self.symbolic_slot_values[slot]) |existing| return existing;
 
         var symbolic_engine = session.engine();
         if (symbolic_engine.currentWitnessExpr(slot, &session.state)) |witness| {
@@ -150,34 +191,29 @@ const NormalizedView = struct {
                 witness,
                 &session.state,
             )) {
-                const copied = try copyExprBetweenTheorems(
-                    session.shared.allocator,
-                    session.shared.theorem,
-                    &self.mirror.theorem,
+                const copied = try self.copyFromSource(
+                    session,
                     witness,
-                    self.mirror.source_dummy_map,
-                    &self.to_mirror,
                 );
-                self.dummy_values[slot] = copied;
+                self.symbolic_slot_values[slot] = copied;
                 return copied;
             }
         }
 
         const info = session.state.symbolic_dummy_infos.items[slot];
-        const sort_id = session.shared.env.sort_names.get(info.sort_name) orelse return error.UnknownSort;
-        // Mirror-only allocation: placeholder for symbolic dummy in temporary
-        // mirror context, not the real theorem. Does not consume real dependency slots.
+        // Mirror-only allocation: placeholder for a symbolic witness slot in
+        // a temporary mirror context, not the real theorem. Does not consume
+        // real dependency slots.
         const placeholder = try self.mirror.theorem
-            .addPlaceholderDummyVarResolved(
+            .addPlaceholderResolved(
             info.sort_name,
-            sort_id,
         );
         try self.placeholder_targets.put(
             session.shared.allocator,
             placeholder,
-            .{ .dummy = slot },
+            .{ .symbolic_slot = slot },
         );
-        self.dummy_values[slot] = placeholder;
+        self.symbolic_slot_values[slot] = placeholder;
         return placeholder;
     }
 };
@@ -416,13 +452,9 @@ pub const RuleMatchSession = struct {
             template,
             view.mirror_binders,
         );
-        const actual_expr = try copyExprBetweenTheorems(
-            self.shared.allocator,
-            self.shared.theorem,
-            &view.mirror.theorem,
+        const actual_expr = try view.copyFromSource(
+            self,
             actual,
-            view.mirror.source_dummy_map,
-            &view.to_mirror,
         );
         return .{
             .session = self,
@@ -717,16 +749,12 @@ pub const RuleMatchSession = struct {
     ) anyerror!ExprId {
         var symbolic_engine = self.engine();
         return switch (bound) {
-            .concrete => |concrete| try copyExprBetweenTheorems(
-                self.shared.allocator,
-                self.shared.theorem,
-                &view.mirror.theorem,
+            .concrete => |concrete| try view.copyFromSource(
+                self,
                 (try symbolic_engine.concreteBindingMatchExpr(
                     concrete,
                     &self.state,
                 )) orelse return error.MissingRepresentative,
-                view.mirror.source_dummy_map,
-                &view.to_mirror,
             ),
             .symbolic => |symbolic| try self.symbolicToMirror(
                 symbolic.expr,
@@ -742,15 +770,11 @@ pub const RuleMatchSession = struct {
     ) anyerror!ExprId {
         return switch (symbolic.*) {
             .binder => |idx| try view.ensureMirrorBinder(self, idx),
-            .fixed => |expr_id| try copyExprBetweenTheorems(
-                self.shared.allocator,
-                self.shared.theorem,
-                &view.mirror.theorem,
+            .fixed => |expr_id| try view.copyFromSource(
+                self,
                 expr_id,
-                view.mirror.source_dummy_map,
-                &view.to_mirror,
             ),
-            .dummy => |slot| try view.ensureMirrorDummy(self, slot),
+            .dummy => |slot| try view.ensureMirrorSymbolicSlot(self, slot),
             .app => |app| blk: {
                 const args = try self.shared.allocator.alloc(
                     ExprId,
@@ -774,12 +798,12 @@ pub const RuleMatchSession = struct {
         pattern_expr: ExprId,
         actual_expr: ExprId,
     ) anyerror!bool {
-        if (view.placeholder_targets.get(pattern_expr)) |target| {
+        if (view.placeholderTarget(pattern_expr)) |target| {
             return try self.assignNormalizedTarget(target, actual_expr, view);
         }
 
         var symbolic_engine = self.engine();
-        if (!view.placeholder_targets.contains(actual_expr)) {
+        if (!view.isPlaceholder(actual_expr)) {
             const pattern_concrete =
                 try self.mirrorExprToConcrete(pattern_expr, view);
             const actual_concrete =
@@ -801,10 +825,15 @@ pub const RuleMatchSession = struct {
         return switch (pattern_node.*) {
             .variable => switch (actual_node.*) {
                 .variable => pattern_expr == actual_expr,
-                .app => false,
+                .placeholder, .app => false,
+            },
+            .placeholder => switch (actual_node.*) {
+                .placeholder => pattern_expr == actual_expr,
+                .variable, .app => false,
             },
             .app => |pattern_app| switch (actual_node.*) {
                 .variable => false,
+                .placeholder => false,
                 .app => |actual_app| blk: {
                     if (pattern_app.term_id != actual_app.term_id) {
                         break :blk false;
@@ -833,7 +862,7 @@ pub const RuleMatchSession = struct {
         actual_expr: ExprId,
         view: *NormalizedView,
     ) anyerror!bool {
-        if (view.placeholder_targets.get(actual_expr)) |actual_target| {
+        if (view.placeholderTarget(actual_expr)) |actual_target| {
             if (samePlaceholderTarget(target, actual_target)) return true;
         }
 
@@ -852,7 +881,7 @@ pub const RuleMatchSession = struct {
                     &self.state,
                 );
             },
-            .dummy => |slot| blk: {
+            .symbolic_slot => |slot| blk: {
                 if (translated == .symbolic and
                     self.symbolicContainsDummy(translated.symbolic.expr, slot))
                 {
@@ -906,8 +935,6 @@ pub const RuleMatchSession = struct {
         expr_id: ExprId,
         view: *const NormalizedView,
     ) anyerror!?ExprId {
-        if (view.placeholder_targets.contains(expr_id)) return null;
-
         return switch (view.mirror.theorem.interner.node(expr_id).*) {
             .variable => |var_id| switch (var_id) {
                 .theorem_var => |idx| blk: {
@@ -923,6 +950,7 @@ pub const RuleMatchSession = struct {
                     break :blk view.mirror.mirror_dummy_map[idx];
                 },
             },
+            .placeholder => null,
             .app => |app| blk: {
                 const args = try self.shared.allocator.alloc(
                     ExprId,
@@ -949,13 +977,6 @@ pub const RuleMatchSession = struct {
         view: *const NormalizedView,
     ) anyerror!*const SymbolicExpr {
         var symbolic_engine = self.engine();
-        if (view.placeholder_targets.get(expr_id)) |target| {
-            return switch (target) {
-                .binder => |idx| try symbolic_engine.allocSymbolic(.{ .binder = idx }),
-                .dummy => |slot| try symbolic_engine.allocSymbolic(.{ .dummy = slot }),
-            };
-        }
-
         return switch (view.mirror.theorem.interner.node(expr_id).*) {
             .variable => |var_id| switch (var_id) {
                 .theorem_var => |idx| blk: {
@@ -975,6 +996,19 @@ pub const RuleMatchSession = struct {
                     });
                 },
             },
+            .placeholder => if (view.placeholderTarget(expr_id)) |target|
+                switch (target) {
+                    .binder => |idx| try symbolic_engine.allocSymbolic(
+                        .{ .binder = idx },
+                    ),
+                    .symbolic_slot => |slot| try symbolic_engine.allocSymbolic(
+                        .{ .dummy = slot },
+                    ),
+                }
+            else if (view.sourceExprForMirror(expr_id)) |source_expr|
+                try symbolic_engine.allocSymbolic(.{ .fixed = source_expr })
+            else
+                return error.MissingMirrorSourceMapping,
             .app => |app| blk: {
                 const args = try self.shared.allocator.alloc(
                     *const SymbolicExpr,
@@ -1074,11 +1108,11 @@ fn samePlaceholderTarget(
     return switch (lhs) {
         .binder => |idx| switch (rhs) {
             .binder => |rhs_idx| idx == rhs_idx,
-            .dummy => false,
+            .symbolic_slot => false,
         },
-        .dummy => |idx| switch (rhs) {
+        .symbolic_slot => |idx| switch (rhs) {
             .binder => false,
-            .dummy => |rhs_idx| idx == rhs_idx,
+            .symbolic_slot => |rhs_idx| idx == rhs_idx,
         },
     };
 }

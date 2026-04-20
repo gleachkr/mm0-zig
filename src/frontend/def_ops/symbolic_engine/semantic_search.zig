@@ -50,6 +50,7 @@ pub fn collectSemanticStepCandidatesExpr(
     const app = switch (node.*) {
         .app => |value| value,
         .variable => return,
+        .placeholder => return,
     };
 
     if (TransparentMatch.getOpenableTerm(self, app.term_id) != null) {
@@ -489,6 +490,7 @@ fn tryMatchSymbolicToExprChildrenSemantic(
     const actual_app = switch (actual_node.*) {
         .app => |app| app,
         .variable => return false,
+        .placeholder => return false,
     };
     if (symbolic_app.term_id != actual_app.term_id) return false;
     if (symbolic_app.args.len != actual_app.args.len) return false;
@@ -564,6 +566,7 @@ fn tryMatchExprToSymbolicChildrenSemantic(
     const actual_app = switch (actual_node.*) {
         .app => |app| app,
         .variable => return false,
+        .placeholder => return false,
     };
     const symbolic_app = switch (symbolic.*) {
         .app => |app| app,
@@ -751,6 +754,7 @@ fn applySemanticStepToSymbolic(
                 const app = switch (node.*) {
                     .app => |value| value,
                     .variable => break :blk null,
+                    .placeholder => break :blk null,
                 };
                 if (app.term_id != unfold.term_id) break :blk null;
                 break :blk try TransparentMatch.expandConcreteDef(

@@ -412,6 +412,7 @@ fn freshenExpr(
     const app = switch (node.*) {
         .app => |value| value,
         .variable => return error.AlphaRewriteSearchFailed,
+        .placeholder => return error.AlphaRewriteSearchFailed,
     };
 
     const new_args = try normalizer.allocator.dupe(ExprId, app.args);
@@ -461,6 +462,7 @@ fn tryApplyAlphaAtRoot(
     const app = switch (node.*) {
         .app => |value| value,
         .variable => return null,
+        .placeholder => return null,
     };
 
     const rules = normalizer.registry.getAlphaRules(app.term_id);
@@ -570,10 +572,12 @@ fn buildRelationProofRec(
     const old_app = switch (old_node.*) {
         .app => |value| value,
         .variable => return error.FreshenTransportFailed,
+        .placeholder => return error.FreshenTransportFailed,
     };
     const new_app = switch (new_node.*) {
         .app => |value| value,
         .variable => return error.FreshenTransportFailed,
+        .placeholder => return error.FreshenTransportFailed,
     };
     if (old_app.term_id != new_app.term_id or
         old_app.args.len != new_app.args.len)

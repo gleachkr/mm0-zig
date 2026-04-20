@@ -116,6 +116,7 @@ pub fn mergeCanonical(
             }
         },
         .variable => {},
+        .placeholder => {},
     }
 
     return try Insert.insertItem(

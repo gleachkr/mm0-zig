@@ -330,10 +330,21 @@ If two occurrences are supposed to be the same node for `URef` or
 `Refl`, the compiler must preserve that sharing. The theorem-local
 interner is the mechanism that makes this possible.
 
-`TheoremContext` also owns theorem-local dummy allocation, parser-variable
-mapping, hypothesis interning, and template instantiation / matching.
-That makes it the main bridge between trusted parser trees and frontend
-proof elaboration.
+The theorem-local DAG now has three leaf shapes:
+
+- theorem or dummy variables through `.variable`
+- frontend-only placeholders through `.placeholder`
+- applications through `.app`
+
+That explicit split matters in the frontend. Real theorem dummies are
+ordinary theorem-local variables that may reach emission. Placeholders
+are temporary frontend leaves used by matching and normalization logic;
+they must be eliminated before checked IR or MMB emission.
+
+`TheoremContext` also owns theorem-local dummy allocation,
+placeholder allocation, parser-variable mapping, hypothesis interning,
+and template instantiation / matching. That makes it the main bridge
+between trusted parser trees and frontend proof elaboration.
 
 ### Pipeline orchestration
 
@@ -414,6 +425,11 @@ The theorem checker records two kinds of checked lines:
 A transport line says that the source line proves an expression that can
 be converted to the needed target expression. This is the bridge between
 frontend elaboration and backend proof emission.
+
+`checked_ir.zig` and `compiler/emit.zig` both enforce the theorem
+boundary explicitly: placeholders are frontend-only and are rejected with
+`PlaceholderLeakage` if they survive into checked lines, unify streams,
+or proof bodies.
 
 `src/frontend/compiler/emit.zig` later lowers this IR to ordinary MMB
 commands. It uses the same theorem-local DAG, so emission is still
@@ -542,10 +558,11 @@ The mirrored theorem serves one narrow purpose: it lets the frontend
 instantiate template placeholders, normalize both sides, and then map the
 result back into the original theorem's binding session.
 
-Those normalization placeholders live in the mirrored theorem, not in the
-main theorem. So normalized comparison can still introduce temporary
-placeholder dummies without consuming the main theorem's real dummy
-supply.
+Those normalization placeholders are explicit `.placeholder` leaves in
+the mirrored theorem, not disguised dummy vars in the main theorem.
+Mirrored copies of real source dummies remain real dummies. So
+normalized comparison can introduce temporary placeholder leaves without
+consuming the main theorem's real dummy supply.
 
 This is not a kernel feature. It is an internal frontend device used only
 while solving omitted binders.

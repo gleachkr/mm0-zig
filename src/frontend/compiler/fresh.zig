@@ -122,7 +122,7 @@ pub fn chooseFreshBinding(
             };
             switch (var_id) {
                 .dummy_var => |dummy_id| {
-                    const dummy_info = theorem.theorem_dummies.items[dummy_id];
+                    const dummy_info = try theorem.requireDummyInfo(dummy_id);
                     if ((used_deps & dummy_info.deps) != 0) continue;
                     if ((reserved_deps & dummy_info.deps) != 0) continue;
                     return .{
@@ -153,10 +153,13 @@ pub fn chooseFreshBinding(
         return error.UnknownTheoremVariable;
     };
     return switch (var_id) {
-        .dummy_var => |dummy_id| .{
-            .expr_id = try theorem.interner.internVar(var_id),
-            .deps = theorem.theorem_dummies.items[dummy_id].deps,
-            .token = token,
+        .dummy_var => |dummy_id| blk: {
+            const dummy_info = try theorem.requireDummyInfo(dummy_id);
+            break :blk .{
+                .expr_id = try theorem.interner.internVar(var_id),
+                .deps = dummy_info.deps,
+                .token = token,
+            };
         },
         .theorem_var => error.FreshNoAvailableVar,
     };

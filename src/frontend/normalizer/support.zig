@@ -18,16 +18,7 @@ pub fn getExprSort(self: anytype, expr_id: ExprId) ?[]const u8 {
             self.env.terms.items[app.term_id].ret_sort_name
         else
             null,
-        .variable => |var_id| switch (var_id) {
-            .theorem_var => |idx| if (idx < self.theorem.arg_infos.len)
-                self.theorem.arg_infos[idx].sort_name
-            else
-                null,
-            .dummy_var => |idx| if (idx < self.theorem.theorem_dummies.items.len)
-                self.theorem.theorem_dummies.items[idx].sort_name
-            else
-                null,
-        },
+        .variable, .placeholder => self.theorem.currentLeafSortName(expr_id),
     };
 }
 

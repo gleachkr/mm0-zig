@@ -190,4 +190,3 @@ pub fn tryBuildConclusionLine(
 
     return null;
 }
-

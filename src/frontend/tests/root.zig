@@ -303,10 +303,121 @@ test "explicit source dummy allocation is allowed and tracks dependency slots" {
     try std.testing.expectEqual(@as(u32, 2), ctx.next_dummy_dep);
 }
 
+test "placeholder allocation leaves real dummy bookkeeping unchanged" {
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    _ = try ctx.addDummyVarResolved("wff", 0);
+    const start_dummy_id = ctx.next_dummy_id;
+    const start_dummy_dep = ctx.next_dummy_dep;
+
+    _ = try ctx.addPlaceholderResolved("wff");
+    _ = try ctx.addPlaceholderResolved("wff");
+
+    try std.testing.expectEqual(start_dummy_id, ctx.next_dummy_id);
+    try std.testing.expectEqual(start_dummy_dep, ctx.next_dummy_dep);
+    try std.testing.expectEqual(
+        @as(usize, 1),
+        ctx.theorem_dummies.items.len,
+    );
+    try std.testing.expectEqual(
+        @as(usize, 2),
+        ctx.theorem_placeholders.items.len,
+    );
+    try std.testing.expect(
+        ctx.theorem_placeholders.items[0].deps !=
+            ctx.theorem_placeholders.items[1].deps,
+    );
+    try std.testing.expect(
+        (ctx.theorem_placeholders.items[0].deps &
+            ctx.theorem_dummies.items[0].deps) == 0,
+    );
+}
+
+test "placeholder deps share the global u55 mask budget" {
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    const limit = FrontendExpr.tracked_bound_dep_limit;
+    ctx.next_dummy_dep = limit - 1;
+
+    const placeholder = try ctx.addPlaceholderResolved("wff");
+    try std.testing.expectEqual(
+        @as(u55, 1) << @intCast(limit - 1),
+        ctx.theorem_placeholders.items[0].deps,
+    );
+    try std.testing.expectEqual(@as(u32, 0), ctx.next_dummy_id);
+    try std.testing.expectEqual(limit - 1, ctx.next_dummy_dep);
+    switch (ctx.interner.node(placeholder).*) {
+        .placeholder => |idx| try std.testing.expectEqual(@as(u32, 0), idx),
+        else => return error.UnexpectedExprNode,
+    }
+
+    try std.testing.expectError(
+        error.DependencySlotExhausted,
+        ctx.addPlaceholderResolved("wff"),
+    );
+    try std.testing.expectEqual(@as(usize, 1), ctx.theorem_placeholders.items.len);
+}
+
+test "placeholder info lookup reports placeholder-specific errors" {
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    try std.testing.expectError(
+        error.UnknownPlaceholder,
+        ctx.requirePlaceholderInfo(0),
+    );
+}
+
+test "leaf info helpers cover theorem vars dummies and placeholders" {
+    var ctx = FrontendExpr.TheoremContext.init(std.testing.allocator);
+    defer ctx.deinit();
+
+    const ArgInfo = @typeInfo(@TypeOf(ctx.arg_infos)).pointer.child;
+    const args = [_]ArgInfo{
+        .{ .sort_name = "wff", .bound = false, .deps = 0 },
+        .{ .sort_name = "obj", .bound = true, .deps = 1 },
+    };
+    const arg_exprs = [_]*const Expr{
+        &.{ .variable = .{ .sort = 0, .bound = false, .deps = 0 } },
+        &.{ .variable = .{ .sort = 0, .bound = true, .deps = 1 } },
+    };
+    try ctx.seedArgs(args[0..], arg_exprs[0..]);
+
+    const theorem_leaf = (try ctx.currentLeafInfo(ctx.theorem_vars.items[1])) orelse {
+        return error.MissingLeafInfo;
+    };
+    try std.testing.expectEqualStrings("obj", theorem_leaf.sort_name);
+    try std.testing.expect(theorem_leaf.bound);
+    try std.testing.expectEqual(@as(u55, 1), theorem_leaf.deps);
+
+    const dummy = try ctx.addDummyVarResolved("wff", 0);
+    const dummy_leaf = (try ctx.currentLeafInfo(dummy)) orelse {
+        return error.MissingLeafInfo;
+    };
+    try std.testing.expectEqualStrings("wff", dummy_leaf.sort_name);
+    try std.testing.expect(dummy_leaf.bound);
+
+    const placeholder = try ctx.addPlaceholderResolved("obj");
+    const placeholder_leaf = (try ctx.currentLeafInfo(placeholder)) orelse {
+        return error.MissingLeafInfo;
+    };
+    try std.testing.expectEqualStrings(
+        "obj",
+        placeholder_leaf.sort_name,
+    );
+    try std.testing.expect(placeholder_leaf.bound);
+    try std.testing.expectEqual(
+        placeholder_leaf.sort_name,
+        ctx.currentLeafSortName(placeholder).?,
+    );
+}
+
 test "mirror-only dummy allocation does not affect source theorem context" {
     // Mirror-only allocations (mirror_support.zig, normalized_match.zig)
     // create dummies in a temporary TheoremContext. This test verifies that
-    // allocating dummies in a separate "mirror" context leaves the original
+    // allocating dummies in a separate mirror context leaves the original
     // source context's dummy count untouched.
     var source = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer source.deinit();
@@ -316,7 +427,7 @@ test "mirror-only dummy allocation does not affect source theorem context" {
     try std.testing.expectEqual(@as(usize, 1), source.theorem_dummies.items.len);
     const source_dep_after = source.next_dummy_dep;
 
-    // Create a separate "mirror" context (simulates MirroredTheoremContext).
+    // Create a separate mirror context (simulates MirroredTheoremContext).
     var mirror = FrontendExpr.TheoremContext.init(std.testing.allocator);
     defer mirror.deinit();
 

@@ -131,6 +131,7 @@ pub fn isAcuiExpr(
     return switch (node.*) {
         .app => |app| app.term_id == head_term_id and app.args.len == 2,
         .variable => false,
+        .placeholder => false,
     };
 }
 

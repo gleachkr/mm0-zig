@@ -54,6 +54,16 @@ pub fn insertItem(
                 acui,
             );
         },
+        .placeholder => {
+            return try insertIntoAtom(
+                self,
+                current_expr,
+                item,
+                canon,
+                relation,
+                acui,
+            );
+        },
         .app => |canon_app| {
             if (canon_app.term_id != acui.head_term_id or
                 canon_app.args.len != 2)

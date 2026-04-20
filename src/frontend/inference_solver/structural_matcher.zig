@@ -73,6 +73,16 @@ pub fn matchExpr(
                         state,
                     );
                 },
+                .placeholder => {
+                    break :blk try StructuralTransparentMatcher
+                        .matchExprTransparent(
+                        self,
+                        template,
+                        actual,
+                        space,
+                        state,
+                    );
+                },
             };
             if (actual_app.term_id != app.term_id or
                 actual_app.args.len != app.args.len)

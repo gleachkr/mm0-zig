@@ -174,7 +174,10 @@ test "semantic step enumeration handles symbolic roots" {
         hasSymbolicUnfold(symbolic_steps.items, fixture.mono_term_id),
     );
 
-    const fixed_comp = try Testing.allocSymbolic(&ctx, .{ .fixed = fixture.comp_expr });
+    const fixed_comp = try Testing.allocSymbolic(
+        &ctx,
+        .{ .fixed = fixture.comp_expr },
+    );
     var fixed_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
     defer fixed_steps.deinit(fixture.arena.allocator());
     try Testing.collectSemanticStepCandidatesSymbolic(
@@ -187,6 +190,45 @@ test "semantic step enumeration handles symbolic roots" {
         fixture.comp_assoc_rule_id,
         fixture.comp_term_id,
     ));
+}
+
+test "semantic step enumeration ignores placeholder roots" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    const placeholder = try fixture.theorem.addPlaceholderResolved(
+        "mor",
+    );
+
+    var expr_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer expr_steps.deinit(fixture.arena.allocator());
+    try Testing.collectSemanticStepCandidatesExpr(
+        &ctx,
+        placeholder,
+        &expr_steps,
+    );
+    try std.testing.expectEqual(@as(usize, 0), expr_steps.items.len);
+
+    const fixed_placeholder = try Testing.allocSymbolic(
+        &ctx,
+        .{ .fixed = placeholder },
+    );
+    var symbolic_steps = std.ArrayListUnmanaged(SemanticStepCandidate){};
+    defer symbolic_steps.deinit(fixture.arena.allocator());
+    try Testing.collectSemanticStepCandidatesSymbolic(
+        &ctx,
+        fixed_placeholder,
+        &symbolic_steps,
+    );
+    try std.testing.expectEqual(@as(usize, 0), symbolic_steps.items.len);
 }
 
 test "semantic search matches def unfold then rewrite" {
@@ -322,4 +364,3 @@ test "semantic def exposure materializes witness toward rewrite target" {
 
     try std.testing.expectEqual(expected, witness);
 }
-

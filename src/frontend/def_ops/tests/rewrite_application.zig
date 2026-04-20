@@ -228,3 +228,47 @@ test "failed rewrite application restores witness state" {
     try std.testing.expectEqual(@as(u32, 1), fixture.theorem.next_dummy_id);
     try std.testing.expectEqual(@as(u32, 1), fixture.theorem.next_dummy_dep);
 }
+
+test "rewrite application ignores placeholder roots" {
+    var fixture = try SemanticStepFixture.init();
+    defer fixture.deinit();
+
+    var ctx = Context.initWithRegistry(
+        fixture.arena.allocator(),
+        &fixture.theorem,
+        &fixture.env,
+        &fixture.registry,
+    );
+    defer ctx.deinit();
+
+    var state = try MatchSession.init(fixture.arena.allocator(), 0);
+    defer state.deinit(fixture.arena.allocator());
+
+    const placeholder = try fixture.theorem.addPlaceholderResolved(
+        "mor",
+    );
+    const start_dummy_info_len = state.symbolic_dummy_infos.items.len;
+    const start_witness_count = state.witnesses.count();
+    const start_placeholder_count = fixture.theorem.theorem_placeholders.items.len;
+
+    const rule = fixture.registry.getRewriteRules(
+        fixture.comp_term_id,
+    )[0];
+    try std.testing.expect(
+        (try Testing.applyRewriteRuleToExpr(
+            &ctx,
+            rule,
+            placeholder,
+            &state,
+        )) == null,
+    );
+    try std.testing.expectEqual(
+        start_dummy_info_len,
+        state.symbolic_dummy_infos.items.len,
+    );
+    try std.testing.expectEqual(start_witness_count, state.witnesses.count());
+    try std.testing.expectEqual(
+        start_placeholder_count,
+        fixture.theorem.theorem_placeholders.items.len,
+    );
+}

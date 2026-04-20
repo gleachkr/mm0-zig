@@ -682,43 +682,28 @@ pub fn rewriteExprInfo(
     theorem: *const TheoremContext,
     expr_id: ExprId,
 ) !ExprInfo {
-    return switch (theorem.interner.node(expr_id).*) {
-        .variable => |var_id| switch (var_id) {
-            .theorem_var => |idx| blk: {
-                if (idx >= theorem.arg_infos.len) {
-                    return error.UnknownTheoremVariable;
-                }
-                const arg = theorem.arg_infos[idx];
-                break :blk .{
-                    .sort_name = arg.sort_name,
-                    .bound = arg.bound,
-                    .deps = arg.deps,
-                };
-            },
-            .dummy_var => |idx| blk: {
-                if (idx >= theorem.theorem_dummies.items.len) {
-                    return error.UnknownDummyVar;
-                }
-                const dummy = theorem.theorem_dummies.items[idx];
-                break :blk .{
-                    .sort_name = dummy.sort_name,
-                    .bound = true,
-                    .deps = dummy.deps,
-                };
-            },
-        },
-        .app => |app| blk: {
-            if (app.term_id >= env.terms.items.len) return error.UnknownTerm;
-            var deps: u55 = 0;
-            for (app.args) |arg_id| {
-                deps |= (try rewriteExprInfo(env, theorem, arg_id)).deps;
-            }
-            break :blk .{
-                .sort_name = env.terms.items[app.term_id].ret_sort_name,
-                .bound = false,
-                .deps = deps,
-            };
-        },
+    if (try theorem.currentLeafInfo(expr_id)) |leaf| {
+        return .{
+            .sort_name = leaf.sort_name,
+            .bound = leaf.bound,
+            .deps = leaf.deps,
+        };
+    }
+
+    const app = switch (theorem.interner.node(expr_id).*) {
+        .app => |value| value,
+        .variable, .placeholder => unreachable,
+    };
+    if (app.term_id >= env.terms.items.len) return error.UnknownTerm;
+
+    var deps: u55 = 0;
+    for (app.args) |arg_id| {
+        deps |= (try rewriteExprInfo(env, theorem, arg_id)).deps;
+    }
+    return .{
+        .sort_name = env.terms.items[app.term_id].ret_sort_name,
+        .bound = false,
+        .deps = deps,
     };
 }
 

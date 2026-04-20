@@ -82,8 +82,17 @@ pub fn copyExprBetweenTheorems(
     source_expr: ExprId,
     source_dummy_map: []const ExprId,
     cache: *std.AutoHashMapUnmanaged(ExprId, ExprId),
+    reverse_cache: ?*std.AutoHashMapUnmanaged(ExprId, ExprId),
 ) !ExprId {
-    if (cache.get(source_expr)) |existing| return existing;
+    if (cache.get(source_expr)) |existing| {
+        try noteReverseMapping(
+            allocator,
+            reverse_cache,
+            existing,
+            source_expr,
+        );
+        return existing;
+    }
 
     const copied = switch (source.interner.node(source_expr).*) {
         .variable => |var_id| switch (var_id) {
@@ -100,6 +109,12 @@ pub fn copyExprBetweenTheorems(
                 break :blk source_dummy_map[idx];
             },
         },
+        .placeholder => |idx| blk: {
+            const placeholder = try source.requirePlaceholderInfo(idx);
+            break :blk try target.addPlaceholderResolved(
+                placeholder.sort_name,
+            );
+        },
         .app => |app| blk: {
             const args = try allocator.alloc(ExprId, app.args.len);
             errdefer allocator.free(args);
@@ -111,6 +126,7 @@ pub fn copyExprBetweenTheorems(
                     arg,
                     source_dummy_map,
                     cache,
+                    reverse_cache,
                 );
             }
             break :blk try target.interner.internAppOwned(app.term_id, args);
@@ -118,5 +134,77 @@ pub fn copyExprBetweenTheorems(
     };
 
     try cache.put(allocator, source_expr, copied);
+    errdefer _ = cache.remove(source_expr);
+    try noteReverseMapping(allocator, reverse_cache, copied, source_expr);
     return copied;
+}
+
+fn noteReverseMapping(
+    allocator: std.mem.Allocator,
+    reverse_cache: ?*std.AutoHashMapUnmanaged(ExprId, ExprId),
+    copied_expr: ExprId,
+    source_expr: ExprId,
+) !void {
+    const reverse = reverse_cache orelse return;
+    const gop = try reverse.getOrPut(allocator, copied_expr);
+    if (!gop.found_existing) {
+        gop.value_ptr.* = source_expr;
+        return;
+    }
+    std.debug.assert(gop.value_ptr.* == source_expr);
+}
+
+test "copyExprBetweenTheorems tracks reverse mappings incrementally" {
+    var source = TheoremContext.init(std.testing.allocator);
+    defer source.deinit();
+    try source.seedBinderCount(1);
+    const source_dummy = try source.addDummyVarResolved("obj", 0);
+    const inner = try source.interner.internApp(
+        1,
+        &[_]ExprId{source.theorem_vars.items[0]},
+    );
+    const outer = try source.interner.internApp(
+        2,
+        &[_]ExprId{ inner, source_dummy },
+    );
+
+    var mirror = try MirroredTheoremContext.init(
+        std.testing.allocator,
+        &source,
+    );
+    defer mirror.deinit(std.testing.allocator);
+
+    var forward: std.AutoHashMapUnmanaged(ExprId, ExprId) = .empty;
+    defer forward.deinit(std.testing.allocator);
+    var reverse: std.AutoHashMapUnmanaged(ExprId, ExprId) = .empty;
+    defer reverse.deinit(std.testing.allocator);
+
+    const copied_outer = try copyExprBetweenTheorems(
+        std.testing.allocator,
+        &source,
+        &mirror.theorem,
+        outer,
+        mirror.source_dummy_map,
+        &forward,
+        &reverse,
+    );
+    const copied_inner = forward.get(inner) orelse return error.MissingMapping;
+
+    try std.testing.expectEqual(outer, reverse.get(copied_outer).?);
+    try std.testing.expectEqual(inner, reverse.get(copied_inner).?);
+
+    const reverse_count = reverse.count();
+    try std.testing.expectEqual(
+        copied_outer,
+        try copyExprBetweenTheorems(
+            std.testing.allocator,
+            &source,
+            &mirror.theorem,
+            outer,
+            mirror.source_dummy_map,
+            &forward,
+            &reverse,
+        ),
+    );
+    try std.testing.expectEqual(reverse_count, reverse.count());
 }

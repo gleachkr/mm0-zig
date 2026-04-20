@@ -14,10 +14,12 @@ pub fn buildNonAcuiCommonTarget(
     const lhs_app = switch (lhs_node.*) {
         .app => |value| value,
         .variable => return null,
+        .placeholder => return null,
     };
     const rhs_app = switch (rhs_node.*) {
         .app => |value| value,
         .variable => return null,
+        .placeholder => return null,
     };
     if (lhs_app.term_id != rhs_app.term_id or
         lhs_app.args.len != rhs_app.args.len)

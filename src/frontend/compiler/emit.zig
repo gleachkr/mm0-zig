@@ -56,16 +56,19 @@ pub const ExprProofEmitter = struct {
             .variable => |var_id| switch (var_id) {
                 .theorem_var => return error.UnboundExprVariable,
                 .dummy_var => |dummy_id| {
-                    if (dummy_id >= self.theorem.theorem_dummies.items.len) {
-                        return error.UnknownDummyVar;
-                    }
-                    const info = self.theorem.theorem_dummies.items[dummy_id];
-                    try MmbWriter.appendCmd(&self.bytes, self.allocator, ProofCmd.Dummy, info.sort_id);
+                    const info = try self.theorem.requireDummyInfo(dummy_id);
+                    try MmbWriter.appendCmd(
+                        &self.bytes,
+                        self.allocator,
+                        ProofCmd.Dummy,
+                        info.sort_id,
+                    );
                     const slot = self.heap_len;
                     self.heap_len = try std.math.add(u32, self.heap_len, 1);
                     try self.expr_slots.put(self.allocator, expr_id, slot);
                 },
             },
+            .placeholder => return error.PlaceholderLeakage,
             .app => |app| {
                 for (app.args) |arg| {
                     try self.emitExpr(arg);
@@ -122,6 +125,7 @@ pub const UnifyEmitter = struct {
         }
         switch (self.theorem.interner.node(expr_id).*) {
             .variable => {},
+            .placeholder => return error.PlaceholderLeakage,
             .app => |app| {
                 for (app.args) |arg| {
                     try self.noteExprUse(arg);
@@ -152,10 +156,7 @@ pub const UnifyEmitter = struct {
             .variable => |var_id| switch (var_id) {
                 .theorem_var => return error.UnboundExprVariable,
                 .dummy_var => |dummy_id| {
-                    if (dummy_id >= self.theorem.theorem_dummies.items.len) {
-                        return error.UnknownDummyVar;
-                    }
-                    const info = self.theorem.theorem_dummies.items[dummy_id];
+                    const info = try self.theorem.requireDummyInfo(dummy_id);
                     try MmbWriter.appendCmd(
                         &self.bytes,
                         self.allocator,
@@ -169,6 +170,7 @@ pub const UnifyEmitter = struct {
                     }
                 },
             },
+            .placeholder => return error.PlaceholderLeakage,
             .app => |app| {
                 try MmbWriter.appendCmd(
                     &self.bytes,
@@ -396,10 +398,7 @@ pub const TheoremProofEmitter = struct {
             .variable => |var_id| switch (var_id) {
                 .theorem_var => return error.UnboundExprVariable,
                 .dummy_var => |dummy_id| {
-                    if (dummy_id >= self.theorem.theorem_dummies.items.len) {
-                        return error.UnknownDummyVar;
-                    }
-                    const info = self.theorem.theorem_dummies.items[dummy_id];
+                    const info = try self.theorem.requireDummyInfo(dummy_id);
                     try MmbWriter.appendCmd(
                         &self.bytes,
                         self.allocator,
@@ -411,6 +410,7 @@ pub const TheoremProofEmitter = struct {
                     try self.expr_slots.put(self.allocator, expr_id, slot);
                 },
             },
+            .placeholder => return error.PlaceholderLeakage,
             .app => |app| {
                 for (app.args) |arg| {
                     try self.emitExpr(arg);
@@ -474,6 +474,34 @@ pub fn lookupSortId(parser: *const MM0Parser, sort_name: []const u8) !u7 {
     return @intCast(sort_id);
 }
 
+fn validateProofBoundaryExpr(
+    theorem: *const TheoremContext,
+    expr_id: ExprId,
+) !void {
+    try CheckedIr.validateNoPlaceholderExpr(theorem, expr_id);
+}
+
+fn validateProofBoundaryExprs(
+    theorem: *const TheoremContext,
+    exprs: []const ExprId,
+) !void {
+    try CheckedIr.validateNoPlaceholderSlice(theorem, exprs);
+}
+
+fn buildDefProofBodyFromExpr(
+    allocator: std.mem.Allocator,
+    theorem: *const TheoremContext,
+    expr_id: ExprId,
+) ![]const u8 {
+    try validateProofBoundaryExpr(theorem, expr_id);
+
+    var emitter = ExprProofEmitter.init(allocator, theorem);
+    defer emitter.deinit();
+    try emitter.emitExpr(expr_id);
+    try MmbWriter.appendCmd(&emitter.bytes, allocator, ProofCmd.End, 0);
+    return try emitter.bytes.toOwnedSlice(allocator);
+}
+
 pub fn buildDefProofBody(
     allocator: std.mem.Allocator,
     parser: *const MM0Parser,
@@ -484,12 +512,7 @@ pub fn buildDefProofBody(
     try theorem.seedTerm(parser, stmt);
     const body = stmt.body orelse return error.ExpectedDefinitionBody;
     const expr_id = try theorem.internParsedExpr(body);
-
-    var emitter = ExprProofEmitter.init(allocator, &theorem);
-    defer emitter.deinit();
-    try emitter.emitExpr(expr_id);
-    try MmbWriter.appendCmd(&emitter.bytes, allocator, ProofCmd.End, 0);
-    return try emitter.bytes.toOwnedSlice(allocator);
+    return try buildDefProofBodyFromExpr(allocator, &theorem, expr_id);
 }
 
 pub fn buildAxiomProofBody(
@@ -497,6 +520,9 @@ pub fn buildAxiomProofBody(
     theorem: *const TheoremContext,
     concl: ExprId,
 ) ![]const u8 {
+    try validateProofBoundaryExprs(theorem, theorem.theorem_hyps.items);
+    try validateProofBoundaryExpr(theorem, concl);
+
     var emitter = ExprProofEmitter.init(allocator, theorem);
     defer emitter.deinit();
     for (theorem.theorem_hyps.items) |hyp| {
@@ -514,6 +540,8 @@ pub fn buildTermUnifyStream(
     theorem: *const TheoremContext,
     body: ExprId,
 ) ![]const u8 {
+    try validateProofBoundaryExpr(theorem, body);
+
     var emitter = UnifyEmitter.init(allocator, theorem);
     defer emitter.deinit();
     try emitter.noteExprUse(body);
@@ -527,6 +555,9 @@ pub fn buildAssertionUnifyStream(
     theorem: *const TheoremContext,
     concl: ExprId,
 ) ![]const u8 {
+    try validateProofBoundaryExprs(theorem, theorem.theorem_hyps.items);
+    try validateProofBoundaryExpr(theorem, concl);
+
     var emitter = UnifyEmitter.init(allocator, theorem);
     defer emitter.deinit();
     try emitter.noteExprUse(concl);
@@ -596,6 +627,9 @@ pub fn buildTheoremProofBody(
     env: *const GlobalEnv,
     lines: []const CheckedLine,
 ) ![]const u8 {
+    try validateProofBoundaryExprs(theorem, theorem.theorem_hyps.items);
+    try CheckedIr.validateLines(theorem, lines);
+
     var emitter = try TheoremProofEmitter.init(allocator, theorem, env, lines);
     defer emitter.deinit();
     try emitter.emitHyps();
@@ -631,4 +665,86 @@ pub fn hypText(
     index: usize,
 ) ![]const u8 {
     return try std.fmt.allocPrint(allocator, "#{d}", .{index});
+}
+
+test "buildAxiomProofBody rejects placeholders" {
+    var theorem = TheoremContext.init(std.testing.allocator);
+    defer theorem.deinit();
+
+    const placeholder = try theorem.addPlaceholderResolved("obj");
+    try std.testing.expectError(
+        error.PlaceholderLeakage,
+        buildAxiomProofBody(std.testing.allocator, &theorem, placeholder),
+    );
+}
+
+test "buildTermUnifyStream rejects placeholders" {
+    var theorem = TheoremContext.init(std.testing.allocator);
+    defer theorem.deinit();
+
+    const placeholder = try theorem.addPlaceholderResolved("obj");
+    try std.testing.expectError(
+        error.PlaceholderLeakage,
+        buildTermUnifyStream(std.testing.allocator, &theorem, placeholder),
+    );
+}
+
+test "buildAssertionUnifyStream rejects placeholders in hypotheses" {
+    var theorem = TheoremContext.init(std.testing.allocator);
+    defer theorem.deinit();
+    try theorem.seedBinderCount(1);
+
+    const placeholder = try theorem.addPlaceholderResolved("obj");
+    try theorem.theorem_hyps.append(std.testing.allocator, placeholder);
+
+    try std.testing.expectError(
+        error.PlaceholderLeakage,
+        buildAssertionUnifyStream(
+            std.testing.allocator,
+            &theorem,
+            theorem.theorem_vars.items[0],
+        ),
+    );
+}
+
+test "buildDefProofBody rejects placeholders after term seeding" {
+    var theorem = TheoremContext.init(std.testing.allocator);
+    defer theorem.deinit();
+
+    const placeholder = try theorem.addPlaceholderResolved("obj");
+    try std.testing.expectError(
+        error.PlaceholderLeakage,
+        buildDefProofBodyFromExpr(
+            std.testing.allocator,
+            &theorem,
+            placeholder,
+        ),
+    );
+}
+
+test "buildTheoremProofBody rejects placeholders in checked lines" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var theorem = TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    try theorem.seedBinderCount(1);
+
+    const placeholder = try theorem.addPlaceholderResolved("obj");
+    const bindings = [_]ExprId{theorem.theorem_vars.items[0]};
+    const lines = [_]CheckedLine{.{
+        .expr = placeholder,
+        .data = .{ .rule = .{
+            .rule_id = 0,
+            .bindings = &bindings,
+            .refs = &.{},
+        } },
+    }};
+
+    var env = GlobalEnv.init(arena.allocator());
+
+    try std.testing.expectError(
+        error.PlaceholderLeakage,
+        buildTheoremProofBody(arena.allocator(), &theorem, &env, &lines),
+    );
 }

@@ -40,6 +40,10 @@ pub fn normalizeUncached(
             .result_expr = expr_id,
             .conv_line_idx = null,
         },
+        .placeholder => NormalizeResult{
+            .result_expr = expr_id,
+            .conv_line_idx = null,
+        },
     };
 
     const relation = Support.resolveRelationForExpr(self, expr_id) orelse {
@@ -90,6 +94,7 @@ pub fn normalizeUncached(
         const head_id = switch (cur_node.*) {
             .app => |app| app.term_id,
             .variable => break,
+            .placeholder => break,
         };
 
         const rules = self.registry.getRewriteRules(head_id);

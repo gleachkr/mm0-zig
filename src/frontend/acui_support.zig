@@ -46,16 +46,7 @@ pub const Context = struct {
                 self.env.terms.items[app.term_id].ret_sort_name
             else
                 null,
-            .variable => |var_id| switch (var_id) {
-                .theorem_var => |idx| if (idx < self.theorem.arg_infos.len)
-                    self.theorem.arg_infos[idx].sort_name
-                else
-                    null,
-                .dummy_var => |idx| if (idx < self.theorem.theorem_dummies.items.len)
-                    self.theorem.theorem_dummies.items[idx].sort_name
-                else
-                    null,
-            },
+            .variable, .placeholder => self.theorem.currentLeafSortName(expr_id),
         };
     }
 
@@ -73,6 +64,7 @@ pub const Context = struct {
                 if (self.exprMatchesCombinerSort(rhs, acui)) return acui;
             },
             .variable => {},
+            .placeholder => {},
         }
         const rhs_node = self.theorem.interner.node(rhs);
         switch (rhs_node.*) {
@@ -83,6 +75,7 @@ pub const Context = struct {
                 if (self.exprMatchesCombinerSort(lhs, acui)) return acui;
             },
             .variable => {},
+            .placeholder => {},
         }
         const lhs_sort = self.getExprSort(lhs) orelse return null;
         const rhs_sort = self.getExprSort(rhs) orelse return null;
@@ -123,6 +116,7 @@ pub const Context = struct {
                 }
             },
             .variable => {},
+            .placeholder => {},
         }
         try out.append(self.allocator, .{
             .expr_id = expr_id,
@@ -140,6 +134,7 @@ pub const Context = struct {
         const node = self.theorem.interner.node(expr_id);
         switch (node.*) {
             .variable => try self.appendSetItem(out, expr_id),
+            .placeholder => try self.appendSetItem(out, expr_id),
             .app => |app| {
                 if (app.term_id == head_term_id and app.args.len == 2) {
                     try self.collectConcreteSetItems(
@@ -288,6 +283,7 @@ pub const Context = struct {
         const app = switch (node.*) {
             .app => |value| value,
             .variable => return false,
+            .placeholder => return false,
         };
         if (app.term_id >= self.env.terms.items.len) return false;
         const term = &self.env.terms.items[app.term_id];
@@ -380,10 +376,12 @@ pub const Context = struct {
         const lhs_app = switch (lhs_node.*) {
             .app => |value| value,
             .variable => return null,
+            .placeholder => return null,
         };
         const rhs_app = switch (rhs_node.*) {
             .app => |value| value,
             .variable => return null,
+            .placeholder => return null,
         };
         if (lhs_app.term_id != rhs_app.term_id or
             lhs_app.args.len != rhs_app.args.len)
@@ -679,6 +677,7 @@ pub const Context = struct {
         return switch (node.*) {
             .app => |app| app.term_id == head_term_id and app.args.len == 2,
             .variable => false,
+            .placeholder => false,
         };
     }
 
@@ -723,6 +722,7 @@ pub const Context = struct {
                 );
             } else try self.insertItemExact(left, right, acui),
             .variable => try self.insertItemExact(left, right, acui),
+            .placeholder => try self.insertItemExact(left, right, acui),
         };
     }
 
@@ -739,6 +739,20 @@ pub const Context = struct {
         const canon_node = self.theorem.interner.node(canon);
         return switch (canon_node.*) {
             .variable => blk: {
+                const cmp = compareExprIds(self.theorem, item, canon);
+                if (cmp == .gt and acui.comm_id != null) {
+                    break :blk try self.theorem.interner.internApp(
+                        acui.head_term_id,
+                        &[_]ExprId{ canon, item },
+                    );
+                }
+                if (cmp == .eq and acui.idem_id != null) break :blk canon;
+                break :blk try self.theorem.interner.internApp(
+                    acui.head_term_id,
+                    &[_]ExprId{ item, canon },
+                );
+            },
+            .placeholder => blk: {
                 const cmp = compareExprIds(self.theorem, item, canon);
                 if (cmp == .gt and acui.comm_id != null) {
                     break :blk try self.theorem.interner.internApp(
@@ -810,10 +824,17 @@ pub fn compareExprIds(
     return switch (lhs_node.*) {
         .variable => |lhs_var| switch (rhs_node.*) {
             .variable => |rhs_var| compareVarIds(lhs_var, rhs_var),
+            .placeholder => .lt,
+            .app => .lt,
+        },
+        .placeholder => |lhs_id| switch (rhs_node.*) {
+            .variable => .gt,
+            .placeholder => |rhs_id| std.math.order(lhs_id, rhs_id),
             .app => .lt,
         },
         .app => |lhs_app| switch (rhs_node.*) {
             .variable => .gt,
+            .placeholder => .gt,
             .app => |rhs_app| blk: {
                 const term_cmp = std.math.order(lhs_app.term_id, rhs_app.term_id);
                 if (term_cmp != .eq) break :blk term_cmp;

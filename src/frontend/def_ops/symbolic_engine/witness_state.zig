@@ -330,20 +330,16 @@ pub fn rebuildExprRepresentativeSymbolic(
         );
     }
 
-    if (try getResymbolizableWitnessInfo(self, expr_id)) |info| {
-        const slot = try slotForWitness(
-            self,
-            expr_id,
-            info,
-            state,
-            &witness_slots,
-        );
-        return try self.allocSymbolic(.{ .dummy = slot });
-    }
-
     const node = self.shared.theorem.interner.node(expr_id);
     return switch (node.*) {
         .variable => try self.allocSymbolic(.{ .fixed = expr_id }),
+        .placeholder => |idx| try resymbolizePlaceholderExpr(
+            self,
+            expr_id,
+            idx,
+            state,
+            &witness_slots,
+        ),
         .app => |app| blk: {
             const args = try self.shared.allocator.alloc(
                 *const SymbolicExpr,
@@ -585,6 +581,27 @@ fn exportConcreteMatchedSymbolic(
     };
 }
 
+fn resymbolizePlaceholderExpr(
+    self: anytype,
+    expr_id: ExprId,
+    idx: usize,
+    state: *MatchSession,
+    witness_slots: *std.AutoHashMapUnmanaged(ExprId, usize),
+) anyerror!*const SymbolicExpr {
+    const placeholder = try self.shared.theorem.requirePlaceholderInfo(idx);
+    const slot = try slotForWitness(
+        self,
+        expr_id,
+        .{
+            .sort_name = placeholder.sort_name,
+            .bound = true,
+        },
+        state,
+        witness_slots,
+    );
+    return try self.allocSymbolic(.{ .dummy = slot });
+}
+
 pub fn symbolicSortName(
     self: anytype,
     symbolic: *const SymbolicExpr,
@@ -685,23 +702,18 @@ pub fn exprSortName(
     self: anytype,
     expr_id: ExprId,
 ) ?[]const u8 {
-    const node = self.shared.theorem.interner.node(expr_id);
-    return switch (node.*) {
-        .app => |app| if (app.term_id < self.shared.env.terms.items.len)
-            self.shared.env.terms.items[app.term_id].ret_sort_name
-        else
-            null,
-        .variable => |var_id| switch (var_id) {
-            .theorem_var => |idx| if (idx < self.shared.theorem.arg_infos.len)
-                self.shared.theorem.arg_infos[idx].sort_name
-            else
-                null,
-            .dummy_var => |idx| if (idx < self.shared.theorem.theorem_dummies.items.len)
-                self.shared.theorem.theorem_dummies.items[idx].sort_name
-            else
-                null,
-        },
+    if (self.shared.theorem.currentLeafSortName(expr_id)) |sort_name| {
+        return sort_name;
+    }
+
+    const app = switch (self.shared.theorem.interner.node(expr_id).*) {
+        .app => |value| value,
+        .variable, .placeholder => return null,
     };
+    return if (app.term_id < self.shared.env.terms.items.len)
+        self.shared.env.terms.items[app.term_id].ret_sort_name
+    else
+        null;
 }
 
 pub fn resymbolizeBinding(
@@ -714,20 +726,16 @@ pub fn resymbolizeBinding(
         return binding;
     }
 
-    if (try getResymbolizableWitnessInfo(self, expr_id)) |info| {
-        const slot = try slotForWitness(
-            self,
-            expr_id,
-            info,
-            state,
-            witness_slots,
-        );
-        return try self.allocSymbolic(.{ .dummy = slot });
-    }
-
     const node = self.shared.theorem.interner.node(expr_id);
     return switch (node.*) {
         .variable => null,
+        .placeholder => |idx| try resymbolizePlaceholderExpr(
+            self,
+            expr_id,
+            idx,
+            state,
+            witness_slots,
+        ),
         .app => |app| blk: {
             var has_symbolic = false;
             const args = try self.shared.allocator.alloc(
@@ -1337,10 +1345,8 @@ pub fn matchSymbolicDummyState(
 
     // Matching a symbolic dummy against a non-variable is a plain mismatch,
     // not a fatal error.
-    const actual_info = getConcreteVarInfo(self, actual) catch |err| switch (err) {
-        error.ExpectedVariable => return false,
-        else => return err,
-    };
+    const actual_info =
+        (try getConcreteLeafInfo(self, actual)) orelse return false;
     if (root_info.bound and !actual_info.bound) return false;
     if (!std.mem.eql(u8, root_info.sort_name, actual_info.sort_name)) {
         return false;
@@ -1435,29 +1441,19 @@ pub fn representResolvedBindings(
 }
 
 fn exprDeps(self: anytype, expr_id: ExprId) anyerror!u55 {
-    return switch (self.shared.theorem.interner.node(expr_id).*) {
-        .variable => |var_id| switch (var_id) {
-            .theorem_var => |idx| blk: {
-                if (idx >= self.shared.theorem.arg_infos.len) {
-                    return error.UnknownTheoremVariable;
-                }
-                break :blk self.shared.theorem.arg_infos[idx].deps;
-            },
-            .dummy_var => |idx| blk: {
-                if (idx >= self.shared.theorem.theorem_dummies.items.len) {
-                    return error.UnknownDummyVar;
-                }
-                break :blk self.shared.theorem.theorem_dummies.items[idx].deps;
-            },
-        },
-        .app => |app| blk: {
-            var deps: u55 = 0;
-            for (app.args) |arg| {
-                deps |= try exprDeps(self, arg);
-            }
-            break :blk deps;
-        },
+    if (try self.shared.theorem.currentLeafInfo(expr_id)) |leaf| {
+        return leaf.deps;
+    }
+
+    const app = switch (self.shared.theorem.interner.node(expr_id).*) {
+        .app => |value| value,
+        .variable, .placeholder => unreachable,
     };
+    var deps: u55 = 0;
+    for (app.args) |arg| {
+        deps |= try exprDeps(self, arg);
+    }
+    return deps;
 }
 
 fn collectUnresolvedRootsInSymbolic(
@@ -1859,56 +1855,16 @@ pub fn resolveWitnessForDummySlot(
     return error.UnresolvedDummyWitness;
 }
 
-pub fn getResymbolizableWitnessInfo(
+pub fn getConcreteLeafInfo(
     self: anytype,
     expr_id: ExprId,
-) !?SymbolicDummyInfo {
-    const node = self.shared.theorem.interner.node(expr_id);
-    return switch (node.*) {
-        .app => null,
-        .variable => |var_id| switch (var_id) {
-            .theorem_var => null,
-            .dummy_var => |idx| blk: {
-                if (idx >= self.shared.theorem.theorem_dummies.items.len) {
-                    return error.UnknownDummyVar;
-                }
-                const dummy = self.shared.theorem.theorem_dummies.items[idx];
-                if (dummy.kind != .placeholder) break :blk null;
-                break :blk .{
-                    .sort_name = dummy.sort_name,
-                    .bound = true,
-                };
-            },
-        },
+) !?ConcreteVarInfo {
+    const leaf = (try self.shared.theorem.currentLeafInfo(expr_id)) orelse {
+        return null;
+    };
+    return .{
+        .sort_name = leaf.sort_name,
+        .bound = leaf.bound,
     };
 }
 
-pub fn getConcreteVarInfo(self: anytype, expr_id: ExprId) !ConcreteVarInfo {
-    const node = self.shared.theorem.interner.node(expr_id);
-    const var_id = switch (node.*) {
-        .variable => |value| value,
-        .app => return error.ExpectedVariable,
-    };
-    return switch (var_id) {
-        .theorem_var => |idx| blk: {
-            if (idx >= self.shared.theorem.arg_infos.len) {
-                return error.UnknownTheoremVariable;
-            }
-            const arg = self.shared.theorem.arg_infos[idx];
-            break :blk .{
-                .sort_name = arg.sort_name,
-                .bound = arg.bound,
-            };
-        },
-        .dummy_var => |idx| blk: {
-            if (idx >= self.shared.theorem.theorem_dummies.items.len) {
-                return error.UnknownDummyVar;
-            }
-            const dummy = self.shared.theorem.theorem_dummies.items[idx];
-            break :blk .{
-                .sort_name = dummy.sort_name,
-                .bound = true,
-            };
-        },
-    };
-}

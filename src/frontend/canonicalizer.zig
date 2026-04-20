@@ -65,6 +65,7 @@ pub const Canonicalizer = struct {
         const node = self.theorem.interner.node(expr_id);
         return switch (node.*) {
             .variable => expr_id,
+            .placeholder => expr_id,
             .app => |app| blk: {
                 const new_args = try self.allocator.alloc(ExprId, app.args.len);
                 defer self.allocator.free(new_args);
@@ -101,6 +102,7 @@ pub const Canonicalizer = struct {
             const head_id = switch (node.*) {
                 .app => |app| app.term_id,
                 .variable => break,
+                .placeholder => break,
             };
             const rules = self.registry.getRewriteRules(head_id);
             var changed = false;

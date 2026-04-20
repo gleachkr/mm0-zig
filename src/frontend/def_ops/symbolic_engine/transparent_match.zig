@@ -273,6 +273,12 @@ pub fn guideSymbolicWitnessesFromTarget(
             target_expr,
             state,
         ),
+        .placeholder => return try guideSymbolicWitnessesFromAcuiTarget(
+            self,
+            symbolic,
+            target_expr,
+            state,
+        ),
     };
 
     if (symbolic_app.term_id == target_app.term_id and
@@ -458,6 +464,7 @@ pub fn matchTemplateAppDirectState(
     const actual_app = switch (actual_node.*) {
         .app => |value| value,
         .variable => return false,
+        .placeholder => return false,
     };
     if (actual_app.term_id != app.term_id or
         actual_app.args.len != app.args.len)
@@ -992,6 +999,7 @@ pub fn getConcreteDef(self: anytype, expr_id: ExprId) ?struct {
     const app = switch (node.*) {
         .app => |value| value,
         .variable => return null,
+        .placeholder => return null,
     };
     const term = getOpenableTerm(self, app.term_id) orelse return null;
     const body = term.body orelse return null;
