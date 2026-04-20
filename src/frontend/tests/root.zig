@@ -114,6 +114,49 @@ test "proof script parser allows newlines inside math strings" {
     );
 }
 
+test "proof script parser allows continuation newlines and comments" {
+    const src =
+        \\demo
+        \\----
+        \\l1:
+        \\  $ a $
+        \\  -- explain the rule choice
+        \\  by
+        \\  ax_keep
+        \\  (
+        \\    a := $ a $,
+        \\    -- reuse the same witness
+        \\    b := $ a $
+        \\  )
+        \\  [
+        \\    #1,
+        \\    l0
+        \\  ]
+        \\l2: $ b $ by ax_b []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expect(block.kind == .theorem);
+    try std.testing.expectEqual(@as(usize, 2), block.lines.len);
+    try std.testing.expectEqualStrings(" a ", block.lines[0].assertion.text);
+    try std.testing.expectEqualStrings("ax_keep", block.lines[0].rule_name);
+    try std.testing.expectEqual(@as(usize, 2), block.lines[0].arg_bindings.len);
+    try std.testing.expectEqual(@as(usize, 2), block.lines[0].refs.len);
+    switch (block.lines[0].refs[0]) {
+        .hyp => |hyp| try std.testing.expectEqual(@as(usize, 1), hyp.index),
+        else => return error.UnexpectedRefKind,
+    }
+    switch (block.lines[0].refs[1]) {
+        .line => |line| try std.testing.expectEqualStrings("l0", line.label),
+        else => return error.UnexpectedRefKind,
+    }
+    try std.testing.expectEqualStrings("l2", block.lines[1].label);
+}
+
 test "theorem context preserves theorem var identity" {
     const src =
         \\provable sort wff;

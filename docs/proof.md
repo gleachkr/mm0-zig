@@ -65,8 +65,10 @@ MM0 comment syntax. Standalone comment lines may appear between blocks or
 between proof lines. Trailing comments are also allowed on theorem
 headers, lemma headers, and proof lines.
 
-Outside math strings, a proof line must stay on one physical line.
-Newlines are allowed inside `$ ... $` math strings.
+Outside math strings, newlines may be mixed with other whitespace inside
+one proof line. A new proof line must still begin on a fresh line with
+its label. Comments are allowed in these continuation positions.
+Newlines are also allowed inside `$ ... $` math strings.
 
 ## Top-level blocks
 
@@ -131,6 +133,11 @@ proof-line ::= label ':' formula 'by' rule-name
                comment? newline*
 ```
 
+The parser treats spaces, newlines, blank lines, and `--` comments as
+interchangeable separators between proof-line components. In particular,
+it is legal to break before or after `by`, and within binding and
+reference lists.
+
 Where:
 
 - `label` is a local proof-line label
@@ -149,6 +156,13 @@ Example:
 ```text
 l1: $ a -> a $ by ax_1 (a := $ a $, b := $ a $) []
 l2: $ a $ by ax_mp (a := $ a $, b := $ a $) [#1, l1]
+
+l3:
+  $ a $
+  -- break before and after `by`
+  by
+  ax_id
+  []
 ```
 
 ## References

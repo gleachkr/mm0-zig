@@ -222,8 +222,8 @@ pub const Parser = struct {
         self.skipHorizontalSpace();
         try self.expect(':');
         const assertion = try self.parseMathString();
-        try self.expectKeyword("by");
-        self.skipHorizontalSpace();
+        try self.expectProofKeyword("by");
+        self.skipProofWhitespace();
         const rule_start = self.pos;
         const rule_name = try self.parseIdentifier();
         const rule_span = Span{
@@ -233,12 +233,9 @@ pub const Parser = struct {
 
         var arg_bindings: []const ArgBinding = &.{};
         var binding_list_span: ?Span = null;
-        self.skipHorizontalSpace();
-        if (self.peek() == '(') {
-            const binding_start = self.pos;
-            try self.expect('(');
+        if (self.consumeOptionalProofDelimiter('(')) |binding_start| {
             arg_bindings = try self.parseArgBindings();
-            try self.expect(')');
+            try self.expectProof(')');
             binding_list_span = .{
                 .start = binding_start,
                 .end = self.pos,
@@ -247,12 +244,9 @@ pub const Parser = struct {
 
         var refs: []const Ref = &.{};
         var refs_span: ?Span = null;
-        self.skipHorizontalSpace();
-        if (self.peek() == '[') {
-            const refs_start = self.pos;
-            self.pos += 1;
+        if (self.consumeOptionalProofDelimiter('[')) |refs_start| {
             refs = try self.parseRefs();
-            try self.expect(']');
+            try self.expectProof(']');
             refs_span = .{
                 .start = refs_start,
                 .end = self.pos,
@@ -278,7 +272,7 @@ pub const Parser = struct {
 
     fn parseArgBindings(self: *Parser) ![]const ArgBinding {
         var bindings = std.ArrayListUnmanaged(ArgBinding){};
-        self.skipHorizontalSpace();
+        self.skipProofWhitespace();
         if (self.peek() == ')') {
             return try bindings.toOwnedSlice(self.allocator);
         }
@@ -297,32 +291,32 @@ pub const Parser = struct {
                     .end = formula.span.end,
                 },
             });
-            self.skipHorizontalSpace();
+            self.skipProofWhitespace();
             if (self.peek() != ',') break;
             self.pos += 1;
-            self.skipHorizontalSpace();
+            self.skipProofWhitespace();
         }
         return try bindings.toOwnedSlice(self.allocator);
     }
 
     fn parseRefs(self: *Parser) ![]const Ref {
         var refs = std.ArrayListUnmanaged(Ref){};
-        self.skipHorizontalSpace();
+        self.skipProofWhitespace();
         if (self.peek() == ']') {
             return try refs.toOwnedSlice(self.allocator);
         }
         while (true) {
             try refs.append(self.allocator, try self.parseRef());
-            self.skipHorizontalSpace();
+            self.skipProofWhitespace();
             if (self.peek() != ',') break;
             self.pos += 1;
-            self.skipHorizontalSpace();
+            self.skipProofWhitespace();
         }
         return try refs.toOwnedSlice(self.allocator);
     }
 
     fn parseRef(self: *Parser) !Ref {
-        self.skipHorizontalSpace();
+        self.skipProofWhitespace();
         const start = self.pos;
         if (self.peek() == '#') {
             self.pos += 1;
@@ -346,7 +340,7 @@ pub const Parser = struct {
     }
 
     fn parseMathString(self: *Parser) !MathString {
-        self.skipHorizontalSpace();
+        self.skipProofWhitespace();
         if (self.peek() != '$') {
             return self.recordErrorAtPos(error.ExpectedMathString);
         }
@@ -496,8 +490,28 @@ pub const Parser = struct {
         }
     }
 
+    fn expectProofKeyword(self: *Parser, keyword: []const u8) !void {
+        self.skipProofWhitespace();
+        const start = self.pos;
+        const actual = try self.parseIdentifier();
+        if (!std.mem.eql(u8, actual, keyword)) {
+            return self.recordErrorAtSpan(error.ExpectedKeyword, .{
+                .start = start,
+                .end = start + actual.len,
+            });
+        }
+    }
+
     fn expect(self: *Parser, ch: u8) !void {
         self.skipHorizontalSpace();
+        if (self.peek() != ch) {
+            return self.recordErrorAtPos(error.UnexpectedCharacter);
+        }
+        self.pos += 1;
+    }
+
+    fn expectProof(self: *Parser, ch: u8) !void {
+        self.skipProofWhitespace();
         if (self.peek() != ch) {
             return self.recordErrorAtPos(error.UnexpectedCharacter);
         }
@@ -540,6 +554,43 @@ pub const Parser = struct {
         {
             self.pos += 1;
         }
+    }
+
+    fn skipProofWhitespace(self: *Parser) void {
+        while (true) {
+            self.skipHorizontalSpace();
+            if (self.pos + 1 < self.src.len and
+                self.src[self.pos] == '-' and
+                self.src[self.pos + 1] == '-')
+            {
+                while (self.pos < self.src.len and
+                    self.src[self.pos] != '\n')
+                {
+                    self.pos += 1;
+                }
+                continue;
+            }
+            if (self.pos < self.src.len and self.src[self.pos] == '\n') {
+                self.pos += 1;
+                continue;
+            }
+            break;
+        }
+    }
+
+    fn consumeOptionalProofDelimiter(
+        self: *Parser,
+        ch: u8,
+    ) ?usize {
+        const saved = self.pos;
+        self.skipProofWhitespace();
+        if (self.peek() == ch) {
+            const start = self.pos;
+            self.pos += 1;
+            return start;
+        }
+        self.pos = saved;
+        return null;
     }
 
     fn skipBlankLines(self: *Parser) void {

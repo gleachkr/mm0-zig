@@ -643,6 +643,33 @@ test "compiler checks proof blocks in theorem order" {
     try compiler.check();
 }
 
+test "compiler accepts multiline proof-line whitespace" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem first: $ top $;
+    ;
+    const proof_src =
+        \\first
+        \\-----
+        \\l1:
+        \\  $ top $
+        \\  -- this comment should not break the line
+        \\  by
+        \\  top_i
+        \\  [
+        \\  ]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.check();
+}
+
 test "compiler rejects lemma names that collide with earlier rules" {
     const mm0_src =
         \\provable sort wff;
