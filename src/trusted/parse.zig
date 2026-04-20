@@ -1342,7 +1342,8 @@ pub const MM0Parser = struct {
         // hop via another sort, or the special provable target slot.
         if (target_idx < MAX_SORTS and expr.sort() == target_idx) return expr;
 
-        const route = self.coercion_table[expr.sort()][target_idx];
+        const row = &self.coercion_table[expr.sort()];
+        const route = row[target_idx];
         switch (route.tag) {
             .empty => return empty_err,
             .prov => return expr,
