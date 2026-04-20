@@ -742,3 +742,344 @@ l10: $ suc (suc (suc 0) + suc 0) = suc (suc (suc (suc 0))) $ by ax_mp [l9, l8]
 l11: $ suc (suc 0) + suc (suc 0) = suc (suc (suc 0) + suc 0) → suc (suc (suc 0) + suc 0) = suc (suc (suc (suc 0))) → suc (suc 0) + suc (suc 0) = suc (suc (suc (suc 0))) $ by eq_trans
 l12: $ suc (suc (suc 0) + suc 0) = suc (suc (suc (suc 0))) → suc (suc 0) + suc (suc 0) = suc (suc (suc (suc 0))) $ by ax_mp [l11, l1]
 l13: $ suc (suc 0) + suc (suc 0) = suc (suc (suc (suc 0))) $ by ax_mp [l12, l10]
+
+mul_0_left
+----------
+-- Induction on x of (0 * x = 0).  Base: mul_0 at 0.  Step collapses
+-- 0 * suc x through mul_suc + add_0 back to 0 * x, then uses the IH.
+l1: $ 0 * 0 = 0 $ by mul_0
+l2: $ 0 * suc x = 0 * x + 0 $ by mul_suc
+l3: $ 0 * x + 0 = 0 * x $ by add_0
+l4: $ 0 * suc x = 0 * x + 0 → 0 * x + 0 = 0 * x → 0 * suc x = 0 * x $ by eq_trans
+l5: $ 0 * x + 0 = 0 * x → 0 * suc x = 0 * x $ by ax_mp [l4, l2]
+l6: $ 0 * suc x = 0 * x $ by ax_mp [l5, l3]
+l7: $ 0 * suc x = 0 * x → 0 * x = 0 → 0 * suc x = 0 $ by eq_trans
+l8: $ 0 * x = 0 → 0 * suc x = 0 $ by ax_mp [l7, l6]
+l9: $ ∀ x (0 * x = 0 → 0 * suc x = 0) $ by ax_gen [l8]
+l10: $ ∀ x (0 * x = 0) $ by peano5 [l1, l9]
+
+mul_0_left_inst
+---------------
+-- Specialise mul_0_left at t := a.
+l1: $ ∀ x (0 * x = 0) $ by mul_0_left
+l2: $ 0 * a = 0 $ by ax_inst [l1]
+
+mul_suc_left_all
+----------------
+-- Induction on x of (suc a * x = a * x + x).
+-- Base: suc a * 0 = a * 0 + 0.  Both sides collapse to 0 via mul_0 and add_0.
+l1: $ suc a * 0 = 0 $ by mul_0
+l2: $ a * 0 = 0 $ by mul_0
+l3: $ a * 0 = 0 → 0 = a * 0 $ by eq_sym
+l4: $ 0 = a * 0 $ by ax_mp [l3, l2]
+l5: $ a * 0 + 0 = a * 0 $ by add_0
+l6: $ a * 0 + 0 = a * 0 → a * 0 = a * 0 + 0 $ by eq_sym
+l7: $ a * 0 = a * 0 + 0 $ by ax_mp [l6, l5]
+l8: $ suc a * 0 = a * 0 + 0 $ by eq_trans3 [l1, l4, l7]
+
+-- Step body: (suc a * x = a * x + x) → (suc a * suc x = a * suc x + suc x).
+-- Chain under IH:
+--   suc a * suc x = suc a * x + suc a              (mul_suc)
+--                = (a * x + x) + suc a             (IH via add_eq_right)
+--                = (a * x + a) + suc x             (add_suc + add_rass + peano2r)
+--                = a * suc x + suc x               (mul_suc via add_eq_right, reversed).
+
+-- IH → (suc a * suc x = (a * x + x) + suc a).
+l9: $ suc a * suc x = suc a * x + suc a $ by mul_suc
+l10: $ suc a * x = a * x + x → suc a * x + suc a = (a * x + x) + suc a $ by add_eq_right
+l11: $ suc a * suc x = suc a * x + suc a → suc a * x + suc a = (a * x + x) + suc a → suc a * suc x = (a * x + x) + suc a $ by eq_trans
+l12: $ suc a * x + suc a = (a * x + x) + suc a → suc a * suc x = (a * x + x) + suc a $ by ax_mp [l11, l9]
+l13: $ suc a * x = a * x + x → suc a * suc x = (a * x + x) + suc a $ by syl [l12, l10]
+
+-- Pure bridge: (a * x + x) + suc a = (a * x + a) + suc x (no IH needed).
+l14: $ (a * x + x) + suc a = suc ((a * x + x) + a) $ by add_suc
+l15: $ (a * x + x) + a = (a * x + a) + x $ by add_rass
+l16: $ (a * x + x) + a = (a * x + a) + x → suc ((a * x + x) + a) = suc ((a * x + a) + x) $ by peano2r
+l17: $ suc ((a * x + x) + a) = suc ((a * x + a) + x) $ by ax_mp [l16, l15]
+l18: $ (a * x + a) + suc x = suc ((a * x + a) + x) $ by add_suc
+l19: $ (a * x + a) + suc x = suc ((a * x + a) + x) → suc ((a * x + a) + x) = (a * x + a) + suc x $ by eq_sym
+l20: $ suc ((a * x + a) + x) = (a * x + a) + suc x $ by ax_mp [l19, l18]
+l21: $ (a * x + x) + suc a = (a * x + a) + suc x $ by eq_trans3 [l14, l17, l20]
+
+-- Pure bridge: (a * x + a) + suc x = a * suc x + suc x.
+l22: $ a * suc x = a * x + a $ by mul_suc
+l23: $ a * suc x = a * x + a → a * x + a = a * suc x $ by eq_sym
+l24: $ a * x + a = a * suc x $ by ax_mp [l23, l22]
+l25: $ a * x + a = a * suc x → (a * x + a) + suc x = a * suc x + suc x $ by add_eq_right
+l26: $ (a * x + a) + suc x = a * suc x + suc x $ by ax_mp [l25, l24]
+
+-- Combine l21 + l26 to get (a * x + x) + suc a = a * suc x + suc x.
+l27: $ (a * x + x) + suc a = (a * x + a) + suc x → (a * x + a) + suc x = a * suc x + suc x → (a * x + x) + suc a = a * suc x + suc x $ by eq_trans
+l28: $ (a * x + a) + suc x = a * suc x + suc x → (a * x + x) + suc a = a * suc x + suc x $ by ax_mp [l27, l21]
+l29: $ (a * x + x) + suc a = a * suc x + suc x $ by ax_mp [l28, l26]
+
+-- Compose l13 (IH → suc a * suc x = (a * x + x) + suc a) with l29 to close step.
+l30: $ suc a * suc x = (a * x + x) + suc a → (a * x + x) + suc a = a * suc x + suc x → suc a * suc x = a * suc x + suc x $ by eq_trans
+l31: $ suc a * x = a * x + x → ((a * x + x) + suc a = a * suc x + suc x → suc a * suc x = a * suc x + suc x) $ by syl [l30, l13]
+l32: $ suc a * x = a * x + x → suc a * suc x = a * suc x + suc x $ by mpi [l29, l31]
+
+l33: $ ∀ x (suc a * x = a * x + x → suc a * suc x = a * suc x + suc x) $ by ax_gen [l32]
+l34: $ ∀ x (suc a * x = a * x + x) $ by peano5 [l8, l33]
+
+mul_suc_left_inst
+-----------------
+-- Specialise mul_suc_left_all at t := b.
+l1: $ ∀ x (suc a * x = a * x + x) $ by mul_suc_left_all
+l2: $ suc a * b = a * b + b $ by ax_inst [l1]
+
+mul_1_right
+-----------
+-- a * suc 0 = a * 0 + a (mul_suc) = 0 + a (add_eq_right on mul_0) = a (add_0_left_inst).
+l1: $ a * suc 0 = a * 0 + a $ by mul_suc
+l2: $ a * 0 = 0 $ by mul_0
+l3: $ a * 0 = 0 → a * 0 + a = 0 + a $ by add_eq_right
+l4: $ a * 0 + a = 0 + a $ by ax_mp [l3, l2]
+l5: $ 0 + a = a $ by add_0_left_inst
+l6: $ a * suc 0 = a $ by eq_trans3 [l1, l4, l5]
+
+mul_1_left
+----------
+-- suc 0 * a = 0 * a + a (mul_suc_left_inst) = 0 + a (add_eq_right on mul_0_left_inst) = a.
+l1: $ suc 0 * a = 0 * a + a $ by mul_suc_left_inst
+l2: $ 0 * a = 0 $ by mul_0_left_inst
+l3: $ 0 * a = 0 → 0 * a + a = 0 + a $ by add_eq_right
+l4: $ 0 * a + a = 0 + a $ by ax_mp [l3, l2]
+l5: $ 0 + a = a $ by add_0_left_inst
+l6: $ suc 0 * a = a $ by eq_trans3 [l1, l4, l5]
+
+mul_eq_left_all
+---------------
+-- Induction on x of (a = b → x * a = x * b).
+-- Base: a = b → 0 * a = 0 * b.  mul_0_left_inst makes both sides 0.
+l1: $ 0 * a = 0 $ by mul_0_left_inst
+l2: $ 0 * b = 0 $ by mul_0_left_inst
+l3: $ 0 * b = 0 → 0 = 0 * b $ by eq_sym
+l4: $ 0 = 0 * b $ by ax_mp [l3, l2]
+l5: $ 0 * a = 0 → 0 = 0 * b → 0 * a = 0 * b $ by eq_trans
+l6: $ 0 = 0 * b → 0 * a = 0 * b $ by ax_mp [l5, l1]
+l7: $ 0 * a = 0 * b $ by ax_mp [l6, l4]
+l8: $ a = b → 0 * a = 0 * b $ by a1i [l7]
+
+-- Step body: (a = b → x * a = x * b) → (a = b → suc x * a = suc x * b).
+-- Route via the bridge U := (x * a + a = x * b + b); both sides suc_expand to U.
+
+-- K = (x * a = x * b), H = (a = b).  K → x * a + a = x * b + a.
+l9: $ x * a = x * b → x * a + a = x * b + a $ by add_eq_right
+-- H → x * b + a = x * b + b.
+l10: $ a = b → x * b + a = x * b + b $ by add_eq_left
+-- eq_trans at (x * a + a, x * b + a, x * b + b).
+l11: $ x * a + a = x * b + a → x * b + a = x * b + b → x * a + a = x * b + b $ by eq_trans
+-- K → (x * b + a = x * b + b → x * a + a = x * b + b).
+l12: $ x * a = x * b → x * b + a = x * b + b → x * a + a = x * b + b $ by syl [l11, l9]
+-- K → (H → x * a + a = x * b + b) via syl5.
+l13: $ x * a = x * b → a = b → x * a + a = x * b + b $ by syl5 [l10, l12]
+-- com12: H → (K → U).
+l14: $ a = b → x * a = x * b → x * a + a = x * b + b $ by com12 [l13]
+
+-- U → V: x * a + a = x * b + b → suc x * a = suc x * b.
+l15: $ suc x * a = x * a + a $ by mul_suc_left_inst
+l16: $ suc x * b = x * b + b $ by mul_suc_left_inst
+l17: $ suc x * b = x * b + b → x * b + b = suc x * b $ by eq_sym
+l18: $ x * b + b = suc x * b $ by ax_mp [l17, l16]
+l19: $ suc x * a = x * a + a → x * a + a = x * b + b → suc x * a = x * b + b $ by eq_trans
+l20: $ x * a + a = x * b + b → suc x * a = x * b + b $ by ax_mp [l19, l15]
+l21: $ suc x * a = x * b + b → x * b + b = suc x * b → suc x * a = suc x * b $ by eq_trans
+l22: $ suc x * a = x * b + b → suc x * a = suc x * b $ by mpi [l18, l21]
+l23: $ x * a + a = x * b + b → suc x * a = suc x * b $ by syl [l22, l20]
+
+-- Lift U → V through (K → _) and (H → _) via imim2i twice.
+l24: $ (x * a = x * b → x * a + a = x * b + b) → (x * a = x * b → suc x * a = suc x * b) $ by imim2i [l23]
+l25: $ (a = b → x * a = x * b → x * a + a = x * b + b) → (a = b → x * a = x * b → suc x * a = suc x * b) $ by imim2i [l24]
+l26: $ a = b → x * a = x * b → suc x * a = suc x * b $ by ax_mp [l25, l14]
+-- a2i collapses (H → K → V) to (H → K) → (H → V).
+l27: $ (a = b → x * a = x * b) → (a = b → suc x * a = suc x * b) $ by a2i [l26]
+
+l28: $ ∀ x ((a = b → x * a = x * b) → (a = b → suc x * a = suc x * b)) $ by ax_gen [l27]
+l29: $ ∀ x (a = b → x * a = x * b) $ by peano5 [l8, l28]
+
+mul_eq_left
+-----------
+-- Specialise mul_eq_left_all at t := c.
+l1: $ ∀ x (a = b → x * a = x * b) $ by mul_eq_left_all
+l2: $ a = b → c * a = c * b $ by ax_inst [l1]
+
+mul_comm
+--------
+-- Induction on x of (a * x = x * a).
+-- Base: a * 0 = 0 * a.  mul_0 + mul_0_left_inst make both 0.
+l1: $ a * 0 = 0 $ by mul_0
+l2: $ 0 * a = 0 $ by mul_0_left_inst
+l3: $ 0 * a = 0 → 0 = 0 * a $ by eq_sym
+l4: $ 0 = 0 * a $ by ax_mp [l3, l2]
+l5: $ a * 0 = 0 → 0 = 0 * a → a * 0 = 0 * a $ by eq_trans
+l6: $ 0 = 0 * a → a * 0 = 0 * a $ by ax_mp [l5, l1]
+l7: $ a * 0 = 0 * a $ by ax_mp [l6, l4]
+
+-- Step: a * x = x * a → a * suc x = suc x * a.
+-- Chain: a * suc x = a * x + a = x * a + a = suc x * a via mul_suc,
+--        IH + add_eq_right, and eq_sym of mul_suc_left_inst.
+l8: $ a * suc x = a * x + a $ by mul_suc
+l9: $ a * x = x * a → a * x + a = x * a + a $ by add_eq_right
+l10: $ a * suc x = a * x + a → a * x + a = x * a + a → a * suc x = x * a + a $ by eq_trans
+l11: $ a * x + a = x * a + a → a * suc x = x * a + a $ by ax_mp [l10, l8]
+l12: $ a * x = x * a → a * suc x = x * a + a $ by syl [l11, l9]
+l13: $ suc x * a = x * a + a $ by mul_suc_left_inst
+l14: $ suc x * a = x * a + a → x * a + a = suc x * a $ by eq_sym
+l15: $ x * a + a = suc x * a $ by ax_mp [l14, l13]
+l16: $ a * suc x = x * a + a → x * a + a = suc x * a → a * suc x = suc x * a $ by eq_trans
+l17: $ a * x = x * a → (x * a + a = suc x * a → a * suc x = suc x * a) $ by syl [l16, l12]
+l18: $ a * x = x * a → a * suc x = suc x * a $ by mpi [l15, l17]
+
+l19: $ ∀ x (a * x = x * a → a * suc x = suc x * a) $ by ax_gen [l18]
+l20: $ ∀ x (a * x = x * a) $ by peano5 [l7, l19]
+
+mul_comm_inst
+-------------
+-- Specialise mul_comm at t := b.
+l1: $ ∀ x (a * x = x * a) $ by mul_comm
+l2: $ a * b = b * a $ by ax_inst [l1]
+
+mul_distrib_left_all
+--------------------
+-- Induction on x of (a * (b + x) = a * b + a * x).
+-- Base: a * (b + 0) = a * b + a * 0.  Both sides collapse to a * b.
+--   a * (b + 0) = a * b (mul_eq_left on add_0),
+--   a * b = a * b + 0 (eq_sym add_0),
+--   a * b + 0 = a * b + a * 0 (add_eq_left on eq_sym mul_0).
+l1: $ b + 0 = b $ by add_0
+l2: $ b + 0 = b → a * (b + 0) = a * b $ by mul_eq_left
+l3: $ a * (b + 0) = a * b $ by ax_mp [l2, l1]
+l4: $ a * b + 0 = a * b $ by add_0
+l5: $ a * b + 0 = a * b → a * b = a * b + 0 $ by eq_sym
+l6: $ a * b = a * b + 0 $ by ax_mp [l5, l4]
+l7: $ a * 0 = 0 $ by mul_0
+l8: $ a * 0 = 0 → 0 = a * 0 $ by eq_sym
+l9: $ 0 = a * 0 $ by ax_mp [l8, l7]
+l10: $ 0 = a * 0 → a * b + 0 = a * b + a * 0 $ by add_eq_left
+l11: $ a * b + 0 = a * b + a * 0 $ by ax_mp [l10, l9]
+l12: $ a * (b + 0) = a * b + a * 0 $ by eq_trans3 [l3, l6, l11]
+
+-- Step body: (a * (b + x) = a * b + a * x) → (a * (b + suc x) = a * b + a * suc x).
+-- Let A := a * (b + suc x), B := a * suc (b + x), C := a * (b + x) + a,
+--     D := (a * b + a * x) + a, E := a * b + (a * x + a), F := a * b + a * suc x.
+-- A = B (mul_eq_left on add_suc); B = C (mul_suc); C = D (IH via add_eq_right);
+-- D = E (eq_sym add_assoc_inst); E = F (add_eq_left on eq_sym mul_suc).
+
+l13: $ b + suc x = suc (b + x) $ by add_suc
+l14: $ b + suc x = suc (b + x) → a * (b + suc x) = a * suc (b + x) $ by mul_eq_left
+l15: $ a * (b + suc x) = a * suc (b + x) $ by ax_mp [l14, l13]
+l16: $ a * suc (b + x) = a * (b + x) + a $ by mul_suc
+l17: $ a * (b + suc x) = a * suc (b + x) → a * suc (b + x) = a * (b + x) + a → a * (b + suc x) = a * (b + x) + a $ by eq_trans
+l18: $ a * suc (b + x) = a * (b + x) + a → a * (b + suc x) = a * (b + x) + a $ by ax_mp [l17, l15]
+l19: $ a * (b + suc x) = a * (b + x) + a $ by ax_mp [l18, l16]
+
+-- IH → (C = D).
+l20: $ a * (b + x) = a * b + a * x → a * (b + x) + a = (a * b + a * x) + a $ by add_eq_right
+
+-- IH → (A = D).
+l21: $ a * (b + suc x) = a * (b + x) + a → a * (b + x) + a = (a * b + a * x) + a → a * (b + suc x) = (a * b + a * x) + a $ by eq_trans
+l22: $ a * (b + x) + a = (a * b + a * x) + a → a * (b + suc x) = (a * b + a * x) + a $ by ax_mp [l21, l19]
+l23: $ a * (b + x) = a * b + a * x → a * (b + suc x) = (a * b + a * x) + a $ by syl [l22, l20]
+
+-- D = E via eq_sym of add_assoc_inst.
+l24: $ a * b + (a * x + a) = (a * b + a * x) + a $ by add_assoc_inst
+l25: $ a * b + (a * x + a) = (a * b + a * x) + a → (a * b + a * x) + a = a * b + (a * x + a) $ by eq_sym
+l26: $ (a * b + a * x) + a = a * b + (a * x + a) $ by ax_mp [l25, l24]
+
+-- E = F via add_eq_left on (a * x + a = a * suc x).
+l27: $ a * suc x = a * x + a $ by mul_suc
+l28: $ a * suc x = a * x + a → a * x + a = a * suc x $ by eq_sym
+l29: $ a * x + a = a * suc x $ by ax_mp [l28, l27]
+l30: $ a * x + a = a * suc x → a * b + (a * x + a) = a * b + a * suc x $ by add_eq_left
+l31: $ a * b + (a * x + a) = a * b + a * suc x $ by ax_mp [l30, l29]
+
+-- D = F via eq_trans (D = E, E = F).
+l32: $ (a * b + a * x) + a = a * b + (a * x + a) → a * b + (a * x + a) = a * b + a * suc x → (a * b + a * x) + a = a * b + a * suc x $ by eq_trans
+l33: $ a * b + (a * x + a) = a * b + a * suc x → (a * b + a * x) + a = a * b + a * suc x $ by ax_mp [l32, l26]
+l34: $ (a * b + a * x) + a = a * b + a * suc x $ by ax_mp [l33, l31]
+
+-- IH → (A = F) by chaining IH → (A = D) with (D = F).
+l35: $ a * (b + suc x) = (a * b + a * x) + a → (a * b + a * x) + a = a * b + a * suc x → a * (b + suc x) = a * b + a * suc x $ by eq_trans
+l36: $ a * (b + suc x) = (a * b + a * x) + a → a * (b + suc x) = a * b + a * suc x $ by mpi [l34, l35]
+l37: $ a * (b + x) = a * b + a * x → a * (b + suc x) = a * b + a * suc x $ by syl [l36, l23]
+
+l38: $ ∀ x (a * (b + x) = a * b + a * x → a * (b + suc x) = a * b + a * suc x) $ by ax_gen [l37]
+l39: $ ∀ x (a * (b + x) = a * b + a * x) $ by peano5 [l12, l38]
+
+mul_distrib_left
+----------------
+-- Specialise mul_distrib_left_all at t := c.
+l1: $ ∀ x (a * (b + x) = a * b + a * x) $ by mul_distrib_left_all
+l2: $ a * (b + c) = a * b + a * c $ by ax_inst [l1]
+
+mul_distrib_right
+-----------------
+-- Chain:  (a + b) * c  =  c * (a + b)      (mul_comm_inst)
+--                     =  c * a + c * b    (mul_distrib_left)
+--                     =  a * c + c * b    (add_eq_right on mul_comm_inst)
+--                     =  a * c + b * c    (add_eq_left on mul_comm_inst).
+l1: $ (a + b) * c = c * (a + b) $ by mul_comm_inst
+l2: $ c * (a + b) = c * a + c * b $ by mul_distrib_left
+l3: $ c * a = a * c $ by mul_comm_inst
+l4: $ c * a = a * c → c * a + c * b = a * c + c * b $ by add_eq_right
+l5: $ c * a + c * b = a * c + c * b $ by ax_mp [l4, l3]
+l6: $ c * b = b * c $ by mul_comm_inst
+l7: $ c * b = b * c → a * c + c * b = a * c + b * c $ by add_eq_left
+l8: $ a * c + c * b = a * c + b * c $ by ax_mp [l7, l6]
+l9: $ (a + b) * c = a * c + b * c $ by eq_trans4 [l1, l2, l5, l8]
+
+mul_assoc
+---------
+-- Induction on x of ((a * b) * x = a * (b * x)).
+-- Base: both sides collapse to 0.
+l1: $ (a * b) * 0 = 0 $ by mul_0
+l2: $ b * 0 = 0 $ by mul_0
+l3: $ b * 0 = 0 → a * (b * 0) = a * 0 $ by mul_eq_left
+l4: $ a * (b * 0) = a * 0 $ by ax_mp [l3, l2]
+l5: $ a * 0 = 0 $ by mul_0
+l6: $ a * (b * 0) = a * 0 → a * 0 = 0 → a * (b * 0) = 0 $ by eq_trans
+l7: $ a * 0 = 0 → a * (b * 0) = 0 $ by ax_mp [l6, l4]
+l8: $ a * (b * 0) = 0 $ by ax_mp [l7, l5]
+l9: $ a * (b * 0) = 0 → 0 = a * (b * 0) $ by eq_sym
+l10: $ 0 = a * (b * 0) $ by ax_mp [l9, l8]
+l11: $ (a * b) * 0 = 0 → 0 = a * (b * 0) → (a * b) * 0 = a * (b * 0) $ by eq_trans
+l12: $ 0 = a * (b * 0) → (a * b) * 0 = a * (b * 0) $ by ax_mp [l11, l1]
+l13: $ (a * b) * 0 = a * (b * 0) $ by ax_mp [l12, l10]
+
+-- Step body: IH: (a * b) * x = a * (b * x); goal (a * b) * suc x = a * (b * suc x).
+-- LHS expands as (a * b) * x + a * b; RHS expands to a * (b * x + b) = a * (b * x) + a * b.
+-- Both sides equal a * (b * x) + a * b under IH.
+l14: $ (a * b) * suc x = (a * b) * x + a * b $ by mul_suc
+l15: $ (a * b) * x = a * (b * x) → (a * b) * x + a * b = a * (b * x) + a * b $ by add_eq_right
+l16: $ (a * b) * suc x = (a * b) * x + a * b → (a * b) * x + a * b = a * (b * x) + a * b → (a * b) * suc x = a * (b * x) + a * b $ by eq_trans
+l17: $ (a * b) * x + a * b = a * (b * x) + a * b → (a * b) * suc x = a * (b * x) + a * b $ by ax_mp [l16, l14]
+l18: $ (a * b) * x = a * (b * x) → (a * b) * suc x = a * (b * x) + a * b $ by syl [l17, l15]
+
+-- S = T via mul_eq_left on (b * suc x = b * x + b).
+l19: $ b * suc x = b * x + b $ by mul_suc
+l20: $ b * suc x = b * x + b → a * (b * suc x) = a * (b * x + b) $ by mul_eq_left
+l21: $ a * (b * suc x) = a * (b * x + b) $ by ax_mp [l20, l19]
+
+-- T = U via mul_distrib_left.
+l22: $ a * (b * x + b) = a * (b * x) + a * b $ by mul_distrib_left
+
+-- S = U via eq_trans.
+l23: $ a * (b * suc x) = a * (b * x + b) → a * (b * x + b) = a * (b * x) + a * b → a * (b * suc x) = a * (b * x) + a * b $ by eq_trans
+l24: $ a * (b * x + b) = a * (b * x) + a * b → a * (b * suc x) = a * (b * x) + a * b $ by ax_mp [l23, l21]
+l25: $ a * (b * suc x) = a * (b * x) + a * b $ by ax_mp [l24, l22]
+l26: $ a * (b * suc x) = a * (b * x) + a * b → a * (b * x) + a * b = a * (b * suc x) $ by eq_sym
+l27: $ a * (b * x) + a * b = a * (b * suc x) $ by ax_mp [l26, l25]
+
+-- IH → (P = S) by chaining (P = U) + (U = S).
+l28: $ (a * b) * suc x = a * (b * x) + a * b → a * (b * x) + a * b = a * (b * suc x) → (a * b) * suc x = a * (b * suc x) $ by eq_trans
+l29: $ (a * b) * suc x = a * (b * x) + a * b → (a * b) * suc x = a * (b * suc x) $ by mpi [l27, l28]
+l30: $ (a * b) * x = a * (b * x) → (a * b) * suc x = a * (b * suc x) $ by syl [l29, l18]
+
+l31: $ ∀ x ((a * b) * x = a * (b * x) → (a * b) * suc x = a * (b * suc x)) $ by ax_gen [l30]
+l32: $ ∀ x ((a * b) * x = a * (b * x)) $ by peano5 [l13, l31]
+
+mul_assoc_inst
+--------------
+-- Specialise mul_assoc at t := c.
+l1: $ ∀ x ((a * b) * x = a * (b * x)) $ by mul_assoc
+l2: $ (a * b) * c = a * (b * c) $ by ax_inst [l1]

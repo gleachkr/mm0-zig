@@ -401,3 +401,59 @@ theorem add_rass (a b c: nat): $ (a + b) + c = (a + c) + b $;
 -- Concrete arithmetic capstone: 2 + 2 = 4, from add_suc + add_0.
 theorem two_plus_two:
   $ suc (suc 0) + suc (suc 0) = suc (suc (suc (suc 0))) $;
+
+-- ---------------------------------------------------------------
+-- Multiplication.  Axiomatised by the usual recurrence on the
+-- right argument; left-identity / commutativity / distributivity /
+-- associativity follow from induction plus the add_* lemmas.
+-- ---------------------------------------------------------------
+
+term mul (a b: nat): nat; infixl mul: $*$ prec 70;
+
+--| @congr
+axiom mul_congr (a b c d: nat):
+  $ nat_eq a b $ > $ nat_eq c d $ > $ nat_eq (a * c) (b * d) $;
+
+--| @rewrite
+axiom sb_t_mul {x: nat} (t: nat x) (a b: nat x):
+  $ nat_eq (sb_t x t (a * b)) (sb_t x t a * sb_t x t b) $;
+
+axiom mul_0 (a: nat): $ a * 0 = 0 $;
+axiom mul_suc (a b: nat): $ a * suc b = a * b + a $;
+
+-- Left zero:  0 * x = 0  by induction on x.
+theorem mul_0_left {x: nat}: $ ∀ x (0 * x = 0) $;
+theorem mul_0_left_inst (a: nat): $ 0 * a = 0 $;
+
+-- Successor on the left:  suc a * x = a * x + x  by induction on x.
+theorem mul_suc_left_all (a: nat) {x: nat}:
+  $ ∀ x (suc a * x = a * x + x) $;
+theorem mul_suc_left_inst (a b: nat): $ suc a * b = a * b + b $;
+
+-- Multiplicative identity: 1 * a = a = a * 1.
+theorem mul_1_right (a: nat): $ a * suc 0 = a $;
+theorem mul_1_left (a: nat): $ suc 0 * a = a $;
+
+-- Equality is preserved by multiplication on the left: a = b → c * a = c * b.
+-- Proved by induction on the outer argument; instance form via ax_inst.
+theorem mul_eq_left_all (a b: nat) {x: nat}: $ ∀ x (a = b → x * a = x * b) $;
+theorem mul_eq_left (c a b: nat): $ a = b → c * a = c * b $;
+
+-- Commutativity of multiplication, proved by induction on x.
+theorem mul_comm (a: nat) {x: nat}: $ ∀ x (a * x = x * a) $;
+theorem mul_comm_inst (a b: nat): $ a * b = b * a $;
+
+-- Left-distributivity of * over +:  a * (b + x) = a * b + a * x.
+-- Induction on x; peano5 discharges the inductive step.
+theorem mul_distrib_left_all (a b: nat) {x: nat}:
+  $ ∀ x (a * (b + x) = a * b + a * x) $;
+theorem mul_distrib_left (a b c: nat): $ a * (b + c) = a * b + a * c $;
+
+-- Right-distributivity:  (a + b) * c = a * c + b * c.  Derived from
+-- mul_distrib_left via mul_comm_inst on each multiplication.
+theorem mul_distrib_right (a b c: nat): $ (a + b) * c = a * c + b * c $;
+
+-- Associativity of multiplication, induction on the rightmost factor.
+theorem mul_assoc (a b: nat) {x: nat}:
+  $ ∀ x ((a * b) * x = a * (b * x)) $;
+theorem mul_assoc_inst (a b c: nat): $ (a * b) * c = a * (b * c) $;
