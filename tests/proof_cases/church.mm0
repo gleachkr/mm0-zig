@@ -514,7 +514,7 @@ theorem exc_def (G: ctx) (A: type) {x q: term} (p: term x):
   $ G ⊩ P · x $ >
   $ G ⊩ ex A · P $;
 
- theorem CHOOSE (G: ctx) (A: type) {x r: term} (p: term x) (q: term):
+ theorem CHOOSE (G: ctx) (A: type) {x: term} (p: term x) (q: term):
   $ G ⊩ q: 𝔹 $ >
   $ G ⊩ ex A · (λ x: A. p) $ >
   $ G , x: A , p ⊩ q $ >
@@ -550,10 +550,10 @@ theorem ORC_DEF (G: ctx) (a b: term) {r: term}:
  $ G ⊩ a: 𝔹 $ > $ G ⊩ b: 𝔹 $ >
  $ G ⊩ a ∨ b ⇔ (!r: 𝔹. (a ⇒ r) ⇒ (b ⇒ r) ⇒ r) $;
 
-theorem DISJ1 (G: ctx) (p q: term) {r: term}:
+theorem DISJ1 (G: ctx) (p q: term):
  $ G ⊩ p $ > $ G ⊩ q: 𝔹 $ > $ G ⊩ p ∨ q $;
 
-theorem DISJ2 (G: ctx) (p q: term) {r: term}:
+theorem DISJ2 (G: ctx) (p q: term):
  $ G ⊩ p: 𝔹 $ > $ G ⊩ q $ > $ G ⊩ p ∨ q $;
 
 theorem orR1 (G: ctx) (p q: term):
@@ -562,7 +562,7 @@ theorem orR1 (G: ctx) (p q: term):
 theorem orR2 (G: ctx) (p q: term):
  $ G ⊩ p ∨ q $ > $ G ⊩ q: 𝔹 $;
 
-theorem DISJ_CASES (G: ctx) (p q r: term) {x: term}:
+theorem DISJ_CASES (G: ctx) (p q r: term):
  $ G ⊩ p ∨ q $ >
  $ G ⊩ r: 𝔹 $ >
  $ G , p ⊩ r $ >
