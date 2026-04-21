@@ -1166,6 +1166,43 @@ test "compiler pinpoints proof parser identifier errors" {
     try std.testing.expectEqualStrings("[", proof_src[span.start..span.end]);
 }
 
+test "compiler pinpoints missing proof block underlines" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad_parse: $ top $;
+    ;
+    const proof_src =
+        \\bad_parse
+        \\l1: $ top $ by keep []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.ExpectedBlockUnderline,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.ExpectedBlockUnderline, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
+    try std.testing.expectEqualStrings("bad_parse", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("bad_parse", diag.block_name.?);
+    try std.testing.expectEqualStrings(
+        "expected underline after proof block header",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "l1: $ top $ by keep []",
+        proof_src[span.start..span.end],
+    );
+}
+
 test "compiler check diagnostics are marked as mm0 source" {
     const mm0_src =
         \\provable sort wff;
@@ -2832,4 +2869,578 @@ test "strict replay does not open defs during omitted inference" {
             line_expr,
         ),
     );
+}
+
+test "compiler primary diagnostic overflow records omitted summary" {
+    var compiler = Compiler.init(std.testing.allocator, "");
+    for (0..Compiler.max_primary_diagnostics + 7) |_| {
+        compiler.addPrimaryDiagnostic(.{
+            .kind = .generic,
+            .err = error.UnknownTerm,
+            .source = .mm0,
+        });
+    }
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(
+        Compiler.max_primary_diagnostics,
+        diags.len,
+    );
+    const omitted = compiler.omittedPrimaryDiagnostic(.mm0) orelse {
+        return error.ExpectedDiagnostic;
+    };
+    try std.testing.expectEqual(.omitted_diagnostics, omitted.kind);
+    switch (omitted.detail) {
+        .omitted_diagnostics => |info| {
+            try std.testing.expectEqual(@as(usize, 7), info.count);
+        },
+        else => return error.ExpectedDiagnosticDetail,
+    }
+    try std.testing.expect(compiler.omittedPrimaryDiagnostic(.proof) == null);
+}
+
+test "compiler analyze mm0 collects multiple statement diagnostics" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\--| @fallback missing
+        \\axiom bad: $ top $;
+        \\--| @fallback still_missing
+        \\axiom still_bad: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+    try std.testing.expect(compiler.last_diagnostic == null);
+
+    try std.testing.expectEqual(error.UnknownFallbackRule, diags[0].err);
+    try std.testing.expectEqualStrings("bad", diags[0].name.?);
+    try std.testing.expectEqual(error.UnknownFallbackRule, diags[1].err);
+    try std.testing.expectEqualStrings("still_bad", diags[1].name.?);
+}
+
+test "compiler analyze mm0 suppresses fallback follow-on diagnostics" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\--| @fallback missing
+        \\axiom bad: $ top $;
+        \\--| @fallback bad
+        \\axiom dependent: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.UnknownFallbackRule, diags[0].err);
+    try std.testing.expectEqualStrings("bad", diags[0].name.?);
+}
+
+test "compiler analyze mm0 recovers after malformed statements" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom bad $ top $;
+        \\--| @fallback missing
+        \\axiom still_bad: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+
+    try std.testing.expectEqual(error.UnexpectedChar, diags[0].err);
+    try std.testing.expectEqualStrings("bad", diags[0].name.?);
+    try std.testing.expectEqual(error.UnknownFallbackRule, diags[1].err);
+    try std.testing.expectEqualStrings("still_bad", diags[1].name.?);
+}
+
+test "compiler analyze mm0 discards annotations from malformed statements" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\--| @fallback missing
+        \\axiom bad $ top $;
+        \\axiom good: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.UnexpectedChar, diags[0].err);
+    try std.testing.expectEqualStrings("bad", diags[0].name.?);
+}
+
+test "compiler analyze mm0 ignores semicolons in comments" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom bad $ top $
+        \\-- comment ; not a boundary
+        \\;
+        \\--| @fallback missing
+        \\axiom still_bad: $ top $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+    try std.testing.expectEqual(error.UnexpectedChar, diags[0].err);
+    try std.testing.expectEqualStrings("bad", diags[0].name.?);
+    try std.testing.expectEqual(error.UnknownFallbackRule, diags[1].err);
+    try std.testing.expectEqualStrings("still_bad", diags[1].name.?);
+}
+
+test "compiler analyze with proof collects multiple block diagnostics" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad_one: $ top $;
+        \\theorem bad_two: $ top $;
+    ;
+    const proof_src =
+        \\bad_one
+        \\-------
+        \\l1: $ top $ by missing_one []
+        \\
+        \\bad_two
+        \\-------
+        \\l1: $ top $ by missing_two []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+    try std.testing.expect(compiler.last_diagnostic == null);
+
+    try std.testing.expectEqual(error.UnknownRule, diags[0].err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diags[0].source);
+    try std.testing.expectEqualStrings("bad_one", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diags[1].source);
+    try std.testing.expectEqualStrings("bad_two", diags[1].theorem_name.?);
+}
+
+test "compiler analyze with proof recovers after failing lemma blocks" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\lemma helper: $ top $
+        \\--------------------
+        \\l1: $ top $ by missing_helper []
+        \\
+        \\target
+        \\------
+        \\l1: $ top $ by missing_target []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+
+    try std.testing.expectEqual(error.UnknownRule, diags[0].err);
+    try std.testing.expectEqualStrings("helper", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
+    try std.testing.expectEqualStrings("target", diags[1].theorem_name.?);
+}
+
+test "compiler analyze with proof recovers after malformed theorem blocks" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad_parse: $ top $;
+        \\theorem later_bad: $ top $;
+    ;
+    const proof_src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\
+        \\later_bad
+        \\---------
+        \\l1: $ top $ by missing_rule []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+
+    try std.testing.expectEqual(error.ExpectedIdentifier, diags[0].err);
+    try std.testing.expectEqualStrings("bad_parse", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
+    try std.testing.expectEqualStrings("later_bad", diags[1].theorem_name.?);
+}
+
+test "compiler analyze with proof recovers to later lemmas with binders" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by [#1]
+        \\
+        \\lemma helper (a: wff): $ a $
+        \\--------------------------
+        \\l1: $ a $ by missing_helper [#1]
+        \\
+        \\target
+        \\------
+        \\l1: $ top $ by missing_target []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 3), diags.len);
+
+    try std.testing.expectEqual(error.ExpectedIdentifier, diags[0].err);
+    try std.testing.expectEqualStrings("target", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownHypothesisRef, diags[1].err);
+    try std.testing.expectEqualStrings("helper", diags[1].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[2].err);
+    try std.testing.expectEqualStrings("target", diags[2].theorem_name.?);
+}
+
+test "compiler analyze with proof ignores stray proof-line comments" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad_parse: $ top $;
+        \\theorem later_bad: $ top $;
+    ;
+    const proof_src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\l2 -- stray comment on a broken proof line
+        \\
+        \\later_bad
+        \\---------
+        \\l1: $ top $ by missing_rule []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+
+    try std.testing.expectEqual(error.ExpectedIdentifier, diags[0].err);
+    try std.testing.expectEqualStrings("bad_parse", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
+    try std.testing.expectEqualStrings("later_bad", diags[1].theorem_name.?);
+}
+
+test "compiler analyze with proof ignores bare identifier fragments" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad_parse: $ top $;
+        \\theorem later_bad: $ top $;
+    ;
+    const proof_src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\l2
+        \\
+        \\later_bad
+        \\---------
+        \\l1: $ top $ by missing_rule []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+
+    try std.testing.expectEqual(error.ExpectedIdentifier, diags[0].err);
+    try std.testing.expectEqualStrings("bad_parse", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
+    try std.testing.expectEqualStrings("later_bad", diags[1].theorem_name.?);
+}
+
+test "compiler analyze with proof recovers after malformed lemma blocks" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\lemma helper: $ top $
+        \\--------------------
+        \\l1: $ top $ by [#1]
+        \\
+        \\target
+        \\------
+        \\l1: $ top $ by missing_target []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+
+    try std.testing.expectEqual(error.ExpectedIdentifier, diags[0].err);
+    try std.testing.expectEqualStrings("helper", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
+    try std.testing.expectEqualStrings("target", diags[1].theorem_name.?);
+}
+
+test "compiler analyze mm0 suppresses blocked sort follow-ons" {
+    const mm0_src =
+        \\provable sort wff;
+        \\--| @vars x
+        \\strict sort nat;
+        \\term zero: nat;
+        \\sort obj;
+        \\term id: obj;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.VarsStrictSort, diags[0].err);
+    try std.testing.expectEqualStrings("nat", diags[0].name.?);
+}
+
+test "compiler analyze mm0 suppresses blocked term follow-ons" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\sort nat;
+        \\--| @bogus
+        \\term bad: nat;
+        \\def alias: nat = $ bad $;
+        \\term good: nat;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.UnknownTermAnnotation, diags[0].err);
+    try std.testing.expectEqualStrings("bad", diags[0].name.?);
+}
+
+test "compiler analyze with proof suppresses blocked theorem follow-ons" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad: $ top $;
+        \\theorem blocked: $ top $;
+        \\theorem later_bad: $ top $;
+    ;
+    const proof_src =
+        \\bad
+        \\---
+        \\l1: $ top $ by missing []
+        \\
+        \\blocked
+        \\-------
+        \\l1: $ top $ by bad []
+        \\
+        \\later_bad
+        \\---------
+        \\l1: $ top $ by missing_again []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+    try std.testing.expectEqual(error.UnknownRule, diags[0].err);
+    try std.testing.expectEqualStrings("bad", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
+    try std.testing.expectEqualStrings("later_bad", diags[1].theorem_name.?);
+}
+
+test "compiler analyze with proof suppresses missing blocks after eof parse failure" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad_rule: $ top $;
+        \\theorem bad_parse: $ top $;
+        \\theorem blocked_after_eof: $ top $;
+    ;
+    const proof_src =
+        \\bad_rule
+        \\--------
+        \\l1: $ top $ by missing []
+        \\
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+    try std.testing.expectEqual(error.UnknownRule, diags[0].err);
+    try std.testing.expectEqualStrings("bad_rule", diags[0].theorem_name.?);
+    try std.testing.expectEqual(error.ExpectedIdentifier, diags[1].err);
+    try std.testing.expectEqualStrings("bad_parse", diags[1].theorem_name.?);
+}
+
+test "compiler analyze with proof stops after unrecoverable mm0 parse failure" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem bad: $ top $
+    ;
+    const proof_src =
+        \\bad
+        \\---
+        \\l1: $ top $ by keep []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.UnexpectedChar, diags[0].err);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSource.mm0,
+        diags[0].source,
+    );
+}
+
+test "compiler analyze with proof suppresses malformed blocks for blocked theorems" {
+    const mm0_src =
+        \\provable sort wff;
+        \\--| @bogus
+        \\term bad: wff;
+        \\term good: wff;
+        \\theorem blocked: $ bad $;
+        \\theorem later: $ good $;
+    ;
+    const proof_src =
+        \\blocked
+        \\-------
+        \\l1: $ bad $ by [#1]
+        \\
+        \\later
+        \\-----
+        \\l1: $ good $ by missing_rule []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+    try std.testing.expectEqual(error.UnknownTermAnnotation, diags[0].err);
+    try std.testing.expectEqualStrings("bad", diags[0].name.?);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSource.proof,
+        diags[1].source,
+    );
+    try std.testing.expectEqualStrings("later", diags[1].theorem_name.?);
+}
+
+test "compiler analyze with proof ignores malformed blocks for blocked trailing theorems" {
+    const mm0_src =
+        \\provable sort wff;
+        \\--| @bogus
+        \\term bad: wff;
+        \\theorem blocked: $ bad $;
+    ;
+    const proof_src =
+        \\blocked
+        \\-------
+        \\l1: $ bad $ by [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try compiler.analyze();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.UnknownTermAnnotation, diags[0].err);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticSource.mm0,
+        diags[0].source,
+    );
+    try std.testing.expectEqualStrings("bad", diags[0].name.?);
 }

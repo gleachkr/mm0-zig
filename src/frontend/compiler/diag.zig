@@ -11,6 +11,7 @@ const MM0Stmt = @import("../../trusted/parse.zig").MM0Stmt;
 
 pub const DiagnosticKind = enum {
     generic,
+    omitted_diagnostics,
     missing_proof_block,
     extra_proof_block,
     theorem_name_mismatch,
@@ -70,6 +71,9 @@ pub const InferenceDiagnosticDetail = struct {
 
 pub const DiagnosticDetail = union(enum) {
     none,
+    omitted_diagnostics: struct {
+        count: usize,
+    },
     unknown_math_token: struct {
         token: []const u8,
     },
@@ -594,6 +598,7 @@ fn annotationDiagnosticSpan(
 pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
     return switch (diag.kind) {
         .generic => compilerErrorSummary(diag.err),
+        .omitted_diagnostics => "additional diagnostics omitted",
         .missing_proof_block => "missing proof block for theorem",
         .extra_proof_block => "extra proof block with no matching theorem",
         .theorem_name_mismatch => "proof block name does not match the theorem",
@@ -714,12 +719,9 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.ExpectedCloseParen => "expected closing parenthesis in math string",
         error.TrailingMathTokens => "unexpected trailing tokens in math string",
         error.NotationMismatch => "token sequence does not match declared notation",
-        error.AnonymousNotationBinder =>
-            "anonymous binders are not permitted in notation declarations",
-        error.DummyNotationBinder =>
-            "dummy binders are not permitted in notation declarations",
-        error.InvalidNotationVariables =>
-            "notation must mention each declared argument exactly once",
+        error.AnonymousNotationBinder => "anonymous binders are not permitted in notation declarations",
+        error.DummyNotationBinder => "dummy binders are not permitted in notation declarations",
+        error.InvalidNotationVariables => "notation must mention each declared argument exactly once",
         error.PrecMismatch => "operator precedence does not allow this parse",
         error.NotProvable => "math string does not have a provable sort",
         error.ExpectedMathString,
@@ -735,6 +737,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.UnexpectedChar,
         => "unexpected character",
         error.ExpectedLineEnd => "expected end of line",
+        error.ExpectedBlockUnderline => "expected underline after proof block header",
         error.UnterminatedMathString,
         error.UnterminatedMathStr,
         => "unterminated $...$ math string",
@@ -839,6 +842,13 @@ pub fn writeMissingCongruenceRuleSummary(
             try writer.writeAll("normalization used an unknown term");
         },
     }
+}
+
+pub fn writeOmittedDiagnosticsSummary(
+    writer: anytype,
+    count: usize,
+) !void {
+    try writer.print("{d} more diagnostics omitted", .{count});
 }
 
 pub fn writeDepViolationSummary(

@@ -10,11 +10,12 @@ const ProofScript = mm0.ProofScript;
 test "proof script parser reads theorem blocks and proof lines" {
     const src =
         \\id
-        \\--
+        \\---
         \\l1: $ a -> a $ by ax_1 (a := $ a $, b := $ a $) []
         \\l2: $ a $ by ax_mp (a := $ a $, b := $ a $) [#1, l1]
         \\
         \\other
+        \\-----
         \\l1: $ b $ by ax_b []
     ;
 
@@ -48,13 +49,96 @@ test "proof script parser reads theorem blocks and proof lines" {
     const second = (try parser.nextBlock()).?;
     try std.testing.expect(second.kind == .theorem);
     try std.testing.expectEqualStrings("other", second.name);
-    try std.testing.expect(second.underline_span == null);
+    try std.testing.expect(second.underline_span != null);
     try std.testing.expectEqual(@as(usize, 1), second.lines.len);
     try std.testing.expectEqual(
         @as(usize, 0),
         second.lines[0].arg_bindings.len,
     );
     try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser requires theorem underlines" {
+    const src =
+        \\main
+        \\l1: $ a -> a $ by id []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(
+        error.ExpectedBlockUnderline,
+        parser.nextBlock(),
+    );
+}
+
+test "proof script parser requires lemma underlines" {
+    const src =
+        \\lemma id (a: wff): $ a -> a $
+        \\l1: $ a -> a $ by ax_id (a := $ a $) []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(
+        error.ExpectedBlockUnderline,
+        parser.nextBlock(),
+    );
+}
+
+test "proof script parser rejects two-dash underlines" {
+    const src =
+        \\main
+        \\--
+        \\l1: $ a -> a $ by id []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(
+        error.ExpectedBlockUnderline,
+        parser.nextBlock(),
+    );
+}
+
+test "proof script parser rejects underline trailing comments" {
+    const src =
+        \\main
+        \\---- -- underline comment
+        \\l1: $ a -> a $ by id []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(
+        error.ExpectedBlockUnderline,
+        parser.nextBlock(),
+    );
+}
+
+test "proof script parser allows header trailing comments" {
+    const src =
+        \\main -- theorem comment
+        \\----
+        \\l1: $ a -> a $ by id []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expect(block.kind == .theorem);
+    try std.testing.expectEqualStrings("main", block.name);
+    try std.testing.expectEqual(@as(usize, 1), block.lines.len);
 }
 
 test "proof script parser reads lemma blocks" {
@@ -155,6 +239,146 @@ test "proof script parser allows continuation newlines and comments" {
         else => return error.UnexpectedRefKind,
     }
     try std.testing.expectEqualStrings("l2", block.lines[1].label);
+}
+
+test "proof script parser recovers to the next block header" {
+    const src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\
+        \\good_block
+        \\----------
+        \\l1: $ top $ by keep []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(error.ExpectedIdentifier, parser.nextBlock());
+    try std.testing.expect(parser.recoverToNextBlockBoundary());
+
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expect(block.kind == .theorem);
+    try std.testing.expectEqualStrings("good_block", block.name);
+    try std.testing.expectEqual(@as(usize, 1), block.lines.len);
+    try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser recovers to lemma blocks with binders" {
+    const src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\
+        \\lemma helper (a: wff): $ a $
+        \\--------------------------
+        \\l1: $ a $ by keep [#1]
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(error.ExpectedIdentifier, parser.nextBlock());
+    try std.testing.expect(parser.recoverToNextBlockBoundary());
+
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expect(block.kind == .lemma);
+    try std.testing.expectEqualStrings("helper", block.name);
+    try std.testing.expectEqualStrings(
+        "(a: wff): $ a $",
+        block.header_tail,
+    );
+    try std.testing.expectEqual(@as(usize, 1), block.lines.len);
+    try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser recovery ignores proof-line comments" {
+    const src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\l2 -- stray comment on a broken proof line
+        \\
+        \\good_block
+        \\----------
+        \\l1: $ top $ by keep []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(error.ExpectedIdentifier, parser.nextBlock());
+    try std.testing.expect(parser.recoverToNextBlockBoundary());
+
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expect(block.kind == .theorem);
+    try std.testing.expectEqualStrings("good_block", block.name);
+    try std.testing.expectEqual(@as(usize, 1), block.lines.len);
+    try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser recovery ignores bare identifier fragments" {
+    const src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\l2
+        \\
+        \\good_block
+        \\----------
+        \\l1: $ top $ by keep []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(error.ExpectedIdentifier, parser.nextBlock());
+    try std.testing.expect(parser.recoverToNextBlockBoundary());
+
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expect(block.kind == .theorem);
+    try std.testing.expectEqualStrings("good_block", block.name);
+    try std.testing.expectEqual(@as(usize, 1), block.lines.len);
+    try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser recovery ignores bare identifiers at eof" {
+    const src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\junk
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(error.ExpectedIdentifier, parser.nextBlock());
+    try std.testing.expect(!parser.recoverToNextBlockBoundary());
+}
+
+test "proof script parser recovery requires underlines on later blocks" {
+    const src =
+        \\bad_parse
+        \\---------
+        \\l1: $ top $ by [#1]
+        \\
+        \\good_block
+        \\l1: $ top $ by keep []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(error.ExpectedIdentifier, parser.nextBlock());
+    try std.testing.expect(!parser.recoverToNextBlockBoundary());
 }
 
 test "theorem context preserves theorem var identity" {

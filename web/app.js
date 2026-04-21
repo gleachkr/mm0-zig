@@ -125,6 +125,11 @@ const editorTheme = EditorView.theme({
     textDecoration: "underline wavy var(--err)",
     textUnderlineOffset: "3px",
   },
+  ".cm-lintRange-warning": {
+    backgroundImage: "none",
+    textDecoration: "underline wavy var(--warn)",
+    textUnderlineOffset: "3px",
+  },
   ".cm-tooltip": {
     background: "var(--bubble)",
     border: "1px solid rgb(255 255 255 / 0.12)",
@@ -147,6 +152,10 @@ const editorTheme = EditorView.theme({
   ".cm-diagnostic-error": {
     borderLeft: "none",
   },
+  ".cm-diagnostic-warning": {
+    borderLeft: "none",
+    color: "#fff8e3",
+  },
 });
 
 const ui = {
@@ -162,7 +171,9 @@ const ui = {
   mmbSize: document.querySelector("#mmb-size"),
   verifyStatus: document.querySelector("#verify-status"),
   verifyTime: document.querySelector("#verify-time"),
-  jump: document.querySelector("#jump-button"),
+  diagnosticNav: document.querySelector("#diagnostic-nav"),
+  diagnosticPrev: document.querySelector("#diagnostic-prev"),
+  diagnosticNext: document.querySelector("#diagnostic-next"),
   examplesBtn: document.querySelector("#examples-button"),
   exampleModal: document.querySelector("#example-modal"),
   theme: document.querySelector("#theme-toggle"),
@@ -171,7 +182,9 @@ const ui = {
 let compilerModule = null;
 let verifierModule = null;
 let pendingTimer = null;
-let lastDiagnosticSpan = null;
+let diagnosticStatus = null;
+let diagnosticTargets = [];
+let diagnosticIndex = -1;
 let runToken = 0;
 let mm0View = null;
 let proofView = null;
@@ -226,7 +239,7 @@ async function main() {
     parent: ui.mm0Editor,
     state: EditorState.create({
       doc: mm0Text,
-      extensions: makeExtensions("MM0 source", false),
+      extensions: makeExtensions("MM0 source", true),
     }),
   });
 
@@ -240,7 +253,8 @@ async function main() {
 
   updateSourceMeta();
 
-  ui.jump.addEventListener("click", jumpToProofDiagnostic);
+  ui.diagnosticPrev.addEventListener("click", () => navigateDiagnostics(-1));
+  ui.diagnosticNext.addEventListener("click", () => navigateDiagnostics(1));
   for (const btn of ui.exampleButtons) {
     btn.addEventListener("click", () => loadExample(btn.dataset.example));
   }
@@ -284,6 +298,7 @@ async function loadExample(name) {
   setEditorContent(mm0View, mm0Text);
   setEditorContent(proofView, proofText);
   updateSourceMeta();
+  clearDiagnosticStatus();
   clearDiagnostics();
 
   markActiveExample(name);
@@ -404,6 +419,7 @@ async function runAnalysis() {
   }
 
   const token = ++runToken;
+  clearDiagnosticStatus();
   setStatus(ui.compileStatus, "running…", "warn");
   setStatus(ui.verifyStatus, "waiting…", "muted");
   ui.compileTime.textContent = "";
@@ -419,6 +435,7 @@ async function runAnalysis() {
   }
 
   const compileMeta = compileResult.meta;
+  const compileDiagnostics = collectCompileDiagnostics(compileMeta);
   const compileOkay = Boolean(compileMeta?.ok);
   setStatus(
     ui.compileStatus,
@@ -430,12 +447,10 @@ async function runAnalysis() {
     ? formatBytes(compileResult.mmbBytes.length)
     : "";
 
-  if (compileMeta?.diagnostic) {
-    pushProofDiagnostic(compileMeta);
-  }
+  const renderedDiagnostics = pushCompileDiagnostics(compileDiagnostics);
 
   if (!compileOkay) {
-    setStatus(ui.verifyStatus, "skipped", "muted");
+    setDiagnosticStatus(renderedDiagnostics);
     return;
   }
 
@@ -454,28 +469,189 @@ async function runAnalysis() {
   ui.verifyTime.textContent = formatApproxMs(verifyResult.durationMs);
 }
 
-function pushProofDiagnostic(meta) {
-  const diag = meta.diagnostic;
+function pushCompileDiagnostics(diagnostics) {
+  if (!mm0View || !proofView) return [];
+
+  const rendered = renderCompileDiagnostics(diagnostics);
+  mm0View.dispatch(setDiagnostics(mm0View.state, rendered.mm0Diagnostics));
+  proofView.dispatch(setDiagnostics(proofView.state, rendered.proofDiagnostics));
+
+  diagnosticTargets = rendered.targets;
+  diagnosticIndex = -1;
+  updateDiagnosticNavigation();
+  return rendered.targets;
+}
+
+function collectCompileDiagnostics(meta) {
+  if (Array.isArray(meta?.diagnostics)) {
+    return meta.diagnostics;
+  }
+  if (meta?.diagnostic) {
+    return [meta.diagnostic];
+  }
+  return [];
+}
+
+function renderCompileDiagnostics(diagnostics) {
+  const rendered = {
+    mm0Diagnostics: [],
+    proofDiagnostics: [],
+    targets: [],
+  };
+
+  for (const diag of diagnostics) {
+    const target = compileDiagnosticTarget(diag);
+    if (!target) continue;
+
+    const editorDiag = {
+      from: target.from,
+      to: target.to,
+      severity: target.severity,
+      message: buildDiagnosticMessage(diag),
+    };
+    if (target.pane === "mm0") {
+      rendered.mm0Diagnostics.push(editorDiag);
+    } else {
+      rendered.proofDiagnostics.push(editorDiag);
+    }
+    rendered.targets.push(target);
+  }
+
+  return rendered;
+}
+
+function compileDiagnosticTarget(diag) {
+  const severity = diag?.severity === "warning" ? "warning" : "error";
+  if (diag?.source === "mm0") {
+    const range = diagnosticRange(mm0View, diag);
+    return range ? { pane: "mm0", severity, ...range } : null;
+  }
+  if (diag?.source === "proof") {
+    const range = diagnosticRange(proofView, diag);
+    return range ? { pane: "proof", severity, ...range } : null;
+  }
+  return null;
+}
+
+function updateDiagnosticNavigation() {
+  const count = diagnosticTargets.length;
+  ui.diagnosticNav.hidden = count === 0;
+  ui.diagnosticPrev.disabled = count === 0;
+  ui.diagnosticNext.disabled = count === 0;
+  updateDiagnosticStatus();
+}
+
+function navigateDiagnostics(delta) {
+  const count = diagnosticTargets.length;
+  if (count === 0) return;
+
+  if (diagnosticIndex < 0) {
+    diagnosticIndex = delta >= 0 ? 0 : count - 1;
+  } else {
+    diagnosticIndex = (diagnosticIndex + delta + count) % count;
+  }
+
+  focusDiagnostic(diagnosticTargets[diagnosticIndex]);
+  updateDiagnosticNavigation();
+}
+
+function focusDiagnostic(target) {
+  const view = target.pane === "mm0" ? mm0View : proofView;
+  if (!view) return;
+
+  setActivePane(target.pane);
+  view.focus();
+  view.dispatch({
+    selection: {
+      anchor: target.from,
+      head: target.to,
+    },
+    scrollIntoView: true,
+  });
+}
+
+function diagnosticCounts(diagnostics) {
+  const counts = { error: 0, warning: 0 };
+  for (const diag of diagnostics) {
+    if (diag?.severity === "warning") {
+      counts.warning += 1;
+    } else {
+      counts.error += 1;
+    }
+  }
+  return counts;
+}
+
+function formatDiagnosticCountSummary(diagnostics) {
+  const counts = diagnosticCounts(diagnostics);
+  const parts = [];
+  if (counts.error !== 0) {
+    parts.push(formatCount(counts.error, "error"));
+  }
+  if (counts.warning !== 0) {
+    parts.push(formatCount(counts.warning, "warning"));
+  }
+  return parts.join(", ");
+}
+
+function diagnosticStatusKind(diagnostics) {
+  const counts = diagnosticCounts(diagnostics);
+  if (counts.error !== 0) return "err";
+  if (counts.warning !== 0) return "warn";
+  return "muted";
+}
+
+function setDiagnosticStatus(diagnostics) {
+  const summary = formatDiagnosticCountSummary(diagnostics);
+  if (!summary) {
+    clearDiagnosticStatus();
+    setStatus(ui.verifyStatus, "compile failed", "err");
+    return;
+  }
+  diagnosticStatus = {
+    summary,
+    kind: diagnosticStatusKind(diagnostics),
+  };
+  updateDiagnosticStatus();
+}
+
+function clearDiagnosticStatus() {
+  diagnosticStatus = null;
+}
+
+function updateDiagnosticStatus() {
+  if (!diagnosticStatus) return;
+  const position = formatDiagnosticPosition();
+  const text = position
+    ? `${diagnosticStatus.summary} (${position})`
+    : diagnosticStatus.summary;
+  setStatus(ui.verifyStatus, text, diagnosticStatus.kind);
+}
+
+function formatDiagnosticPosition() {
+  const count = diagnosticTargets.length;
+  if (count === 0) return null;
+  const current = diagnosticIndex < 0 ? 0 : diagnosticIndex + 1;
+  return `${current}/${count}`;
+}
+
+function formatCount(count, label) {
+  return `${count} ${label}${count === 1 ? "" : "s"}`;
+}
+
+function diagnosticRange(view, diag) {
+  if (!view) return null;
   const hasSpan =
-    Number.isInteger(diag.spanStart) && Number.isInteger(diag.spanEnd);
-  if (!hasSpan) return;
+    Number.isInteger(diag?.spanStart) && Number.isInteger(diag?.spanEnd);
+  if (!hasSpan) return null;
 
   // The compiler returns byte offsets into UTF-8 encoded text, but CodeMirror
   // uses character offsets. Convert via encode→slice→decode.
-  const text = proofView.state.doc.toString();
+  const text = view.state.doc.toString();
   const bytes = encoder.encode(text);
   const from = byteToCharPos(bytes, diag.spanStart);
   const to = Math.max(from + 1, byteToCharPos(bytes, diag.spanEnd));
-
-  lastDiagnosticSpan = { start: from, end: to };
-  ui.jump.hidden = false;
-
-  proofView.dispatch(setDiagnostics(proofView.state, [{
-    from,
-    to,
-    severity: "error",
-    message: buildDiagnosticMessage(meta),
-  }]));
+  return { from, to };
 }
 
 function byteToCharPos(bytes, byteOffset) {
@@ -483,67 +659,121 @@ function byteToCharPos(bytes, byteOffset) {
   return decoder.decode(bytes.slice(0, safe)).length;
 }
 
-function buildDiagnosticMessage(meta) {
-  const parts = [meta.message];
-  const diag = meta.diagnostic;
-  const extra = [];
-  if (diag.theorem) extra.push(diag.theorem);
-  if (diag.lineLabel) extra.push(diag.lineLabel);
-  if (diag.rule) extra.push(`rule ${diag.rule}`);
-  if (diag.name) extra.push(diag.name);
-  if (diag.expected) extra.push(`expected ${diag.expected}`);
+function buildDiagnosticMessage(diag) {
+  const parts = [diag.message || diag.error || "diagnostic"];
+  const context = [];
+  if (diag.theorem) context.push(diag.theorem);
+  if (diag.block && diag.block !== diag.theorem) context.push(diag.block);
+  if (diag.lineLabel) context.push(diag.lineLabel);
+  if (diag.rule) context.push(`rule ${diag.rule}`);
+  if (diag.name) context.push(diag.name);
+  if (diag.expected) context.push(`expected ${diag.expected}`);
+  if (diag.phase) context.push(`phase ${humanizeDiagnosticValue(diag.phase)}`);
+  if (context.length) parts.push(context.join(" · "));
 
-  const detail = diag.detail;
-  if (detail?.kind === "unknown_math_token" && detail.token) {
-    extra.push(`token ${detail.token}`);
-  } else if (
-    detail?.kind === "missing_binder_assignment" &&
-    detail.binder
-  ) {
-    extra.push(`missing binder ${detail.binder}`);
-  } else if (detail?.kind === "missing_congruence_rule") {
-    if (detail.summary) {
-      extra.push(detail.summary);
-    } else {
-      const parts = [];
-      if (detail.reason) parts.push(`reason ${detail.reason}`);
-      if (detail.term) parts.push(`term ${detail.term}`);
-      if (detail.sort) parts.push(`sort ${detail.sort}`);
-      if (Number.isInteger(detail.argIndex)) {
-        parts.push(`arg ${detail.argIndex + 1}`);
-      }
-      if (parts.length) extra.push(parts.join(" · "));
+  const detail = buildDiagnosticDetail(diag.detail);
+  if (detail) parts.push(detail);
+
+  if (Array.isArray(diag.notes)) {
+    for (const note of diag.notes) {
+      const source = note?.source ? ` (${note.source})` : "";
+      if (note?.message) parts.push(`note${source}: ${note.message}`);
     }
-  } else if (
-    detail?.kind === "hypothesis_ref" &&
-    Number.isInteger(detail.index)
-  ) {
-    extra.push(`#${detail.index}`);
   }
 
-  if (extra.length) parts.push(extra.join(" \u00b7 "));
+  if (Array.isArray(diag.related)) {
+    for (const related of diag.related) {
+      const source = related?.source ? ` (${related.source})` : "";
+      if (related?.label) parts.push(`related${source}: ${related.label}`);
+    }
+  }
+
   return parts.join("\n");
 }
 
+function buildDiagnosticDetail(detail) {
+  if (!detail?.kind) return "";
+
+  if (detail.summary) return detail.summary;
+
+  if (detail.kind === "unknown_math_token" && detail.token) {
+    return `token ${detail.token}`;
+  }
+
+  if (detail.kind === "missing_binder_assignment") {
+    const parts = [];
+    if (detail.binder) parts.push(`missing binder ${detail.binder}`);
+    if (detail.path) parts.push(`path ${humanizeDiagnosticValue(detail.path)}`);
+    return parts.join(" · ");
+  }
+
+  if (detail.kind === "inference_failure") {
+    const parts = [];
+    if (detail.path) parts.push(`path ${humanizeDiagnosticValue(detail.path)}`);
+    if (detail.firstUnsolvedBinder) {
+      parts.push(`first unsolved binder ${detail.firstUnsolvedBinder}`);
+    }
+    return parts.join(" · ");
+  }
+
+  if (detail.kind === "missing_congruence_rule") {
+    const parts = [];
+    if (detail.reason) parts.push(`reason ${humanizeDiagnosticValue(detail.reason)}`);
+    if (detail.term) parts.push(`term ${detail.term}`);
+    if (detail.sort) parts.push(`sort ${detail.sort}`);
+    if (Number.isInteger(detail.argIndex)) {
+      parts.push(`arg ${detail.argIndex + 1}`);
+    }
+    return parts.join(" · ");
+  }
+
+  if (detail.kind === "dep_violation") {
+    const parts = [];
+    if (detail.firstArgName && detail.secondArgName) {
+      parts.push(
+        `conflicting binders ${detail.firstArgName} and ${detail.secondArgName}`,
+      );
+    }
+    if (Number.isInteger(detail.firstDeps)) {
+      parts.push(`first deps 0x${detail.firstDeps.toString(16)}`);
+    }
+    if (Number.isInteger(detail.secondDeps)) {
+      parts.push(`second deps 0x${detail.secondDeps.toString(16)}`);
+    }
+    return parts.join(" · ");
+  }
+
+  if (detail.kind === "hypothesis_ref" && Number.isInteger(detail.index)) {
+    return `#${detail.index}`;
+  }
+
+  if (detail.kind === "unused_parameter" && detail.parameter) {
+    return `parameter ${detail.parameter}`;
+  }
+
+  if (detail.kind === "omitted_diagnostics" && Number.isInteger(detail.count)) {
+    return `${detail.count} more diagnostics omitted`;
+  }
+
+  return "";
+}
+
+function humanizeDiagnosticValue(value) {
+  return String(value).replaceAll("_", " ");
+}
+
 function clearDiagnostics() {
-  lastDiagnosticSpan = null;
-  ui.jump.hidden = true;
+  diagnosticTargets = [];
+  diagnosticIndex = -1;
+  ui.diagnosticNav.hidden = true;
+  ui.diagnosticPrev.disabled = true;
+  ui.diagnosticNext.disabled = true;
+  if (mm0View) {
+    mm0View.dispatch(setDiagnostics(mm0View.state, []));
+  }
   if (proofView) {
     proofView.dispatch(setDiagnostics(proofView.state, []));
   }
-}
-
-function jumpToProofDiagnostic() {
-  if (!lastDiagnosticSpan || !proofView) return;
-  setActivePane("proof");
-  proofView.focus();
-  proofView.dispatch({
-    selection: {
-      anchor: lastDiagnosticSpan.start,
-      head: lastDiagnosticSpan.end,
-    },
-    scrollIntoView: true,
-  });
 }
 
 function callCompiler(mm0Text, proofText) {
@@ -680,6 +910,7 @@ function formatBytes(value) {
 }
 
 function renderFatal(error) {
+  clearDiagnosticStatus();
   setStatus(ui.compileStatus, error.message, "err");
   setStatus(ui.verifyStatus, "startup failed", "err");
   ui.compileTime.textContent = "";

@@ -242,7 +242,38 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-#jump-button[hidden] {
+.diagnostic-nav {
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-strong);
+}
+
+.diagnostic-nav button {
+  min-width: 2rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding-inline: 0.55rem;
+}
+
+.diagnostic-nav button + button {
+  border-left: 1px solid var(--line);
+}
+
+.diagnostic-nav button:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.08);
+}
+
+.diagnostic-nav button:disabled {
+  cursor: default;
+  color: var(--muted);
+  opacity: 0.65;
+}
+
+#diagnostic-nav[hidden] {
   display: none;
 }
 

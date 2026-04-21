@@ -263,6 +263,17 @@ pub const MM0Parser = struct {
         }
     }
 
+    pub fn discardPendingAnnotations(self: *MM0Parser) void {
+        self.pending_annotations.clearRetainingCapacity();
+        self.pending_annotation_spans.clearRetainingCapacity();
+        self.last_annotations = &.{};
+        self.last_annotation_spans = &.{};
+    }
+
+    pub fn recoverToStatementBoundary(self: *MM0Parser) !void {
+        try self.skipToSemicolon();
+    }
+
     pub fn diagnosticName(self: *const MM0Parser) ?[]const u8 {
         return self.current_decl_name;
     }
@@ -1736,6 +1747,14 @@ pub const MM0Parser = struct {
                     return error.UnterminatedMathStr;
                 }
                 self.pos += 1;
+            } else if (ch == '-' and
+                self.pos < self.src.len and
+                self.src[self.pos] == '-')
+            {
+                self.pos += 1;
+                while (self.pos < self.src.len and self.src[self.pos] != '\n') {
+                    self.pos += 1;
+                }
             } else if (ch == ';') {
                 self.skipWhitespaceAndComments();
                 return;

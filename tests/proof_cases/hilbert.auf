@@ -7,7 +7,7 @@ l4: $ (a -> (a -> a)) -> (a -> a) $ by mp [l1, l3]
 l5: $ a -> a $ by mp [l2, l4]
 
 hs
---
+---
 l1: $ (b -> c) -> (a -> (b -> c)) $ by h1 
 l2: $ a -> (b -> c) $ by mp [#2, l1]
 l3: $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $ by h2 

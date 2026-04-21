@@ -23,7 +23,7 @@ l1: $ a → b $ by a1i [#1]
 l2: $ a → c $ by mpd [l1, #2]
 
 id
---
+---
 -- a → a by the standard Lukasiewicz trick: ax_1 twice at different b's
 -- and ax_2 to glue them together.
 l1: $ a → (a → a) → a $ by ax_1
@@ -178,7 +178,7 @@ l2: $ (¬ a → b) → ¬ a → ¬ ¬ b $ by imim2i [l1]
 l3: $ (¬ a → b) → ¬ b → a $ by a3d [l2]
 
 mt
---
+---
 -- h1: b → a, h2: ¬ a.  Conclude ¬ b.  Apply con3 then two ax_mp's.
 l1: $ (b → a) → ¬ a → ¬ b $ by con3
 l2: $ ¬ a → ¬ b $ by ax_mp [l1, #1]

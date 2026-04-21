@@ -26,13 +26,20 @@ pub const appendTransportLine = CheckedIr.appendTransportLine;
 
 pub const Compiler = struct {
     pub const max_warnings = 32;
-    const diagnostic_storage_size = 4096;
+    pub const max_primary_diagnostics = 256;
+    const diagnostic_storage_size = 32768;
     const truncated_diagnostic_string = "<diagnostic string truncated>";
 
     allocator: std.mem.Allocator,
     source: []const u8,
     proof_source: ?[]const u8,
     last_diagnostic: ?Diagnostic,
+    primary_diagnostic_storage: [max_primary_diagnostics]Diagnostic =
+        undefined,
+    primary_diagnostic_count: usize = 0,
+    dropped_primary_diagnostic_count: usize = 0,
+    dropped_mm0_primary_diagnostic_count: usize = 0,
+    dropped_proof_primary_diagnostic_count: usize = 0,
     warning_storage: [max_warnings]Diagnostic = undefined,
     warning_count: usize = 0,
     dropped_warning_count: usize = 0,
@@ -68,6 +75,11 @@ pub const Compiler = struct {
             .source = source,
             .proof_source = proof_source,
             .last_diagnostic = null,
+            .primary_diagnostic_storage = undefined,
+            .primary_diagnostic_count = 0,
+            .dropped_primary_diagnostic_count = 0,
+            .dropped_mm0_primary_diagnostic_count = 0,
+            .dropped_proof_primary_diagnostic_count = 0,
             .warning_storage = undefined,
             .warning_count = 0,
             .dropped_warning_count = 0,
@@ -87,6 +99,28 @@ pub const Compiler = struct {
 
         try Pipeline.run(self, arena.allocator(), null);
         try self.promoteWarningsToErrors();
+    }
+
+    pub fn analyze(self: *Compiler) !void {
+        self.clearDiagnostics();
+
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+
+        if (self.proof_source != null) {
+            try Pipeline.analyze(self, arena.allocator());
+            return;
+        }
+        try Pipeline.analyzeMm0(self, arena.allocator());
+    }
+
+    pub fn analyzeMm0(self: *Compiler) !void {
+        self.clearDiagnostics();
+
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+
+        try Pipeline.analyzeMm0(self, arena.allocator());
     }
 
     pub fn compileMmb(
@@ -119,8 +153,43 @@ pub const Compiler = struct {
         self.allocator.free(bytes);
     }
 
+    pub fn primaryDiagnostics(self: *const Compiler) []const Diagnostic {
+        return self.primary_diagnostic_storage[0..self.primary_diagnostic_count];
+    }
+
     pub fn warningDiagnostics(self: *const Compiler) []const Diagnostic {
         return self.warning_storage[0..self.warning_count];
+    }
+
+    pub fn omittedPrimaryDiagnostic(
+        self: *const Compiler,
+        source: DiagnosticSource,
+    ) ?Diagnostic {
+        const count = self.droppedPrimaryDiagnosticCount(source);
+        if (count == 0) return null;
+        return .{
+            .kind = .omitted_diagnostics,
+            .err = error.DiagnosticsOmitted,
+            .source = source,
+            .detail = .{ .omitted_diagnostics = .{ .count = count } },
+        };
+    }
+
+    pub fn addPrimaryDiagnostic(self: *Compiler, diag: Diagnostic) void {
+        const primary = self.stableDiagnostic(diag);
+        if (self.primary_diagnostic_count >=
+            self.primary_diagnostic_storage.len)
+        {
+            self.dropped_primary_diagnostic_count += 1;
+            switch (primary.source) {
+                .mm0 => self.dropped_mm0_primary_diagnostic_count += 1,
+                .proof => self.dropped_proof_primary_diagnostic_count += 1,
+            }
+            return;
+        }
+        self.primary_diagnostic_storage[self.primary_diagnostic_count] =
+            primary;
+        self.primary_diagnostic_count += 1;
     }
 
     pub fn addWarning(self: *Compiler, diag: Diagnostic) void {
@@ -159,6 +228,10 @@ pub const Compiler = struct {
     fn clearDiagnostics(self: *Compiler) void {
         self.diagnostic_storage_len = 0;
         self.last_diagnostic = null;
+        self.primary_diagnostic_count = 0;
+        self.dropped_primary_diagnostic_count = 0;
+        self.dropped_mm0_primary_diagnostic_count = 0;
+        self.dropped_proof_primary_diagnostic_count = 0;
         self.warning_count = 0;
         self.dropped_warning_count = 0;
     }
@@ -179,6 +252,19 @@ pub const Compiler = struct {
         diag: Diagnostic,
         label: []const u8,
     ) void {
+        if (diag.kind == .omitted_diagnostics) {
+            const detail = switch (diag.detail) {
+                .omitted_diagnostics => |info| info,
+                else => return,
+            };
+            std.debug.print("{s}: ", .{label});
+            CompilerDiag.writeOmittedDiagnosticsSummary(
+                std.fs.File.stderr().deprecatedWriter(),
+                detail.count,
+            ) catch return;
+            std.debug.print("\n", .{});
+            return;
+        }
         std.debug.print(
             "{s}: {s}\n",
             .{ label, diagnosticSummary(diag) },
@@ -334,6 +420,7 @@ pub const Compiler = struct {
     ) DiagnosticDetail {
         return switch (detail) {
             .none => .none,
+            .omitted_diagnostics => |info| .{ .omitted_diagnostics = info },
             .unknown_math_token => |info| .{ .unknown_math_token = .{
                 .token = self.stableRequiredString(info.token),
             } },
@@ -404,6 +491,16 @@ pub const Compiler = struct {
         }
         return false;
     }
+
+    fn droppedPrimaryDiagnosticCount(
+        self: *const Compiler,
+        source: DiagnosticSource,
+    ) usize {
+        return switch (source) {
+            .mm0 => self.dropped_mm0_primary_diagnostic_count,
+            .proof => self.dropped_proof_primary_diagnostic_count,
+        };
+    }
 };
 
 pub const diagnosticSummary = CompilerDiag.diagnosticSummary;
@@ -414,6 +511,7 @@ fn reportDiagnosticDetail(
 ) void {
     switch (detail) {
         .none => {},
+        .omitted_diagnostics => {},
         .unknown_math_token => |info| {
             std.debug.print("  token: {s}\n", .{info.token});
         },

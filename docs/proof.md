@@ -85,12 +85,14 @@ comment ::= '--' (any char except newline)* newline
 A public theorem block names the theorem being proved.
 
 ```text
-theorem-block ::= theorem-name newline underline? newline* proof-line*
-underline ::= '-' '-'+
+theorem-block ::= theorem-name newline underline newline* proof-line*
+underline ::= hspace? '-' '-' '-'* hspace? newline
 ```
 
-The underline is optional and cosmetic. If present, the parser ignores
-its exact length.
+The underline is required. It must appear on the line immediately after
+the theorem header, contain only dashes plus optional leading or
+trailing horizontal whitespace, and be at least 3 dashes long. Trailing
+comment text is not allowed on underline lines.
 
 Example:
 
@@ -106,7 +108,7 @@ A lemma block declares a proof-only local rule.
 
 ```text
 lemma-block ::= 'lemma' identifier lemma-binders? ':' assertion-tail
-                newline underline? newline* proof-line*
+                newline underline newline* proof-line*
 
 assertion-tail ::= formula ('>' formula)*
 ```

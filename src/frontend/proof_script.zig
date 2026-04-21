@@ -127,6 +127,22 @@ pub const Parser = struct {
         return self.current_block_name;
     }
 
+    pub fn recoverToNextBlockBoundary(self: *Parser) bool {
+        self.current_block_name = null;
+        self.current_block_name_span = null;
+        if (self.pos < self.src.len) {
+            self.pos = self.nextLineStart(self.pos);
+        }
+        while (self.pos < self.src.len) {
+            const line_start = self.pos;
+            if (self.lineLooksLikeBlockHeader(line_start)) {
+                return true;
+            }
+            self.pos = self.nextLineStart(line_start);
+        }
+        return false;
+    }
+
     fn startsLemmaHeader(self: *Parser) bool {
         var i = self.pos;
         while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
@@ -145,7 +161,7 @@ pub const Parser = struct {
             .start = block_start,
             .end = self.pos,
         };
-        const underline_span = self.parseUnderlineLine();
+        const underline_span = try self.parseRequiredUnderlineLine();
         const lines = try self.parseProofLines();
         return .{
             .kind = .theorem,
@@ -177,7 +193,7 @@ pub const Parser = struct {
             .start = block_start,
             .end = self.pos,
         };
-        const underline_span = self.parseUnderlineLine();
+        const underline_span = try self.parseRequiredUnderlineLine();
         const lines = try self.parseProofLines();
         return .{
             .kind = .lemma,
@@ -404,31 +420,18 @@ pub const Parser = struct {
         return self.src[start..end];
     }
 
-    fn parseUnderlineLine(self: *Parser) ?Span {
-        const saved = self.pos;
-        var line_start = saved;
-        while (line_start < self.src.len and
-            isHorizontalSpace(self.src[line_start]))
-        {
-            line_start += 1;
+    fn parseRequiredUnderlineLine(self: *Parser) !Span {
+        const start = self.pos;
+        if (!self.lineIsUnderline(start)) {
+            return self.recordErrorAtSpan(
+                error.ExpectedBlockUnderline,
+                self.underlineDiagnosticSpan(start),
+            );
         }
-        var line_end = line_start;
-        while (line_end < self.src.len and self.src[line_end] != '\n') {
-            line_end += 1;
-        }
-        const trimmed = std.mem.trimRight(
-            u8,
-            self.src[line_start..line_end],
-            " \t\r",
-        );
-        if (trimmed.len < 2) return null;
-        for (trimmed) |ch| {
-            if (ch != '-') return null;
-        }
-        self.pos = line_end;
+        self.pos = self.lineEnd(start);
         self.consumeNewline();
         return .{
-            .start = saved,
+            .start = start,
             .end = self.pos,
         };
     }
@@ -618,6 +621,108 @@ pub const Parser = struct {
         }
     }
 
+    fn lineLooksLikeBlockHeader(
+        self: *Parser,
+        line_start: usize,
+    ) bool {
+        if (!self.lineStartsBlockHeaderLead(line_start)) return false;
+
+        const next_start = self.nextLineStart(line_start);
+        if (next_start >= self.src.len or !self.lineIsUnderline(next_start)) {
+            return false;
+        }
+        self.pos = line_start;
+        return true;
+    }
+
+    fn lineStartsBlockHeaderLead(
+        self: *const Parser,
+        line_start: usize,
+    ) bool {
+        var i = line_start;
+        while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
+        if (i >= self.src.len or self.src[i] == '\n') return false;
+        if (i + 1 < self.src.len and
+            self.src[i] == '-' and
+            self.src[i + 1] == '-')
+        {
+            return false;
+        }
+        const ident_start = i;
+        if (!isIdentStart(self.src[ident_start])) return false;
+        i += 1;
+        while (i < self.src.len and isIdentChar(self.src[i])) : (i += 1) {}
+        const ident = self.src[ident_start..i];
+        if (std.mem.eql(u8, ident, "lemma")) {
+            return self.lineLooksLikeLemmaHeader(i);
+        }
+        while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
+        return i >= self.src.len or
+            self.src[i] == '\n' or
+            (i + 1 < self.src.len and
+                self.src[i] == '-' and
+                self.src[i + 1] == '-');
+    }
+
+    fn lineLooksLikeLemmaHeader(
+        self: *const Parser,
+        after_keyword: usize,
+    ) bool {
+        var i = after_keyword;
+        while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
+        if (i >= self.src.len or !isIdentStart(self.src[i])) return false;
+        i += 1;
+        while (i < self.src.len and isIdentChar(self.src[i])) : (i += 1) {}
+
+        const line_end = self.lineEnd(i);
+        while (i < line_end) {
+            if (self.src[i] == '$') {
+                i += 1;
+                while (i < line_end and self.src[i] != '$') : (i += 1) {}
+                if (i >= line_end) return false;
+                i += 1;
+                continue;
+            }
+            if (self.src[i] == ':') return true;
+            if (i + 1 < line_end and
+                self.src[i] == '-' and
+                self.src[i + 1] == '-')
+            {
+                return false;
+            }
+            i += 1;
+        }
+        return false;
+    }
+
+    fn lineIsUnderline(self: *const Parser, line_start: usize) bool {
+        var i = line_start;
+        while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
+        const line_end = self.lineEnd(i);
+        const trimmed = std.mem.trimRight(
+            u8,
+            self.src[i..line_end],
+            " \t\r",
+        );
+        if (trimmed.len < 3) return false;
+        for (trimmed) |ch| {
+            if (ch != '-') return false;
+        }
+        return true;
+    }
+
+    fn lineEnd(self: *const Parser, start: usize) usize {
+        var i = start;
+        while (i < self.src.len and self.src[i] != '\n') : (i += 1) {}
+        return i;
+    }
+
+    fn nextLineStart(self: *const Parser, start: usize) usize {
+        var i = self.lineEnd(start);
+        if (i < self.src.len) i += 1;
+        return i;
+    }
+
     fn setCurrentBlockContext(
         self: *Parser,
         name: []const u8,
@@ -651,6 +756,18 @@ pub const Parser = struct {
             .start = start,
             .end = end,
         };
+    }
+
+    fn underlineDiagnosticSpan(self: *const Parser, start: usize) Span {
+        const clamped_start = @min(start, self.src.len);
+        const line_end = self.lineEnd(clamped_start);
+        if (line_end > clamped_start) {
+            return .{
+                .start = clamped_start,
+                .end = line_end,
+            };
+        }
+        return self.tokenSpanAt(clamped_start);
     }
 };
 

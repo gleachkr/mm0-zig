@@ -187,9 +187,30 @@
       </div>
       <div class="hud-line hud-actions">
         <span id="mmb-size" class="meta"></span>
-        <button id="jump-button" type="button" hidden>
-          jump to error
-        </button>
+        <div
+          id="diagnostic-nav"
+          class="diagnostic-nav"
+          role="group"
+          aria-label="Diagnostic navigation"
+          hidden
+        >
+          <button
+            id="diagnostic-prev"
+            type="button"
+            aria-label="Previous diagnostic"
+            disabled
+          >
+            ←
+          </button>
+          <button
+            id="diagnostic-next"
+            type="button"
+            aria-label="Next diagnostic"
+            disabled
+          >
+            →
+          </button>
+        </div>
         <button id="examples-button" type="button">
           hilbert
         </button>

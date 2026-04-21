@@ -659,6 +659,88 @@ test "MM0 parser skips local theorems and unknown declarations" {
     try std.testing.expect((try parser.next()) == null);
 }
 
+test "MM0 parser recovers to the next statement boundary" {
+    const src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom bad $ top $;
+        \\axiom good: $ top $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.UnexpectedChar, parser.next());
+    try parser.recoverToStatementBoundary();
+
+    const stmt = (try parser.next()).?;
+    switch (stmt) {
+        .assertion => |assert_stmt| {
+            try std.testing.expectEqualStrings("good", assert_stmt.name);
+        },
+        else => return error.UnexpectedStatementKind,
+    }
+
+    try std.testing.expect((try parser.next()) == null);
+}
+
+test "MM0 parser recovery skips semicolons inside math strings" {
+    const src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom bad $ top ; top $;
+        \\axiom good: $ top $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.UnexpectedChar, parser.next());
+    try parser.recoverToStatementBoundary();
+
+    const stmt = (try parser.next()).?;
+    switch (stmt) {
+        .assertion => |assert_stmt| {
+            try std.testing.expectEqualStrings("good", assert_stmt.name);
+        },
+        else => return error.UnexpectedStatementKind,
+    }
+}
+
+test "MM0 parser recovery skips semicolons inside comments" {
+    const src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom bad $ top $
+        \\-- comment ; not a boundary
+        \\;
+        \\axiom good: $ top $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+    try std.testing.expectError(error.UnexpectedChar, parser.next());
+    try parser.recoverToStatementBoundary();
+
+    const stmt = (try parser.next()).?;
+    switch (stmt) {
+        .assertion => |assert_stmt| {
+            try std.testing.expectEqualStrings("good", assert_stmt.name);
+        },
+        else => return error.UnexpectedStatementKind,
+    }
+}
+
 test "MM0 parser rejects unknown sorts in term signatures" {
     {
         const src =

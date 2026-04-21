@@ -30,7 +30,13 @@ pub export fn compile_sources(
     var compiler = mm0.Compiler.initWithProof(allocator, mm0_src, proof_src);
 
     result_mmb = compiler.compileMmb(allocator) catch |err| {
-        writeCompileFailure(&compiler, err) catch clearState();
+        var analysis_compiler = mm0.Compiler.initWithProof(
+            allocator,
+            mm0_src,
+            proof_src,
+        );
+        analysis_compiler.analyze() catch {};
+        writeCompileFailure(&compiler, &analysis_compiler, err) catch clearState();
         return 0;
     };
     writeCompileSuccess(result_mmb.len) catch {
@@ -88,13 +94,16 @@ fn writeCompileSuccess(mmb_len: usize) !void {
     try out.writer.writeAll("\"error\":null,");
     try out.writer.writeAll("\"mmbLen\":");
     try out.writer.print("{d}", .{mmb_len});
-    try out.writer.writeAll(",\"diagnostic\":null}");
+    try out.writer.writeAll(",\"diagnostic\":null,");
+    try writeDiagnosticsField(&out.writer, null);
+    try out.writer.writeByte('}');
 
     result_json = try out.toOwnedSlice();
 }
 
 fn writeCompileFailure(
     compiler: *const mm0.Compiler,
+    analysis_compiler: *const mm0.Compiler,
     err: anyerror,
 ) !void {
     var out: std.io.Writer.Allocating = .init(allocator);
@@ -112,60 +121,108 @@ fn writeCompileFailure(
             "message",
             mm0.compilerDiagnosticSummary(diag),
         );
-        try out.writer.writeAll(",\"mmbLen\":0,\"diagnostic\":{");
-        try writeOptionalStringField(&out.writer, "theorem", diag.theorem_name);
-        try out.writer.writeByte(',');
-        try writeOptionalStringField(&out.writer, "block", diag.block_name);
-        try out.writer.writeByte(',');
-        try writeOptionalStringField(
-            &out.writer,
-            "lineLabel",
-            diag.line_label,
-        );
-        try out.writer.writeByte(',');
-        try writeOptionalStringField(&out.writer, "rule", diag.rule_name);
-        try out.writer.writeByte(',');
-        try writeOptionalStringField(&out.writer, "name", diag.name);
-        try out.writer.writeByte(',');
-        try writeOptionalStringField(
-            &out.writer,
-            "expected",
-            diag.expected_name,
-        );
-        try out.writer.writeByte(',');
-        try writeOptionalStringField(
-            &out.writer,
-            "phase",
-            if (diag.phase) |phase|
-                diagnosticPhaseName(phase)
-            else
-                null,
-        );
-        try out.writer.writeByte(',');
-        try writeOptionalUsizeField(
-            &out.writer,
-            "spanStart",
-            if (diag.span) |span| span.start else null,
-        );
-        try out.writer.writeByte(',');
-        try writeOptionalUsizeField(
-            &out.writer,
-            "spanEnd",
-            if (diag.span) |span| span.end else null,
-        );
-        try out.writer.writeByte(',');
-        try writeDiagnosticDetailField(&out.writer, diag);
-        try out.writer.writeByte(',');
-        try writeDiagnosticNotesField(&out.writer, diag);
-        try out.writer.writeByte(',');
-        try writeDiagnosticRelatedField(&out.writer, diag);
-        try out.writer.writeAll("}}");
+        try out.writer.writeAll(",\"mmbLen\":0,\"diagnostic\":");
+        try writeDiagnosticObject(&out.writer, diag);
     } else {
         try writeJsonStringField(&out.writer, "message", @errorName(err));
-        try out.writer.writeAll(",\"mmbLen\":0,\"diagnostic\":null}");
+        try out.writer.writeAll(",\"mmbLen\":0,\"diagnostic\":null");
     }
+    try out.writer.writeByte(',');
+    try writeDiagnosticsField(&out.writer, analysis_compiler);
+    try out.writer.writeByte('}');
 
     result_json = try out.toOwnedSlice();
+}
+
+fn writeDiagnosticsField(
+    writer: anytype,
+    compiler: ?*const mm0.Compiler,
+) !void {
+    try writer.writeAll("\"diagnostics\":[");
+
+    if (compiler) |actual| {
+        var need_comma = false;
+        for (actual.primaryDiagnostics()) |diag| {
+            if (need_comma) try writer.writeByte(',');
+            try writeDiagnosticObject(writer, diag);
+            need_comma = true;
+        }
+        if (actual.omittedPrimaryDiagnostic(.mm0)) |diag| {
+            if (need_comma) try writer.writeByte(',');
+            try writeDiagnosticObject(writer, diag);
+            need_comma = true;
+        }
+        if (actual.omittedPrimaryDiagnostic(.proof)) |diag| {
+            if (need_comma) try writer.writeByte(',');
+            try writeDiagnosticObject(writer, diag);
+            need_comma = true;
+        }
+        for (actual.warningDiagnostics()) |diag| {
+            if (need_comma) try writer.writeByte(',');
+            try writeDiagnosticObject(writer, diag);
+            need_comma = true;
+        }
+    }
+
+    try writer.writeByte(']');
+}
+
+fn writeDiagnosticObject(
+    writer: anytype,
+    diag: mm0.CompilerDiagnostic,
+) !void {
+    try writer.writeByte('{');
+    try writeJsonStringField(
+        writer,
+        "message",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    try writer.writeByte(',');
+    try writeJsonStringField(writer, "severity", @tagName(diag.severity));
+    try writer.writeByte(',');
+    try writeJsonStringField(writer, "source", @tagName(diag.source));
+    try writer.writeByte(',');
+    try writeJsonStringField(writer, "error", @errorName(diag.err));
+    try writer.writeByte(',');
+    try writeOptionalStringField(writer, "theorem", diag.theorem_name);
+    try writer.writeByte(',');
+    try writeOptionalStringField(writer, "block", diag.block_name);
+    try writer.writeByte(',');
+    try writeOptionalStringField(writer, "lineLabel", diag.line_label);
+    try writer.writeByte(',');
+    try writeOptionalStringField(writer, "rule", diag.rule_name);
+    try writer.writeByte(',');
+    try writeOptionalStringField(writer, "name", diag.name);
+    try writer.writeByte(',');
+    try writeOptionalStringField(writer, "expected", diag.expected_name);
+    try writer.writeByte(',');
+    try writeOptionalStringField(
+        writer,
+        "phase",
+        if (diag.phase) |phase|
+            diagnosticPhaseName(phase)
+        else
+            null,
+    );
+    try writer.writeByte(',');
+    try writeOptionalUsizeField(
+        writer,
+        "spanStart",
+        if (diag.span) |span| span.start else null,
+    );
+    try writer.writeByte(',');
+    try writeOptionalUsizeField(
+        writer,
+        "spanEnd",
+        if (diag.span) |span| span.end else null,
+    );
+    try writer.writeByte(',');
+    try writeDiagnosticDetailField(writer, diag);
+    try writer.writeByte(',');
+    try writeDiagnosticNotesField(writer, diag);
+    try writer.writeByte(',');
+    try writeDiagnosticRelatedField(writer, diag);
+    try writer.writeByte('}');
 }
 
 fn writeJsonStringField(
@@ -227,6 +284,24 @@ fn writeDiagnosticDetailField(
     try writer.writeAll("\"detail\":");
     switch (diag.detail) {
         .none => try writer.writeAll("null"),
+        .omitted_diagnostics => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(
+                writer,
+                "kind",
+                "omitted_diagnostics",
+            );
+            try writer.writeByte(',');
+            try writer.writeAll("\"summary\":\"");
+            try mm0.writeCompilerOmittedDiagnosticsSummary(
+                writer,
+                info.count,
+            );
+            try writer.writeByte('"');
+            try writer.writeByte(',');
+            try writer.print("\"count\":{d}", .{info.count});
+            try writer.writeAll("}");
+        },
         .unknown_math_token => |info| {
             try writer.writeAll("{");
             try writeJsonStringField(writer, "kind", "unknown_math_token");

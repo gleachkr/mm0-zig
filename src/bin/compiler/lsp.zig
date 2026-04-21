@@ -286,6 +286,7 @@ const Handler = struct {
                 uri,
                 doc.version,
                 doc.text,
+                path,
             ),
             .proof => try self.analyzeProofDocument(
                 arena,
@@ -304,7 +305,22 @@ const Handler = struct {
         uri: []const u8,
         version: i32,
         text: []const u8,
+        path: []const u8,
     ) !void {
+        if (siblingPathForMm0(arena, path)) |proof_path| {
+            const proof_uri = try pathToUri(arena, proof_path);
+            if (self.docs.get(proof_uri)) |proof_doc| {
+                try self.analyzeProofDocument(
+                    arena,
+                    proof_uri,
+                    proof_doc.version,
+                    proof_doc.text,
+                    proof_path,
+                );
+                return;
+            }
+        } else |_| {}
+
         const diag_context: DiagnosticContext = .{
             .mm0 = .{
                 .uri = uri,
@@ -314,12 +330,19 @@ const Handler = struct {
         };
 
         var compiler = mm0.Compiler.init(arena, text);
-        compiler.check() catch |err| {
-            if (compiler.last_diagnostic) |diag| {
-                try self.publishCompilerDiagnostic(
+        compiler.analyzeMm0() catch |err| {
+            if (compiler.last_diagnostic != null or
+                compiler.primaryDiagnostics().len != 0 or
+                compiler.warningDiagnostics().len != 0)
+            {
+                try self.publishCompilerSourceDiagnostics(
                     arena,
                     diag_context,
-                    diag,
+                    compiler.primaryDiagnostics(),
+                    compiler.warningDiagnostics(),
+                    compiler.last_diagnostic,
+                    compiler.omittedPrimaryDiagnostic(.mm0),
+                    .mm0,
                 );
             } else {
                 try self.publishMessageDiagnostic(
@@ -332,10 +355,13 @@ const Handler = struct {
             }
             return;
         };
-        try self.publishCompilerWarnings(
+        try self.publishCompilerSourceDiagnostics(
             arena,
             diag_context,
+            compiler.primaryDiagnostics(),
             compiler.warningDiagnostics(),
+            null,
+            compiler.omittedPrimaryDiagnostic(.mm0),
             .mm0,
         );
     }
@@ -397,34 +423,29 @@ const Handler = struct {
             mm0_loaded.text,
             proof_text,
         );
-        compiler.writeMmb() catch |err| {
-            if (compiler.last_diagnostic) |diag| {
-                switch (diag.source) {
-                    .mm0 => {
-                        try self.publishCompilerDiagnostic(
-                            arena,
-                            diag_context,
-                            diag,
-                        );
-                        try self.clearDiagnostics(
-                            arena,
-                            proof_uri,
-                            proof_version,
-                        );
-                    },
-                    .proof => {
-                        try self.publishCompilerDiagnostic(
-                            arena,
-                            diag_context,
-                            diag,
-                        );
-                        try self.clearDiagnostics(
-                            arena,
-                            mm0_loaded.uri,
-                            mm0_loaded.version,
-                        );
-                    },
-                }
+        compiler.analyze() catch |err| {
+            if (compiler.last_diagnostic != null or
+                compiler.primaryDiagnostics().len != 0 or
+                compiler.warningDiagnostics().len != 0)
+            {
+                try self.publishCompilerSourceDiagnostics(
+                    arena,
+                    diag_context,
+                    compiler.primaryDiagnostics(),
+                    compiler.warningDiagnostics(),
+                    compiler.last_diagnostic,
+                    compiler.omittedPrimaryDiagnostic(.proof),
+                    .proof,
+                );
+                try self.publishCompilerSourceDiagnostics(
+                    arena,
+                    diag_context,
+                    compiler.primaryDiagnostics(),
+                    compiler.warningDiagnostics(),
+                    compiler.last_diagnostic,
+                    compiler.omittedPrimaryDiagnostic(.mm0),
+                    .mm0,
+                );
             } else {
                 try self.publishMessageDiagnostic(
                     arena,
@@ -442,16 +463,22 @@ const Handler = struct {
             return;
         };
 
-        try self.publishCompilerWarnings(
+        try self.publishCompilerSourceDiagnostics(
             arena,
             diag_context,
+            compiler.primaryDiagnostics(),
             compiler.warningDiagnostics(),
+            compiler.last_diagnostic,
+            compiler.omittedPrimaryDiagnostic(.proof),
             .proof,
         );
-        try self.publishCompilerWarnings(
+        try self.publishCompilerSourceDiagnostics(
             arena,
             diag_context,
+            compiler.primaryDiagnostics(),
             compiler.warningDiagnostics(),
+            compiler.last_diagnostic,
+            compiler.omittedPrimaryDiagnostic(.mm0),
             .mm0,
         );
     }
@@ -511,6 +538,39 @@ const Handler = struct {
             arena,
             diag_context,
             diags,
+            source,
+            self.offset_encoding,
+        );
+        if (diagnostics.len == 0) {
+            try self.clearDiagnostics(arena, doc.uri, doc.version);
+            return;
+        }
+        try self.publishDiagnostics(
+            arena,
+            doc.uri,
+            doc.version,
+            diagnostics,
+        );
+    }
+
+    fn publishCompilerSourceDiagnostics(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        diag_context: DiagnosticContext,
+        primary: []const mm0.CompilerDiagnostic,
+        warnings: []const mm0.CompilerDiagnostic,
+        extra: ?mm0.CompilerDiagnostic,
+        omitted: ?mm0.CompilerDiagnostic,
+        source: mm0.CompilerDiagnosticSource,
+    ) !void {
+        const doc = diag_context.sourceDocument(source) orelse return;
+        const diagnostics = try compilerSourceDiagnosticsToLsp(
+            arena,
+            diag_context,
+            primary,
+            warnings,
+            extra,
+            omitted,
             source,
             self.offset_encoding,
         );
@@ -707,6 +767,77 @@ fn compilerDiagnosticsToLsp(
     return result;
 }
 
+fn compilerSourceDiagnosticsToLsp(
+    arena: std.mem.Allocator,
+    diag_context: DiagnosticContext,
+    primary: []const mm0.CompilerDiagnostic,
+    warnings: []const mm0.CompilerDiagnostic,
+    extra: ?mm0.CompilerDiagnostic,
+    omitted: ?mm0.CompilerDiagnostic,
+    source: mm0.CompilerDiagnosticSource,
+    encoding: lsp.offsets.Encoding,
+) ![]types.Diagnostic {
+    var count: usize = 0;
+    if (extra) |diag| {
+        if (diag.source == source) count += 1;
+    }
+    for (primary) |diag| {
+        if (diag.source == source) count += 1;
+    }
+    for (warnings) |diag| {
+        if (diag.source == source) count += 1;
+    }
+    if (omitted) |diag| {
+        if (diag.source == source) count += 1;
+    }
+
+    const result = try arena.alloc(types.Diagnostic, count);
+    var out_idx: usize = 0;
+    if (extra) |diag| {
+        if (diag.source == source) {
+            result[out_idx] = try compilerDiagnosticToLsp(
+                arena,
+                diag_context,
+                diag,
+                encoding,
+            );
+            out_idx += 1;
+        }
+    }
+    for (primary) |diag| {
+        if (diag.source != source) continue;
+        result[out_idx] = try compilerDiagnosticToLsp(
+            arena,
+            diag_context,
+            diag,
+            encoding,
+        );
+        out_idx += 1;
+    }
+    if (omitted) |diag| {
+        if (diag.source == source) {
+            result[out_idx] = try compilerDiagnosticToLsp(
+                arena,
+                diag_context,
+                diag,
+                encoding,
+            );
+            out_idx += 1;
+        }
+    }
+    for (warnings) |diag| {
+        if (diag.source != source) continue;
+        result[out_idx] = try compilerDiagnosticToLsp(
+            arena,
+            diag_context,
+            diag,
+            encoding,
+        );
+        out_idx += 1;
+    }
+    return result;
+}
+
 fn compilerDiagnosticToLsp(
     arena: std.mem.Allocator,
     diag_context: DiagnosticContext,
@@ -840,7 +971,19 @@ fn compilerDiagnosticMessage(
     var buf = std.ArrayListUnmanaged(u8){};
     var writer = buf.writer(arena);
 
-    try writer.writeAll(mm0.compilerDiagnosticSummary(diag));
+    if (diag.kind == .omitted_diagnostics) {
+        switch (diag.detail) {
+            .omitted_diagnostics => |detail| {
+                try mm0.writeCompilerOmittedDiagnosticsSummary(
+                    &writer,
+                    detail.count,
+                );
+            },
+            else => try writer.writeAll(mm0.compilerDiagnosticSummary(diag)),
+        }
+    } else {
+        try writer.writeAll(mm0.compilerDiagnosticSummary(diag));
+    }
     try appendNamedLine(&writer, "theorem", diag.theorem_name);
     try appendNamedLine(&writer, "proof block", diag.block_name);
     try appendNamedLine(&writer, "line", diag.line_label);
@@ -856,6 +999,7 @@ fn compilerDiagnosticMessage(
 
     switch (diag.detail) {
         .none => {},
+        .omitted_diagnostics => {},
         .unknown_math_token => |detail| {
             try writer.print("\ntoken: {s}", .{detail.token});
         },
@@ -1018,6 +1162,118 @@ test "compiler diagnostics filter by source for LSP publishing" {
     try std.testing.expectEqual(
         types.DiagnosticSeverity.Warning,
         mm0_diags[0].severity.?,
+    );
+}
+
+test "compiler source diagnostics merge primaries and warnings" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const primary = [_]mm0.CompilerDiagnostic{
+        .{
+            .kind = .generic,
+            .err = error.UnknownTerm,
+            .source = .mm0,
+        },
+    };
+    const warnings = [_]mm0.CompilerDiagnostic{
+        .{
+            .severity = .warning,
+            .kind = .generic,
+            .err = error.AmbiguousAcuiMatch,
+            .source = .mm0,
+        },
+        .{
+            .severity = .warning,
+            .kind = .generic,
+            .err = error.UnknownLabel,
+            .source = .proof,
+        },
+    };
+    const extra: mm0.CompilerDiagnostic = .{
+        .kind = .generic,
+        .err = error.ExpectedIdent,
+        .source = .mm0,
+    };
+    const diag_context: DiagnosticContext = .{
+        .mm0 = .{
+            .uri = "file:///tmp/test.mm0",
+            .text = "",
+            .version = 1,
+        },
+        .proof = .{
+            .uri = "file:///tmp/test.auf",
+            .text = "",
+            .version = 1,
+        },
+    };
+
+    const diags = try compilerSourceDiagnosticsToLsp(
+        allocator,
+        diag_context,
+        &primary,
+        &warnings,
+        extra,
+        null,
+        .mm0,
+        .@"utf-16",
+    );
+    try std.testing.expectEqual(@as(usize, 3), diags.len);
+    try std.testing.expectEqual(
+        types.DiagnosticSeverity.Error,
+        diags[0].severity.?,
+    );
+    try std.testing.expectEqual(
+        types.DiagnosticSeverity.Error,
+        diags[1].severity.?,
+    );
+    try std.testing.expectEqual(
+        types.DiagnosticSeverity.Warning,
+        diags[2].severity.?,
+    );
+}
+
+test "compiler source diagnostics append omitted summary" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const allocator = arena_state.allocator();
+
+    const primary = [_]mm0.CompilerDiagnostic{
+        .{
+            .kind = .generic,
+            .err = error.UnknownTerm,
+            .source = .mm0,
+        },
+    };
+    const omitted: mm0.CompilerDiagnostic = .{
+        .kind = .omitted_diagnostics,
+        .err = error.DiagnosticsOmitted,
+        .source = .mm0,
+        .detail = .{ .omitted_diagnostics = .{ .count = 17 } },
+    };
+    const diag_context: DiagnosticContext = .{
+        .mm0 = .{
+            .uri = "file:///tmp/test.mm0",
+            .text = "",
+            .version = 1,
+        },
+    };
+
+    const diags = try compilerSourceDiagnosticsToLsp(
+        allocator,
+        diag_context,
+        &primary,
+        &.{},
+        null,
+        omitted,
+        .mm0,
+        .@"utf-16",
+    );
+    try std.testing.expectEqual(@as(usize, 2), diags.len);
+    try std.testing.expectEqualStrings(
+        "17 more diagnostics omitted",
+        diags[1].message,
     );
 }
 
