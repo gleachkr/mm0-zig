@@ -1,8 +1,14 @@
 const std = @import("std");
 const DefOps = @import("../../def_ops.zig");
 const Fixtures = @import("./fixtures.zig");
+const TemplateExpr = @import("../../rules.zig").TemplateExpr;
+const ArgInfo = @import("../../../trusted/parse.zig").ArgInfo;
+const AssertionKind = @import("../../../trusted/parse.zig").AssertionKind;
 const RewriteRule = @import("../../rewrite_registry.zig").RewriteRule;
+const RewriteRegistry = @import("../../rewrite_registry.zig").RewriteRegistry;
 const ExprId = @import("../../expr.zig").ExprId;
+const TheoremContext = @import("../../expr.zig").TheoremContext;
+const GlobalEnv = @import("../../env.zig").GlobalEnv;
 const Context = DefOps.Context;
 const Testing = DefOps.Testing;
 const MatchSession = Testing.MatchSession;
@@ -249,7 +255,8 @@ test "rewrite application ignores placeholder roots" {
     );
     const start_dummy_info_len = state.symbolic_dummy_infos.items.len;
     const start_witness_count = state.witnesses.count();
-    const start_placeholder_count = fixture.theorem.theorem_placeholders.items.len;
+    const start_placeholder_count =
+        fixture.theorem.theorem_placeholders.items.len;
 
     const rule = fixture.registry.getRewriteRules(
         fixture.comp_term_id,
@@ -270,5 +277,127 @@ test "rewrite application ignores placeholder roots" {
     try std.testing.expectEqual(
         start_placeholder_count,
         fixture.theorem.theorem_placeholders.items.len,
+    );
+}
+
+test "rewrite application rejects bindings with forbidden deps" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var env = GlobalEnv.init(allocator);
+    var registry = RewriteRegistry.init(allocator);
+
+    const arr_term_id: u32 = 0;
+    const sb_ty_term_id: u32 = 1;
+    try env.term_names.put("arr", arr_term_id);
+    try env.term_names.put("sb_ty", sb_ty_term_id);
+    try env.terms.append(allocator, .{
+        .name = "arr",
+        .args = &.{},
+        .arg_names = &.{},
+        .dummy_args = &.{},
+        .ret_sort_name = "ty",
+        .is_def = false,
+        .body = null,
+    });
+    try env.terms.append(allocator, .{
+        .name = "sb_ty",
+        .args = &.{},
+        .arg_names = &.{},
+        .dummy_args = &.{},
+        .ret_sort_name = "ty",
+        .is_def = false,
+        .body = null,
+    });
+
+    const lhs: TemplateExpr = .{ .app = .{
+        .term_id = sb_ty_term_id,
+        .args = try allocator.dupe(TemplateExpr, &.{
+            TemplateExpr{ .binder = 0 },
+            TemplateExpr{ .binder = 1 },
+            TemplateExpr{ .app = .{
+                .term_id = arr_term_id,
+                .args = try allocator.dupe(TemplateExpr, &.{
+                    TemplateExpr{ .binder = 2 },
+                    TemplateExpr{ .binder = 3 },
+                }),
+            } },
+        }),
+    } };
+    const rhs: TemplateExpr = .{ .app = .{
+        .term_id = arr_term_id,
+        .args = try allocator.dupe(TemplateExpr, &.{
+            TemplateExpr{ .binder = 2 },
+            TemplateExpr{ .binder = 3 },
+        }),
+    } };
+
+    const rule_args = try allocator.dupe(ArgInfo, &.{
+        ArgInfo{ .sort_name = "tm", .bound = true, .deps = 0 },
+        ArgInfo{ .sort_name = "tm", .bound = false, .deps = 1 },
+        ArgInfo{ .sort_name = "ty", .bound = false, .deps = 0 },
+        ArgInfo{ .sort_name = "ty", .bound = false, .deps = 0 },
+    });
+    try env.rule_names.put("sb_ty_arr", 0);
+    try env.rules.append(allocator, .{
+        .name = "sb_ty_arr",
+        .args = rule_args,
+        .arg_names = &.{},
+        .hyps = &.{},
+        .concl = lhs,
+        .kind = AssertionKind.axiom,
+        .is_local = false,
+    });
+
+    var rules = std.ArrayListUnmanaged(RewriteRule){};
+    try rules.append(allocator, .{
+        .rule_id = 0,
+        .lhs = lhs,
+        .rhs = rhs,
+        .num_binders = rule_args.len,
+        .head_term_id = sb_ty_term_id,
+    });
+    try registry.rewrites_by_head.put(sb_ty_term_id, rules);
+
+    var theorem = TheoremContext.init(allocator);
+    const theorem_args = [_]ArgInfo{
+        .{ .sort_name = "tm", .bound = true, .deps = 1 },
+        .{ .sort_name = "tm", .bound = false, .deps = 1 },
+        .{ .sort_name = "ty", .bound = false, .deps = 1 },
+        .{ .sort_name = "ty", .bound = false, .deps = 1 },
+    };
+    theorem.arg_infos = &theorem_args;
+    try theorem.seedBinderCount(theorem_args.len);
+
+    var ctx = Context.initWithRegistry(
+        allocator,
+        &theorem,
+        &env,
+        &registry,
+    );
+    defer ctx.deinit();
+
+    var state = try MatchSession.init(allocator, 0);
+    defer state.deinit(allocator);
+
+    const x = theorem.theorem_vars.items[0];
+    const u = theorem.theorem_vars.items[1];
+    const a = theorem.theorem_vars.items[2];
+    const b = theorem.theorem_vars.items[3];
+    const arr_expr = try theorem.interner.internApp(arr_term_id, &.{ a, b });
+    const expr = try theorem.interner.internApp(
+        sb_ty_term_id,
+        &.{ x, u, arr_expr },
+    );
+
+    const rule = registry.getRewriteRules(sb_ty_term_id)[0];
+    try std.testing.expect(
+        (try Testing.applyRewriteRuleToExpr(
+            &ctx,
+            rule,
+            expr,
+            &state,
+        )) == null,
     );
 }

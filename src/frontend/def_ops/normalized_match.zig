@@ -418,7 +418,7 @@ pub const RuleMatchSession = struct {
         actual: ExprId,
     ) anyerror!bool {
         var symbolic_engine = self.engine();
-        return try symbolic_engine.matchTemplateRecState(
+        return try symbolic_engine.tryMatchTemplateStateDirect(
             template,
             actual,
             &self.state,

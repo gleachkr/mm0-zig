@@ -1136,6 +1136,67 @@ test "transparent matching reuses resolved allc representatives" {
     );
 }
 
+test "failed transparent match rolls back binder state" {
+    const src =
+        \\\provable sort obj;
+        \\\term pair (a b: obj): obj;
+        \\\axiom dup (x: obj): $ pair x x $ > $ pair x x $;
+        \\\theorem host (a b: obj): $ pair a b $;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    var env = FrontendEnv.GlobalEnv.init(arena.allocator());
+    var theorem = FrontendExpr.TheoremContext.init(arena.allocator());
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(
+        arena.allocator(),
+    );
+    defer theorem_vars.deinit();
+    var found_theorem = false;
+
+    while (try parser.next()) |stmt| {
+        try env.addStmt(stmt);
+        switch (stmt) {
+            .assertion => |value| {
+                if (value.kind != .theorem or found_theorem) continue;
+                try theorem.seedAssertion(value);
+                for (value.arg_names, value.arg_exprs) |name, expr| {
+                    if (name) |actual_name| {
+                        try theorem_vars.put(actual_name, expr);
+                    }
+                }
+                found_theorem = true;
+            },
+            else => {},
+        }
+    }
+    if (!found_theorem) return error.MissingAssertion;
+
+    const actual_expr = try parser.parseFormulaText(" pair a b ", &theorem_vars);
+    const actual = try theorem.internParsedExpr(actual_expr);
+
+    const rule_id = env.getRuleId("dup") orelse return error.MissingRule;
+    const rule = &env.rules.items[rule_id];
+    const seeds = try allocNoneSeeds(arena.allocator(), rule.args.len);
+    defer arena.allocator().free(seeds);
+
+    var def_ops = DefOps.Context.init(arena.allocator(), &theorem, &env);
+    defer def_ops.deinit();
+
+    var session = try def_ops.beginRuleMatch(rule.args, seeds);
+    defer session.deinit();
+
+    try std.testing.expect(!try session.matchTransparent(rule.hyps[0], actual));
+
+    const bindings = try session.materializeOptionalBindings();
+    defer arena.allocator().free(bindings);
+    try std.testing.expectEqual(@as(usize, 1), bindings.len);
+    try std.testing.expectEqual(@as(?FrontendExpr.ExprId, null), bindings[0]);
+}
+
 test "resolveBindingSeeds preserves symbolic state through view reuse" {
     // Same setup as the strict finalization test: matching "mono f" against
     // keep_all's ∀ x p produces symbolic bindings with hidden-dummy structure.

@@ -1,0 +1,141 @@
+pi_dep_ty
+---------
+
+l1: $ g ⊢ Ty (Π x : A. B) $ by pi_form [#1, #2]
+
+app_dep_raw
+-----------
+
+l1: $ g ⊢ f · u : [x/u] B $ by app_elim [#1, #2]
+
+imp_form
+--------
+
+l1: $ g , y : A ⊢ Ty B $ by weaken [#2]
+l2: $ g ⊢ Ty (Π y : A. B) $ by pi_form [#1, l1]
+
+pi_imp_dist_ty
+--------------
+
+l1: $ g , x : A ⊢ Ty (p → q) $ by imp_form [#2, #3]
+l2: $ g ⊢ Ty (Π x : A. (p → q)) $ by pi_form [#1, l1]
+l3: $ g ⊢ Ty (Π x : A. p) $ by pi_form [#1, #2]
+l4: $ g ⊢ Ty (Π x : A. q) $ by pi_form [#1, #3]
+l5: $ g ⊢ Ty ((Π x : A. p) → (Π x : A. q)) $ by imp_form [l3, l4]
+l6: $ g ⊢ Ty ((Π x : A. (p → q)) → ((Π x : A. p) → (Π x : A. q))) $
+  by imp_form [l2, l5]
+
+pi_const_alpha_has_ty
+---------------------
+
+l0: $ ctx_eq g g $ by ctx_refl
+l1: $ tm_eq t t $ by tm_refl
+l2: $ ty_eq (Π x : A. B) (Π y : A. B) $ by pi_const_alpha
+l3: $ (t : (Π x : A. B)) <=> (t : (Π y : A. B)) $
+  by has_ty_congr [l1, l2]
+l4: $ (g ⊢ (t : (Π x : A. B))) <=> (g ⊢ (t : (Π y : A. B))) $
+  by nd_congr [l0, l3]
+l5: $ g ⊢ t : (Π y : A. B) $ by jiff_mp [l4, #1]
+
+pi_alpha_has_ty
+---------------
+
+l0: $ ctx_eq g g $ by ctx_refl
+l1: $ tm_eq t t $ by tm_refl
+l2: $ ty_eq (Π x : A. B) (Π y : A. [x/y] B) $ by pi_alpha
+l3: $ (t : (Π x : A. B)) <=> (t : (Π y : A. [x/y] B)) $
+  by has_ty_congr [l1, l2]
+l4: $ (g ⊢ (t : (Π x : A. B))) <=> (g ⊢ (t : (Π y : A. [x/y] B))) $
+  by nd_congr [l0, l3]
+l5: $ g ⊢ t : (Π y : A. [x/y] B) $ by jiff_mp [l4, #1]
+
+imp_dist_tm
+-----------
+
+l1: $ g ⊢ f : (Π z : A. [y/z] (p → q)) $ by pi_alpha_has_ty [#4]
+l2: $ g ⊢ h : (Π z : A. [y/z] p) $ by pi_alpha_has_ty [#5]
+l3: $ g , y : A ⊢ f : (Π z : A. [y/z] (p → q)) $ by weaken [l1]
+l4: $ g , y : A ⊢ h : (Π z : A. [y/z] p) $ by weaken [l2]
+l5: $ g , y : A ⊢ y : A $ by var
+l6: $ g , y : A ⊢ f · y : (p → q) $ by app_elim [l3, l5]
+l7: $ g , y : A ⊢ h · y : p $ by app_elim [l4, l5]
+l8: $ g , y : A ⊢ (f · y) · (h · y) : q $ by app_elim [l6, l7]
+l9: $ g ⊢ (λ y : A. (f · y) · (h · y)) : (Π y : A. q) $
+  by lam_intro [#1, #3, l8]
+
+imp_dist_bool_tm
+----------------
+
+l1: $ g ⊢ f : (Π z : A. (Bool → Bool)) $
+  by pi_const_alpha_has_ty [#2]
+l2: $ g ⊢ h : (Π z : A. Bool) $
+  by pi_const_alpha_has_ty [#3]
+l3: $ g , y : A ⊢ f : (Π z : A. (Bool → Bool)) $ by weaken [l1]
+l4: $ g , y : A ⊢ h : (Π z : A. Bool) $ by weaken [l2]
+l5: $ g , y : A ⊢ y : A $ by var
+l6: $ g , y : A ⊢ f · y : (Bool → Bool) $ by app_elim [l3, l5]
+l7: $ g , y : A ⊢ h · y : Bool $ by app_elim [l4, l5]
+l8: $ g , y : A ⊢ (f · y) · (h · y) : Bool $ by app_elim [l6, l7]
+l9: $ g , y : A ⊢ Ty Bool $ by bool_form
+l10: $ g ⊢ (λ y : A. (f · y) · (h · y)) : (Π y : A. Bool) $
+  by lam_intro [#1, l9, l8]
+
+one_ty
+------
+
+l1: $ g ⊢ zero : Nat $ by zero_ty
+l2: $ g ⊢ suc zero : Nat $ by suc_ty [l1]
+
+pi_nat_nat_ty
+-------------
+
+l1: $ g ⊢ Ty Nat $ by nat_form 
+l2: $ g , x : Nat ⊢ Ty Nat $ by nat_form 
+l3: $ g ⊢ Ty (Π x : Nat. Nat) $ by pi_dep_ty [l1, l2]
+
+pi_nat_bool_ty
+--------------
+
+l1: $ g ⊢ Ty Nat $ by nat_form 
+l2: $ g , x : Nat ⊢ Ty Bool $ by bool_form 
+l3: $ g ⊢ Ty (Π x : Nat. Bool) $ by pi_dep_ty [l1, l2]
+
+second_var
+----------
+
+l1: $ x : A , y : B ⊢ y : B $ by var 
+
+exchange_demo
+-------------
+
+l1: $ x : A , y : B ⊢ y : B $ by second_var 
+l2: $ x : A , y : B , z : B ⊢ y : B $ by weaken [l1]
+l3: $ y : B , x : A , z : B ⊢ y : B $ by exchange [l2]
+
+id_nat_ty
+---------
+
+l1: $ g ⊢ Ty Nat $ by nat_form 
+l2: $ g , x : Nat ⊢ Ty Nat $ by nat_form 
+l3: $ g , x : Nat ⊢ x : Nat $ by var 
+l4: $ g ⊢ (λ x : Nat. x) : (Π x : Nat. Nat) $ by lam_intro [l1, l2, l3]
+
+const_true_ty
+-------------
+
+l1: $ g ⊢ Ty Nat $ by nat_form 
+l2: $ g , x : Nat ⊢ Ty Bool $ by bool_form 
+l3: $ g , x : Nat ⊢ true : Bool $ by true_ty 
+l4: $ g ⊢ (λ x : Nat. true) : (Π x : Nat. Bool) $ by lam_intro [l1, l2, l3]
+
+app_id_nat
+----------
+
+l1: $ g ⊢ (λ x : Nat. x) : (Π x : Nat. Nat) $ by id_nat_ty 
+l2: $ g ⊢ (λ x : Nat. x) · n : Nat $ by app_elim [l1, #1]
+
+app_const_true
+--------------
+
+l1: $ g ⊢ (λ x : Nat. true) : (Π x : Nat. Bool) $ by const_true_ty 
+l2: $ g ⊢ (λ x : Nat. true) · n : Bool $ by app_elim [l1, #1]

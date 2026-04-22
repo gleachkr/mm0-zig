@@ -1,0 +1,272 @@
+delimiter $ ( [ / . : , ) ] $;
+strict provable sort jdg;
+sort ctx;
+sort ty;
+--| @vars y z
+sort tm;
+
+-- This v1 demo omits an explicit context well-formedness judgment.
+-- Context entries are just typing judgments, which keeps the core examples
+-- small enough to read while still exercising dependent binders.
+-- Under Curry-Howard, the `Π` and `→` examples below read like familiar
+-- quantified intuitionistic logic formulas.
+
+term jiff (J K: jdg): jdg;
+infixr jiff: $<=>$ prec 20;
+
+term ctx_eq (g h: ctx): jdg;
+term emp: ctx;
+--| @acui ctx_assoc _ emp _
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (J: jdg): ctx;
+coercion hyp: jdg > ctx;
+term nd (g: ctx) (J: jdg): jdg;
+infixl nd: $⊢$ prec 0;
+
+term tm_eq (s t: tm): jdg;
+term ty_eq (A B: ty): jdg;
+term Nat: ty;
+term Bool: ty;
+term is_ty (A: ty): jdg;
+prefix is_ty: $Ty$ prec 60;
+
+term has_ty (t: tm) (A: ty): jdg;
+infixl has_ty: $:$ prec 40;
+
+term Pi (A: ty) {x: tm} (B: ty x): ty;
+notation Pi (A: ty) {x: tm} (B: ty x): ty =
+  ($Π$:20) x ($:$:40) A ($.$:0) B;
+
+def arr (A B: ty) {.x: tm}: ty = $ Π x : A. B $;
+infixr arr: $→$ prec 25;
+
+term lam (A: ty) {x: tm} (t: tm x): tm;
+notation lam (A: ty) {x: tm} (t: tm x): tm =
+  ($λ$:20) x ($:$:40) A ($.$:0) t;
+
+term app (f u: tm): tm;
+infixl app: $·$ prec 70;
+
+term zero: tm;
+term suc (t: tm): tm;
+term true: tm;
+term false: tm;
+
+term sb_ty {x: tm} (u: tm) (B: ty x): ty;
+notation sb_ty {x: tm} (u: tm) (B: ty x): ty =
+  ($[$:41) x ($/$:0) u ($]$:0) B;
+
+term sb_tm {x: tm} (u: tm) (t: tm x): tm;
+notation sb_tm {x: tm} (u: tm) (t: tm x): tm =
+  ($⟦$:41) x ($/$:0) u ($⟧$:0) t;
+
+--| @relation jdg jiff jiff_refl jiff_trans jiff_sym jiff_mp
+axiom jiff_refl (J: jdg): $ J <=> J $;
+axiom jiff_trans (J K L: jdg):
+  $ J <=> K $ > $ K <=> L $ > $ J <=> L $;
+axiom jiff_sym (J K: jdg): $ J <=> K $ > $ K <=> J $;
+axiom jiff_mp (J K: jdg): $ J <=> K $ > $ J $ > $ K $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @relation tm tm_eq tm_refl tm_trans tm_sym _
+axiom tm_refl (t: tm): $ tm_eq t t $;
+axiom tm_trans (s t u: tm):
+  $ tm_eq s t $ > $ tm_eq t u $ > $ tm_eq s u $;
+axiom tm_sym (s t: tm): $ tm_eq s t $ > $ tm_eq t s $;
+
+--| @relation ty ty_eq ty_refl ty_trans ty_sym _
+axiom ty_refl (A: ty): $ ty_eq A A $;
+axiom ty_trans (A B C: ty):
+  $ ty_eq A B $ > $ ty_eq B C $ > $ ty_eq A C $;
+axiom ty_sym (A B: ty): $ ty_eq A B $ > $ ty_eq B A $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ > $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (J K: jdg):
+  $ ctx_eq g h $ > $ J <=> K $ > $ (g ⊢ J) <=> (h ⊢ K) $;
+
+--| @congr
+axiom is_ty_congr (A B: ty):
+  $ ty_eq A B $ > $ Ty A <=> Ty B $;
+
+--| @congr
+axiom has_ty_congr (t u: tm) (A B: ty):
+  $ tm_eq t u $ > $ ty_eq A B $ > $ (t : A) <=> (u : B) $;
+
+--| @congr
+axiom pi_congr (A B: ty) {x: tm} (C D: ty x):
+  $ ty_eq A B $ > $ ty_eq C D $ > $ ty_eq (Π x : A. C) (Π x : B. D) $;
+
+--| @congr
+axiom lam_congr (A B: ty) {x: tm} (t u: tm x):
+  $ ty_eq A B $ > $ tm_eq t u $ > $ tm_eq (λ x : A. t) (λ x : B. u) $;
+
+--| @congr
+axiom app_congr (f g u v: tm):
+  $ tm_eq f g $ > $ tm_eq u v $ > $ tm_eq (f · u) (g · v) $;
+
+--| @congr
+axiom sb_ty_congr {x: tm} (u v: tm) (A B: ty x):
+  $ tm_eq u v $ > $ ty_eq A B $ > $ ty_eq ([x/u] A) ([x/v] B) $;
+
+--| @rewrite
+axiom sb_ty_nat {x: tm} (u: tm): $ ty_eq ([x/u] Nat) Nat $;
+
+--| @rewrite
+axiom sb_ty_bool {x: tm} (u: tm): $ ty_eq ([x/u] Bool) Bool $;
+
+--| @rewrite
+axiom sb_ty_arr {x: tm} (u: tm) (A B: ty):
+  $ ty_eq ([x/u] (A → B)) (A → B) $;
+
+--| @rewrite
+axiom sb_ty_id {x: tm} (A: ty x):
+  $ ty_eq ([x/x] A) A $;
+
+--| @rewrite
+axiom sb_ty_swap {x y: tm} (A: ty y):
+  $ ty_eq ([x/y] [y/x] A) A $;
+
+--| @rewrite
+axiom sb_ty_other {x y: tm} (u: tm) (A: ty y):
+  $ ty_eq ([x/u] A) A $;
+
+--| @rewrite
+axiom sb_ty_free {x: tm} (u: tm) (A: ty):
+  $ ty_eq ([x/u] A) A $;
+
+--| @rewrite
+axiom sb_tm_var {x: tm} (u: tm): $ tm_eq (⟦ x / u ⟧ x) u $;
+
+--| @rewrite
+axiom sb_tm_true {x: tm} (u: tm): $ tm_eq (⟦ x / u ⟧ true) true $;
+
+axiom pi_const_alpha (A B: ty) {x y: tm}:
+  $ ty_eq (Π x : A. B) (Π y : A. B) $;
+
+--| @alpha x y
+axiom pi_alpha (A: ty) {x y: tm} (B: ty x):
+  $ ty_eq (Π x : A. B) (Π y : A. [x/y] B) $;
+
+--| @alpha x y
+axiom lam_alpha {x y: tm} (A: ty) (t: tm x y):
+  $ tm_eq (λ x : A. t) (λ y : A. ⟦ x / y ⟧ t) $;
+
+axiom nat_form (g: ctx): $ g ⊢ Ty Nat $;
+axiom bool_form (g: ctx): $ g ⊢ Ty Bool $;
+
+axiom zero_ty (g: ctx): $ g ⊢ zero : Nat $;
+axiom suc_ty (g: ctx) (t: tm): $ g ⊢ t : Nat $ > $ g ⊢ suc t : Nat $;
+axiom true_ty (g: ctx): $ g ⊢ true : Bool $;
+axiom false_ty (g: ctx): $ g ⊢ false : Bool $;
+
+axiom var (g: ctx) {x: tm} (A: ty): $ g , x : A ⊢ x : A $;
+
+axiom pi_form (g: ctx) (A: ty) {x: tm} (B: ty x):
+  $ g ⊢ Ty A $
+  > $ g , x : A ⊢ Ty B $
+  > $ g ⊢ Ty (Π x : A. B) $;
+
+axiom lam_intro (g: ctx) (A: ty) {x: tm} (B: ty x) (t: tm x):
+  $ g ⊢ Ty A $
+  > $ g , x : A ⊢ Ty B $
+  > $ g , x : A ⊢ t : B $
+  > $ g ⊢ (λ x : A. t) : (Π x : A. B) $;
+
+axiom weaken (g: ctx) (J K: jdg):
+  $ g ⊢ J $
+  > $ g , K ⊢ J $;
+
+--| @view (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm) (q: ty): $ g ⊢ f : (Π x : A. B) $ > $ g ⊢ u : A $ > $ g ⊢ f · u : q $
+--| @freshen f x
+--| @normalize conc
+axiom app_elim (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm):
+  $ g ⊢ f : (Π x : A. B) $
+  > $ g ⊢ u : A $
+  > $ g ⊢ f · u : [x/u] B $;
+
+--| @normalize hyp0 conc
+axiom exchange (g: ctx) {x y: tm} (A: ty) (B: ty y) (d: ctx x y)
+  (J: jdg x y):
+  $ g , x : A , y : B , d ⊢ J $
+  > $ g , y : B , x : A , d ⊢ J $;
+
+theorem pi_dep_ty (g: ctx) (A: ty) {x: tm} (B: ty x):
+  $ g ⊢ Ty A $
+  > $ g , x : A ⊢ Ty B $
+  > $ g ⊢ Ty (Π x : A. B) $;
+
+theorem app_dep_raw (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm):
+  $ g ⊢ f : (Π x : A. B) $
+  > $ g ⊢ u : A $
+  > $ g ⊢ f · u : [x/u] B $;
+
+theorem imp_form (g: ctx) (A B: ty):
+  $ g ⊢ Ty A $
+  > $ g ⊢ Ty B $
+  > $ g ⊢ Ty (A → B) $;
+
+theorem pi_imp_dist_ty (g: ctx) (A: ty) {x: tm} (p q: ty x):
+  $ g ⊢ Ty A $
+  > $ g , x : A ⊢ Ty p $
+  > $ g , x : A ⊢ Ty q $
+  > $ g ⊢ Ty ((Π x : A. (p → q)) → ((Π x : A. p) → (Π x : A. q))) $;
+
+theorem pi_const_alpha_has_ty (g: ctx) (A B: ty) (t: tm) {x y: tm}:
+  $ g ⊢ t : (Π x : A. B) $
+  > $ g ⊢ t : (Π y : A. B) $;
+
+theorem pi_alpha_has_ty (g: ctx) (A: ty) (t: tm) {x y: tm} (B: ty x):
+  $ g ⊢ t : (Π x : A. B) $
+  > $ g ⊢ t : (Π y : A. [x/y] B) $;
+
+theorem imp_dist_tm (g: ctx) (A: ty) (f h: tm) {y: tm} (p q: ty y):
+  $ g ⊢ Ty A $
+  > $ g , y : A ⊢ Ty p $
+  > $ g , y : A ⊢ Ty q $
+  > $ g ⊢ f : (Π y : A. (p → q)) $
+  > $ g ⊢ h : (Π y : A. p) $
+  > $ g ⊢ (λ y : A. (f · y) · (h · y)) : (Π y : A. q) $;
+
+theorem imp_dist_bool_tm (g: ctx) (A: ty) (f h: tm) {y: tm}:
+  $ g ⊢ Ty A $
+  > $ g ⊢ f : (Π y : A. (Bool → Bool)) $
+  > $ g ⊢ h : (Π y : A. Bool) $
+  > $ g ⊢ (λ y : A. (f · y) · (h · y)) : (Π y : A. Bool) $;
+theorem one_ty (g: ctx): $ g ⊢ suc zero : Nat $;
+
+theorem pi_nat_nat_ty (g: ctx) {x: tm}: $ g ⊢ Ty (Π x : Nat. Nat) $;
+
+theorem pi_nat_bool_ty (g: ctx) {x: tm}: $ g ⊢ Ty (Π x : Nat. Bool) $;
+
+theorem second_var {x y: tm} (A B: ty): $ x : A , y : B ⊢ y : B $;
+
+theorem exchange_demo {x y z: tm} (A B: ty):
+  $ x : A , y : B , z : B ⊢ y : B $
+  > $ y : B , x : A , z : B ⊢ y : B $;
+
+theorem id_nat_ty (g: ctx) {x: tm}:
+  $ g ⊢ (λ x : Nat. x) : (Π x : Nat. Nat) $;
+
+theorem const_true_ty (g: ctx) {x: tm}:
+  $ g ⊢ (λ x : Nat. true) : (Π x : Nat. Bool) $;
+
+theorem app_id_nat (g: ctx) {x: tm} (n: tm):
+  $ g ⊢ n : Nat $
+  > $ g ⊢ (λ x : Nat. x) · n : Nat $;
+
+theorem app_const_true (g: ctx) {x: tm} (n: tm):
+  $ g ⊢ n : Nat $
+  > $ g ⊢ (λ x : Nat. true) · n : Bool $;

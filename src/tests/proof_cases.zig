@@ -217,8 +217,14 @@ const proof_cases = [_]ProofCase{
         .outcome = .{ .fail = error.UnifyMismatch },
     },
     .{ .stem = "pass_struct_nd_imp_intro", .outcome = .pass },
+    .{ .stem = "pass_struct_exchange_ctx", .outcome = .pass },
+    .{
+        .stem = "fail_struct_exchange_bad_B_dep",
+        .outcome = .{ .fail = error.DepViolation },
+    },
     .{ .stem = "pass_struct_nd_forall_elim", .outcome = .pass },
     .{ .stem = "pass_view_infer_ctx_raw", .outcome = .pass },
+    .{ .stem = "pass_view_materialized_nonderived", .outcome = .pass },
     .{ .stem = "pass_view_recover_free_hole_auto", .outcome = .pass },
     .{ .stem = "pass_view_recover_symbolic_hole", .outcome = .pass },
     .{ .stem = "pass_view_acui_joint_cover", .outcome = .pass },
@@ -226,6 +232,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "prawitz", .outcome = .pass },
     .{ .stem = "barcan", .outcome = .pass },
     .{ .stem = "church", .outcome = .pass },
+    .{ .stem = "mltt_min", .outcome = .pass },
     .{ .stem = "peano", .outcome = .pass },
     .{
         .stem = "fail_missing_binding",

@@ -1,0 +1,6 @@
+fail_struct_exchange_bad_B_dep
+-----------------------------
+
+l1: $ nd (decl z A , (decl y Bad , (decl x A , mark x y))) p $
+  by exchange (x := $ x $, y := $ y $, A := $ A $, B := $ Bad $, p := $ p $)
+  [#1]

@@ -1,0 +1,4 @@
+view_materialized_nonderived
+----------------------------
+
+l1: $ g , y : A ⊢ f · y : (p → q) $ by app_elim [#1, #2]

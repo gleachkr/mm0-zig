@@ -2,6 +2,8 @@ const std = @import("std");
 const ExprId = @import("./expr.zig").ExprId;
 const ExprNode = @import("./expr.zig").ExprNode;
 const TheoremContext = @import("./expr.zig").TheoremContext;
+const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
+const BindingValidation = @import("./binding_validation.zig");
 const GlobalEnv = @import("./env.zig").GlobalEnv;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
 const RewriteRule = @import("./rewrite_registry.zig").RewriteRule;
@@ -137,7 +139,33 @@ pub const Canonicalizer = struct {
         for (bindings, 0..) |binding, idx| {
             concrete[idx] = binding orelse return null;
         }
+        if (!try self.validateRewriteBindings(rule, concrete)) {
+            return null;
+        }
         return try self.theorem.instantiateTemplate(rule.rhs, concrete);
+    }
+
+    fn validateRewriteBindings(
+        self: *Canonicalizer,
+        rule: RewriteRule,
+        bindings: []const ExprId,
+    ) Error!bool {
+        if (rule.rule_id >= self.env.rules.items.len) return false;
+        const rule_decl = &self.env.rules.items[rule.rule_id];
+
+        var infos: [56]BindingValidation.ExprInfo = undefined;
+        std.debug.assert(bindings.len <= infos.len);
+        for (bindings, 0..) |binding, idx| {
+            infos[idx] = try BindingValidation.currentExprInfo(
+                self.env,
+                self.theorem,
+                binding,
+            );
+        }
+        return BindingValidation.firstViolation(
+            rule_decl.args,
+            infos[0..bindings.len],
+        ) == null;
     }
 
     fn canonicalizeAcui(
@@ -157,3 +185,115 @@ pub const Canonicalizer = struct {
         return try support.canonicalizeAcui(expr_id, acui);
     }
 };
+
+test "canonicalizer rejects rewrite bindings with forbidden deps" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    var env = GlobalEnv.init(allocator);
+    var registry = RewriteRegistry.init(allocator);
+
+    const TemplateExpr = @import("./rules.zig").TemplateExpr;
+    const arr_term_id: u32 = 0;
+    const sb_ty_term_id: u32 = 1;
+    try env.term_names.put("arr", arr_term_id);
+    try env.term_names.put("sb_ty", sb_ty_term_id);
+    try env.terms.append(allocator, .{
+        .name = "arr",
+        .args = &.{},
+        .arg_names = &.{},
+        .dummy_args = &.{},
+        .ret_sort_name = "ty",
+        .is_def = false,
+        .body = null,
+    });
+    try env.terms.append(allocator, .{
+        .name = "sb_ty",
+        .args = &.{},
+        .arg_names = &.{},
+        .dummy_args = &.{},
+        .ret_sort_name = "ty",
+        .is_def = false,
+        .body = null,
+    });
+
+    const lhs: TemplateExpr = .{ .app = .{
+        .term_id = sb_ty_term_id,
+        .args = try allocator.dupe(TemplateExpr, &.{
+            TemplateExpr{ .binder = 0 },
+            TemplateExpr{ .binder = 1 },
+            TemplateExpr{ .app = .{
+                .term_id = arr_term_id,
+                .args = try allocator.dupe(TemplateExpr, &.{
+                    TemplateExpr{ .binder = 2 },
+                    TemplateExpr{ .binder = 3 },
+                }),
+            } },
+        }),
+    } };
+    const rhs: TemplateExpr = .{ .app = .{
+        .term_id = arr_term_id,
+        .args = try allocator.dupe(TemplateExpr, &.{
+            TemplateExpr{ .binder = 2 },
+            TemplateExpr{ .binder = 3 },
+        }),
+    } };
+
+    const rule_args = try allocator.dupe(ArgInfo, &.{
+        ArgInfo{ .sort_name = "tm", .bound = true, .deps = 0 },
+        ArgInfo{ .sort_name = "tm", .bound = false, .deps = 1 },
+        ArgInfo{ .sort_name = "ty", .bound = false, .deps = 0 },
+        ArgInfo{ .sort_name = "ty", .bound = false, .deps = 0 },
+    });
+    try env.rule_names.put("sb_ty_arr", 0);
+    try env.rules.append(allocator, .{
+        .name = "sb_ty_arr",
+        .args = rule_args,
+        .arg_names = &.{},
+        .hyps = &.{},
+        .concl = lhs,
+        .kind = .axiom,
+        .is_local = false,
+    });
+
+    var rules = std.ArrayListUnmanaged(RewriteRule){};
+    try rules.append(allocator, .{
+        .rule_id = 0,
+        .lhs = lhs,
+        .rhs = rhs,
+        .num_binders = rule_args.len,
+        .head_term_id = sb_ty_term_id,
+    });
+    try registry.rewrites_by_head.put(sb_ty_term_id, rules);
+
+    var theorem = TheoremContext.init(allocator);
+    const theorem_args = [_]ArgInfo{
+        .{ .sort_name = "tm", .bound = true, .deps = 1 },
+        .{ .sort_name = "tm", .bound = false, .deps = 1 },
+        .{ .sort_name = "ty", .bound = false, .deps = 1 },
+        .{ .sort_name = "ty", .bound = false, .deps = 1 },
+    };
+    theorem.arg_infos = &theorem_args;
+    try theorem.seedBinderCount(theorem_args.len);
+
+    const x = theorem.theorem_vars.items[0];
+    const u = theorem.theorem_vars.items[1];
+    const a = theorem.theorem_vars.items[2];
+    const b = theorem.theorem_vars.items[3];
+
+    const arr_expr = try theorem.interner.internApp(arr_term_id, &.{ a, b });
+    const expr = try theorem.interner.internApp(
+        sb_ty_term_id,
+        &.{ x, u, arr_expr },
+    );
+
+    var canonicalizer = Canonicalizer.init(
+        allocator,
+        &theorem,
+        &registry,
+        &env,
+    );
+
+    try std.testing.expectEqual(expr, try canonicalizer.canonicalize(expr));
+}

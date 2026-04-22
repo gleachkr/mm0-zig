@@ -26,6 +26,8 @@ pub const SymbolicEngine = struct {
         TransparentMatch.instantiateDefTowardExpr;
     pub const matchTemplateRecState =
         TransparentMatch.matchTemplateRecState;
+    pub const tryMatchTemplateStateDirect =
+        TransparentMatch.tryMatchTemplateStateDirect;
     pub const matchTemplateSemantic = SemanticSearch.matchTemplateSemantic;
     pub const collectSemanticStepCandidatesExpr =
         SemanticSearch.collectSemanticStepCandidatesExpr;

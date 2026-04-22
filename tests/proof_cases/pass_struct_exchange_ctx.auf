@@ -1,0 +1,6 @@
+pass_struct_exchange_ctx
+------------------------
+
+l1: $ nd (decl z A , (decl y B , (decl x A , mark x y))) p $
+  by exchange (x := $ x $, y := $ y $, A := $ A $, B := $ B $, p := $ p $)
+  [#1]

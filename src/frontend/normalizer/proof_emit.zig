@@ -5,6 +5,7 @@ const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const DiagScratch = @import("../diag_scratch.zig");
 const RewriteRule = @import("../rewrite_registry.zig").RewriteRule;
+const BindingValidation = @import("../binding_validation.zig");
 const MissingCongruenceReason = DiagScratch.MissingCongruenceReason;
 const ResolvedRelation = @import("../rewrite_registry.zig").ResolvedRelation;
 const ResolvedStructuralCombiner =
@@ -634,77 +635,29 @@ fn traceExprPair(
     );
 }
 
-const ExprInfo = struct {
-    sort_name: []const u8,
-    bound: bool,
-    deps: u55,
-};
-
 pub fn validateRewriteBindings(
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
     expected_args: []const ArgInfo,
     bindings: []const ExprId,
 ) !void {
-    if (expected_args.len != bindings.len) return error.SortMismatch;
-
-    var bound_deps: [56]u55 = undefined;
-    var bound_len: usize = 0;
-    var prev_deps: [56]u55 = undefined;
-    var prev_len: usize = 0;
-    for (expected_args, bindings) |expected, expr_id| {
-        const info = try rewriteExprInfo(env, theorem, expr_id);
-        if (!std.mem.eql(u8, info.sort_name, expected.sort_name)) {
-            return error.SortMismatch;
-        }
-        if (expected.bound) {
-            if (!info.bound) return error.BoundnessMismatch;
-            var k: usize = 0;
-            while (k < prev_len) : (k += 1) {
-                if (prev_deps[k] & info.deps != 0) return error.DepViolation;
-            }
-            bound_deps[bound_len] = info.deps;
-            bound_len += 1;
-        } else {
-            for (0..bound_len) |k| {
-                if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0)
-                    continue;
-                if (bound_deps[k] & info.deps != 0) return error.DepViolation;
-            }
-        }
-        prev_deps[prev_len] = info.deps;
-        prev_len += 1;
+    var infos: [56]BindingValidation.ExprInfo = undefined;
+    std.debug.assert(bindings.len <= infos.len);
+    for (bindings, 0..) |expr_id, idx| {
+        infos[idx] = try BindingValidation.currentExprInfo(
+            env,
+            theorem,
+            expr_id,
+        );
     }
-}
-
-pub fn rewriteExprInfo(
-    env: *const GlobalEnv,
-    theorem: *const TheoremContext,
-    expr_id: ExprId,
-) !ExprInfo {
-    if (try theorem.currentLeafInfo(expr_id)) |leaf| {
-        return .{
-            .sort_name = leaf.sort_name,
-            .bound = leaf.bound,
-            .deps = leaf.deps,
-        };
+    switch (BindingValidation.firstViolation(
+        expected_args,
+        infos[0..bindings.len],
+    ) orelse return) {
+        .len_mismatch, .sort_mismatch => return error.SortMismatch,
+        .boundness_mismatch => return error.BoundnessMismatch,
+        .dep_violation => return error.DepViolation,
     }
-
-    const app = switch (theorem.interner.node(expr_id).*) {
-        .app => |value| value,
-        .variable, .placeholder => unreachable,
-    };
-    if (app.term_id >= env.terms.items.len) return error.UnknownTerm;
-
-    var deps: u55 = 0;
-    for (app.args) |arg_id| {
-        deps |= (try rewriteExprInfo(env, theorem, arg_id)).deps;
-    }
-    return .{
-        .sort_name = env.terms.items[app.term_id].ret_sort_name,
-        .bound = false,
-        .deps = deps,
-    };
 }
 
 test "validateRewriteBindings rejects bound alias after regular arg" {

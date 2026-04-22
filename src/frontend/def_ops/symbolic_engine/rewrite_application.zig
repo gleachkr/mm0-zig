@@ -2,6 +2,7 @@ const std = @import("std");
 const ExprId = @import("../../expr.zig").ExprId;
 const TemplateExpr = @import("../../rules.zig").TemplateExpr;
 const RewriteRule = @import("../../rewrite_registry.zig").RewriteRule;
+const BindingValidation = @import("../../binding_validation.zig");
 const Types = @import("../types.zig");
 const MatchState = @import("../match_state.zig");
 const TransparentMatch = @import("./transparent_match.zig");
@@ -317,26 +318,51 @@ fn validateRewriteRuleBindings(
 ) anyerror!bool {
     if (rule.rule_id >= self.shared.env.rules.items.len) return false;
     const rule_decl = &self.shared.env.rules.items[rule.rule_id];
-    if (rule_decl.args.len != rewrite_bindings.len) return false;
 
-    for (rule_decl.args, rewrite_bindings) |arg, binding_opt| {
+    var infos: [56]BindingValidation.ExprInfo = undefined;
+    std.debug.assert(rewrite_bindings.len <= infos.len);
+    for (rewrite_bindings, 0..) |binding_opt, idx| {
         const binding = binding_opt orelse return false;
-        const sort_name = try rewriteBoundValueSortName(
-            self,
-            binding,
-            state,
-        ) orelse return false;
-        if (!std.mem.eql(u8, sort_name, arg.sort_name)) return false;
-        const actual_bound = try rewriteBoundValueIsBound(
-            self,
-            binding,
-            state,
-        );
-        if (arg.bound and !actual_bound) {
-            return false;
-        }
+        infos[idx] = .{
+            .sort_name = try rewriteBoundValueSortName(
+                self,
+                binding,
+                state,
+            ) orelse return false,
+            .bound = try rewriteBoundValueIsBound(
+                self,
+                binding,
+                state,
+            ),
+            .deps = try rewriteBoundValueDeps(
+                self,
+                binding,
+                state,
+            ),
+        };
     }
-    return true;
+    return BindingValidation.firstViolation(
+        rule_decl.args,
+        infos[0..rewrite_bindings.len],
+    ) == null;
+}
+
+fn rewriteBoundValueDeps(
+    self: anytype,
+    bound: BoundValue,
+    state: *MatchSession,
+) anyerror!u55 {
+    var deps: u55 = 0;
+    var seen_binders: std.AutoHashMapUnmanaged(usize, void) = .empty;
+    defer seen_binders.deinit(self.shared.allocator);
+    try WitnessState.collectConcreteDepsInBoundValue(
+        self,
+        bound,
+        state,
+        &deps,
+        &seen_binders,
+    );
+    return deps;
 }
 
 fn rewriteBoundValueSortName(

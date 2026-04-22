@@ -15,6 +15,7 @@ const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const NormalizeSpec = @import("../rewrite_registry.zig").NormalizeSpec;
 const Normalizer = @import("../normalizer.zig").Normalizer;
 const Canonicalizer = @import("../canonicalizer.zig").Canonicalizer;
+const BindingValidation = @import("../binding_validation.zig");
 const InferenceSolver = @import("../inference_solver.zig").Solver;
 const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const CompilerViews = @import("./views.zig");
@@ -44,11 +45,7 @@ pub const RuleMatchResult = union(enum) {
     unresolved_dummy_witness,
 };
 
-const ExprInfo = struct {
-    sort_name: []const u8,
-    bound: bool,
-    deps: u55,
-};
+const ExprInfo = BindingValidation.ExprInfo;
 
 pub const DepViolationDetail = CompilerDiag.DepViolationDiagnosticDetail;
 
@@ -1770,54 +1767,23 @@ pub fn firstDepViolation(
     rule_arg_names: []const ?[]const u8,
     bindings: []const ExprId,
 ) !?DepViolationDetail {
-    var bound_deps: [56]u55 = undefined;
-    var bound_arg_indices: [56]usize = undefined;
-    var bound_infos: [56]ExprInfo = undefined;
-    var bound_len: usize = 0;
-    var prev_deps: [56]u55 = undefined;
-    var prev_arg_indices: [56]usize = undefined;
-    var prev_infos: [56]ExprInfo = undefined;
-    var prev_len: usize = 0;
-
-    for (bindings, rule_args, 0..) |binding, expected, idx| {
-        const info = try exprInfo(env, theorem, theorem_args, binding);
-        if (expected.bound) {
-            for (0..prev_len) |k| {
-                if (prev_deps[k] & info.deps != 0) {
-                    return depViolationDetail(
-                        rule_arg_names,
-                        prev_arg_indices[k],
-                        prev_infos[k],
-                        idx,
-                        info,
-                    );
-                }
-            }
-            bound_deps[bound_len] = info.deps;
-            bound_arg_indices[bound_len] = idx;
-            bound_infos[bound_len] = info;
-            bound_len += 1;
-        } else {
-            for (0..bound_len) |k| {
-                if ((@as(u64, expected.deps) >> @intCast(k)) & 1 != 0)
-                    continue;
-                if (bound_deps[k] & info.deps != 0) {
-                    return depViolationDetail(
-                        rule_arg_names,
-                        bound_arg_indices[k],
-                        bound_infos[k],
-                        idx,
-                        info,
-                    );
-                }
-            }
-        }
-        prev_deps[prev_len] = info.deps;
-        prev_arg_indices[prev_len] = idx;
-        prev_infos[prev_len] = info;
-        prev_len += 1;
+    var infos: [56]ExprInfo = undefined;
+    std.debug.assert(bindings.len <= infos.len);
+    for (bindings, 0..) |binding, idx| {
+        infos[idx] = try exprInfo(env, theorem, theorem_args, binding);
     }
-    return null;
+
+    const violation = BindingValidation.firstDepViolation(
+        rule_args,
+        infos[0..bindings.len],
+    ) orelse return null;
+    return depViolationDetail(
+        rule_arg_names,
+        violation.first_idx,
+        infos[violation.first_idx],
+        violation.second_idx,
+        infos[violation.second_idx],
+    );
 }
 
 fn depViolationDetail(
@@ -1871,29 +1837,12 @@ pub fn exprInfo(
     theorem_args: []const ArgInfo,
     expr_id: ExprId,
 ) !ExprInfo {
-    if (try theorem.leafInfoWithArgs(theorem_args, expr_id)) |leaf| {
-        return .{
-            .sort_name = leaf.sort_name,
-            .bound = leaf.bound,
-            .deps = leaf.deps,
-        };
-    }
-
-    const app = switch (theorem.interner.node(expr_id).*) {
-        .app => |value| value,
-        .variable, .placeholder => unreachable,
-    };
-    if (app.term_id >= env.terms.items.len) return error.UnknownTerm;
-
-    var deps: u55 = 0;
-    for (app.args) |arg_id| {
-        deps |= (try exprInfo(env, theorem, theorem_args, arg_id)).deps;
-    }
-    return .{
-        .sort_name = env.terms.items[app.term_id].ret_sort_name,
-        .bound = false,
-        .deps = deps,
-    };
+    return try BindingValidation.exprInfo(
+        env,
+        theorem,
+        theorem_args,
+        expr_id,
+    );
 }
 
 pub fn hasOmittedBindings(bindings: []const ?ExprId) bool {

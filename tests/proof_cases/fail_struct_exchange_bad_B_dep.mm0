@@ -1,0 +1,51 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+sort obj;
+sort ty;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+--| @acui ctx_assoc _ emp _
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term decl (v: obj) (T: ty): ctx;
+term mark (x y: obj): ctx;
+term nd (g: ctx) (p: wff): wff;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ > $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ nd g a ↔ nd h b $;
+
+--| @normalize hyp0 conc
+axiom exchange (g: ctx) {x y: obj} (A: ty) (B: ty y) (d: ctx x y) (p: wff):
+  $ nd (g , (decl x A , (decl y B , d))) p $
+  > $ nd (g , (decl y B , (decl x A , d))) p $;
+
+theorem fail_struct_exchange_bad_B_dep {x y z: obj}
+    (A: ty) (Bad: ty x y) (p: wff):
+  $ nd (decl z A , (decl x A , (decl y Bad , mark x y))) p $
+  > $ nd (decl z A , (decl y Bad , (decl x A , mark x y))) p $;
