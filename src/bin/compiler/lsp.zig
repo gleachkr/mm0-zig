@@ -1037,6 +1037,24 @@ fn compilerDiagnosticMessage(
                 .{ detail.second_deps, detail.second_bound },
             );
         },
+        .definition_body => |detail| {
+            try writer.print(
+                "\ndeclared sort: {s}",
+                .{detail.declared_sort_name},
+            );
+            try writer.print(
+                "\nactual sort: {s}",
+                .{detail.actual_sort_name},
+            );
+            try writer.print(
+                "\nbody deps: 0x{x}",
+                .{detail.body_deps},
+            );
+            try writer.print(
+                "\nhidden binders: {d}",
+                .{detail.hidden_binder_count},
+            );
+        },
         .missing_congruence_rule => |detail| {
             try writer.writeAll("\nmissing congruence: ");
             try mm0.writeCompilerMissingCongruenceRuleSummary(&writer, detail);

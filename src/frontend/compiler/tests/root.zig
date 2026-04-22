@@ -1441,6 +1441,55 @@ test "compiler reports conflicting dependency binders by name" {
     }
 }
 
+test "compiler rejects def bodies that leave hidden binders free" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\sort obj;
+        \\def bad {.x: obj}: obj = $ x $;
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        "",
+    );
+    try std.testing.expectError(
+        error.DepViolation,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DepViolation, diag.err);
+    try std.testing.expectEqual(.invalid_definition_body, diag.kind);
+    try std.testing.expectEqualStrings(
+        "definition body leaves hidden binders free in the result",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("bad", mm0_src[span.start..span.end]);
+    switch (diag.detail) {
+        .definition_body => |detail| {
+            try std.testing.expectEqualStrings("obj", detail.declared_sort_name);
+            try std.testing.expectEqualStrings("obj", detail.actual_sort_name);
+            try std.testing.expectEqual(
+                @as(usize, 1),
+                detail.hidden_binder_count,
+            );
+            try std.testing.expect(detail.body_deps != 0);
+        },
+        else => return error.ExpectedDefinitionBodyDetail,
+    }
+    try std.testing.expectEqual(@as(usize, 2), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "definition bodies are checked before the def unify stream runs",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqualStrings(
+        "the body still depends on one or more hidden binders",
+        diag.noteSlice()[1].message,
+    );
+}
+
 test "multi-remainder inference handles a simple ACUI cover" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(

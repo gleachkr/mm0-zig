@@ -17,12 +17,14 @@ const ProofScriptParser = @import("../proof_script.zig").Parser;
 const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
 const Span = @import("../proof_script.zig").Span;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
+const BindingValidation = @import("../binding_validation.zig");
 const CompilerEmit = @import("./emit.zig");
 const Check = @import("./check.zig");
 const RuleCatalog = @import("./rule_catalog.zig");
 const CompilerVars = @import("./vars.zig");
 const CompilerDiag = @import("./diag.zig");
 const CompilerLints = @import("./lints.zig");
+const Diagnostic = CompilerDiag.Diagnostic;
 const DiagnosticSource = CompilerDiag.DiagnosticSource;
 
 const ViewDecl = Metadata.ViewDecl;
@@ -37,6 +39,80 @@ pub const Output = struct {
     theorems: std.ArrayListUnmanaged(TheoremRecord) = .{},
     statements: std.ArrayListUnmanaged(Statement) = .{},
 };
+
+fn validateDefinitionBody(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *const MM0Parser,
+    env: *const GlobalEnv,
+    term_stmt: TermStmt,
+) !void {
+    if (!term_stmt.is_def) return;
+
+    var theorem = TheoremContext.init(allocator);
+    defer theorem.deinit();
+    try theorem.seedTerm(parser, term_stmt);
+
+    const body = term_stmt.body orelse return error.ExpectedDefinitionBody;
+    const body_expr_id = try theorem.internParsedExpr(body);
+    const body_info = try BindingValidation.currentDefExprInfo(
+        env,
+        &theorem,
+        body_expr_id,
+    );
+
+    if (!std.mem.eql(u8, body_info.sort_name, term_stmt.ret_sort_name)) {
+        var diag = Diagnostic{
+            .kind = .invalid_definition_body,
+            .err = error.SortMismatch,
+            .name = term_stmt.name,
+            .span = CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+            .detail = .{ .definition_body = .{
+                .declared_sort_name = term_stmt.ret_sort_name,
+                .actual_sort_name = body_info.sort_name,
+                .body_deps = body_info.deps,
+                .hidden_binder_count = term_stmt.dummy_args.len,
+            } },
+        };
+        CompilerDiag.addNote(
+            &diag,
+            "the definition body must already have the declared result sort",
+            .mm0,
+            null,
+        );
+        self.setDiagnostic(diag);
+        return error.SortMismatch;
+    }
+
+    if (body_info.deps != 0) {
+        var diag = Diagnostic{
+            .kind = .invalid_definition_body,
+            .err = error.DepViolation,
+            .name = term_stmt.name,
+            .span = CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+            .detail = .{ .definition_body = .{
+                .declared_sort_name = term_stmt.ret_sort_name,
+                .actual_sort_name = body_info.sort_name,
+                .body_deps = body_info.deps,
+                .hidden_binder_count = term_stmt.dummy_args.len,
+            } },
+        };
+        CompilerDiag.addNote(
+            &diag,
+            "definition bodies are checked before the def unify stream runs",
+            .mm0,
+            null,
+        );
+        CompilerDiag.addNote(
+            &diag,
+            "the body still depends on one or more hidden binders",
+            .mm0,
+            null,
+        );
+        self.setDiagnostic(diag);
+        return error.DepViolation;
+    }
+}
 
 const DependencyStatus = enum {
     ok,
@@ -126,6 +202,15 @@ pub fn run(
             },
             .term => |term_stmt| {
                 const term_stmt_copy = term_stmt;
+                validateDefinitionBody(
+                    self,
+                    allocator,
+                    &parser,
+                    &env,
+                    term_stmt,
+                ) catch |err| {
+                    return err;
+                };
                 if (emit) |out| {
                     const term_record = CompilerEmit.compileTermRecord(
                         allocator,

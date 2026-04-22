@@ -1,0 +1,4 @@
+delimiter $ ( ) $;
+sort obj;
+
+def bad {.x: obj}: obj = $ x $;

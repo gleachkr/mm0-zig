@@ -92,6 +92,10 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_fold", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_all_elim_ctx_twostep", .outcome = .pass },
     .{ .stem = "pass_def_hidden_dummy_imp_elim_ctx_mixed", .outcome = .pass },
+    .{
+        .stem = "fail_def_body_free_hidden_binder",
+        .outcome = .{ .fail = error.DepViolation },
+    },
     .{ .stem = "pass_def_acui_assoc", .outcome = .pass },
     .{
         .stem = "fail_def_unfold_then_rewrite",
@@ -233,6 +237,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "barcan", .outcome = .pass },
     .{ .stem = "church", .outcome = .pass },
     .{ .stem = "mltt_min", .outcome = .pass },
+    .{ .stem = "martin_lof", .outcome = .pass },
     .{ .stem = "peano", .outcome = .pass },
     .{
         .stem = "fail_missing_binding",

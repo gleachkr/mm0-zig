@@ -446,6 +446,16 @@ pub const Compiler = struct {
                 .first_bound = info.first_bound,
                 .second_bound = info.second_bound,
             } },
+            .definition_body => |info| .{ .definition_body = .{
+                .declared_sort_name = self.stableRequiredString(
+                    info.declared_sort_name,
+                ),
+                .actual_sort_name = self.stableRequiredString(
+                    info.actual_sort_name,
+                ),
+                .body_deps = info.body_deps,
+                .hidden_binder_count = info.hidden_binder_count,
+            } },
             .missing_congruence_rule => |info| .{ .missing_congruence_rule = .{
                 .reason = info.reason,
                 .term_name = self.stableString(info.term_name),
@@ -549,6 +559,24 @@ fn reportDiagnosticDetail(
             std.debug.print(
                 "  second binder: deps=0x{x} bound={}\n",
                 .{ info.second_deps, info.second_bound },
+            );
+        },
+        .definition_body => |info| {
+            std.debug.print(
+                "  declared sort: {s}\n",
+                .{info.declared_sort_name},
+            );
+            std.debug.print(
+                "  actual sort: {s}\n",
+                .{info.actual_sort_name},
+            );
+            std.debug.print(
+                "  body deps: 0x{x}\n",
+                .{info.body_deps},
+            );
+            std.debug.print(
+                "  hidden binders: {d}\n",
+                .{info.hidden_binder_count},
             );
         },
         .missing_congruence_rule => |info| {

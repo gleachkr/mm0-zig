@@ -61,6 +61,62 @@ pub fn currentExprInfo(
     return try exprInfo(env, theorem, theorem.arg_infos, expr_id);
 }
 
+pub fn defExprInfo(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    theorem_args: []const ArgInfo,
+    expr_id: ExprId,
+) !ExprInfo {
+    if (try theorem.leafInfoWithArgs(theorem_args, expr_id)) |leaf| {
+        return .{
+            .sort_name = leaf.sort_name,
+            .bound = leaf.bound,
+            .deps = leaf.deps,
+        };
+    }
+
+    const app = switch (theorem.interner.node(expr_id).*) {
+        .app => |value| value,
+        .variable, .placeholder => unreachable,
+    };
+    if (app.term_id >= env.terms.items.len) return error.UnknownTerm;
+
+    const term = env.terms.items[app.term_id];
+    var deps: u55 = 0;
+    var bound_deps: [56]u55 = undefined;
+    var bound_len: usize = 0;
+
+    for (term.args, app.args) |arg, arg_id| {
+        const arg_info = try defExprInfo(env, theorem, theorem_args, arg_id);
+        if (arg.bound) {
+            bound_deps[bound_len] = arg_info.deps;
+            bound_len += 1;
+            continue;
+        }
+
+        var arg_deps = arg_info.deps;
+        for (0..bound_len) |j| {
+            if ((@as(u64, arg.deps) >> @intCast(j)) & 1 == 0) continue;
+            arg_deps &= ~bound_deps[j];
+        }
+        deps |= arg_deps;
+    }
+
+    return .{
+        .sort_name = term.ret_sort_name,
+        .bound = false,
+        .deps = deps,
+    };
+}
+
+pub fn currentDefExprInfo(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    expr_id: ExprId,
+) !ExprInfo {
+    return try defExprInfo(env, theorem, theorem.arg_infos, expr_id);
+}
+
 pub fn firstViolation(
     expected_args: []const ArgInfo,
     infos: []const ExprInfo,

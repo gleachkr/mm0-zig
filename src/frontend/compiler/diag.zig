@@ -33,6 +33,7 @@ pub const DiagnosticKind = enum {
     duplicate_label,
     empty_proof_block,
     final_line_mismatch,
+    invalid_definition_body,
     unused_theorem_parameter,
     unused_definition_parameter,
 };
@@ -69,6 +70,13 @@ pub const InferenceDiagnosticDetail = struct {
     first_unsolved_binder_name: ?[]const u8 = null,
 };
 
+pub const DefinitionBodyDiagnosticDetail = struct {
+    declared_sort_name: []const u8,
+    actual_sort_name: []const u8,
+    body_deps: u55,
+    hidden_binder_count: usize,
+};
+
 pub const DiagnosticDetail = union(enum) {
     none,
     omitted_diagnostics: struct {
@@ -83,6 +91,7 @@ pub const DiagnosticDetail = union(enum) {
     },
     inference_failure: InferenceDiagnosticDetail,
     dep_violation: DepViolationDiagnosticDetail,
+    definition_body: DefinitionBodyDiagnosticDetail,
     missing_congruence_rule: MissingCongruenceRuleDetail,
     hypothesis_ref: struct {
         index: usize,
@@ -620,8 +629,19 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
         .duplicate_label => "duplicate proof line label",
         .empty_proof_block => "proof block is empty",
         .final_line_mismatch => "last proof line does not prove the theorem conclusion",
+        .invalid_definition_body => definitionBodySummary(diag.err),
         .unused_theorem_parameter => "theorem parameter is unused; if it is only needed during proofs, use @vars and an explicit theorem-local dummy instead",
         .unused_definition_parameter => "definition parameter is unused; remove it if it is not part of the definition",
+    };
+}
+
+fn definitionBodySummary(err: anyerror) []const u8 {
+    return switch (err) {
+        error.DepViolation =>
+            "definition body leaves hidden binders free in the result",
+        error.SortMismatch =>
+            "definition body sort does not match the declared result sort",
+        else => "definition body does not satisfy the declared result",
     };
 }
 

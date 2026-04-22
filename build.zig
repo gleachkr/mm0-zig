@@ -194,6 +194,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/mac_lane.auf"),
         "web-demo/fixtures/mac_lane.auf",
     );
+    const install_martin_lof_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/martin_lof.mm0"),
+        "web-demo/fixtures/martin_lof.mm0",
+    );
+    const install_martin_lof_proof = b.addInstallFile(
+        b.path("tests/proof_cases/martin_lof.auf"),
+        "web-demo/fixtures/martin_lof.auf",
+    );
     const install_peano_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/peano.mm0"),
         "web-demo/fixtures/peano.mm0",
@@ -230,6 +238,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_calculus_product_rule_proof.step);
     web_demo_step.dependOn(&install_category_pullback_mm0.step);
     web_demo_step.dependOn(&install_category_pullback_proof.step);
+    web_demo_step.dependOn(&install_martin_lof_mm0.step);
+    web_demo_step.dependOn(&install_martin_lof_proof.step);
     web_demo_step.dependOn(&install_peano_mm0.step);
     web_demo_step.dependOn(&install_peano_proof.step);
 
