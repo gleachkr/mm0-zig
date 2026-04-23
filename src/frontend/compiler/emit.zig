@@ -629,6 +629,9 @@ pub fn buildTheoremProofBody(
 ) ![]const u8 {
     try validateProofBoundaryExprs(theorem, theorem.theorem_hyps.items);
     try CheckedIr.validateLines(theorem, lines);
+    if (try CheckedIr.firstDepViolation(env, theorem, lines)) |_| {
+        return error.DepViolation;
+    }
 
     var emitter = try TheoremProofEmitter.init(allocator, theorem, env, lines);
     defer emitter.deinit();

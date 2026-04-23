@@ -99,6 +99,28 @@ test "compiler handles normalize-plus-unfold hidden-dummy proof" {
     try mm0.verifyPair(allocator, mm0_src, mmb);
 }
 
+test "compiler rejects hidden-dummy dep violations before emission" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "fail_verify_hidden_dummy_dep",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "fail_verify_hidden_dummy_dep",
+        proof_case_ext,
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    try std.testing.expectError(
+        error.DepViolation,
+        compiler.compileMmb(allocator),
+    );
+}
+
 test "compiler verifies bodyful constant defs with lambda bodies" {
     const mm0_src =
         \\delimiter $ ( @ [ $ $ . : ; ) ] $;

@@ -69,20 +69,15 @@ const examples = {
     mm0: "./fixtures/mac_lane.mm0",
     proof: "./fixtures/mac_lane.auf",
   },
-  martin_lof: {
-    label: "martin-löf",
-    mm0: "./fixtures/martin_lof.mm0",
-    proof: "./fixtures/martin_lof.auf",
+  mltt: {
+    label: "mltt",
+    mm0: "./fixtures/mltt.mm0",
+    proof: "./fixtures/mltt.auf",
   },
   peano: {
     label: "peano",
     mm0: "./fixtures/peano.mm0",
     proof: "./fixtures/peano.auf",
-  },
-  martin_lof: {
-    label: "martin löf",
-    mm0: "./fixtures/martin_lof.mm0",
-    proof: "./fixtures/martin_lof.auf",
   },
 };
 

@@ -1,0 +1,14 @@
+nat_rec_dep_ty
+--------------
+
+l1: $ g , y : Nat ⊢ Ty A $ by weaken [#1]
+l2: $ g , y : Nat ⊢ s : (A → A) $ by weaken [#3]
+l3: $ g , y : Nat , z : A ⊢ s : (A → A) $ by weaken [l2]
+l4: $ g , y : Nat , z : A ⊢ z : A $ by var
+l5: $ g , y : Nat , z : A ⊢ s · z : A $ by app_elim [l3, l4]
+l6: $ g , y : Nat , z : A ⊢ s · z : [y/suc y] (const_ty y A) $
+  by cast_step [l5]
+l7: $ g ⊢ nat_ind y z (const_ty y A) z0 (s · z) n : A $
+  by nat_ind_ty (g := $ g $, y := $ y $, z := $ z $,
+    C := $ const_ty y A $, z0 := $ z0 $, s := $ s · z $, n := $ n $)
+    [l1, #2, l6, #4]

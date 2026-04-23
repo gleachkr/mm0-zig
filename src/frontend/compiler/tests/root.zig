@@ -1441,6 +1441,57 @@ test "compiler reports conflicting dependency binders by name" {
     }
 }
 
+test "compiler reports checked-ir dep violations before emission" {
+    const mm0_src = try readProofCaseFile(
+        std.testing.allocator,
+        "fail_verify_hidden_dummy_dep",
+        "mm0",
+    );
+    defer std.testing.allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        std.testing.allocator,
+        "fail_verify_hidden_dummy_dep",
+        "auf",
+    );
+    defer std.testing.allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.DepViolation,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.DepViolation, diag.err);
+    try std.testing.expectEqual(.generic, diag.kind);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.theorem_application,
+        diag.phase.?,
+    );
+    try std.testing.expectEqualStrings("nat_rec_dep_ty", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l7", diag.line_label.?);
+    try std.testing.expectEqualStrings("sb_ty_congr", diag.rule_name.?);
+    try std.testing.expectEqualStrings(
+        "binder assignments violate the rule's dependency constraints",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    switch (diag.detail) {
+        .dep_violation => |detail| {
+            try std.testing.expect(detail.first_arg_idx < detail.second_arg_idx);
+            try std.testing.expect(detail.first_arg_name != null);
+            try std.testing.expect(detail.second_arg_name != null);
+            try std.testing.expect(detail.first_bound or detail.second_bound);
+            try std.testing.expect(detail.first_deps != 0);
+            try std.testing.expect(detail.second_deps != 0);
+        },
+        else => return error.ExpectedDepViolationDetail,
+    }
+}
+
 test "compiler rejects def bodies that leave hidden binders free" {
     const mm0_src =
         \\delimiter $ ( ) $;

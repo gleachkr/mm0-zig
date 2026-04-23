@@ -1,6 +1,9 @@
 const std = @import("std");
 const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const BindingValidation = @import("../binding_validation.zig");
+const CompilerDiag = @import("./diag.zig");
 
 pub const CheckedRef = union(enum) {
     hyp: usize,
@@ -24,6 +27,12 @@ pub const CheckedLine = struct {
         source: CheckedRef,
         source_expr: ExprId,
     };
+};
+
+pub const DepViolation = struct {
+    line_idx: usize,
+    rule_id: u32,
+    detail: CompilerDiag.DepViolationDiagnosticDetail,
 };
 
 pub fn validateNoPlaceholderExpr(
@@ -74,6 +83,72 @@ pub fn validateLines(
     for (lines) |line| {
         try validateLine(theorem, line);
     }
+}
+
+pub fn firstDepViolation(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    lines: []const CheckedLine,
+) !?DepViolation {
+    for (lines, 0..) |line, line_idx| {
+        const rule = switch (line.data) {
+            .rule => |rule| rule,
+            .transport => continue,
+        };
+        if (rule.rule_id >= env.rules.items.len) return error.UnknownRule;
+
+        const rule_decl = &env.rules.items[rule.rule_id];
+        var infos: [56]BindingValidation.ExprInfo = undefined;
+        std.debug.assert(rule.bindings.len <= infos.len);
+        for (rule.bindings, 0..) |binding, idx| {
+            infos[idx] = try BindingValidation.currentExprInfo(
+                env,
+                theorem,
+                binding,
+            );
+        }
+        const violation = BindingValidation.firstDepViolation(
+            rule_decl.args,
+            infos[0..rule.bindings.len],
+        ) orelse continue;
+        return .{
+            .line_idx = line_idx,
+            .rule_id = rule.rule_id,
+            .detail = depViolationDetail(
+                rule_decl.arg_names,
+                violation.first_idx,
+                infos[violation.first_idx],
+                violation.second_idx,
+                infos[violation.second_idx],
+            ),
+        };
+    }
+    return null;
+}
+
+fn depViolationDetail(
+    rule_arg_names: []const ?[]const u8,
+    first_idx: usize,
+    first_info: BindingValidation.ExprInfo,
+    second_idx: usize,
+    second_info: BindingValidation.ExprInfo,
+) CompilerDiag.DepViolationDiagnosticDetail {
+    return .{
+        .first_arg_idx = first_idx,
+        .second_arg_idx = second_idx,
+        .first_arg_name = if (first_idx < rule_arg_names.len)
+            rule_arg_names[first_idx]
+        else
+            null,
+        .second_arg_name = if (second_idx < rule_arg_names.len)
+            rule_arg_names[second_idx]
+        else
+            null,
+        .first_deps = first_info.deps,
+        .second_deps = second_info.deps,
+        .first_bound = first_info.bound,
+        .second_bound = second_info.bound,
+    };
 }
 
 pub fn appendRuleLine(

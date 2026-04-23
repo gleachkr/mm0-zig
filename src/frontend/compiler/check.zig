@@ -181,6 +181,7 @@ pub fn checkTheoremBlock(
 
             validateAttemptCheckedIrRange(
                 self,
+                env,
                 &attempt.theorem,
                 assertion.name,
                 checked.items[checked_mark..],
@@ -267,6 +268,7 @@ pub fn checkTheoremBlock(
                 diag_scratch.discard(final_mark);
                 try ensureConcreteCheckedIrRange(
                     self,
+                    env,
                     theorem,
                     assertion.name,
                     checked.items[checked_mark..],
@@ -886,6 +888,7 @@ fn applyFreshenedRuleLine(
 
 fn ensureConcreteCheckedIrRange(
     self: anytype,
+    env: *const GlobalEnv,
     theorem: *const TheoremContext,
     theorem_name: []const u8,
     lines: []const CheckedLine,
@@ -905,6 +908,21 @@ fn ensureConcreteCheckedIrRange(
         }, phase));
         return err;
     };
+    if (try CheckedIr.firstDepViolation(env, theorem, lines)) |failure| {
+        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            .kind = .generic,
+            .err = error.DepViolation,
+            .theorem_name = theorem_name,
+            .line_label = line_label,
+            .rule_name = if (failure.rule_id < env.rules.items.len)
+                env.rules.items[failure.rule_id].name
+            else
+                null,
+            .span = span,
+            .detail = .{ .dep_violation = failure.detail },
+        }, phase));
+        return error.DepViolation;
+    }
 }
 
 // Preserve any new checked-IR validation diagnostic on failure, but restore
@@ -912,6 +930,7 @@ fn ensureConcreteCheckedIrRange(
 // diagnostically transparent.
 fn validateAttemptCheckedIrRange(
     self: anytype,
+    env: *const GlobalEnv,
     theorem: *const TheoremContext,
     theorem_name: []const u8,
     lines: []const CheckedLine,
@@ -922,6 +941,7 @@ fn validateAttemptCheckedIrRange(
 ) !void {
     try ensureConcreteCheckedIrRange(
         self,
+        env,
         theorem,
         theorem_name,
         lines,
@@ -964,10 +984,20 @@ test "checked ir leak diagnostics replace saved diagnostics" {
     }, .theorem_application);
     const saved_diag = getDiagnostic(&sink);
     const span: Span = .{ .start = 3, .end = 11 };
+    var env = GlobalEnv.init(std.testing.allocator);
+    defer {
+        env.sort_names.deinit();
+        env.term_names.deinit();
+        env.rule_names.deinit();
+        env.terms.deinit(std.testing.allocator);
+        env.rules.deinit(std.testing.allocator);
+    }
+
     try std.testing.expectError(
         error.PlaceholderLeakage,
         validateAttemptCheckedIrRange(
             &sink,
+            &env,
             &theorem,
             "demo",
             &lines,

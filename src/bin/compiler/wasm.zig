@@ -388,6 +388,36 @@ fn writeDiagnosticDetailField(
             try writer.print("\"secondBound\":{}", .{info.second_bound});
             try writer.writeAll("}");
         },
+        .definition_body => |info| {
+            try writer.writeAll("{");
+            try writeJsonStringField(writer, "kind", "definition_body");
+            try writer.writeByte(',');
+            try writeJsonStringField(
+                writer,
+                "summary",
+                mm0.compilerDiagnosticSummary(diag),
+            );
+            try writer.writeByte(',');
+            try writeJsonStringField(
+                writer,
+                "declaredSort",
+                info.declared_sort_name,
+            );
+            try writer.writeByte(',');
+            try writeJsonStringField(
+                writer,
+                "actualSort",
+                info.actual_sort_name,
+            );
+            try writer.writeByte(',');
+            try writeOptionalUsizeField(writer, "bodyDeps", info.body_deps);
+            try writer.writeByte(',');
+            try writer.print(
+                "\"hiddenBinderCount\":{d}",
+                .{info.hidden_binder_count},
+            );
+            try writer.writeAll("}");
+        },
         .missing_congruence_rule => |info| {
             try writer.writeAll("{");
             try writeJsonStringField(

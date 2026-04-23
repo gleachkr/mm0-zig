@@ -1,621 +1,265 @@
-pi_dep_ty
----------
+-- Curated Martin-Löf demo proof scaffold.
+--
+-- This file now tracks only the theorem story we expect to keep visible in
+-- the demo. The old large regression script lives in `mltt.auf`.
+--
+-- At the moment that story covers four small steps:
+--   * the identity warmup in the Π-fragment
+--   * a Bool negation example
+--   * the first Nat recursion example
+--   * the first internal identity helpers
+--
+-- ==================================================================
+-- SECTION 1: Current visible warmup
+-- ==================================================================
 
-l1: $ g ⊢ Ty (Π x : A. B) $ by pi_form [#1, #2]
+id_ty
+-----
 
-app_dep_raw
+l1: $ g , x : A ⊢ Ty A $ by weaken [#1]
+l2: $ g , x : A ⊢ x : A $ by var
+l3: $ g ⊢ (λ x : A. x) : (Π x : A. A) $ by lam_intro [#1, l1, l2]
+
+app_id_beta
 -----------
 
-l1: $ g ⊢ f · u : [x/u] B $ by app_elim [#1, #2]
+l1: $ g ⊢ (λ x : A. x) : (Π x : A. A) $ by id_ty [#1]
+l2: $ g ⊢ ≡[A] ((λ x : A. x) · u) = u $ by app_beta [l1, #2]
 
-imp_form
---------
-
-l1: $ g , y : A ⊢ Ty B $ by weaken [#2]
-l2: $ g ⊢ Ty (Π y : A. B) $ by pi_form [#1, l1]
-
-pi_imp_dist_ty
---------------
-
-l1: $ g , x : A ⊢ Ty (p → q) $ by imp_form [#2, #3]
-l2: $ g ⊢ Ty (Π x : A. (p → q)) $ by pi_form [#1, l1]
-l3: $ g ⊢ Ty (Π x : A. p) $ by pi_form [#1, #2]
-l4: $ g ⊢ Ty (Π x : A. q) $ by pi_form [#1, #3]
-l5: $ g ⊢ Ty ((Π x : A. p) → (Π x : A. q)) $ by imp_form [l3, l4]
-l6: $ g ⊢ Ty ((Π x : A. (p → q)) → ((Π x : A. p) → (Π x : A. q))) $
-  by imp_form [l2, l5]
-
-pi_const_alpha_has_ty
----------------------
-
-l0: $ ctx_eq g g $ by ctx_refl
-l1: $ tm_eq t t $ by tm_refl
-l2: $ ty_eq (Π x : A. B) (Π y : A. B) $ by pi_const_alpha
-l3: $ (t : (Π x : A. B)) <=> (t : (Π y : A. B)) $
-  by has_ty_congr [l1, l2]
-l4: $ (g ⊢ (t : (Π x : A. B))) <=> (g ⊢ (t : (Π y : A. B))) $
-  by nd_congr [l0, l3]
-l5: $ g ⊢ t : (Π y : A. B) $ by jiff_mp [l4, #1]
-
-pi_alpha_has_ty
----------------
-
-l0: $ ctx_eq g g $ by ctx_refl
-l1: $ tm_eq t t $ by tm_refl
-l2: $ ty_eq (Π x : A. B) (Π y : A. [x/y] B) $ by pi_alpha
-l3: $ (t : (Π x : A. B)) <=> (t : (Π y : A. [x/y] B)) $
-  by has_ty_congr [l1, l2]
-l4: $ (g ⊢ (t : (Π x : A. B))) <=> (g ⊢ (t : (Π y : A. [x/y] B))) $
-  by nd_congr [l0, l3]
-l5: $ g ⊢ t : (Π y : A. [x/y] B) $ by jiff_mp [l4, #1]
-
-imp_dist_tm
------------
-
-l1: $ g ⊢ f : (Π z : A. [y/z] (p → q)) $ by pi_alpha_has_ty [#4]
-l2: $ g ⊢ h : (Π z : A. [y/z] p) $ by pi_alpha_has_ty [#5]
-l3: $ g , y : A ⊢ f : (Π z : A. [y/z] (p → q)) $ by weaken [l1]
-l4: $ g , y : A ⊢ h : (Π z : A. [y/z] p) $ by weaken [l2]
-l5: $ g , y : A ⊢ y : A $ by var
-l6: $ g , y : A ⊢ f · y : (p → q) $ by app_elim [l3, l5]
-l7: $ g , y : A ⊢ h · y : p $ by app_elim [l4, l5]
-l8: $ g , y : A ⊢ (f · y) · (h · y) : q $ by app_elim [l6, l7]
-l9: $ g ⊢ (λ y : A. (f · y) · (h · y)) : (Π y : A. q) $
-  by lam_intro [#1, #3, l8]
-
-imp_dist_bool_tm
-----------------
-
-l1: $ g ⊢ f : (Π z : A. (Bool → Bool)) $
-  by pi_const_alpha_has_ty [#2]
-l2: $ g ⊢ h : (Π z : A. Bool) $
-  by pi_const_alpha_has_ty [#3]
-l3: $ g , y : A ⊢ f : (Π z : A. (Bool → Bool)) $ by weaken [l1]
-l4: $ g , y : A ⊢ h : (Π z : A. Bool) $ by weaken [l2]
-l5: $ g , y : A ⊢ y : A $ by var
-l6: $ g , y : A ⊢ f · y : (Bool → Bool) $ by app_elim [l3, l5]
-l7: $ g , y : A ⊢ h · y : Bool $ by app_elim [l4, l5]
-l8: $ g , y : A ⊢ (f · y) · (h · y) : Bool $ by app_elim [l6, l7]
-l9: $ g , y : A ⊢ Ty Bool $ by bool_form
-l10: $ g ⊢ (λ y : A. (f · y) · (h · y)) : (Π y : A. Bool) $
-  by lam_intro [#1, l9, l8]
-
-one_ty
-------
-
-l1: $ g ⊢ zero : Nat $ by zero_ty
-l2: $ g ⊢ suc zero : Nat $ by suc_ty [l1]
-
-pi_nat_nat_ty
--------------
-
-l1: $ g ⊢ Ty Nat $ by nat_form 
-l2: $ g , x : Nat ⊢ Ty Nat $ by nat_form 
-l3: $ g ⊢ Ty (Π x : Nat. Nat) $ by pi_dep_ty [l1, l2]
-
-pi_nat_bool_ty
---------------
-
-l1: $ g ⊢ Ty Nat $ by nat_form 
-l2: $ g , x : Nat ⊢ Ty Bool $ by bool_form 
-l3: $ g ⊢ Ty (Π x : Nat. Bool) $ by pi_dep_ty [l1, l2]
-
-second_var
-----------
-
-l1: $ x : A , y : B ⊢ y : B $ by var 
-
-exchange_demo
--------------
-
-l1: $ x : A , y : B ⊢ y : B $ by second_var 
-l2: $ x : A , y : B , z : B ⊢ y : B $ by weaken [l1]
-l3: $ y : B , x : A , z : B ⊢ y : B $ by exchange [l2]
-
-id_nat_ty
----------
-
-l1: $ g ⊢ Ty Nat $ by nat_form 
-l2: $ g , x : Nat ⊢ Ty Nat $ by nat_form 
-l3: $ g , x : Nat ⊢ x : Nat $ by var 
-l4: $ g ⊢ (λ x : Nat. x) : (Π x : Nat. Nat) $ by lam_intro [l1, l2, l3]
-
-const_true_ty
--------------
-
-l1: $ g ⊢ Ty Nat $ by nat_form 
-l2: $ g , x : Nat ⊢ Ty Bool $ by bool_form 
-l3: $ g , x : Nat ⊢ true : Bool $ by true_ty 
-l4: $ g ⊢ (λ x : Nat. true) : (Π x : Nat. Bool) $ by lam_intro [l1, l2, l3]
-
-app_id_nat
-----------
-
-l1: $ g ⊢ (λ x : Nat. x) : (Π x : Nat. Nat) $ by id_nat_ty 
-l2: $ g ⊢ (λ x : Nat. x) · n : Nat $ by app_elim [l1, #1]
-
-app_const_true
---------------
-
-l1: $ g ⊢ (λ x : Nat. true) : (Π x : Nat. Bool) $ by const_true_ty 
-l2: $ g ⊢ (λ x : Nat. true) · n : Bool $ by app_elim [l1, #1]
-
-first_var
----------
-
-l1: $ g , x : A ⊢ x : A $ by var
-l2: $ g , x : A , y : B ⊢ x : A $ by weaken [l1]
-
-tm_conv
--------
-
-l0: $ ctx_eq g g $ by ctx_refl
-l1: $ ty_eq A A $ by ty_refl
-l2: $ (t : A) <=> (u : A) $ by has_ty_congr [#1, l1]
-l3: $ (g ⊢ (t : A)) <=> (g ⊢ (u : A)) $
-  by nd_congr [l0, l2]
-l4: $ g ⊢ u : A $ by jiff_mp [l3, #2]
-
-ty_conv
--------
-
-l0: $ ctx_eq g g $ by ctx_refl
-l1: $ tm_eq t t $ by tm_refl
-l2: $ (t : A) <=> (t : B) $ by has_ty_congr [l1, #1]
-l3: $ (g ⊢ (t : A)) <=> (g ⊢ (t : B)) $
-  by nd_congr [l0, l2]
-l4: $ g ⊢ t : B $ by jiff_mp [l3, #2]
-
-ctx_conv
---------
-
-l1: $ J <=> J $ by jiff_refl
-l2: $ (g ⊢ J) <=> (h ⊢ J) $ by nd_congr [#1, l1]
-l3: $ h ⊢ J $ by jiff_mp [l2, #2]
+-- ==================================================================
+-- SECTION 2: Bool warmup
+-- ==================================================================
 
 bool_not_ty
 -----------
 
 l1: $ g ⊢ Ty Bool $ by bool_form
-l2: $ g , y : Bool ⊢ Ty Bool $ by bool_form
-l3: $ g , y : Bool ⊢ false : Bool $ by false_ty
-l4: $ g , y : Bool ⊢ true : Bool $ by true_ty
-l5: $ g , y : Bool ⊢ y : Bool $ by var
-l6: $ g , y : Bool ⊢ bool_rec Bool false true y : Bool $
-  by bool_rec_ty [l2, l3, l4, l5]
-l7: $ g ⊢ (λ y : Bool. bool_rec Bool false true y) :
-  (Π y : Bool. Bool) $ by lam_intro [l1, l2, l6]
+l2: $ g ⊢ false : Bool $ by false_intro
+l3: $ g ⊢ true : Bool $ by true_intro
+l4: $ g ⊢ ¬ b : Bool $ by bool_elim [l1, l2, l3, #1]
 
-bool_not_true_ty
-----------------
+bool_not_true
+-------------
 
-l1: $ g ⊢ (λ y : Bool. bool_rec Bool false true y) :
-  (Π y : Bool. Bool) $ by bool_not_ty
-l2: $ g ⊢ true : Bool $ by true_ty
-l3: $ g ⊢ (λ y : Bool. bool_rec Bool false true y) · true : Bool $
-  by app_elim [l1, l2]
+l1: $ g ⊢ Ty Bool $ by bool_form
+l2: $ g ⊢ false : Bool $ by false_intro
+l3: $ g ⊢ true : Bool $ by true_intro
+l4: $ g ⊢ ≡[Bool] (¬ true) = false $ by bool_beta_true [l1, l2, l3]
 
-bool_not_false_ty
------------------
-
-l1: $ g ⊢ (λ y : Bool. bool_rec Bool false true y) :
-  (Π y : Bool. Bool) $ by bool_not_ty
-l2: $ g ⊢ false : Bool $ by false_ty
-l3: $ g ⊢ (λ y : Bool. bool_rec Bool false true y) · false : Bool $
-  by app_elim [l1, l2]
-
-bool_to_nat_ty
+bool_not_false
 --------------
 
 l1: $ g ⊢ Ty Bool $ by bool_form
-l2: $ g , y : Bool ⊢ Ty Nat $ by nat_form
-l3: $ g , y : Bool ⊢ zero : Nat $ by zero_ty
-l4: $ g , y : Bool ⊢ zero : Nat $ by zero_ty
-l5: $ g , y : Bool ⊢ suc zero : Nat $ by suc_ty [l4]
-l6: $ g , y : Bool ⊢ y : Bool $ by var
-l7: $ g , y : Bool ⊢ bool_rec Nat zero (suc zero) y : Nat $
-  by bool_rec_ty [l2, l3, l5, l6]
-l8: $ g ⊢ (λ y : Bool. bool_rec Nat zero (suc zero) y) :
-  (Π y : Bool. Nat) $ by lam_intro [l1, l2, l7]
+l2: $ g ⊢ false : Bool $ by false_intro
+l3: $ g ⊢ true : Bool $ by true_intro
+l4: $ g ⊢ ≡[Bool] (¬ false) = true $ by bool_beta_false [l1, l2, l3]
 
-bool_to_nat_true_ty
--------------------
+-- ==================================================================
+-- SECTION 3: Nat warmup
+-- ==================================================================
 
-l1: $ g ⊢ (λ y : Bool. bool_rec Nat zero (suc zero) y) :
-  (Π y : Bool. Nat) $ by bool_to_nat_ty
-l2: $ g ⊢ true : Bool $ by true_ty
-l3: $ g ⊢ (λ y : Bool. bool_rec Nat zero (suc zero) y) · true : Nat $
-  by app_elim [l1, l2]
+one_ty
+------
 
-bool_to_nat_false_ty
---------------------
+l1: $ g ⊢ zero : Nat $ by zero_intro
+l2: $ g ⊢ suc zero : Nat $ by suc_intro [l1]
 
-l1: $ g ⊢ (λ y : Bool. bool_rec Nat zero (suc zero) y) :
-  (Π y : Bool. Nat) $ by bool_to_nat_ty
-l2: $ g ⊢ false : Bool $ by false_ty
-l3: $ g ⊢ (λ y : Bool. bool_rec Nat zero (suc zero) y) · false : Nat $
-  by app_elim [l1, l2]
-
-sel_ty_true
------------
-
-l1: $ g ⊢ true : Bool $ by true_ty
-l2: $ g ⊢ Ty (sel_ty true) $ by sel_ty_form [l1]
-
-sel_ty_false
-------------
-
-l1: $ g ⊢ false : Bool $ by false_ty
-l2: $ g ⊢ Ty (sel_ty false) $ by sel_ty_form [l1]
-
-sel_dep_ty
+nat_rec_ty
 ----------
-
-l1: $ g ⊢ Ty Bool $ by bool_form
-l2: $ g , y : Bool ⊢ y : Bool $ by var
-l3: $ g , y : Bool ⊢ Ty (sel_ty y) $ by sel_ty_form [l2]
-l4: $ g , y : Bool ⊢ sel_tm y : sel_ty y $ by sel_tm_ty [l2]
-l5: $ g ⊢ (λ y : Bool. sel_tm y) : (Π y : Bool. sel_ty y) $
-  by lam_intro [l1, l3, l4]
-
-sel_dep_true_ty
----------------
-
-l1: $ g ⊢ (λ y : Bool. sel_tm y) : (Π y : Bool. sel_ty y) $ by sel_dep_ty
-l2: $ g ⊢ true : Bool $ by true_ty
-l3: $ g ⊢ (λ y : Bool. sel_tm y) · true : sel_ty true $
-  by app_elim [l1, l2]
-
-sel_dep_false_ty
-----------------
-
-l1: $ g ⊢ (λ y : Bool. sel_tm y) : (Π y : Bool. sel_ty y) $ by sel_dep_ty
-l2: $ g ⊢ false : Bool $ by false_ty
-l3: $ g ⊢ (λ y : Bool. sel_tm y) · false : sel_ty false $
-  by app_elim [l1, l2]
-
-nat_even_ty
------------
-
-l1: $ g ⊢ Ty Nat $ by nat_form
-l2: $ g , n : Nat ⊢ Ty Bool $ by bool_form
-l3: $ g , n : Nat ⊢ true : Bool $ by true_ty
-l4: $ g , n : Nat ⊢ bool_not_fn : (Bool → Bool) $ by bool_not_fn_ty
-l5: $ g , n : Nat ⊢ n : Nat $ by var
-l6: $ g , n : Nat ⊢ nat_rec Bool true bool_not_fn n : Bool $
-  by nat_rec_ty [l2, l3, l4, l5]
-l7: $ g ⊢ (λ n : Nat. nat_rec Bool true bool_not_fn n) :
-  (Π n : Nat. Bool) $ by lam_intro [l1, l2, l6]
-
-nat_even_zero_ty
-----------------
-
-l1: $ g ⊢ (λ n : Nat. nat_rec Bool true bool_not_fn n) :
-  (Π n : Nat. Bool) $ by nat_even_ty
-l2: $ g ⊢ zero : Nat $ by zero_ty
-l3: $ g ⊢ (λ n : Nat. nat_rec Bool true bool_not_fn n) · zero : Bool $
-  by app_elim [l1, l2]
-
-nat_even_one_ty
----------------
-
-l1: $ g ⊢ (λ n : Nat. nat_rec Bool true bool_not_fn n) :
-  (Π n : Nat. Bool) $ by nat_even_ty
-l2: $ g ⊢ suc zero : Nat $ by one_ty
-l3: $ g ⊢ (λ n : Nat. nat_rec Bool true bool_not_fn n) · suc zero : Bool $
-  by app_elim [l1, l2]
-
-nat_even_two_ty
----------------
-
-l1: $ g ⊢ (λ n : Nat. nat_rec Bool true bool_not_fn n) :
-  (Π n : Nat. Bool) $ by nat_even_ty
-l2: $ g ⊢ zero : Nat $ by zero_ty
-l3: $ g ⊢ suc zero : Nat $ by suc_ty [l2]
-l4: $ g ⊢ suc (suc zero) : Nat $ by suc_ty [l3]
-l5: $ g ⊢ (λ n : Nat. nat_rec Bool true bool_not_fn n) ·
-  suc (suc zero) : Bool $ by app_elim [l1, l4]
-
-nat_even_zero_beta
-------------------
-
-l1: $ tm_eq (nat_rec Bool true bool_not_fn zero) true $ by nat_rec_zero
-
-nat_even_one_beta
------------------
-
-l1: $ tm_eq (nat_rec Bool true bool_not_fn (suc zero))
-  (bool_not_fn · (nat_rec Bool true bool_not_fn zero)) $ by nat_rec_suc
-l2: $ tm_eq bool_not_fn bool_not_fn $ by tm_refl
-l3: $ tm_eq (nat_rec Bool true bool_not_fn zero) true $ by nat_even_zero_beta
-l4: $ tm_eq (bool_not_fn · (nat_rec Bool true bool_not_fn zero))
-  (bool_not_fn · true) $ by app_congr [l2, l3]
-l5: $ tm_eq (bool_not_fn · true) false $ by app_bool_not_true
-l6: $ tm_eq (nat_rec Bool true bool_not_fn (suc zero))
-  (bool_not_fn · true) $ by tm_trans [l1, l4]
-l7: $ tm_eq (nat_rec Bool true bool_not_fn (suc zero)) false $
-  by tm_trans [l6, l5]
-
-nat_even_two_beta
------------------
-
-l1: $ tm_eq (nat_rec Bool true bool_not_fn (suc (suc zero)))
-  (bool_not_fn · (nat_rec Bool true bool_not_fn (suc zero))) $
-  by nat_rec_suc
-l2: $ tm_eq bool_not_fn bool_not_fn $ by tm_refl
-l3: $ tm_eq (nat_rec Bool true bool_not_fn (suc zero)) false $
-  by nat_even_one_beta
-l4: $ tm_eq (bool_not_fn · (nat_rec Bool true bool_not_fn (suc zero)))
-  (bool_not_fn · false) $ by app_congr [l2, l3]
-l5: $ tm_eq (bool_not_fn · false) true $ by app_bool_not_false
-l6: $ tm_eq (nat_rec Bool true bool_not_fn (suc (suc zero)))
-  (bool_not_fn · false) $ by tm_trans [l1, l4]
-l7: $ tm_eq (nat_rec Bool true bool_not_fn (suc (suc zero))) true $
-  by tm_trans [l6, l5]
-
-
-stage_fn_term_ty
-----------------
-
-l1: $ g , k : Nat ⊢ k : Nat $ by var
-l2: $ g , k : Nat ⊢ Ty (stage_ty k) $ by stage_ty_form [l1]
-l3: $ g ⊢ stage_zero : stage_ty zero $ by stage_zero_ty
-l4: $ ty_eq ([k/zero] (stage_ty k)) (stage_ty (⟦ k / zero ⟧ k)) $
-  by sb_ty_stage (x := $ k $, u := $ zero $, n := $ k $)
-l5: $ tm_eq (⟦ k / zero ⟧ k) zero $ by sb_tm_var
-l6: $ ty_eq (stage_ty (⟦ k / zero ⟧ k)) (stage_ty zero) $
-  by stage_ty_congr [l5]
-l7: $ ty_eq ([k/zero] (stage_ty k)) (stage_ty zero) $
-  by ty_trans [l4, l6]
-l8: $ ty_eq (stage_ty zero) ([k/zero] (stage_ty k)) $ by ty_sym [l7]
-l9: $ g ⊢ stage_zero : [k/zero] (stage_ty k) $ by ty_conv [l8, l3]
-l10: $ g , k : Nat ⊢ k : Nat $ by var
-l11: $ g , k : Nat , ih : stage_ty k ⊢ k : Nat $ by weaken [l10]
-l12: $ g , k : Nat , ih : stage_ty k ⊢ ih : stage_ty k $ by var
-l13: $ g , k : Nat , ih : stage_ty k ⊢
-  stage_suc k ih : stage_ty (suc k) $ by stage_suc_ty [l11, l12]
-l14: $ ty_eq ([k/suc k] (stage_ty k)) (stage_ty (⟦ k / suc k ⟧ k)) $
-  by sb_ty_stage (x := $ k $, u := $ suc k $, n := $ k $)
-l15: $ tm_eq (⟦ k / suc k ⟧ k) (suc k) $ by sb_tm_var
-l16: $ ty_eq (stage_ty (⟦ k / suc k ⟧ k)) (stage_ty (suc k)) $
-  by stage_ty_congr [l15]
-l17: $ ty_eq ([k/suc k] (stage_ty k)) (stage_ty (suc k)) $
-  by ty_trans [l14, l16]
-l18: $ ty_eq (stage_ty (suc k)) ([k/suc k] (stage_ty k)) $
-  by ty_sym [l17]
-l19: $ g , k : Nat , ih : stage_ty k ⊢
-  stage_suc k ih : [k/suc k] (stage_ty k) $ by ty_conv [l18, l13]
-l20: $ g ⊢ stage_fn n : stage_ty n $ by nat_ind_ty [l2, l9, l19, #1]
-
-stage_fn_ty
------------
-
-l1: $ g ⊢ Ty Nat $ by nat_form
-l2: $ g , n : Nat ⊢ n : Nat $ by var
-l3: $ g , n : Nat ⊢ Ty (stage_ty n) $ by stage_ty_form [l2]
-l4: $ g , n : Nat ⊢ stage_fn n : stage_ty n $ by stage_fn_term_ty [l2]
-l5: $ g ⊢ (λ n : Nat. stage_fn n) : (Π n : Nat. stage_ty n) $
-  by lam_intro [l1, l3, l4]
-
-stage_fn_zero_ty
-----------------
-
-l1: $ g ⊢ zero : Nat $ by zero_ty
-l2: $ g ⊢ stage_fn zero : stage_ty zero $ by stage_fn_term_ty [l1]
-
-stage_fn_one_ty
----------------
-
-l1: $ g ⊢ suc zero : Nat $ by one_ty
-l2: $ g ⊢ stage_fn (suc zero) : stage_ty (suc zero) $
-  by stage_fn_term_ty [l1]
-
-stage_fn_zero_beta
-------------------
-
-l1: $ tm_eq (nat_ind k ih (stage_ty k) stage_zero (stage_suc k ih) zero)
-  stage_zero $
-  by nat_ind_zero (k := $ k $, ih := $ ih $, C := $ stage_ty k $,
-    z := $ stage_zero $, s := $ stage_suc k ih $)
-
-stage_fn_suc_beta
------------------
-
-l1: $ tm_eq (nat_ind k ih (stage_ty k) stage_zero (stage_suc k ih)
-  (suc n)) (stage_suc n (nat_ind k ih (stage_ty k) stage_zero
-  (stage_suc k ih) n)) $
-  by nat_ind_suc (k := $ k $, ih := $ ih $, C := $ stage_ty k $,
-    z := $ stage_zero $, s := $ stage_suc k ih $, n := $ n $)
-
-nat_rec_dep_ty
---------------
 
 l1: $ g , k : Nat ⊢ Ty A $ by weaken [#1]
 l2: $ g , k : Nat ⊢ s : (A → A) $ by weaken [#3]
-l3: $ g , k : Nat , ih : A ⊢ s : (A → A) $ by weaken [l2]
-l4: $ g , k : Nat , ih : A ⊢ ih : A $ by var
-l5: $ g , k : Nat , ih : A ⊢ s · ih : A $ by app_elim [l3, l4]
-l6: $ g ⊢ nat_ind k ih (const_ty k A) z (s · ih) n : A $
-  by nat_ind_ty [l1, #2, l5, #4]
+l3: $ g , k : Nat , ih : const_ty k A ⊢ s : (A → A) $ by weaken [l2]
+l4: $ g , k : Nat , ih : const_ty k A ⊢ ih : const_ty k A $ by var
+l5: $ g , k : Nat , ih : const_ty k A ⊢ s · ih : A $
+  by app_elim [l3, l4]
+l6: $ g ⊢ nat_ind k ih (const_ty k A) z (s · ih) n :
+  [k/n] (const_ty k A) $ by nat_ind_elim [l1, #2, l5, #4]
 
-nat_rec_dep_zero
-----------------
+nat_rec_zero
+------------
 
-l1: $ tm_eq (nat_ind k ih (const_ty k A) z (s · ih) zero) z $
-  by nat_ind_zero (k := $ k $, ih := $ ih $, C := $ const_ty k A $,
-    z := $ z $, s := $ s · ih $)
+l1: $ g , k : Nat ⊢ Ty A $ by weaken [#1]
+l2: $ g , k : Nat ⊢ s : (A → A) $ by weaken [#3]
+l3: $ g , k : Nat , ih : const_ty k A ⊢ s : (A → A) $ by weaken [l2]
+l4: $ g , k : Nat , ih : const_ty k A ⊢ ih : const_ty k A $ by var
+l5: $ g , k : Nat , ih : const_ty k A ⊢ s · ih : A $
+  by app_elim [l3, l4]
+l6: $ g ⊢ ≡[[k/zero] (const_ty k A)]
+  (nat_ind k ih (const_ty k A) z (s · ih) zero) = z $
+  by nat_ind_zero [l1, #2, l5]
 
-nat_rec_dep_suc
----------------
-
-l1: $ tm_eq (nat_ind k ih (const_ty k A) z (s · ih) (suc n))
-  (s · (nat_ind k ih (const_ty k A) z (s · ih) n)) $
-  by nat_ind_suc (k := $ k $, ih := $ ih $, C := $ const_ty k A $,
-    z := $ z $, s := $ s · ih $, n := $ n $)
-
-nat_even_dep_ty
----------------
-
-l1: $ g ⊢ Ty Nat $ by nat_form
-l2: $ g , n : Nat ⊢ Ty Bool $ by bool_form
-l3: $ g , n : Nat ⊢ true : Bool $ by true_ty
-l4: $ g , n : Nat ⊢ bool_not_fn : (Bool → Bool) $ by bool_not_fn_ty
-l5: $ g , n : Nat ⊢ n : Nat $ by var
-l6: $ g , n : Nat ⊢ nat_rec_dep Bool true bool_not_fn n : Bool $
-  by nat_rec_dep_ty [l2, l3, l4, l5]
-l7: $ g ⊢ (λ n : Nat. nat_rec_dep Bool true bool_not_fn n) :
-  (Π n : Nat. Bool) $ by lam_intro [l1, l2, l6]
-
-nat_even_dep_zero_beta
-----------------------
-
-l1: $ tm_eq (nat_rec_dep Bool true bool_not_fn zero) true $
-  by nat_rec_dep_zero
-
-nat_even_dep_one_beta
----------------------
-
-l1: $ tm_eq (nat_rec_dep Bool true bool_not_fn (suc zero))
-  (bool_not_fn · (nat_rec_dep Bool true bool_not_fn zero)) $
-  by nat_rec_dep_suc
-l2: $ tm_eq bool_not_fn bool_not_fn $ by tm_refl
-l3: $ tm_eq (nat_rec_dep Bool true bool_not_fn zero) true $
-  by nat_even_dep_zero_beta
-l4: $ tm_eq (bool_not_fn · (nat_rec_dep Bool true bool_not_fn zero))
-  (bool_not_fn · true) $ by app_congr [l2, l3]
-l5: $ tm_eq (bool_not_fn · true) false $ by app_bool_not_true
-l6: $ tm_eq (nat_rec_dep Bool true bool_not_fn (suc zero))
-  (bool_not_fn · true) $ by tm_trans [l1, l4]
-l7: $ tm_eq (nat_rec_dep Bool true bool_not_fn (suc zero)) false $
-  by tm_trans [l6, l5]
-
-nat_even_dep_two_beta
----------------------
-
-l1: $ tm_eq (nat_rec_dep Bool true bool_not_fn (suc (suc zero)))
-  (bool_not_fn · (nat_rec_dep Bool true bool_not_fn (suc zero))) $
-  by nat_rec_dep_suc
-l2: $ tm_eq bool_not_fn bool_not_fn $ by tm_refl
-l3: $ tm_eq (nat_rec_dep Bool true bool_not_fn (suc zero)) false $
-  by nat_even_dep_one_beta
-l4: $ tm_eq (bool_not_fn · (nat_rec_dep Bool true bool_not_fn (suc zero)))
-  (bool_not_fn · false) $ by app_congr [l2, l3]
-l5: $ tm_eq (bool_not_fn · false) true $ by app_bool_not_false
-l6: $ tm_eq (nat_rec_dep Bool true bool_not_fn (suc (suc zero)))
-  (bool_not_fn · false) $ by tm_trans [l1, l4]
-l7: $ tm_eq (nat_rec_dep Bool true bool_not_fn (suc (suc zero))) true $
-  by tm_trans [l6, l5]
-
-bool_and_ty
+nat_rec_suc
 -----------
 
-l1: $ g ⊢ Ty Bool $ by bool_form
-l2: $ g , y : Bool ⊢ Ty Bool $ by bool_form
-l3: $ g , y : Bool , z : Bool ⊢ Ty Bool $ by bool_form
-l4: $ g , y : Bool , z : Bool ⊢ z : Bool $ by var
-l5: $ g , y : Bool , z : Bool ⊢ false : Bool $ by false_ty
-l6: $ g , y : Bool , z : Bool ⊢ y : Bool $ by first_var
-l7: $ g , y : Bool , z : Bool ⊢ bool_rec Bool z false y : Bool $
-  by bool_rec_ty [l3, l4, l5, l6]
-l8: $ g , y : Bool ⊢ Ty (Π z : Bool. Bool) $ by pi_dep_ty [l2, l3]
-l9: $ g , y : Bool ⊢ (λ z : Bool. bool_rec Bool z false y) :
-  (Π z : Bool. Bool) $ by lam_intro [l2, l3, l7]
-l10: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) :
-  (Π y : Bool. (Π z : Bool. Bool)) $ by lam_intro [l1, l8, l9]
+l1: $ g , k : Nat ⊢ Ty A $ by weaken [#1]
+l2: $ g , k : Nat ⊢ s : (A → A) $ by weaken [#3]
+l3: $ g , k : Nat , ih : const_ty k A ⊢ s : (A → A) $ by weaken [l2]
+l4: $ g , k : Nat , ih : const_ty k A ⊢ ih : const_ty k A $ by var
+l5: $ g , k : Nat , ih : const_ty k A ⊢ s · ih : A $
+  by app_elim [l3, l4]
+l6: $ g ⊢ ≡[[k/suc n] (const_ty k A)]
+  (nat_ind k ih (const_ty k A) z (s · ih) (suc n)) =
+  (⟦ ih / nat_ind k ih (const_ty k A) z (s · ih) n ⟧
+      (⟦ k / n ⟧ (s · ih))) $
+  by nat_ind_suc [l1, #2, l5, #4]
 
-bool_and_true_ty
-----------------
+-- ==================================================================
+-- SECTION 4: Typed equality warmup
+-- ==================================================================
 
-l1: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) :
-  (Π y : Bool. (Π z : Bool. Bool)) $ by bool_and_ty
-l2: $ g ⊢ true : Bool $ by true_ty
-l3: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) · true :
-  (Π z : Bool. Bool) $ by app_elim [l1, l2]
-
-bool_and_false_ty
------------------
-
-l1: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) :
-  (Π y : Bool. (Π z : Bool. Bool)) $ by bool_and_ty
-l2: $ g ⊢ false : Bool $ by false_ty
-l3: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) · false :
-  (Π z : Bool. Bool) $ by app_elim [l1, l2]
-
-bool_and_true_true_ty
----------------------
-
-l1: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) · true :
-  (Π z : Bool. Bool) $ by bool_and_true_ty
-l2: $ g ⊢ true : Bool $ by true_ty
-l3: $ g ⊢ ((λ y : Bool. λ z : Bool. bool_rec Bool z false y) · true)
-  · true : Bool $ by app_elim [l1, l2]
-
-bool_and_true_false_ty
-----------------------
-
-l1: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) · true :
-  (Π z : Bool. Bool) $ by bool_and_true_ty
-l2: $ g ⊢ false : Bool $ by false_ty
-l3: $ g ⊢ ((λ y : Bool. λ z : Bool. bool_rec Bool z false y) · true)
-  · false : Bool $ by app_elim [l1, l2]
-
-bool_and_false_true_ty
-----------------------
-
-l1: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) · false :
-  (Π z : Bool. Bool) $ by bool_and_false_ty
-l2: $ g ⊢ true : Bool $ by true_ty
-l3: $ g ⊢ ((λ y : Bool. λ z : Bool. bool_rec Bool z false y) · false)
-  · true : Bool $ by app_elim [l1, l2]
-
-bool_and_false_false_ty
------------------------
-
-l1: $ g ⊢ (λ y : Bool. λ z : Bool. bool_rec Bool z false y) · false :
-  (Π z : Bool. Bool) $ by bool_and_false_ty
-l2: $ g ⊢ false : Bool $ by false_ty
-l3: $ g ⊢ ((λ y : Bool. λ z : Bool. bool_rec Bool z false y) · false)
-  · false : Bool $ by app_elim [l1, l2]
-
-nat_case_true_ty
-----------------
+double_step_ty
+--------------
 
 l1: $ g ⊢ Ty Nat $ by nat_form
-l2: $ g ⊢ zero : Nat $ by zero_ty
-l3: $ g ⊢ zero : Nat $ by zero_ty
-l4: $ g ⊢ suc zero : Nat $ by suc_ty [l3]
-l5: $ g ⊢ true : Bool $ by true_ty
-l6: $ g ⊢ bool_rec Nat zero (suc zero) true : Nat $
-  by bool_rec_ty [l1, l2, l4, l5]
+l2: $ g , k : Nat ⊢ Ty Nat $ by nat_form
+l3: $ g , k : Nat ⊢ k : Nat $ by var
+l4: $ g , k : Nat ⊢ suc k : Nat $ by suc_intro [l3]
+l5: $ g , k : Nat ⊢ suc (suc k) : Nat $ by suc_intro [l4]
+l6: $ g ⊢ (λ k : Nat. suc (suc k)) : (Nat → Nat) $
+  by lam_intro [l1, l2, l5]
 
-nat_case_false_ty
------------------
+nat_rec_two_step_one
+--------------------
 
 l1: $ g ⊢ Ty Nat $ by nat_form
-l2: $ g ⊢ zero : Nat $ by zero_ty
-l3: $ g ⊢ zero : Nat $ by zero_ty
-l4: $ g ⊢ suc zero : Nat $ by suc_ty [l3]
-l5: $ g ⊢ false : Bool $ by false_ty
-l6: $ g ⊢ bool_rec Nat zero (suc zero) false : Nat $
-  by bool_rec_ty [l1, l2, l4, l5]
+l2: $ g ⊢ zero : Nat $ by zero_intro
+l3: $ g ⊢ (λ k : Nat. suc (suc k)) : (Nat → Nat) $ by double_step_ty
+l4: $ g ⊢ ≡[Nat] (nat_rec Nat zero (λ k : Nat. suc (suc k))
+  (suc zero)) = ((λ k : Nat. suc (suc k)) ·
+  (nat_rec Nat zero (λ k : Nat. suc (suc k)) zero)) $
+  by nat_rec_suc [l1, l2, l3, l2]
+l5: $ g ⊢ ≡[Nat] (nat_rec Nat zero (λ k : Nat. suc (suc k)) zero) = zero $
+  by nat_rec_zero [l1, l2, l3]
+l6: $ g ⊢ ≡[Nat] ((λ k : Nat. suc (suc k)) ·
+  (nat_rec Nat zero (λ k : Nat. suc (suc k)) zero)) =
+  ((λ k : Nat. suc (suc k)) · zero) $ by app_eq_right [l3, l5]
+l7: $ g ⊢ ≡[Nat] ((λ k : Nat. suc (suc k)) · zero) =
+  (suc (suc zero)) $ by app_beta [l3, l2]
+l8: $ g ⊢ ≡[Nat] (nat_rec Nat zero (λ k : Nat. suc (suc k))
+  (suc zero)) = ((λ k : Nat. suc (suc k)) · zero) $
+  by eq_tm_trans [l4, l6]
+l9: $ g ⊢ ≡[Nat] (nat_rec Nat zero (λ k : Nat. suc (suc k))
+  (suc zero)) = (suc (suc zero)) $ by eq_tm_trans [l8, l7]
 
-bool_rec_true_demo
+-- ==================================================================
+-- SECTION 5: Identity warmup
+-- ==================================================================
+
+id_sym_ty
+---------
+
+l1: $ g , x : A ⊢ Ty A $ by weaken [#1]
+l2: $ g , x : A , y : A ⊢ y : A $ by var
+l3: $ g , x : A ⊢ x : A $ by var
+l4: $ g , x : A , y : A ⊢ x : A $ by weaken [l3]
+l5: $ g , x : A , y : A ⊢ Ty A $ by weaken [l1]
+l6: $ g , x : A , y : A , q : Id A x y ⊢ Ty A $ by weaken [l5]
+l7: $ g , x : A , y : A , q : Id A x y ⊢ y : A $ by weaken [l2]
+l8: $ g , x : A , y : A , q : Id A x y ⊢ x : A $ by weaken [l4]
+l9: $ g , x : A , y : A , q : Id A x y ⊢ Ty (Id A y x) $
+  by Id_form [l6, l7, l8]
+l10: $ g , x : A ⊢ x : A $ by var
+l11: $ g , x : A ⊢ refl A x : Id A x x $ by refl_intro [l10]
+l12: $ g ⊢ J x y q A (Id A y x) (refl A x) s t p :
+  [x/s] [y/t] [q/p] (Id A y x) $ by J_elim [l9, l11, #2, #3, #4]
+
+id_sym_refl
+-----------
+
+l1: $ g , x : A ⊢ Ty A $ by weaken [#1]
+l2: $ g , x : A , y : A ⊢ y : A $ by var
+l3: $ g , x : A ⊢ x : A $ by var
+l4: $ g , x : A , y : A ⊢ x : A $ by weaken [l3]
+l5: $ g , x : A , y : A ⊢ Ty A $ by weaken [l1]
+l6: $ g , x : A , y : A , q : Id A x y ⊢ Ty A $ by weaken [l5]
+l7: $ g , x : A , y : A , q : Id A x y ⊢ y : A $ by weaken [l2]
+l8: $ g , x : A , y : A , q : Id A x y ⊢ x : A $ by weaken [l4]
+l9: $ g , x : A , y : A , q : Id A x y ⊢ Ty (Id A y x) $
+  by Id_form [l6, l7, l8]
+l10: $ g , x : A ⊢ x : A $ by var
+l11: $ g , x : A ⊢ refl A x : Id A x x $ by refl_intro [l10]
+l12: $ g ⊢ ≡[[x/s] [y/s] [q/refl A s] (Id A y x)]
+  (J x y q A (Id A y x) (refl A x) s s (refl A s)) =
+  (⟦ x / s ⟧ (refl A x)) $ by J_beta [l9, l11, #2]
+
+id_trans_ty
+-----------
+
+l1: $ g , x : A ⊢ Ty A $ by weaken [#1]
+l2: $ g , x : A , y : A ⊢ y : A $ by var
+l3: $ g , x : A , y : A ⊢ Ty A $ by weaken [l1]
+l4: $ g , x : A ⊢ x : A $ by var
+l5: $ g , x : A ⊢ u : A $ by weaken [#4]
+l6: $ g , x : A , y : A ⊢ u : A $ by weaken [l5]
+l7: $ g , x : A , y : A , z : Id A x y ⊢ Ty A $ by weaken [l3]
+l8: $ g , x : A , y : A , z : Id A x y ⊢ y : A $ by weaken [l2]
+l9: $ g , x : A , y : A , z : Id A x y ⊢ u : A $ by weaken [l6]
+l10: $ g , x : A , y : A , z : Id A x y ⊢ Ty (Id A y u) $
+  by Id_form [l7, l8, l9]
+l11: $ g , x : A , y : A ⊢ x : A $ by weaken [l4]
+l12: $ g , x : A , y : A , z : Id A x y ⊢ x : A $ by weaken [l11]
+l13: $ g , x : A , y : A , z : Id A x y ⊢ Ty (Id A x u) $
+  by Id_form [l7, l12, l9]
+l14: $ g , x : A , y : A , z : Id A x y , w : Id A y u ⊢
+  Ty (Id A x u) $ by weaken [l13]
+l15: $ g , x : A , y : A , z : Id A x y ⊢ Ty (Id A y u → Id A x u) $
+  by pi_form [l10, l14]
+l16: $ g , x : A ⊢ Ty (Id A x u) $ by Id_form [l1, l4, l5]
+l17: $ g , x : A ⊢ (λ w : Id A x u. w) : (Id A x u → Id A x u) $
+  by id_ty [l16]
+l18: $ g ⊢ J x y z A (Id A y u → Id A x u)
+  (λ w : Id A x u. w) s t p : (Id A t u → Id A s u) $
+  by J_elim [l15, l17, #2, #3, #5]
+l19: $ g ⊢ (J x y z A (Id A y u → Id A x u)
+  (λ w : Id A x u. w) s t p) · q : Id A s u $ by app_elim [l18, #6]
+
+id_trans_refl_left
 ------------------
 
-l1: $ tm_eq (bool_rec Bool false true true) false $ by bool_rec_true
+l1: $ g , x : A ⊢ Ty A $ by weaken [#1]
+l2: $ g , x : A , y : A ⊢ y : A $ by var
+l3: $ g , x : A , y : A ⊢ Ty A $ by weaken [l1]
+l4: $ g , x : A ⊢ x : A $ by var
+l5: $ g , x : A ⊢ u : A $ by weaken [#3]
+l6: $ g , x : A , y : A ⊢ u : A $ by weaken [l5]
+l7: $ g , x : A , y : A , z : Id A x y ⊢ Ty A $ by weaken [l3]
+l8: $ g , x : A , y : A , z : Id A x y ⊢ y : A $ by weaken [l2]
+l9: $ g , x : A , y : A , z : Id A x y ⊢ u : A $ by weaken [l6]
+l10: $ g , x : A , y : A , z : Id A x y ⊢ Ty (Id A y u) $
+  by Id_form [l7, l8, l9]
+l11: $ g , x : A , y : A ⊢ x : A $ by weaken [l4]
+l12: $ g , x : A , y : A , z : Id A x y ⊢ x : A $ by weaken [l11]
+l13: $ g , x : A , y : A , z : Id A x y ⊢ Ty (Id A x u) $
+  by Id_form [l7, l12, l9]
+l14: $ g , x : A , y : A , z : Id A x y , w : Id A y u ⊢
+  Ty (Id A x u) $ by weaken [l13]
+l15: $ g , x : A , y : A , z : Id A x y ⊢ Ty (Id A y u → Id A x u) $
+  by pi_form [l10, l14]
+l16: $ g , x : A ⊢ Ty (Id A x u) $ by Id_form [l1, l4, l5]
+l17: $ g , x : A ⊢ (λ w : Id A x u. w) : (Id A x u → Id A x u) $
+  by id_ty [l16]
+l18: $ g ⊢ ≡[[x/s] [y/s] [z/refl A s] (Id A y u → Id A x u)]
+  (J x y z A (Id A y u → Id A x u) (λ w : Id A x u. w)
+    s s (refl A s)) = (⟦ x / s ⟧ (λ w : Id A x u. w)) $
+  by J_beta [l15, l17, #2]
+l19: $ g ⊢ ≡[Id A s u]
+  ((J x y z A (Id A y u → Id A x u) (λ w : Id A x u. w)
+    s s (refl A s)) · q) = ((λ w : Id A s u. w) · q) $
+  by app_eq_left [l18, #4]
+l20: $ g ⊢ Ty (Id A s u) $ by Id_form [#1, #2, #3]
+l21: $ g , w : Id A s u ⊢ Ty (Id A s u) $ by weaken [l20]
+l22: $ g , w : Id A s u ⊢ w : Id A s u $ by var
+l23: $ g ⊢ (λ w : Id A s u. w) : (Id A s u → Id A s u) $
+  by lam_intro [l20, l21, l22]
+l24: $ g ⊢ ≡[Id A s u] ((λ w : Id A s u. w) · q) = q $
+  by app_beta [l23, #4]
+l25: $ g ⊢ ≡[Id A s u]
+  ((J x y z A (Id A y u → Id A x u) (λ w : Id A x u. w)
+    s s (refl A s)) · q) = q $ by eq_tm_trans [l19, l24]
 
-bool_rec_false_demo
--------------------
-
-l1: $ tm_eq (bool_rec Bool false true false) true $ by bool_rec_false
-
-nat_case_true_beta
-------------------
-
-l1: $ tm_eq (bool_rec Nat zero (suc zero) true) zero $ by bool_rec_true
-
-nat_case_false_beta
--------------------
-
-l1: $ tm_eq (bool_rec Nat zero (suc zero) false) (suc zero) $
-  by bool_rec_false
+-- ==================================================================
+-- SECTION 6: Planned next steps
+-- ==================================================================
+--
+-- TODO: addition and `add_comm` capstone.
