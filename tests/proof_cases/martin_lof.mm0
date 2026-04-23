@@ -1,6 +1,6 @@
 -- Curated Martin-Löf demo scaffold.
 --
--- This file is intentionally not a registered proof case yet.
+-- This file is registered as a passing proof case.
 -- The old large regression/stress case lives in `mltt.*`.
 --
 -- Goal for this file:

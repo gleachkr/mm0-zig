@@ -163,9 +163,12 @@ pub const UnifyEmitter = struct {
                         UnifyCmd.UDummy,
                         info.sort_id,
                     );
+                    // Verifier-side `UDummy` always appends to the unify
+                    // heap. Even single-use dummies reserve a slot and shift
+                    // later `URef` indices.
+                    const slot = self.heap_len;
+                    self.heap_len = try std.math.add(u32, self.heap_len, 1);
                     if (save_for_ref) {
-                        const slot = self.heap_len;
-                        self.heap_len = try std.math.add(u32, self.heap_len, 1);
                         try self.slots.put(self.allocator, expr_id, slot);
                     }
                 },

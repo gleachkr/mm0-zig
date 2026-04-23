@@ -121,6 +121,22 @@ test "compiler rejects hidden-dummy dep violations before emission" {
     );
 }
 
+test "compiler reserves unify heap slots for single-use dummies" {
+    const allocator = std.testing.allocator;
+    const mm0_src =
+        \\delimiter $ ( ) . : ; $;
+        \\sort term;
+        \\term bind {x: term} (t: term x): term;
+        \\def d {.x .y: term}: term = $ bind x (bind y y) $;
+    ;
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, "");
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+}
+
 test "compiler verifies bodyful constant defs with lambda bodies" {
     const mm0_src =
         \\delimiter $ ( @ [ $ $ . : ; ) ] $;
