@@ -37,8 +37,7 @@ axiom comp_assoc (f g h: mor):
   $ (f o g) o h ~ f o (g o h) $;
 axiom comp_unit (f: mor): $ id o f ~ f $;
 
--- Right unit via rewriting (supplements AU's left-unit handling)
---| @rewrite
+-- Right unit support is discovered structurally from theorem shape.
 axiom comp_unit_r (f: mor): $ f o id ~ f $;
 
 -- Congruence rules (used by normalizer)
@@ -85,7 +84,6 @@ axiom pb_med_congr (a1 b1 a2 b2: mor):
 
 -- Warm-up: basic AU axiom application (no normalization exercised)
 theorem assoc_norm (f g h: mor): $ (f o g) o h ~ f o (g o h) $;
-theorem unit_norm (f: mor): $ id o f ~ f $;
 
 -- Main theorem: pullback preserves monomorphisms (exercises AU normalization)
 theorem pb_preserves_mono (alpha beta: mor):

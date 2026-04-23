@@ -17,7 +17,7 @@ pub fn mergeCanonical(
     acui: ResolvedStructuralCombiner,
 ) anyerror!NormalizeResult {
     const unit_expr = try ProofEmit.unitExpr(self, acui);
-    if (left == unit_expr) {
+    if (left == unit_expr and acui.supportsLeftUnit()) {
         return .{
             .result_expr = right,
             .conv_line_idx = try ProofEmit.emitLeftUnit(

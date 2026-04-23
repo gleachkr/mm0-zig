@@ -139,9 +139,9 @@ pub fn sharedStructuralCombiner(
     self: anytype,
     lhs: ExprId,
     rhs: ExprId,
-) ?ResolvedStructuralCombiner {
+) anyerror!?ResolvedStructuralCombiner {
     var support = Support.acuiSupport(self);
-    return support.sharedStructuralCombiner(lhs, rhs);
+    return try support.sharedStructuralCombiner(lhs, rhs);
 }
 
 pub fn buildCanonicalAcuiFromItems(

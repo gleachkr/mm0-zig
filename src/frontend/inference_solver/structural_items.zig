@@ -14,7 +14,7 @@ pub fn structuralProfileFor(
     head_term_id: u32,
     unit_term_id: u32,
 ) anyerror!StructuralProfile {
-    const profile = resolveStructuralProfile(self, head_term_id) orelse {
+    const profile = try resolveStructuralProfile(self, head_term_id) orelse {
         return error.UnifyMismatch;
     };
     if (profile.unitTermId() != unit_term_id) {
@@ -101,7 +101,10 @@ pub fn collectTemplateStructuralItems(
                 );
                 return;
             }
-            if (app.term_id == profile.unitTermId() and app.args.len == 0) {
+            if (app.term_id == profile.unitTermId() and app.args.len == 0 and
+                profile.combiner.supportsLeftUnit() and
+                profile.combiner.supportsRightUnit())
+            {
                 return;
             }
             try appendTemplateStructuralItem(
@@ -137,8 +140,7 @@ pub fn collectConcreteStructuralItems(
     const node = self.theorem.interner.node(expr_id);
     switch (node.*) {
         .variable => try appendStructuralItem(self, profile, out, expr_id),
-        .placeholder =>
-            try appendStructuralItem(self, profile, out, expr_id),
+        .placeholder => try appendStructuralItem(self, profile, out, expr_id),
         .app => |app| {
             if (app.term_id == profile.headTermId() and app.args.len == 2) {
                 try collectConcreteStructuralItems(
@@ -155,7 +157,10 @@ pub fn collectConcreteStructuralItems(
                 );
                 return;
             }
-            if (app.term_id == profile.unitTermId() and app.args.len == 0) {
+            if (app.term_id == profile.unitTermId() and app.args.len == 0 and
+                profile.combiner.supportsLeftUnit() and
+                profile.combiner.supportsRightUnit())
+            {
                 return;
             }
             try appendStructuralItem(self, profile, out, expr_id);
@@ -286,8 +291,8 @@ pub fn isStructuralRemainderBinder(
 pub fn resolveStructuralProfile(
     self: anytype,
     head_term_id: u32,
-) ?StructuralProfile {
-    const combiner = self.registry.resolveStructuralCombiner(
+) anyerror!?StructuralProfile {
+    const combiner = try self.registry.resolveStructuralCombiner(
         self.env,
         head_term_id,
     ) orelse return null;

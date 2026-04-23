@@ -26,7 +26,7 @@ pub fn matchStructural(
         .binder => return null,
     };
     const profile =
-        StructuralItems.resolveStructuralProfile(self, app.term_id) orelse
+        try StructuralItems.resolveStructuralProfile(self, app.term_id) orelse
         return null;
 
     const bindings = BranchStateOps.getBindings(self, @constCast(&state), space);

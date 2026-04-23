@@ -83,7 +83,7 @@ pub const Canonicalizer = struct {
                 else
                     expr_id;
 
-                break :blk if (self.registry.resolveStructuralCombiner(
+                break :blk if (try self.registry.resolveStructuralCombiner(
                     self.env,
                     app.term_id,
                 )) |acui|

@@ -203,6 +203,17 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_acui_cross_side_structural_def_leftover", .outcome = .pass },
     .{ .stem = "pass_acui_fragment_baseline", .outcome = .pass },
     .{ .stem = "pass_au_category", .outcome = .pass },
+    .{
+        .stem = "fail_au_right_unit_unsupported",
+        .outcome = .{ .fail = error.UnifyMismatch },
+    },
+    .{ .stem = "pass_au_right_unit_direct", .outcome = .pass },
+    .{ .stem = "pass_au_right_unit_reversed", .outcome = .pass },
+    .{ .stem = "pass_acu_right_unit_via_comm", .outcome = .pass },
+    .{
+        .stem = "fail_au_ambiguous_right_unit",
+        .outcome = .{ .fail = error.AmbiguousStructuralUnitRule },
+    },
     .{ .stem = "pass_au_order_sensitive", .outcome = .pass },
     .{ .stem = "fail_au_order_sensitive", .outcome = .{ .fail = error.UnifyMismatch } },
     .{ .stem = "pass_acu_multiplicity_sensitive", .outcome = .pass },

@@ -127,11 +127,10 @@ pub fn appendCombinedStructuralObligationState(
             continue;
         }
         const combined =
-            (try combineStructuralObligations(self, existing, obligation))
-                orelse {
-            self.allocator.free(binder_idxs);
-            return;
-        };
+            (try combineStructuralObligations(self, existing, obligation)) orelse {
+                self.allocator.free(binder_idxs);
+                return;
+            };
         if (!try StructuralIntervals.obligationCompatibleWithState(
             self,
             &final_state,
@@ -378,7 +377,7 @@ pub fn combineStructuralIntervals(
     {
         return error.UnifyMismatch;
     }
-    const profile = StructuralItems.resolveStructuralProfile(
+    const profile = try StructuralItems.resolveStructuralProfile(
         self,
         lhs.head_term_id,
     ) orelse return error.UnifyMismatch;

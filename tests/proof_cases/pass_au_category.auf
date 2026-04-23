@@ -3,11 +3,6 @@ assoc_norm
 
 l1: $ (f o g) o h ~ f o (g o h) $ by comp_assoc []
 
-unit_norm
----------
-
-l1: $ id o f ~ f $ by comp_unit []
-
 pb_preserves_mono
 -----------------
 

@@ -19,7 +19,7 @@ pub fn buildAcuiCommonTarget(
 ) anyerror!?CommonTargetResult {
     const relation =
         Support.resolveRelationForExpr(self, lhs) orelse return null;
-    const acui = Cover.sharedStructuralCombiner(self, lhs, rhs) orelse {
+    const acui = try Cover.sharedStructuralCombiner(self, lhs, rhs) orelse {
         return null;
     };
 

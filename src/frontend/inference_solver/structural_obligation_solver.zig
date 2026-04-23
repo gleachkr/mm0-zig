@@ -17,7 +17,7 @@ pub fn solveStructuralObligation(
     space: BinderSpace,
     obligation: StructuralJointObligation,
 ) anyerror![]BranchState {
-    const profile = StructuralItems.resolveStructuralProfile(
+    const profile = try StructuralItems.resolveStructuralProfile(
         self,
         obligation.head_term_id,
     ) orelse return error.UnifyMismatch;

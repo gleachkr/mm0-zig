@@ -96,7 +96,7 @@ fn appendSemanticHeadStepCandidates(
     for (registry.getRewriteRules(head_term_id)) |rule| {
         try out.append(self.shared.allocator, .{ .rewrite_rule = rule });
     }
-    if (registry.resolveStructuralCombiner(
+    if (try registry.resolveStructuralCombiner(
         self.shared.env,
         head_term_id,
     )) |acui| {
@@ -715,7 +715,8 @@ fn applySemanticStepToExpr(
         else
             try TransparentMatch.expandConcreteDef(self, expr_id, state),
         .unfold_symbolic_def => null,
-        .rewrite_rule => |rule| try RewriteApplication.applyRewriteRuleToExpr(self, 
+        .rewrite_rule => |rule| try RewriteApplication.applyRewriteRuleToExpr(
+            self,
             rule,
             expr_id,
             state,
@@ -765,7 +766,8 @@ fn applySemanticStepToSymbolic(
             },
             else => null,
         },
-        .rewrite_rule => |rule| try RewriteApplication.applyRewriteRuleToSymbolic(self, 
+        .rewrite_rule => |rule| try RewriteApplication.applyRewriteRuleToSymbolic(
+            self,
             rule,
             symbolic,
             state,

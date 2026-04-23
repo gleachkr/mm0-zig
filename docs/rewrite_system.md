@@ -401,8 +401,11 @@ performs the following steps:
    appropriate rules before the structural pass begins.
 2. **Flatten nested uses.** `(a ∘ b) ∘ c` and `a ∘ (b ∘ c)` are treated as
    the flat list `[a, b, c]`.
-3. **Remove unit elements.** Any occurrence of the unit is dropped from the
-   list.
+3. **Remove supported unit elements.** The normalizer drops a left unit
+   only when it has discovered a proof of `unit ∘ a ~ a`, and drops a right
+   unit only when it has discovered a proof of `a ∘ unit ~ a`. If the
+   combiner is commutative, either side can be derived from the other by
+   first commuting.
 4. **Sort deterministically** (if commutativity is declared). Elements are
    ordered using a canonical comparison, making the normal form
    order-independent.
@@ -423,17 +426,22 @@ engine.
 
 ### Supported subsets
 
-Associativity (A) and unit (U) are mandatory. Without associativity,
-flattening is unjustified. Without a unit, there is no base case for empty
-or singleton lists. Commutativity (C) and idempotence (I) are optional and
-independent:
+Associativity (A) is mandatory, because flattening is unjustified without
+it. The `unit` field names the nullary term to use for empty rebuilt lists,
+but unit *elimination* is structural only when matching unit laws are
+available. Commutativity (C) and idempotence (I) are optional and independent:
 
 | Declared | Behavior |
 |----------|----------|
-| AU   | Flatten and eliminate units only; order is preserved |
-| ACU  | Flatten, eliminate units, sort canonically |
-| AUI  | Flatten, eliminate units, deduplicate |
-| ACUI | Flatten, eliminate units, sort, deduplicate |
+| AU   | Flatten; eliminate only the discovered left/right unit sides |
+| ACU  | Flatten; eliminate supported units; sort canonically |
+| AUI  | Flatten; eliminate supported units; deduplicate |
+| ACUI | Flatten; eliminate supported units; sort; deduplicate |
+
+For non-commutative AU and AUI combiners, left and right unit support are
+distinct. A theorem of shape `unit ∘ a ~ a` does not justify dropping
+`a ∘ unit`. For commutative ACU and ACUI combiners, one side can be derived
+from the other using the declared commutativity theorem.
 
 **Example — AU (non-commutative monoid):**
 ```
@@ -443,8 +451,10 @@ term comp (f g: mor): mor;
 ```
 
 This is suitable for morphism composition: `(f ∘ g) ∘ h` normalizes to
-`f ∘ (g ∘ h)` and `id ∘ f` normalizes to `f`, but the order of distinct
-morphisms is preserved.
+`f ∘ (g ∘ h)`. If the file contains a theorem of shape `id ∘ f ~ f`, then
+`id ∘ f` normalizes to `f`; if it also contains `f ∘ id ~ f`, then trailing
+identities normalize away as well. The order of distinct morphisms is
+preserved.
 
 ### Required companions
 

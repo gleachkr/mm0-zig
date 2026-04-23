@@ -62,7 +62,7 @@ pub fn normalizeUncached(
         const current_node = self.theorem.interner.node(current);
         if (current_node.* != .app) break;
         const app = current_node.app;
-        const acui = self.registry.resolveStructuralCombiner(
+        const acui = try self.registry.resolveStructuralCombiner(
             self.env,
             app.term_id,
         ) orelse break;

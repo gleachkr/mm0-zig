@@ -427,24 +427,43 @@ pub fn emitLeftUnit(
     relation: ResolvedRelation,
     acui: ResolvedStructuralCombiner,
 ) anyerror!usize {
-    const bindings = try self.allocator.alloc(ExprId, 1);
-    bindings[0] = result_expr;
+    if (acui.left_unit_rule_id != null) {
+        return try emitDirectUnit(
+            self,
+            current_expr,
+            result_expr,
+            relation,
+            acui.left_unit_rule_id,
+            acui.left_unit_rule_reversed,
+        );
+    }
+    if (acui.comm_id == null or acui.right_unit_rule_id == null) {
+        return error.MissingStructuralMetadata;
+    }
 
-    const theorem_expr = if (acui.left_unit_rule_reversed)
-        try buildRelExpr(self, relation, result_expr, current_expr)
-    else
-        try buildRelExpr(self, relation, current_expr, result_expr);
-
-    const unit_idx = try appendRuleLine(
-        self.lines,
-        self.allocator,
-        theorem_expr,
-        acui.left_unit_rule_id,
-        bindings,
-        &.{},
+    const unit_expr = try unitExpr(self, acui);
+    const swapped = try self.theorem.interner.internApp(
+        acui.head_term_id,
+        &[_]ExprId{ result_expr, unit_expr },
     );
-    if (!acui.left_unit_rule_reversed) return unit_idx;
-    return try emitSymm(self, relation, result_expr, current_expr, unit_idx);
+    const comm_idx = try emitComm(self, unit_expr, result_expr, relation, acui);
+    const unit_idx = try emitDirectUnit(
+        self,
+        swapped,
+        result_expr,
+        relation,
+        acui.right_unit_rule_id,
+        acui.right_unit_rule_reversed,
+    );
+    return try composeTransitivityLine(
+        self,
+        relation,
+        current_expr,
+        swapped,
+        result_expr,
+        comm_idx,
+        unit_idx,
+    );
 }
 
 pub fn emitRightUnit(
@@ -458,12 +477,33 @@ pub fn emitRightUnit(
         acui.head_term_id,
         &[_]ExprId{ item, unit_expr },
     );
+    if (acui.right_unit_rule_id != null) {
+        return try emitDirectUnit(
+            self,
+            current_expr,
+            item,
+            relation,
+            acui.right_unit_rule_id,
+            acui.right_unit_rule_reversed,
+        );
+    }
+    if (acui.comm_id == null or acui.left_unit_rule_id == null) {
+        return error.MissingStructuralMetadata;
+    }
+
     const swapped = try self.theorem.interner.internApp(
         acui.head_term_id,
         &[_]ExprId{ unit_expr, item },
     );
     const comm_idx = try emitComm(self, item, unit_expr, relation, acui);
-    const unit_idx = try emitLeftUnit(self, swapped, item, relation, acui);
+    const unit_idx = try emitDirectUnit(
+        self,
+        swapped,
+        item,
+        relation,
+        acui.left_unit_rule_id,
+        acui.left_unit_rule_reversed,
+    );
     return try composeTransitivityLine(
         self,
         relation,
@@ -473,6 +513,34 @@ pub fn emitRightUnit(
         comm_idx,
         unit_idx,
     );
+}
+
+fn emitDirectUnit(
+    self: anytype,
+    current_expr: ExprId,
+    result_expr: ExprId,
+    relation: ResolvedRelation,
+    rule_id: ?u32,
+    reversed: bool,
+) anyerror!usize {
+    const bindings = try self.allocator.alloc(ExprId, 1);
+    bindings[0] = result_expr;
+
+    const theorem_expr = if (reversed)
+        try buildRelExpr(self, relation, result_expr, current_expr)
+    else
+        try buildRelExpr(self, relation, current_expr, result_expr);
+
+    const unit_idx = try appendRuleLine(
+        self.lines,
+        self.allocator,
+        theorem_expr,
+        rule_id orelse return error.MissingStructuralMetadata,
+        bindings,
+        &.{},
+    );
+    if (!reversed) return unit_idx;
+    return try emitSymm(self, relation, result_expr, current_expr, unit_idx);
 }
 
 pub fn composeTransitivity(

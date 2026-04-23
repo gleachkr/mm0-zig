@@ -54,10 +54,10 @@ pub const Context = struct {
         self: *Context,
         lhs: ExprId,
         rhs: ExprId,
-    ) ?ResolvedStructuralCombiner {
+    ) anyerror!?ResolvedStructuralCombiner {
         const lhs_node = self.theorem.interner.node(lhs);
         switch (lhs_node.*) {
-            .app => |app| if (self.registry.resolveStructuralCombiner(
+            .app => |app| if (try self.registry.resolveStructuralCombiner(
                 self.env,
                 app.term_id,
             )) |acui| {
@@ -68,7 +68,7 @@ pub const Context = struct {
         }
         const rhs_node = self.theorem.interner.node(rhs);
         switch (rhs_node.*) {
-            .app => |app| if (self.registry.resolveStructuralCombiner(
+            .app => |app| if (try self.registry.resolveStructuralCombiner(
                 self.env,
                 app.term_id,
             )) |acui| {
@@ -80,7 +80,7 @@ pub const Context = struct {
         const lhs_sort = self.getExprSort(lhs) orelse return null;
         const rhs_sort = self.getExprSort(rhs) orelse return null;
         if (!std.mem.eql(u8, lhs_sort, rhs_sort)) return null;
-        return self.registry.resolveStructuralCombinerForSort(
+        return try self.registry.resolveStructuralCombinerForSort(
             self.env,
             lhs_sort,
         );
@@ -127,8 +127,17 @@ pub const Context = struct {
     pub fn collectConcreteSetItems(
         self: *Context,
         expr_id: ExprId,
-        head_term_id: u32,
-        unit_term_id: u32,
+        acui: ResolvedStructuralCombiner,
+        out: *std.ArrayListUnmanaged(ExprId),
+    ) anyerror!void {
+        const canonical = try self.canonicalizeAcuiExact(expr_id, acui);
+        try self.collectConcreteSetItemsExact(canonical, acui, out);
+    }
+
+    fn collectConcreteSetItemsExact(
+        self: *Context,
+        expr_id: ExprId,
+        acui: ResolvedStructuralCombiner,
         out: *std.ArrayListUnmanaged(ExprId),
     ) anyerror!void {
         const node = self.theorem.interner.node(expr_id);
@@ -136,22 +145,22 @@ pub const Context = struct {
             .variable => try self.appendSetItem(out, expr_id),
             .placeholder => try self.appendSetItem(out, expr_id),
             .app => |app| {
-                if (app.term_id == head_term_id and app.args.len == 2) {
-                    try self.collectConcreteSetItems(
+                if (app.term_id == acui.head_term_id and app.args.len == 2) {
+                    try self.collectConcreteSetItemsExact(
                         app.args[0],
-                        head_term_id,
-                        unit_term_id,
+                        acui,
                         out,
                     );
-                    try self.collectConcreteSetItems(
+                    try self.collectConcreteSetItemsExact(
                         app.args[1],
-                        head_term_id,
-                        unit_term_id,
+                        acui,
                         out,
                     );
                     return;
                 }
-                if (app.term_id == unit_term_id and app.args.len == 0) {
+                if (app.term_id == acui.unit_term_id and app.args.len == 0 and
+                    acui.supportsLeftUnit() and acui.supportsRightUnit())
+                {
                     return;
                 }
                 try self.appendSetItem(out, expr_id);
@@ -414,7 +423,7 @@ pub const Context = struct {
         lhs: ExprId,
         rhs: ExprId,
     ) anyerror!?ExprId {
-        const acui = self.sharedStructuralCombiner(lhs, rhs) orelse return null;
+        const acui = try self.sharedStructuralCombiner(lhs, rhs) orelse return null;
 
         var lhs_leaves = std.ArrayListUnmanaged(LeafInfo){};
         defer lhs_leaves.deinit(self.allocator);
@@ -703,7 +712,9 @@ pub const Context = struct {
         right: ExprId,
         acui: ResolvedStructuralCombiner,
     ) anyerror!ExprId {
-        if (left == try self.unitExpr(acui)) return right;
+        if (left == try self.unitExpr(acui) and acui.supportsLeftUnit()) {
+            return right;
+        }
 
         const left_node = self.theorem.interner.node(left);
         return switch (left_node.*) {
@@ -733,8 +744,8 @@ pub const Context = struct {
         acui: ResolvedStructuralCombiner,
     ) anyerror!ExprId {
         const unit_expr = try self.unitExpr(acui);
-        if (item == unit_expr) return canon;
-        if (canon == unit_expr) return item;
+        if (item == unit_expr and acui.supportsLeftUnit()) return canon;
+        if (canon == unit_expr and acui.supportsRightUnit()) return item;
 
         const canon_node = self.theorem.interner.node(canon);
         return switch (canon_node.*) {

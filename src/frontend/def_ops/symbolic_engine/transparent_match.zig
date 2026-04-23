@@ -335,7 +335,7 @@ pub fn guideSymbolicWitnessesFromAcuiTarget(
     const symbolic_sort = WitnessState.symbolicSortName(self, symbolic, state) orelse {
         return false;
     };
-    const acui = registry.resolveStructuralCombinerForSort(
+    const acui = try registry.resolveStructuralCombinerForSort(
         self.shared.env,
         symbolic_sort,
     ) orelse return false;
@@ -352,8 +352,7 @@ pub fn guideSymbolicWitnessesFromAcuiTarget(
     defer items.deinit(self.shared.allocator);
     try support.collectConcreteSetItems(
         target_expr,
-        acui.head_term_id,
-        acui.unit_term_id,
+        acui,
         &items,
     );
 

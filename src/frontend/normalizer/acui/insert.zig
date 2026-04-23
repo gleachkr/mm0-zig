@@ -18,7 +18,7 @@ pub fn insertItem(
     acui: ResolvedStructuralCombiner,
 ) anyerror!NormalizeResult {
     const unit_expr = try ProofEmit.unitExpr(self, acui);
-    if (item == unit_expr) {
+    if (item == unit_expr and acui.supportsLeftUnit()) {
         return .{
             .result_expr = canon,
             .conv_line_idx = try ProofEmit.emitLeftUnit(
@@ -30,7 +30,7 @@ pub fn insertItem(
             ),
         };
     }
-    if (canon == unit_expr) {
+    if (canon == unit_expr and acui.supportsRightUnit()) {
         return .{
             .result_expr = item,
             .conv_line_idx = try ProofEmit.emitRightUnit(

@@ -62,7 +62,7 @@ pub const CongruenceRule = struct {
     num_binders: usize,
 };
 
-const LeftUnitRule = struct {
+const UnitRule = struct {
     rule_id: u32,
     reversed: bool,
 };
@@ -76,7 +76,10 @@ pub const StructuralCombiner = struct {
     assoc_id: ?u32 = null,
     comm_id: ?u32 = null,
     idem_id: ?u32 = null,
-    left_unit_rule: ?LeftUnitRule = null,
+    left_unit_rule: ?UnitRule = null,
+    right_unit_rule: ?UnitRule = null,
+    left_unit_rule_searched: bool = false,
+    right_unit_rule_searched: bool = false,
 };
 
 pub const ResolvedStructuralCombiner = struct {
@@ -85,8 +88,20 @@ pub const ResolvedStructuralCombiner = struct {
     assoc_id: u32,
     comm_id: ?u32,
     idem_id: ?u32,
-    left_unit_rule_id: u32,
+    left_unit_rule_id: ?u32,
     left_unit_rule_reversed: bool,
+    right_unit_rule_id: ?u32,
+    right_unit_rule_reversed: bool,
+
+    pub fn supportsLeftUnit(self: ResolvedStructuralCombiner) bool {
+        return self.left_unit_rule_id != null or
+            (self.comm_id != null and self.right_unit_rule_id != null);
+    }
+
+    pub fn supportsRightUnit(self: ResolvedStructuralCombiner) bool {
+        return self.right_unit_rule_id != null or
+            (self.comm_id != null and self.left_unit_rule_id != null);
+    }
 };
 
 pub const RewriteRegistry = struct {
@@ -488,7 +503,7 @@ pub const RewriteRegistry = struct {
         self: *RewriteRegistry,
         env: *const GlobalEnv,
         sort_name: []const u8,
-    ) ?ResolvedStructuralCombiner {
+    ) anyerror!?ResolvedStructuralCombiner {
         var found_head: ?u32 = null;
         var it = self.acui_by_head.iterator();
         while (it.next()) |entry| {
@@ -503,7 +518,7 @@ pub const RewriteRegistry = struct {
             found_head = head_term_id;
         }
         return if (found_head) |head_term_id|
-            self.resolveStructuralCombiner(env, head_term_id)
+            try self.resolveStructuralCombiner(env, head_term_id)
         else
             null;
     }
@@ -512,7 +527,7 @@ pub const RewriteRegistry = struct {
         self: *RewriteRegistry,
         env: *const GlobalEnv,
         head_term_id: u32,
-    ) ?ResolvedStructuralCombiner {
+    ) anyerror!?ResolvedStructuralCombiner {
         const combiner = self.acui_by_head.getPtr(head_term_id) orelse return null;
         const term_decl = if (head_term_id < env.terms.items.len)
             &env.terms.items[head_term_id]
@@ -534,24 +549,47 @@ pub const RewriteRegistry = struct {
         if (combiner.idem_id == null and combiner.idem_name != null) {
             combiner.idem_id = env.getRuleId(combiner.idem_name.?);
         }
-        if (combiner.left_unit_rule == null) {
-            combiner.left_unit_rule = findLeftUnitRule(
+        if (!combiner.left_unit_rule_searched) {
+            combiner.left_unit_rule = try findLeftUnitRule(
                 env,
                 relation.rel_term_id,
                 head_term_id,
                 combiner.unit_term_id orelse return null,
             );
+            combiner.left_unit_rule_searched = true;
+        }
+        if (!combiner.right_unit_rule_searched) {
+            combiner.right_unit_rule = try findRightUnitRule(
+                env,
+                relation.rel_term_id,
+                head_term_id,
+                combiner.unit_term_id orelse return null,
+            );
+            combiner.right_unit_rule_searched = true;
         }
 
-        const left_unit = combiner.left_unit_rule orelse return null;
         return .{
             .head_term_id = head_term_id,
             .unit_term_id = combiner.unit_term_id orelse return null,
             .assoc_id = combiner.assoc_id orelse return null,
             .comm_id = combiner.comm_id,
             .idem_id = combiner.idem_id,
-            .left_unit_rule_id = left_unit.rule_id,
-            .left_unit_rule_reversed = left_unit.reversed,
+            .left_unit_rule_id = if (combiner.left_unit_rule) |rule|
+                rule.rule_id
+            else
+                null,
+            .left_unit_rule_reversed = if (combiner.left_unit_rule) |rule|
+                rule.reversed
+            else
+                false,
+            .right_unit_rule_id = if (combiner.right_unit_rule) |rule|
+                rule.rule_id
+            else
+                null,
+            .right_unit_rule_reversed = if (combiner.right_unit_rule) |rule|
+                rule.reversed
+            else
+                false,
         };
     }
 };
@@ -561,28 +599,70 @@ fn findLeftUnitRule(
     rel_term_id: u32,
     head_term_id: u32,
     unit_term_id: u32,
-) ?LeftUnitRule {
+) !?UnitRule {
+    return try findUnitRule(
+        env,
+        rel_term_id,
+        head_term_id,
+        unit_term_id,
+        isLeftUnitPattern,
+    );
+}
+
+fn findRightUnitRule(
+    env: *const GlobalEnv,
+    rel_term_id: u32,
+    head_term_id: u32,
+    unit_term_id: u32,
+) !?UnitRule {
+    return try findUnitRule(
+        env,
+        rel_term_id,
+        head_term_id,
+        unit_term_id,
+        isRightUnitPattern,
+    );
+}
+
+fn findUnitRule(
+    env: *const GlobalEnv,
+    rel_term_id: u32,
+    head_term_id: u32,
+    unit_term_id: u32,
+    comptime matches: fn (TemplateExpr, TemplateExpr, u32, u32) bool,
+) !?UnitRule {
+    var found: ?UnitRule = null;
     for (env.rules.items, 0..) |rule, rule_idx| {
+        if (rule.args.len != 1) continue;
         const app = switch (rule.concl) {
             .app => |value| value,
             else => continue,
         };
         if (app.term_id != rel_term_id or app.args.len != 2) continue;
 
-        if (isLeftUnitPattern(app.args[0], app.args[1], head_term_id, unit_term_id)) {
-            return .{
-                .rule_id = @intCast(rule_idx),
-                .reversed = false,
-            };
-        }
-        if (isLeftUnitPattern(app.args[1], app.args[0], head_term_id, unit_term_id)) {
-            return .{
-                .rule_id = @intCast(rule_idx),
-                .reversed = true,
-            };
-        }
+        const direct = matches(
+            app.args[0],
+            app.args[1],
+            head_term_id,
+            unit_term_id,
+        );
+        const reversed = matches(
+            app.args[1],
+            app.args[0],
+            head_term_id,
+            unit_term_id,
+        );
+        if (!direct and !reversed) continue;
+        if (direct and reversed) return error.AmbiguousStructuralUnitRule;
+
+        const candidate: UnitRule = .{
+            .rule_id = @intCast(rule_idx),
+            .reversed = reversed,
+        };
+        if (found != null) return error.AmbiguousStructuralUnitRule;
+        found = candidate;
     }
-    return null;
+    return found;
 }
 
 fn isLeftUnitPattern(
@@ -595,6 +675,9 @@ fn isLeftUnitPattern(
         .app => |value| value,
         else => return false,
     };
+    if (lhs_app.term_id != head_term_id or lhs_app.args.len != 2) {
+        return false;
+    }
     const unit_app = switch (lhs_app.args[0]) {
         .app => |value| value,
         else => return false,
@@ -607,9 +690,37 @@ fn isLeftUnitPattern(
         .binder => |value| value,
         else => return false,
     };
-    return lhs_app.term_id == head_term_id and
-        lhs_app.args.len == 2 and
-        unit_app.term_id == unit_term_id and
+    return unit_app.term_id == unit_term_id and
+        unit_app.args.len == 0 and
+        lhs_rhs_binder == rhs_binder;
+}
+
+fn isRightUnitPattern(
+    lhs: TemplateExpr,
+    rhs: TemplateExpr,
+    head_term_id: u32,
+    unit_term_id: u32,
+) bool {
+    const lhs_app = switch (lhs) {
+        .app => |value| value,
+        else => return false,
+    };
+    if (lhs_app.term_id != head_term_id or lhs_app.args.len != 2) {
+        return false;
+    }
+    const lhs_rhs_binder = switch (lhs_app.args[0]) {
+        .binder => |value| value,
+        else => return false,
+    };
+    const unit_app = switch (lhs_app.args[1]) {
+        .app => |value| value,
+        else => return false,
+    };
+    const rhs_binder = switch (rhs) {
+        .binder => |value| value,
+        else => return false,
+    };
+    return unit_app.term_id == unit_term_id and
         unit_app.args.len == 0 and
         lhs_rhs_binder == rhs_binder;
 }
