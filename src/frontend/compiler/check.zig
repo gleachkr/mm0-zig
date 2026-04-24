@@ -63,6 +63,8 @@ pub fn checkTheoremBlock(
     defer labels.deinit();
 
     var checked = std.ArrayListUnmanaged(CheckedLine){};
+    var rule_unify_cache = Inference.RuleUnifyCache.init(allocator);
+    defer rule_unify_cache.deinit();
     var diag_scratch = CompilerDiag.Scratch.init(allocator);
     defer diag_scratch.deinit();
     var last_line: ?ExprId = null;
@@ -107,6 +109,52 @@ pub fn checkTheoremBlock(
         );
 
         const saved_diag = getDiagnostic(self);
+
+        if (registry.getFallbackRule(initial_rule_id) == null) {
+            const checked_mark = checked.items.len;
+            const attempt = try tryApplyLineWithCandidate(
+                self,
+                allocator,
+                parser,
+                env,
+                registry,
+                fresh_bindings,
+                freshen_bindings,
+                views,
+                sort_vars,
+                assertion,
+                line,
+                initial_rule_id,
+                theorem,
+                &theorem_vars,
+                base_refs,
+                base_ref_exprs,
+                &checked,
+                &diag_scratch,
+                &rule_unify_cache,
+            );
+
+            try validateAttemptCheckedIrRange(
+                self,
+                env,
+                theorem,
+                assertion.name,
+                checked.items[checked_mark..],
+                line.label,
+                line.span,
+                .theorem_application,
+                saved_diag,
+            );
+
+            restoreDiagnostic(self, saved_diag);
+            try labels.put(line.label, attempt.line_idx);
+            last_line = checked.items[attempt.line_idx].expr;
+            last_line_idx = attempt.line_idx;
+            last_label = line.label;
+            last_span = line.span;
+            continue;
+        }
+
         var first_diag: ?Diagnostic = null;
         var first_err: ?anyerror = null;
         var seen_candidates = std.AutoHashMap(u32, void).init(allocator);
@@ -157,6 +205,7 @@ pub fn checkTheoremBlock(
                 base_ref_exprs,
                 &checked,
                 &diag_scratch,
+                &rule_unify_cache,
             ) catch |err| {
                 CheckedIr.rollbackToMark(
                     allocator,
@@ -321,6 +370,7 @@ fn tryApplyLineWithCandidate(
     base_ref_exprs: []const ExprId,
     checked: *std.ArrayListUnmanaged(CheckedLine),
     diag_scratch: *CompilerDiag.Scratch,
+    rule_unify_cache: *Inference.RuleUnifyCache,
 ) !SuccessfulLineAttempt {
     const line_expr = parseLineAssertion(
         parser,
@@ -444,6 +494,7 @@ fn tryApplyLineWithCandidate(
             fresh_context,
             maybe_view,
             use_advanced_inference,
+            rule_unify_cache,
         );
     } else blk: {
         const b = try Inference.requireConcreteBindings(

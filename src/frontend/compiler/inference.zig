@@ -59,6 +59,41 @@ const StrictReplayResult = union(enum) {
     failed: StrictReplayFailure,
 };
 
+/// Per-proof cache for verifier-style rule unify streams used by strict
+/// inference replay.  Rule templates are immutable once they enter the env,
+/// so the stream only depends on the rule id.
+pub const RuleUnifyCache = struct {
+    allocator: std.mem.Allocator,
+    entries: std.AutoHashMapUnmanaged(u32, []const u8) = .empty,
+
+    pub fn init(allocator: std.mem.Allocator) RuleUnifyCache {
+        return .{ .allocator = allocator };
+    }
+
+    pub fn deinit(self: *RuleUnifyCache) void {
+        var it = self.entries.valueIterator();
+        while (it.next()) |stream| {
+            self.allocator.free(stream.*);
+        }
+        self.entries.deinit(self.allocator);
+    }
+
+    pub fn get(
+        self: *RuleUnifyCache,
+        rule_id: u32,
+        rule: *const RuleDecl,
+    ) ![]const u8 {
+        const gop = try self.entries.getOrPut(self.allocator, rule_id);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = try Emit.buildRuleUnifyStream(
+                self.allocator,
+                rule,
+            );
+        }
+        return gop.value_ptr.*;
+    }
+};
+
 const BindingSummaryMode = enum {
     explicit,
     inferred,
@@ -682,12 +717,12 @@ fn bindingSeedsForViewReuse(
     return seeds;
 }
 
-pub fn inferBindingsTransparent(
+fn inferBindingsTransparentWithSeeds(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     theorem: *TheoremContext,
     rule: *const RuleDecl,
-    partial_bindings: []const ?ExprId,
+    seeds: []const DefOps.BindingSeed,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
 ) ![]const ExprId {
@@ -697,9 +732,6 @@ pub fn inferBindingsTransparent(
         env,
     );
     defer def_ops.deinit();
-
-    const seeds = try exactBindingSeeds(allocator, partial_bindings);
-    defer allocator.free(seeds);
 
     var session = try def_ops.beginRuleMatch(rule.args, seeds);
     defer session.deinit();
@@ -712,9 +744,83 @@ pub fn inferBindingsTransparent(
     if (!try session.matchTransparent(rule.concl, line_expr)) {
         return error.UnifyMismatch;
     }
-    // Use strict finalization — transparent matching with exact seeds
-    // should never produce unresolved hidden-dummy structure.
+    // Use strict finalization here. This path is only for transparent
+    // matching of ordinary theorem binders; hidden witnesses still fall
+    // through to the structural solver.
     return try session.finalizeConcreteBindings();
+}
+
+pub fn inferBindingsTransparent(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *TheoremContext,
+    rule: *const RuleDecl,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ![]const ExprId {
+    const seeds = try exactBindingSeeds(allocator, partial_bindings);
+    defer allocator.free(seeds);
+
+    return try inferBindingsTransparentWithSeeds(
+        allocator,
+        env,
+        theorem,
+        rule,
+        seeds,
+        ref_exprs,
+        line_expr,
+    );
+}
+
+fn bindingSeedsFromStrictFailure(
+    allocator: std.mem.Allocator,
+    explicit_bindings: []const ?ExprId,
+    strict_bindings: []const ?ExprId,
+) ![]DefOps.BindingSeed {
+    std.debug.assert(explicit_bindings.len == strict_bindings.len);
+    const seeds = try allocator.alloc(DefOps.BindingSeed, strict_bindings.len);
+    for (strict_bindings, explicit_bindings, 0..) |binding, explicit, idx| {
+        seeds[idx] = if (binding) |expr_id|
+            if (explicit == null)
+                .{ .semantic = .{
+                    .expr_id = expr_id,
+                    .mode = .transparent,
+                } }
+            else
+                .{ .exact = expr_id }
+        else
+            .none;
+    }
+    return seeds;
+}
+
+fn inferBindingsTransparentFromStrictFailure(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *TheoremContext,
+    rule: *const RuleDecl,
+    explicit_bindings: []const ?ExprId,
+    strict_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    line_expr: ExprId,
+) ![]const ExprId {
+    const seeds = try bindingSeedsFromStrictFailure(
+        allocator,
+        explicit_bindings,
+        strict_bindings,
+    );
+    defer allocator.free(seeds);
+
+    return try inferBindingsTransparentWithSeeds(
+        allocator,
+        env,
+        theorem,
+        rule,
+        seeds,
+        ref_exprs,
+        line_expr,
+    );
 }
 
 fn hypMarkedForNormalize(norm_spec: ?NormalizeSpec, hyp_idx: usize) bool {
@@ -1045,7 +1151,74 @@ pub fn inferBindings(
     fresh_context: ?HiddenWitnessFreshContext,
     maybe_view: ?ViewDecl,
     use_advanced_inference: bool,
+    rule_unify_cache: ?*RuleUnifyCache,
 ) ![]const ExprId {
+    const needs_strict_replay = maybe_view == null or !use_advanced_inference;
+    const cached_unify = if (needs_strict_replay)
+        if (rule_unify_cache) |cache|
+            try cache.get(rule_id, rule)
+        else
+            null
+    else
+        null;
+
+    if (use_advanced_inference and maybe_view == null) {
+        try traceInferenceAttempt(
+            self.debug,
+            allocator,
+            theorem,
+            env,
+            rule,
+            .strict_replay,
+            partial_bindings,
+            partial_bindings,
+        );
+        const strict_result = try strictInferBindingsDetailed(
+            self,
+            allocator,
+            env,
+            theorem,
+            assertion,
+            rule,
+            line,
+            partial_bindings,
+            ref_exprs,
+            line_expr,
+            cached_unify,
+        );
+        switch (strict_result) {
+            .complete => |bindings| return bindings,
+            .failed => |failure| {
+                defer allocator.free(failure.partial_bindings);
+                self.last_diagnostic = null;
+                try traceInferenceAttempt(
+                    self.debug,
+                    allocator,
+                    theorem,
+                    env,
+                    rule,
+                    .transparent_fallback,
+                    partial_bindings,
+                    failure.partial_bindings,
+                );
+                if (inferBindingsTransparentFromStrictFailure(
+                    allocator,
+                    env,
+                    theorem,
+                    rule,
+                    partial_bindings,
+                    failure.partial_bindings,
+                    ref_exprs,
+                    line_expr,
+                )) |bindings| {
+                    return bindings;
+                } else |_| {
+                    self.last_diagnostic = null;
+                }
+            },
+        }
+    }
+
     if (use_advanced_inference) {
         var seeded_bindings_storage: ?[]?ExprId = null;
         defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
@@ -1356,6 +1529,7 @@ pub fn inferBindings(
         partial_bindings,
         ref_exprs,
         line_expr,
+        cached_unify,
     );
     switch (strict_result) {
         .complete => |bindings| return bindings,
@@ -1384,12 +1558,13 @@ pub fn inferBindings(
                     partial_bindings,
                     strict_failure.partial_bindings,
                 );
-                const transparent = inferBindingsTransparent(
+                const transparent = inferBindingsTransparentFromStrictFailure(
                     allocator,
                     env,
                     theorem,
                     rule,
                     partial_bindings,
+                    strict_failure.partial_bindings,
                     ref_exprs,
                     line_expr,
                 ) catch |transparent_err| blk: {
@@ -1475,8 +1650,11 @@ fn strictInferBindingsDetailed(
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
+    cached_unify: ?[]const u8,
 ) !StrictReplayResult {
-    const unify = try Emit.buildRuleUnifyStream(allocator, rule);
+    const unify = cached_unify orelse
+        try Emit.buildRuleUnifyStream(allocator, rule);
+    defer if (cached_unify == null) allocator.free(unify);
 
     var inference = try InferenceContext.init(
         allocator,
@@ -1639,6 +1817,7 @@ pub fn strictInferBindings(
         partial_bindings,
         ref_exprs,
         line_expr,
+        null,
     );
     return switch (result) {
         .complete => |bindings| bindings,
