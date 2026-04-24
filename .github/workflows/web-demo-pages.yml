@@ -1,0 +1,63 @@
+name: Deploy web demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Cache Zig build data
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/zig-global
+            .cache/zig-local
+          key: zig-${{ runner.os }}-${{ hashFiles('build.zig.zon') }}
+          restore-keys: |
+            zig-${{ runner.os }}-
+
+      - name: Build web demo
+        run: |
+          zig build web-demo \
+            -Doptimize=ReleaseFast \
+            --cache-dir .cache/zig-local \
+            --global-cache-dir .cache/zig-global
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: zig-out/web-demo
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
