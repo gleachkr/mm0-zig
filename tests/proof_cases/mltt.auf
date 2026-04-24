@@ -33,8 +33,7 @@ ty_raw_conv
 l0: $ ctx_eq g g $ by ctx_refl
 l1: $ t ≈ t $ by tm_refl
 l2: $ (t : A) <=> (t : B) $ by has_ty_congr [l1, #1]
-l3: $ (g ⊢ (t : A)) <=> (g ⊢ (t : B)) $
-  by nd_congr [l0, l2]
+l3: $ (g ⊢ (t : A)) <=> (g ⊢ (t : B)) $ by nd_congr [l0, l2]
 l4: $ g ⊢ t : B $ by jiff_mp [l3, #2]
 
 pi_const_alpha_has_ty
@@ -66,10 +65,8 @@ l9: $ g ⊢ (λ y : A. (f · y) · (h · y)) : (Π y : A. q) $
 imp_dist_bool_tm
 ----------------
 
-l1: $ g ⊢ f : (Π z : A. (Bool → Bool)) $
-  by pi_const_alpha_has_ty [#2]
-l2: $ g ⊢ h : (Π z : A. Bool) $
-  by pi_const_alpha_has_ty [#3]
+l1: $ g ⊢ f : (Π z : A. (Bool → Bool)) $ by pi_const_alpha_has_ty [#2]
+l2: $ g ⊢ h : (Π z : A. Bool) $ by pi_const_alpha_has_ty [#3]
 l3: $ g , y : A ⊢ f : (Π z : A. (Bool → Bool)) $ by weaken [l1]
 l4: $ g , y : A ⊢ h : (Π z : A. Bool) $ by weaken [l2]
 l5: $ g , y : A ⊢ y : A $ by var
@@ -146,15 +143,13 @@ app_id_nat_beta
 ---------------
 
 l1: $ g ⊢ (λ x : Nat. x) : (Π x : Nat. Nat) $ by id_nat_ty
-l2: $ g ⊢ ≡[Nat] ((λ x : Nat. x) · n) = n $
-  by app_beta [l1, #1]
+l2: $ g ⊢ ≡[Nat] ((λ x : Nat. x) · n) = n $ by app_beta [l1, #1]
 
 app_const_true_beta
 -------------------
 
 l1: $ g ⊢ (λ x : Nat. true) : (Π x : Nat. Bool) $ by const_true_ty
-l2: $ g ⊢ ≡[Bool] ((λ x : Nat. true) · n) = true $
-  by app_beta [l1, #1]
+l2: $ g ⊢ ≡[Bool] ((λ x : Nat. true) · n) = true $ by app_beta [l1, #1]
 
 first_var
 ---------
@@ -168,8 +163,7 @@ tm_raw_conv
 l0: $ ctx_eq g g $ by ctx_refl
 l1: $ ty_raw_eq A A $ by ty_refl
 l2: $ (t : A) <=> (u : A) $ by has_ty_congr [#1, l1]
-l3: $ (g ⊢ (t : A)) <=> (g ⊢ (u : A)) $
-  by nd_congr [l0, l2]
+l3: $ (g ⊢ (t : A)) <=> (g ⊢ (u : A)) $ by nd_congr [l0, l2]
 l4: $ g ⊢ u : A $ by jiff_mp [l3, #2]
 
 ctx_conv
@@ -401,8 +395,7 @@ nat_double_ty
 l1: $ g ⊢ Ty Nat $ by nat_form
 l2: $ g , n : Nat ⊢ Ty Nat $ by nat_form
 l3: $ g , n : Nat ⊢ zero : Nat $ by zero_ty
-l4: $ g , n : Nat ⊢ (λ k : Nat. suc (suc k)) : (Nat → Nat) $
-  by double_step_ty
+l4: $ g , n : Nat ⊢ (λ k : Nat. suc (suc k)) : (Nat → Nat) $ by double_step_ty
 l5: $ g , n : Nat ⊢ n : Nat $ by var
 l6: $ g , n : Nat ⊢ nat_rec_dep Nat zero (λ k : Nat. suc (suc k)) n : Nat $
   by nat_rec_dep_ty [l2, l3, l4, l5]
@@ -436,8 +429,7 @@ l6: $ g ⊢ ≡[Nat] ((λ k : Nat. suc (suc k)) ·
 l7: $ g ⊢ ≡[Nat] ((λ k : Nat. suc (suc k)) · zero) =
   (suc (suc zero)) $ by app_beta [l3, l2]
 l8: $ g ⊢ ≡[Nat] (nat_rec_dep Nat zero (λ k : Nat. suc (suc k))
-  (suc zero)) = ((λ k : Nat. suc (suc k)) · zero) $
-  by tm_eq_trans [l4, l6]
+  (suc zero)) = ((λ k : Nat. suc (suc k)) · zero) $ by tm_eq_trans [l4, l6]
 l9: $ g ⊢ ≡[Nat] (nat_rec_dep Nat zero (λ k : Nat. suc (suc k))
   (suc zero)) = (suc (suc zero)) $ by tm_eq_trans [l8, l7]
 

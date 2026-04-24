@@ -1,23 +1,4 @@
--- Curated Martin-Löf demo scaffold.
---
--- This file is registered as a passing proof case.
--- The old large regression/stress case lives in `mltt.*`.
---
--- Goal for this file:
---   * tell a clear story in the web app
---   * keep each constructor's intro/elim/comp rules together
---   * distinguish raw syntactic equality from typed equality and Id
---   * require congruence and substitution rewrites for every term and def
---
--- Naming plan:
---   * `eq_raw_ctx`, `eq_raw_ty`, `eq_raw_tm`
---       - these are the `@relation` relations
---       - they mean literal intersubstitutability in syntax
---       - they primarily support substitution rewrites and normalization
---   * `eq_ty`, `eq_tm`
---       - typed judgemental equalities in a context
---   * `Id`
---       - the internal identity type
+-- This is a small dependently typed calculus with an identity type
 --
 -- For readability, the intended user-facing notation is:
 --   * `g ≋ h` for raw context equality
@@ -52,6 +33,10 @@ axiom jiff_trans (J K L: jdg):
   $ J <=> K $ > $ K <=> L $ > $ J <=> L $;
 axiom jiff_sym (J K: jdg): $ J <=> K $ > $ K <=> J $;
 axiom jiff_mp (J K: jdg): $ J <=> K $ > $ J $ > $ K $;
+
+--| @congr
+axiom jiff_congr (J1 J2 K1 K2: jdg):
+  $ J1 <=> J2 $ > $ K1 <=> K2 $ > $ (J1 <=> K1) <=> (J2 <=> K2) $;
 
 -- `eq_raw_*` is the syntax-level equality layer. These relations are the
 -- frontend's notion of intersubstitutability for each non-provable sort.
@@ -145,8 +130,7 @@ axiom eq_tm_congr (A B: ty) (s1 s2 t1 t2: tm):
 -- ==================================================================
 --
 -- Contexts are built from an empty context, a binary join, and singleton
--- hypotheses. The visible demo should use only a small amount of explicit
--- structural reasoning, but the raw-equality support lives here.
+-- hypotheses. 
 term emp: ctx;
 --| @acui eq_raw_ctx_assoc _ emp _
 term join (g h: ctx): ctx;
@@ -184,15 +168,10 @@ axiom exchange (g: ctx) {x y: tm} (A: ty) (B: ty y) (d: ctx x y)
   $ g , x : A , y : B , d ⊢ J $
   > $ g , y : B , x : A , d ⊢ J $;
 
--- TODO: add any remaining raw-context normalization lemmas only if they are
--- needed by the final curated theorem scripts.
---
 -- ==================================================================
 -- SECTION 3: Π-types and substitution primitives
 -- ==================================================================
 --
--- Substitution is explicit syntax in the object language. That keeps the
--- rewrite story visible and makes β-rules state exactly what they compute.
 term sb_ty {x: tm} (u: tm) (B: ty x): ty;
 notation sb_ty {x: tm} (u: tm) (B: ty x): ty =
   ($[$:41) x ($/$:0) u ($]$:0) B;
@@ -217,6 +196,14 @@ axiom sb_ty_id {x: tm} (A: ty x): $ [x/x] A ~ A $;
 axiom sb_ty_swap {x y: tm} (A: ty y): $ [x/y] [y/x] A ~ A $;
 
 --| @rewrite
+axiom sb_ty_var_comp {x y: tm} (u: tm) (A: ty x):
+  $ [y/u] [x/y] A ~ [x/u] A $;
+
+--| @rewrite
+axiom sb_ty_shadow {x: tm} (u v: tm) (A: ty x):
+  $ [x/u] [x/v] A ~ [x/v] A $;
+
+--| @rewrite
 axiom sb_ty_other {x y: tm} (u: tm x) (A: ty y): $ [x/u] A ~ A $;
 
 --| @rewrite
@@ -230,6 +217,17 @@ axiom sb_tm_other {x y: tm} (u: tm x): $ (⟦ x / u ⟧ y) ≈ y $;
 
 --| @rewrite
 axiom sb_tm_free {x: tm} (u: tm x) (t: tm): $ (⟦ x / u ⟧ t) ≈ t $;
+
+-- Explicit substitution has typing rules as well as raw rewrite rules.
+axiom sb_ty_form (g: ctx) (A: ty) {x: tm} (B: ty x) (u: tm):
+  $ g , x : A ⊢ Ty B $
+  > $ g ⊢ u : A $
+  > $ g ⊢ Ty ([x/u] B) $;
+
+axiom sb_ty_var_form (g: ctx) (A: ty) {x y: tm} (B: ty x)
+  (d: ctx x y):
+  $ g , x : A ⊢ Ty B $
+  > $ g , x : A , y : A , d ⊢ Ty ([x/y] B) $;
 
 term Pi (A: ty) {x: tm} (B: ty x): ty;
 notation Pi (A: ty) {x: tm} (B: ty x): ty =
@@ -263,8 +261,8 @@ axiom sb_ty_arr {x: tm} (u: tm x) (A B: ty x):
   $ [x/u] (A → B) ~ ([x/u] A → [x/u] B) $;
 
 --| @rewrite
-axiom sb_ty_pi {x y: tm} (u: tm x) (A: ty) (B: ty x y):
-  $ [x/u] (Π y : A. B) ~ (Π y : A. [x/u] B) $;
+axiom sb_ty_pi {x y: tm} (u: tm x) (A: ty x) (B: ty x y):
+  $ [x/u] (Π y : A. B) ~ (Π y : [x/u] A. [x/u] B) $;
 
 --| @rewrite
 axiom sb_tm_lam {x y: tm} (u: tm x) (A: ty x) (t: tm x y):
@@ -314,9 +312,6 @@ axiom app_beta (g: ctx) (A: ty) {x: tm} (B: ty x) (t: tm x) (u: tm):
   > $ g ⊢ u : A $
   > $ g ⊢ ≡[[x/u] B] ((λ x : A. t) · u) = (⟦ x / u ⟧ t) $;
 
--- Keep the visible warmup theorem story very small. Everything else in
--- this section should be justified by its use in later visible theorems,
--- not by a desire to probe metadata or theorem application.
 theorem id_ty (g: ctx) (A: ty) {x: tm}:
   $ g ⊢ Ty A $
   > $ g ⊢ (λ x : A. x) : (Π x : A. A) $;
@@ -326,15 +321,14 @@ theorem app_id_beta (g: ctx) (A: ty) {x: tm} (u: tm):
   > $ g ⊢ u : A $
   > $ g ⊢ ≡[A] ((λ x : A. x) · u) = u $;
 
--- TODO: decide whether the final warmup should stay generic or specialize
--- immediately to Nat so the visible theorem story reaches computation
--- examples sooner.
+-- The generic identity theorem stays here as the smallest possible Π example;
+-- later Nat examples show the same machinery doing computation.
 --
 -- ==================================================================
 -- SECTION 4: Bool
 -- ==================================================================
 --
--- Bool is the first closed datatype in the demo. We keep its rules small
+-- Bool is the first closed datatype in this example. We keep its rules small
 -- and direct: one eliminator, two computation rules, and one user-facing
 -- helper def for negation.
 term Bool: ty;
@@ -344,6 +338,9 @@ term bool_rec (A: ty) (t f b: tm): tm;
 
 def bool_not (b: tm): tm = $ bool_rec Bool false true b $;
 notation bool_not (b: tm): tm = ($¬$:65) b;
+
+--| @congr
+axiom bool_not_congr (b c: tm): $ b ≈ c $ > $ ¬ b ≈ ¬ c $;
 
 --| @congr
 axiom bool_rec_congr (A B: ty) (t1 t2 f1 f2 b1 b2: tm):
@@ -367,6 +364,10 @@ axiom sb_tm_bool_rec {x: tm} (u: tm x) (A: ty x) (t f b: tm x):
   $ (⟦ x / u ⟧ (bool_rec A t f b))
       ≈ (bool_rec ([x/u] A) (⟦ x / u ⟧ t) (⟦ x / u ⟧ f)
           (⟦ x / u ⟧ b)) $;
+
+--| @rewrite
+axiom sb_tm_bool_not {x: tm} (u: tm x) (b: tm x):
+  $ (⟦ x / u ⟧ (¬ b)) ≈ (¬ (⟦ x / u ⟧ b)) $;
 
 axiom bool_form (g: ctx): $ g ⊢ Ty Bool $;
 axiom true_intro (g: ctx): $ g ⊢ true : Bool $;
@@ -394,10 +395,6 @@ axiom bool_beta_false (g: ctx) (A: ty) (t f: tm):
   > $ g ⊢ f : A $
   > $ g ⊢ ≡[A] (bool_rec A t f false) = f $;
 
--- `¬` is user-facing, but for now we only keep the typed theorems that
--- directly serve the demo story. If we later need first-class raw rewrite
--- support for this transparent def, we should add it deliberately rather
--- than force it through awkward AUF inference.
 theorem bool_not_ty (g: ctx) (b: tm):
   $ g ⊢ b : Bool $
   > $ g ⊢ ¬ b : Bool $;
@@ -408,9 +405,6 @@ theorem bool_not_true (g: ctx):
 theorem bool_not_false (g: ctx):
   $ g ⊢ ≡[Bool] (¬ false) = true $;
 
--- TODO: decide whether the final visible theorem story needs both Bool
--- computation theorems, or just one of them.
---
 -- ==================================================================
 -- SECTION 5: Nat
 -- ==================================================================
@@ -421,10 +415,32 @@ term Nat: ty;
 term zero: tm;
 term suc (n: tm): tm;
 term const_ty (n: tm) (A: ty): ty;
+
+-- `nat_ind` is a dependent eliminator, so its family and step case are
+-- open expressions. Morally, the eliminator is applied as
+--
+--   nat_ind (λ k. C) z (λ k ih. s) n
+--
+-- but MM0 is first-order: it does not pass λ-abstractions as meta-level
+-- arguments. Instead, the variables in curly binders are local names bound
+-- by the constructor. Thus `C: ty k` may mention `k`, and `s: tm k ih` may
+-- mention both `k` and the induction hypothesis `ih`. Since the return sort
+-- of `nat_ind` is plain `tm`, these local names do not escape as
+-- dependencies of the constructed term. The typing side conditions for the
+-- family and step are stated in `nat_ind_elim`, rather than encoded as
+-- elaborate function types for the raw syntax arguments.
 term nat_ind {k ih: tm} (C: ty k) (z: tm) (s: tm k ih) (n: tm): tm;
 
 def nat_rec (A: ty) (z s n: tm) {.k .ih: tm}: tm =
   $ nat_ind k ih (const_ty k A) z (s · ih) n $;
+
+--| @congr
+axiom nat_rec_congr (A B: ty) (z1 z2 s1 s2 n1 n2: tm):
+  $ A ~ B $
+  > $ z1 ≈ z2 $
+  > $ s1 ≈ s2 $
+  > $ n1 ≈ n2 $
+  > $ nat_rec A z1 s1 n1 ≈ nat_rec B z2 s2 n2 $;
 
 --| @congr
 axiom suc_congr (m n: tm):
@@ -447,8 +463,8 @@ axiom nat_ind_congr {k ih: tm} (C D: ty k) (z1 z2: tm)
 axiom sb_ty_nat {x: tm} (u: tm x): $ [x/u] Nat ~ Nat $;
 
 --| @rewrite
-axiom sb_ty_const {k: tm} (u: tm k) (A: ty):
-  $ [k/u] (const_ty k A) ~ const_ty k A $;
+axiom sb_ty_const {x: tm} (u n: tm x) (A: ty x):
+  $ [x/u] (const_ty n A) ~ const_ty (⟦ x / u ⟧ n) ([x/u] A) $;
 
 --| @rewrite
 axiom const_ty_eval (n: tm) (A: ty): $ const_ty n A ~ A $;
@@ -465,6 +481,12 @@ axiom sb_tm_nat_ind {x k ih: tm} (u: tm x) (C: ty x k) (z: tm x)
   (s: tm x k ih) (n: tm x):
   $ (⟦ x / u ⟧ (nat_ind k ih C z s n))
       ≈ (nat_ind k ih ([x/u] C) (⟦ x / u ⟧ z) (⟦ x / u ⟧ s)
+          (⟦ x / u ⟧ n)) $;
+
+--| @rewrite
+axiom sb_tm_nat_rec {x: tm} (u: tm x) (A: ty x) (z s n: tm x):
+  $ (⟦ x / u ⟧ (nat_rec A z s n))
+      ≈ (nat_rec ([x/u] A) (⟦ x / u ⟧ z) (⟦ x / u ⟧ s)
           (⟦ x / u ⟧ n)) $;
 
 axiom nat_form (g: ctx): $ g ⊢ Ty Nat $;
@@ -524,30 +546,13 @@ theorem nat_rec_suc (g: ctx) (A: ty) (z s n: tm):
   > $ g ⊢ n : Nat $
   > $ g ⊢ ≡[A] (nat_rec A z s (suc n)) = (s · (nat_rec A z s n)) $;
 
--- TODO: if `nat_rec` stays user-facing, add deliberate raw support for the
--- transparent def rather than relying only on unfolding.
---   * `nat_rec_congr`
---   * `sb_tm_nat_rec`
--- TODO: once the typed equality layer lands, add a more compelling theorem
--- that uses Nat induction at a genuinely dependent family.
+-- The identity-type and arithmetic sections below use Nat induction at
+-- genuinely dependent families.
 --
 -- ==================================================================
 -- SECTION 6: Typed equality layer
 -- ==================================================================
---
--- Raw equality handles syntax-level normalization. This section adds the
--- judgemental equalities that users actually chain in proofs.
-axiom eq_ty_from_raw (g: ctx) (A B: ty):
-  $ A ~ B $
-  > $ g ⊢ Ty A $
-  > $ g ⊢ Ty B $
-  > $ g ⊢ A ≡ B $;
 
-axiom eq_tm_from_raw (g: ctx) (A: ty) (s t: tm):
-  $ s ≈ t $
-  > $ g ⊢ s : A $
-  > $ g ⊢ t : A $
-  > $ g ⊢ ≡[A] s = t $;
 
 axiom eq_ty_refl (g: ctx) (A: ty):
   $ g ⊢ Ty A $
@@ -602,6 +607,10 @@ axiom app_eq_left (g: ctx) (A B: ty) (f h u: tm):
   > $ g ⊢ u : A $
   > $ g ⊢ ≡[B] (f · u) = (h · u) $;
 
+axiom suc_eq (g: ctx) (m n: tm):
+  $ g ⊢ ≡[Nat] m = n $
+  > $ g ⊢ ≡[Nat] suc m = suc n $;
+
 axiom ty_conv (g: ctx) (t: tm) (A B: ty):
   $ g ⊢ A ≡ B $
   > $ g ⊢ t : A $
@@ -625,6 +634,23 @@ theorem nat_rec_two_step_one (g: ctx) {k: tm}:
 -- user-facing helper.
 term Id (A: ty) (s t: tm): ty;
 term refl (A: ty) (t: tm): tm;
+
+-- `J` is the dependent eliminator for identity types. It is not an
+-- object-language binder like `λ`, but it does bind the local names used by
+-- the motive and reflexivity case. Morally, the eliminator is applied as
+--
+--   J A (λ x y q. C) (λ x. r) s t p
+--
+-- where `C` is the motive in context `x : A, y : A, q : Id A x y`, and `r`
+-- is the reflexivity branch in context `x : A`. MM0 represents those
+-- abstractions first-order by making `x`, `y`, and `q` curly-bound
+-- arguments of the constructor. Thus `C: ty x y q` may mention all three
+-- local names, and `r: tm x` may mention `x`. Since the return sort is
+-- plain `tm`, those local names are removed from the dependencies of the
+-- constructed term; only the ordinary arguments `A`, `s`, `t`, and `p`, and
+-- any outer variables in `C` and `r`, can remain free. The typing side
+-- conditions for the motive and branch are stated in `J_elim` and `J_beta`,
+-- rather than encoded as higher-order function types for `C` and `r`.
 term J {x y q: tm} (A: ty) (C: ty x y q) (r: tm x) (s t p: tm): tm;
 
 --| @congr
@@ -676,6 +702,14 @@ axiom refl_intro (g: ctx) (A: ty) (s: tm):
   $ g ⊢ s : A $
   > $ g ⊢ refl A s : Id A s s $;
 
+-- Judgemental equality gives an identity path. This is the bridge that lets
+-- definitional computation feed later propositional arithmetic proofs.
+axiom eq_tm_to_Id (g: ctx) (A: ty) (s t: tm):
+  $ g ⊢ ≡[A] s = t $
+  > $ g ⊢ s : A $
+  > $ g ⊢ t : A $
+  > $ g ⊢ refl A s : Id A s t $;
+
 --| @normalize hyp1 conc
 axiom J_elim (g: ctx) {x y q: tm} (A: ty) (C: ty x y q) (r: tm x)
   (s t p: tm):
@@ -698,6 +732,20 @@ axiom J_beta (g: ctx) {x y q: tm} (A: ty) (C: ty x y q) (r: tm x)
 def id_sym (A: ty) (s t p: tm) {.x .y .q: tm}: tm =
   $ J x y q A (Id A y x) (refl A x) s t p $;
 
+--| @congr
+axiom id_sym_congr (A B: ty) (s1 s2 t1 t2 p1 p2: tm):
+  $ A ~ B $
+  > $ s1 ≈ s2 $
+  > $ t1 ≈ t2 $
+  > $ p1 ≈ p2 $
+  > $ id_sym A s1 t1 p1 ≈ id_sym B s2 t2 p2 $;
+
+--| @rewrite
+axiom sb_tm_id_sym {x: tm} (u: tm x) (A: ty x) (s t p: tm x):
+  $ (⟦ x / u ⟧ (id_sym A s t p))
+      ≈ id_sym ([x/u] A) (⟦ x / u ⟧ s) (⟦ x / u ⟧ t)
+          (⟦ x / u ⟧ p) $;
+
 theorem id_sym_ty (g: ctx) (A: ty) (s t p: tm):
   $ g ⊢ Ty A $
   > $ g ⊢ s : A $
@@ -713,6 +761,23 @@ theorem id_sym_refl (g: ctx) (A: ty) (s: tm):
 def id_trans (A: ty) (s t u p q: tm) {.x .y .z .w: tm}: tm =
   $ (J x y z A (Id A y u → Id A x u) (λ w : Id A x u. w)
       s t p) · q $;
+
+--| @congr
+axiom id_trans_congr (A B: ty) (s1 s2 t1 t2 u1 u2 p1 p2 q1 q2: tm):
+  $ A ~ B $
+  > $ s1 ≈ s2 $
+  > $ t1 ≈ t2 $
+  > $ u1 ≈ u2 $
+  > $ p1 ≈ p2 $
+  > $ q1 ≈ q2 $
+  > $ id_trans A s1 t1 u1 p1 q1 ≈ id_trans B s2 t2 u2 p2 q2 $;
+
+--| @rewrite
+axiom sb_tm_id_trans {x: tm} (a: tm x) (A: ty x)
+  (s t u p q: tm x):
+  $ (⟦ x / a ⟧ (id_trans A s t u p q))
+      ≈ id_trans ([x/a] A) (⟦ x / a ⟧ s) (⟦ x / a ⟧ t)
+          (⟦ x / a ⟧ u) (⟦ x / a ⟧ p) (⟦ x / a ⟧ q) $;
 
 theorem id_trans_ty (g: ctx) (A: ty) (s t u p q: tm):
   $ g ⊢ Ty A $
@@ -730,73 +795,259 @@ theorem id_trans_refl_left (g: ctx) (A: ty) (s u q: tm):
   > $ g ⊢ q : Id A s u $
   > $ g ⊢ ≡[Id A s u] (id_trans A s s u (refl A s) q) = q $;
 
--- TODO: add the rest of the first user-facing identity toolkit.
---   * `ap`
---   * `transport`
---   * probably `ap_suc`
--- TODO: if `id_sym` stays user-facing, add deliberate raw support for the
--- transparent def rather than relying only on unfolding.
---   * `id_sym_congr`
---   * `sb_tm_id_sym`
+def ap (A B: ty) (f s t p: tm) {.x .y .q: tm}: tm =
+  $ J x y q A (Id B (f · x) (f · y)) (refl B (f · x)) s t p $;
+
+--| @congr
+axiom ap_congr (A1 A2 B1 B2: ty) (f1 f2 s1 s2 t1 t2 p1 p2: tm):
+  $ A1 ~ A2 $
+  > $ B1 ~ B2 $
+  > $ f1 ≈ f2 $
+  > $ s1 ≈ s2 $
+  > $ t1 ≈ t2 $
+  > $ p1 ≈ p2 $
+  > $ ap A1 B1 f1 s1 t1 p1 ≈ ap A2 B2 f2 s2 t2 p2 $;
+
+--| @rewrite
+axiom sb_tm_ap {x: tm} (u: tm x) (A B: ty x) (f s t p: tm x):
+  $ (⟦ x / u ⟧ (ap A B f s t p))
+      ≈ ap ([x/u] A) ([x/u] B) (⟦ x / u ⟧ f) (⟦ x / u ⟧ s)
+          (⟦ x / u ⟧ t) (⟦ x / u ⟧ p) $;
+
+theorem ap_ty (g: ctx) (A B: ty) (f s t p: tm):
+  $ g ⊢ Ty A $
+  > $ g ⊢ Ty B $
+  > $ g ⊢ f : (A → B) $
+  > $ g ⊢ s : A $
+  > $ g ⊢ t : A $
+  > $ g ⊢ p : Id A s t $
+  > $ g ⊢ ap A B f s t p : Id B (f · s) (f · t) $;
+
+theorem ap_refl (g: ctx) (A B: ty) (f s: tm):
+  $ g ⊢ Ty A $
+  > $ g ⊢ Ty B $
+  > $ g ⊢ f : (A → B) $
+  > $ g ⊢ s : A $
+  > $ g ⊢ ≡[Id B (f · s) (f · s)]
+      (ap A B f s s (refl A s)) = refl B (f · s) $;
+
+-- A specialized action of successor on identity paths. This is deliberately
+-- direct rather than going through `ap` at a λ-term, because typed β-equality
+-- is not a raw rewrite for arbitrary application.
+def ap_suc (s t p: tm) {.x .y .q: tm}: tm =
+  $ J x y q Nat (Id Nat (suc x) (suc y)) (refl Nat (suc x)) s t p $;
+
+--| @congr
+axiom ap_suc_congr (s1 s2 t1 t2 p1 p2: tm):
+  $ s1 ≈ s2 $
+  > $ t1 ≈ t2 $
+  > $ p1 ≈ p2 $
+  > $ ap_suc s1 t1 p1 ≈ ap_suc s2 t2 p2 $;
+
+--| @rewrite
+axiom sb_tm_ap_suc {x: tm} (u: tm x) (s t p: tm x):
+  $ (⟦ x / u ⟧ (ap_suc s t p))
+      ≈ ap_suc (⟦ x / u ⟧ s) (⟦ x / u ⟧ t) (⟦ x / u ⟧ p) $;
+
+theorem ap_suc_ty (g: ctx) (s t p: tm):
+  $ g ⊢ s : Nat $
+  > $ g ⊢ t : Nat $
+  > $ g ⊢ p : Id Nat s t $
+  > $ g ⊢ ap_suc s t p : Id Nat (suc s) (suc t) $;
+
+theorem ap_suc_refl (g: ctx) (s: tm):
+  $ g ⊢ s : Nat $
+  > $ g ⊢ ≡[Id Nat (suc s) (suc s)]
+      (ap_suc s s (refl Nat s)) = refl Nat (suc s) $;
+
+-- `transport` packages path induction for a dependent family.
+def transport (A: ty) {x: tm} (B: ty x) (s t p u: tm)
+  {.y .q .w: tm}: tm =
+  $ (J x y q A (B → [x/y] B) (λ w : B. w) s t p) · u $;
+
+--| @congr
+axiom transport_congr (A C: ty) {x: tm} (B D: ty x)
+  (s1 s2 t1 t2 p1 p2 u1 u2: tm):
+  $ A ~ C $
+  > $ B ~ D $
+  > $ s1 ≈ s2 $
+  > $ t1 ≈ t2 $
+  > $ p1 ≈ p2 $
+  > $ u1 ≈ u2 $
+  > $ transport A x B s1 t1 p1 u1
+      ≈ transport C x D s2 t2 p2 u2 $;
+
+--| @rewrite
+axiom sb_tm_transport {x y: tm} (a: tm x) (A: ty x) (B: ty x y)
+  (s t p u: tm x):
+  $ (⟦ x / a ⟧ (transport A y B s t p u))
+      ≈ transport ([x/a] A) y ([x/a] B) (⟦ x / a ⟧ s)
+          (⟦ x / a ⟧ t) (⟦ x / a ⟧ p) (⟦ x / a ⟧ u) $;
+
+theorem transport_ty (g: ctx) (A: ty) {x: tm} (B: ty x)
+  (s t p u: tm):
+  $ g ⊢ Ty A $
+  > $ g , x : A ⊢ Ty B $
+  > $ g ⊢ s : A $
+  > $ g ⊢ t : A $
+  > $ g ⊢ p : Id A s t $
+  > $ g ⊢ u : [x/s] B $
+  > $ g ⊢ transport A x B s t p u : [x/t] B $;
+
+theorem transport_refl (g: ctx) (A: ty) {x: tm} (B: ty x) (s u: tm):
+  $ g ⊢ Ty A $
+  > $ g , x : A ⊢ Ty B $
+  > $ g ⊢ s : A $
+  > $ g ⊢ u : [x/s] B $
+  > $ g ⊢ ≡[[x/s] B] (transport A x B s s (refl A s) u) = u $;
+
 --
 -- ==================================================================
 -- SECTION 8: Arithmetic library
 -- ==================================================================
 --
--- TODO: define addition as a simple Nat program.
---   * use one transparent def
---   * keep notation pleasant
---
--- Required TODOs for the `add` def:
---   * notation
---   * congruence theorem if users will rewrite under it
---   * substitution rewrite through `add`
---   * rely on transparent unfolding rather than an unfold axiom
---
--- TODO: keep the theorem ladder tight.
---   * `add_ty`
---   * `add_zero_left`
---   * `add_suc_left`
---   * `add_zero_right`
---   * `add_suc_right`
---   * `add_comm`
+-- Addition is a transparent program over `nat_rec`. It recurses on the left
+-- argument, so the left zero and successor equations are judgemental
+-- computation lemmas. The right-sided laws are propositional arithmetic and
+-- are stated with the internal identity type.
+def suc_fn {.k: tm}: tm = $ λ k : Nat. suc k $;
+def add (m n: tm): tm = $ nat_rec Nat n suc_fn m $;
+infixl add: $+$ prec 55;
+
+--| @rewrite
+axiom sb_tm_suc_fn {x: tm} (u: tm x): $ (⟦ x / u ⟧ suc_fn) ≈ suc_fn $;
+
+--| @congr
+axiom add_congr (m1 m2 n1 n2: tm):
+  $ m1 ≈ m2 $
+  > $ n1 ≈ n2 $
+  > $ (m1 + n1) ≈ (m2 + n2) $;
+
+--| @rewrite
+axiom sb_tm_add {x: tm} (u: tm x) (m n: tm x):
+  $ (⟦ x / u ⟧ (m + n)) ≈ ((⟦ x / u ⟧ m) + (⟦ x / u ⟧ n)) $;
+
+axiom add_eq_congr (g: ctx) (m1 m2 n1 n2: tm):
+  $ g ⊢ ≡[Nat] m1 = m2 $
+  > $ g ⊢ ≡[Nat] n1 = n2 $
+  > $ g ⊢ ≡[Nat] (m1 + n1) = (m2 + n2) $;
+
+theorem suc_fn_ty (g: ctx):
+  $ g ⊢ suc_fn : (Nat → Nat) $;
+
+theorem add_ty (g: ctx) (m n: tm):
+  $ g ⊢ m : Nat $
+  > $ g ⊢ n : Nat $
+  > $ g ⊢ m + n : Nat $;
+
+theorem add_zero_left (g: ctx) (n: tm):
+  $ g ⊢ n : Nat $
+  > $ g ⊢ ≡[Nat] (zero + n) = n $;
+
+theorem add_suc_left (g: ctx) (m n: tm):
+  $ g ⊢ m : Nat $
+  > $ g ⊢ n : Nat $
+  > $ g ⊢ ≡[Nat] ((suc m) + n) = suc (m + n) $;
+
+theorem one_plus_one (g: ctx):
+  $ g ⊢ ≡[Nat] ((suc zero) + (suc zero)) = (suc (suc zero)) $;
+
+-- The remaining arithmetic laws are propositional. Their proof terms are
+-- named so theorem statements stay readable in the demo.
+def add_zero_right_p (m: tm) {.k .ih: tm}: tm =
+  $ nat_ind k ih (Id Nat (k + zero) k) (refl Nat (zero + zero))
+      (id_trans Nat ((suc k) + zero) (suc (k + zero)) (suc k)
+        (refl Nat ((suc k) + zero)) (ap_suc (k + zero) k ih)) m $;
+
+def add_suc_right_p (m n: tm) {.k .ih: tm}: tm =
+  $ nat_ind k ih (Id Nat (k + suc n) (suc (k + n)))
+      (id_trans Nat (zero + suc n) (suc n) (suc (zero + n))
+        (refl Nat (zero + suc n))
+        (id_sym Nat (suc (zero + n)) (suc n)
+          (refl Nat (suc (zero + n)))))
+      (id_trans Nat ((suc k) + suc n) (suc (k + suc n))
+        (suc ((suc k) + n))
+        (refl Nat ((suc k) + suc n))
+        (id_trans Nat (suc (k + suc n)) (suc (suc (k + n)))
+          (suc ((suc k) + n)) (ap_suc (k + suc n) (suc (k + n)) ih)
+          (id_sym Nat (suc ((suc k) + n)) (suc (suc (k + n)))
+            (ap_suc ((suc k) + n) (suc (k + n))
+              (refl Nat ((suc k) + n)))))) m $;
+
+def add_comm_p (m n: tm) {.k .ih: tm}: tm =
+  $ nat_ind k ih (Id Nat (k + n) (n + k))
+      (id_trans Nat (zero + n) n (n + zero)
+        (refl Nat (zero + n))
+        (id_sym Nat (n + zero) n (add_zero_right_p n)))
+      (id_trans Nat ((suc k) + n) (suc (k + n)) (n + suc k)
+        (refl Nat ((suc k) + n))
+        (id_trans Nat (suc (k + n)) (suc (n + k)) (n + suc k)
+          (ap_suc (k + n) (n + k) ih)
+          (id_sym Nat (n + suc k) (suc (n + k))
+            (add_suc_right_p n k)))) m $;
+
+--| @congr
+axiom add_zero_right_p_congr (m1 m2: tm):
+  $ m1 ≈ m2 $ > $ add_zero_right_p m1 ≈ add_zero_right_p m2 $;
+
+--| @rewrite
+axiom sb_tm_add_zero_right_p {x: tm} (u: tm x) (m: tm x):
+  $ (⟦ x / u ⟧ (add_zero_right_p m))
+      ≈ add_zero_right_p (⟦ x / u ⟧ m) $;
+
+--| @congr
+axiom add_suc_right_p_congr (m1 m2 n1 n2: tm):
+  $ m1 ≈ m2 $
+  > $ n1 ≈ n2 $
+  > $ add_suc_right_p m1 n1 ≈ add_suc_right_p m2 n2 $;
+
+--| @rewrite
+axiom sb_tm_add_suc_right_p {x: tm} (u: tm x) (m n: tm x):
+  $ (⟦ x / u ⟧ (add_suc_right_p m n))
+      ≈ add_suc_right_p (⟦ x / u ⟧ m) (⟦ x / u ⟧ n) $;
+
+--| @congr
+axiom add_comm_p_congr (m1 m2 n1 n2: tm):
+  $ m1 ≈ m2 $
+  > $ n1 ≈ n2 $
+  > $ add_comm_p m1 n1 ≈ add_comm_p m2 n2 $;
+
+--| @rewrite
+axiom sb_tm_add_comm_p {x: tm} (u: tm x) (m n: tm x):
+  $ (⟦ x / u ⟧ (add_comm_p m n))
+      ≈ add_comm_p (⟦ x / u ⟧ m) (⟦ x / u ⟧ n) $;
+
+theorem add_zero_right (g: ctx) (m: tm):
+  $ g ⊢ m : Nat $
+  > $ g ⊢ add_zero_right_p m : Id Nat (m + zero) m $;
+
+theorem add_suc_right (g: ctx) (m n: tm):
+  $ g ⊢ m : Nat $
+  > $ g ⊢ n : Nat $
+  > $ g ⊢ add_suc_right_p m n : Id Nat (m + suc n) (suc (m + n)) $;
+
+theorem add_comm (g: ctx) (m n: tm):
+  $ g ⊢ m : Nat $
+  > $ g ⊢ n : Nat $
+  > $ g ⊢ add_comm_p m n : Id Nat (m + n) (n + m) $;
 --
 -- ==================================================================
--- SECTION 9: Final curated theorem story
+-- SECTION 9: Demo shape and maintenance notes
 -- ==================================================================
 --
--- TODO: make the visible theorem progression read like a demo, not a stress
--- test.
+-- The visible theorem progression is now:
+--   1. a Π warmup (`id_ty`, `app_id_beta`)
+--   2. Bool formation and computation (`bool_not_*`)
+--   3. Nat recursion and judgemental equality chaining
+--   4. an Id toolkit built from path induction
+--   5. addition typing, computation, and propositional arithmetic
+--   6. the capstone: commutativity of addition
 --
--- Proposed theorem order:
---   1. one Π warmup
---   2. one Bool computation example
---   3. the small Id toolkit
---   4. addition typing and computation lemmas
---   5. commutativity of addition
+-- The file is intentionally more explicit than a minimal proof of the final
+-- theorem. Raw congruence and substitution metadata are included for
+-- user-facing terms and defs so nearby experiments normalize in the same
+-- style as the curated proof.
 --
--- TODO: avoid bespoke side examples unless one is strictly needed to make the
--- identity-type story clearer.
---
--- ==================================================================
--- SECTION 10: Completeness checklist before registration
--- ==================================================================
---
--- TODO: for every `term`:
---   * raw congruence axiom exists
---   * substitution rewrite axioms exist for every sort position it binds
---
--- TODO: for every `def`:
---   * notation is settled
---   * substitution rewrite theorem exists where needed
---   * transparent unfolding is enough; no unfold theorem by default
---   * congruence theorem exists if the def is user-facing
---
--- TODO: for every constructor family:
---   * intro/elim/comp rules are adjacent in the file
---   * comments explain the design pattern once, then reuse it
---
--- TODO: for every visible theorem:
---   * it contributes to the capstone
---   * it is readable in the web editor
---   * it does not look like a regression-only corner case
+-- When extending the demo, prefer adding one small, named helper theorem over
+-- hiding a large term in a final theorem. The goal is for the proof script to
+-- explain the construction, not merely to pass verification.
