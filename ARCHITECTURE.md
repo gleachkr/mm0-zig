@@ -61,6 +61,7 @@ Most project-specific docs now live under `docs/`:
 - `docs/transparent_defs.md` for transparent def handling
 - `docs/view_recover.md` for `@view`, `@recover`, and `@abstract`
 - `docs/fresh_binders.md` for `@vars` and `@fresh`
+- `docs/holes.md` for proof-side holes (`@hole`)
 
 The language / binary specs remain under `specs/`:
 
@@ -128,8 +129,16 @@ Compiler data models and theorem-local state:
 - `env.zig`
 - `expr.zig`
 - `rules.zig`
+- `surface_expr.zig`
 - `compiler/checked_ir.zig`
 - `compiler/vars.zig`
+
+`surface_expr.zig` provides helpers for the surface `Expr` tree that
+sits between the trusted parser and the theorem-local interner. The
+surface `Expr` includes a `.hole` leaf used by proof-side holes; helpers
+here detect holes, recover the source span of the first occurrence, and
+lower structural ACUI holes to unit terms when an enclosing combiner is
+in scope.
 
 `compiler/vars.zig` tracks sort-scoped `@vars` pools. Those pools feed
 proof-math token expansion, `@fresh`, recover-hole seeding, and the
@@ -145,7 +154,15 @@ Theorem checking and emission:
 - `compiler/metadata.zig`
 - `compiler/views.zig`
 - `compiler/fresh.zig`
+- `compiler/holes.zig`
 - `derived_bindings.zig`
+
+`compiler/holes.zig` owns proof-side hole elaboration: parsing a
+holey assertion via the trusted hole-aware parser entry point,
+matching visible structure against rule templates while deferring hole
+positions, and validating filled lines against a candidate's concrete
+conclusion (with sort checks at every hole). Holes never reach the
+theorem-local DAG, the checked IR, or the MMB emitter.
 
 Definition-aware matching and normalization support:
 
@@ -264,7 +281,12 @@ This parser is reused in several places:
 - metadata parsing that reuses MM0 syntax, such as view signatures
 
 The parser produces ordinary expression trees using `Expr` nodes in
-`src/trusted/expressions.zig`.
+`src/trusted/expressions.zig`. `Expr` has three leaf shapes:
+`.variable`, `.term`, and `.hole`. `.hole` is populated only by the
+proof-side hole-aware parse entry point and only when the enclosing
+sort has a registered `@hole` token; it carries the sort and the
+source span of the token. Ordinary parse paths used by `.mm0` files
+never produce `.hole` leaves.
 
 ### Trusted MM0 / MMB cross-checker
 
@@ -412,6 +434,38 @@ candidate binding list exists.
 The checker does not adopt a general alpha-equivalence policy. Any extra
 flexibility is consumed earlier by symbolic matching or is turned into
 explicit transport proof lines.
+
+### Proof-side holes
+
+Aufbau proof lines may contain anonymous holes that stand for one
+concrete subexpression each. Holes are opt-in per sort via `@hole`,
+and they appear only in `.auf` line assertions. The user-facing
+behavior is documented in `docs/holes.md`.
+
+Internally, hole-aware checking is structured to keep the rest of the
+pipeline concrete:
+
+- the proof-line assertion is parsed once, before the candidate /
+  fallback loop, into a surface `Expr` that may contain `.hole`
+  leaves; hole identity therefore belongs to the user's line, not to
+  any one candidate;
+- if no hole is present, the existing concrete fast path runs
+  unchanged, including strict unify replay where it already applies;
+- if a hole is present, the line is routed through the advanced
+  candidate path (`@view`, `@recover`, `@abstract`, `@normalize`,
+  `@fallback`); strict replay is not extended to solve holes;
+- visible (non-hole) structure participates in matching as usual,
+  while hole positions defer to the candidate's concrete conclusion;
+- hole filling is candidate-local and late: each candidate is
+  instantiated, the filled line is compared against the surface
+  assertion, and the first candidate whose elaboration succeeds
+  end-to-end (refs match, view / recover / abstract / normalize
+  succeed, hole sorts agree, no ambiguity) wins.
+
+The theorem-local interner stays concrete-only. Surface `.hole` leaves
+are never lowered into the theorem DAG; the checked IR and MMB emitter
+remain unchanged. Trust boundaries are unaffected: the verifier and
+cross-checker do not know holes exist.
 
 ### Checked-line IR and emission boundary
 
