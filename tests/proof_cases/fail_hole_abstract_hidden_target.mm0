@@ -1,5 +1,6 @@
 delimiter $ ( ) $;
 --| @vars x
+--| @hole _wff
 provable sort wff;
 
 term imp (a b: wff): wff;

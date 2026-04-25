@@ -795,6 +795,7 @@ test "compiler rejects out-of-order and extra proof blocks" {
 test "compiler records proof diagnostics for failing proof lines" {
     const mm0_src =
         \\delimiter $ ( ) $;
+        \\--| @hole _wff
         \\provable sort wff;
         \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
         \\axiom ax_keep (a b: wff): $ a $ > $ a -> b -> a $;
@@ -1138,6 +1139,7 @@ test "compiler notes exhausted fallback chains for holey assertions" {
     const mm0_src =
         \\delimiter $ ( ) $;
         \\provable sort wff;
+        \\--| @hole _obj
         \\provable sort obj;
         \\term top: wff;
         \\term bot: wff;
@@ -1383,6 +1385,7 @@ test "compiler explains proof hole sort mismatches" {
     const mm0_src =
         \\delimiter $ ( ) $;
         \\provable sort wff;
+        \\--| @hole _obj
         \\provable sort obj;
         \\term top: wff;
         \\term thing: obj;
@@ -1431,6 +1434,7 @@ test "compiler explains proof hole sort mismatches" {
 test "compiler explains proof hole visible structure mismatches" {
     const mm0_src =
         \\delimiter $ ( ) $;
+        \\--| @hole _wff
         \\provable sort wff;
         \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
         \\axiom ax_keep (a b: wff): $ a $ > $ a -> b -> a $;
@@ -1476,6 +1480,7 @@ test "compiler explains proof hole visible structure mismatches" {
 test "compiler explains proof holes that leave binders unsolved" {
     const mm0_src =
         \\delimiter $ ( ) $;
+        \\--| @hole _wff
         \\provable sort wff;
         \\axiom ax_vacuous (a b: wff): $ a $ > $ a $;
         \\theorem bad (a b: wff): $ a $ > $ a $;
@@ -3646,6 +3651,7 @@ test "compiler analyze mm0 suppresses blocked sort follow-ons" {
 test "compiler rejects @vars tokens that conflict with hole syntax" {
     const mm0_src =
         \\--| @vars _wff
+        \\--| @hole _wff
         \\provable sort wff;
         \\term top: wff;
     ;
@@ -3660,6 +3666,7 @@ test "compiler rejects @vars tokens that conflict with hole syntax" {
 
 test "compiler rejects theorem binders that conflict with hole syntax" {
     const mm0_src =
+        \\--| @hole _wff
         \\provable sort wff;
         \\theorem bad (_wff: wff): $ _wff $;
     ;
@@ -3674,6 +3681,7 @@ test "compiler rejects theorem binders that conflict with hole syntax" {
 
 test "compiler rejects term names that conflict with hole syntax" {
     const mm0_src =
+        \\--| @hole _wff
         \\provable sort wff;
         \\term _wff: wff;
     ;
@@ -3688,6 +3696,7 @@ test "compiler rejects term names that conflict with hole syntax" {
 
 test "compiler rejects notation tokens that conflict with hole syntax" {
     const mm0_src =
+        \\--| @hole _wff
         \\provable sort wff;
         \\term top: wff;
         \\prefix top: $_wff$ prec 10;
@@ -3703,6 +3712,7 @@ test "compiler rejects notation tokens that conflict with hole syntax" {
 
 test "compiler rejects bare notation markers with hole syntax" {
     const mm0_src =
+        \\--| @hole _wff
         \\provable sort wff;
         \\notation "_wff";
     ;
@@ -3717,6 +3727,7 @@ test "compiler rejects bare notation markers with hole syntax" {
 
 test "compiler rejects general notation tokens with hole syntax" {
     const mm0_src =
+        \\--| @hole _wff
         \\provable sort wff;
         \\term box (a: wff): wff;
         \\notation box (a: wff): wff = ($_wff$:10) a;
@@ -3734,7 +3745,91 @@ test "compiler rejects sorts that make existing tokens into holes" {
     const mm0_src =
         \\sort base;
         \\term _wff: base;
+        \\--| @hole _wff
         \\provable sort wff;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.HoleTokenNameCollision, diags[0].err);
+}
+
+test "compiler permits underscore sort-like tokens without @hole" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term _wff: wff;
+        \\theorem ok: $ _wff $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.check();
+}
+
+test "compiler accepts custom proof hole tokens" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @hole HOLE
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem ok: $ top $;
+    ;
+    const proof_src =
+        \\ok
+        \\---
+        \\l1: $ HOLE $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler rejects duplicate hole annotations on one sort" {
+    const mm0_src =
+        \\--| @hole _wff
+        \\--| @hole HOLE
+        \\provable sort wff;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.DuplicateHoleAnnotation, diags[0].err);
+}
+
+test "compiler rejects duplicate hole tokens across sorts" {
+    const mm0_src =
+        \\--| @hole _hole
+        \\provable sort wff;
+        \\--| @hole _hole
+        \\sort obj;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.DuplicateHoleToken, diags[0].err);
+}
+
+test "compiler rejects @vars tokens registered after hole tokens" {
+    const mm0_src =
+        \\--| @hole _wff
+        \\provable sort wff;
+        \\--| @vars _wff
+        \\sort obj;
     ;
 
     var compiler = Compiler.init(std.testing.allocator, mm0_src);

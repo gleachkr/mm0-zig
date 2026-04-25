@@ -11,6 +11,7 @@
 --   * `≃[A] t = u` is a Boolean-valued term
 --   * `≡[A] t = u` is a wff-level judgmental equality proposition
 
+--| @hole _wff
 strict provable sort wff;
 
 delimiter $ ( @ [ / ! ? ~ $ $ . : , ) ] $;

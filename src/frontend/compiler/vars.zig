@@ -142,7 +142,7 @@ pub fn ensureMathTextVars(
         parser.right_delims,
     )) |token| {
         if (theorem_vars.contains(token)) {
-            if (isReservedHoleToken(parser, token)) {
+            if (parser.isRegisteredHoleToken(token)) {
                 return error.HoleTokenNameCollision;
             }
             continue;
@@ -151,7 +151,7 @@ pub fn ensureMathTextVars(
         if (sort_vars.count() == 0) continue;
 
         if (sort_vars.getTokenDecl(token)) |decl| {
-            if (isReservedHoleToken(parser, token)) {
+            if (parser.isRegisteredHoleToken(token)) {
                 return error.HoleTokenNameCollision;
             }
             try theorem.ensureNamedDummyParserVar(
@@ -175,15 +175,10 @@ fn validateTokenHasNoSyntaxCollision(
     parser: *const MM0Parser,
     token: []const u8,
 ) !void {
-    if (isReservedHoleToken(parser, token)) {
+    if (parser.isRegisteredHoleToken(token)) {
         return error.HoleTokenNameCollision;
     }
     if (hasSyntaxCollision(parser, token)) return error.VarsTokenCollision;
-}
-
-fn isReservedHoleToken(parser: *const MM0Parser, token: []const u8) bool {
-    if (token.len < 2 or token[0] != '_') return false;
-    return parser.sort_names.contains(token[1..]);
 }
 
 fn hasSyntaxCollision(parser: *const MM0Parser, token: []const u8) bool {

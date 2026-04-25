@@ -601,6 +601,9 @@ fn annotationDiagnosticSpan(
         error.VarsFreeSort,
         error.DuplicateVarsToken,
         error.VarsTokenCollision,
+        error.InvalidHoleAnnotation,
+        error.DuplicateHoleAnnotation,
+        error.DuplicateHoleToken,
         => firstAnnotationSpan(parser),
         else => null,
     };
@@ -659,7 +662,7 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.UnifyStackNotEmpty,
         error.HypCountMismatch,
         => "could not infer omitted rule arguments from the line and refs",
-        error.HoleTokenNameCollision => "name conflicts with reserved proof hole syntax",
+        error.HoleTokenNameCollision => "name conflicts with a proof hole token",
         error.HoleyInferenceMismatch => "could not infer omitted rule arguments from the holey assertion",
         error.HoleConclusionMismatch => "holey assertion does not match the candidate conclusion",
         // Legacy public error name. The repaired structural solver uses
@@ -726,6 +729,9 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.DepViolation => "binder assignments violate the rule's dependency constraints",
         error.FreshenMissingRelation => "freshening needs a registered relation on the affected sort",
         error.FreshenTransportFailed => "freshening could not lift the alpha rewrite through the rule formula",
+        error.InvalidHoleAnnotation => "@hole expects exactly one raw math token",
+        error.DuplicateHoleAnnotation => "multiple @hole annotations were attached to one sort",
+        error.DuplicateHoleToken => "duplicate @hole token across sorts",
         error.InvalidVarsAnnotation => "@vars expects one or more raw math tokens",
         error.VarsStrictSort => "@vars cannot be used on a strict sort",
         error.VarsFreeSort => "@vars cannot be used on a free sort",

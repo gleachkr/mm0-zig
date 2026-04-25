@@ -2,6 +2,7 @@ const std = @import("std");
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerFresh = @import("./fresh.zig");
+const CompilerHoles = @import("./holes.zig");
 const CompilerViews = @import("./views.zig");
 const CompilerVars = @import("./vars.zig");
 const TermAnnotations = @import("../term_annotations.zig");
@@ -17,7 +18,7 @@ pub const SortVarDecl = CompilerVars.SortVarDecl;
 pub const SortVarRegistry = CompilerVars.SortVarRegistry;
 
 pub fn processSortMetadata(
-    parser: *const MM0Parser,
+    parser: *MM0Parser,
     sort_stmt: SortStmt,
     annotations: []const []const u8,
     sort_vars: *SortVarRegistry,
@@ -26,6 +27,12 @@ pub fn processSortMetadata(
         parser,
         sort_stmt.name,
         sort_stmt.modifiers,
+        annotations,
+        sort_vars,
+    );
+    try CompilerHoles.processSortHoleAnnotations(
+        parser,
+        sort_stmt.name,
         annotations,
         sort_vars,
     );

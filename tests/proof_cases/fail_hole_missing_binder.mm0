@@ -1,4 +1,5 @@
 delimiter $ ( ) $;
+--| @hole _wff
 provable sort wff;
 axiom ax_vacuous (a b: wff): $ a $ > $ a $;
 theorem bad (a b: wff): $ a $ > $ a $;

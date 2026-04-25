@@ -1,4 +1,5 @@
 delimiter $ ( ) $;
+--| @hole _wff
 provable sort wff;
 term top: wff;
 term sb (t: wff) {x: wff} (r: wff x): wff;

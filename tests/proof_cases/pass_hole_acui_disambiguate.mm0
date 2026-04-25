@@ -1,5 +1,6 @@
 delimiter $ ( ) $;
 provable sort wff;
+--| @hole _ctx
 sort ctx;
 
 term iff (a b: wff): wff;

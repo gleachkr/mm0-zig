@@ -26,6 +26,46 @@ pub const containsStructuralHole = SurfaceExpr.containsStructuralHole;
 pub const lowerStructuralHolesToUnits =
     SurfaceExpr.lowerStructuralHolesToUnits;
 
+pub fn processSortHoleAnnotations(
+    parser: *MM0Parser,
+    sort_name: []const u8,
+    annotations: []const []const u8,
+    sort_vars: *const SortVarRegistry,
+) !void {
+    const hole_tag = "@hole";
+
+    var hole_token: ?[]const u8 = null;
+    for (annotations) |ann| {
+        if (!annotationMatchesTag(ann, hole_tag)) continue;
+
+        if (hole_token != null) return error.DuplicateHoleAnnotation;
+        const tail = std.mem.trim(u8, ann[hole_tag.len..], " \t\r\n");
+        if (tail.len == 0) return error.InvalidHoleAnnotation;
+
+        var iter = std.mem.tokenizeAny(u8, tail, " \t\r\n");
+        const token = iter.next() orelse return error.InvalidHoleAnnotation;
+        if (iter.next() != null) return error.InvalidHoleAnnotation;
+        if (sort_vars.getTokenDecl(token) != null) {
+            return error.HoleTokenNameCollision;
+        }
+        hole_token = token;
+    }
+
+    if (hole_token) |token| {
+        try parser.registerHoleTokenForSort(sort_name, token);
+    }
+}
+
+fn annotationMatchesTag(ann: []const u8, tag: []const u8) bool {
+    if (!std.mem.startsWith(u8, ann, tag)) return false;
+    if (ann.len == tag.len) return true;
+    return isAsciiWhitespace(ann[tag.len]);
+}
+
+fn isAsciiWhitespace(ch: u8) bool {
+    return ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r';
+}
+
 pub const ParsedAssertion = union(enum) {
     concrete: ExprId,
     holey: *const Expr,
@@ -451,6 +491,7 @@ const TestFixture = struct {
                 else => {},
             }
         }
+        try parser.registerHoleTokenForSort("wff", "_wff");
 
         var theorem = TheoremContext.init(allocator);
         try theorem.seedAssertion(theorem_assertion.?);

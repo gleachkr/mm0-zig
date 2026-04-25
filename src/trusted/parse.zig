@@ -207,6 +207,8 @@ pub const MM0Parser = struct {
     infix_assoc: std.AutoHashMap(u16, bool),
     leading_tokens: std.StringHashMap(void),
     infixy_tokens: std.StringHashMap(void),
+    hole_tokens: std.StringHashMap(u8),
+    sort_hole_tokens: std.StringHashMap([]const u8),
     // For each source sort, store either a direct coercion, a transitive
     // hop through another sort, or a route to the provable target slot.
     coercion_table: [MAX_SORTS][MAX_SORTS + 1]CoercionRoute,
@@ -241,6 +243,8 @@ pub const MM0Parser = struct {
             .infix_assoc = std.AutoHashMap(u16, bool).init(allocator),
             .leading_tokens = std.StringHashMap(void).init(allocator),
             .infixy_tokens = std.StringHashMap(void).init(allocator),
+            .hole_tokens = std.StringHashMap(u8).init(allocator),
+            .sort_hole_tokens = std.StringHashMap([]const u8).init(allocator),
             .coercion_table = std.mem.zeroes(
                 [MAX_SORTS][MAX_SORTS + 1]CoercionRoute,
             ),
@@ -548,10 +552,6 @@ pub const MM0Parser = struct {
                     self.last_error_span = name_info.span;
                     return error.DuplicateSort;
                 }
-                if (self.existingHoleTokenCollisionForSort(name_info.text)) {
-                    self.last_error_span = name_info.span;
-                    return error.HoleTokenNameCollision;
-                }
                 const sort_id = try self.nextSortId();
                 try self.sort_names.put(name_info.text, sort_id);
                 try self.sort_infos.append(self.allocator, modifiers);
@@ -574,7 +574,7 @@ pub const MM0Parser = struct {
         _ = self.consumeIdent();
         const name_info = try self.consumeRequiredIdentInfo();
         self.recordNameContext(name_info);
-        if (self.isReservedHoleTokenName(name_info.text)) {
+        if (self.isRegisteredHoleToken(name_info.text)) {
             self.last_error_span = name_info.span;
             return error.HoleTokenNameCollision;
         }
@@ -720,7 +720,7 @@ pub const MM0Parser = struct {
                 const is_dummy = self.peek() == '.';
                 if (is_dummy) self.pos += 1;
                 const ident_info = try self.consumeRequiredIdentInfo();
-                if (self.isReservedHoleTokenName(ident_info.text)) {
+                if (self.isRegisteredHoleToken(ident_info.text)) {
                     self.last_error_span = ident_info.span;
                     return error.HoleTokenNameCollision;
                 }
@@ -878,7 +878,7 @@ pub const MM0Parser = struct {
         self.skipWhitespaceAndComments();
         try self.expect(':');
         const token = try self.readConstantToken();
-        try self.rejectReservedHoleToken(token, self.last_math_span);
+        try self.rejectRegisteredHoleToken(token, self.last_math_span);
         self.skipWhitespaceAndComments();
         const kw_info = try self.consumeRequiredIdentInfo();
         if (!std.mem.eql(u8, kw_info.text, "prec")) {
@@ -935,7 +935,7 @@ pub const MM0Parser = struct {
         }
         const token_start = self.pos + 1;
         const token = try self.readQuotedString();
-        try self.rejectReservedHoleToken(token, .{
+        try self.rejectRegisteredHoleToken(token, .{
             .start = token_start,
             .end = token_start + token.len,
         });
@@ -978,7 +978,7 @@ pub const MM0Parser = struct {
                     self.last_error_span = ident_info.span;
                     return error.AnonymousNotationBinder;
                 }
-                if (self.isReservedHoleTokenName(ident_info.text)) {
+                if (self.isRegisteredHoleToken(ident_info.text)) {
                     self.last_error_span = ident_info.span;
                     return error.HoleTokenNameCollision;
                 }
@@ -1287,50 +1287,41 @@ pub const MM0Parser = struct {
         return error.UnknownMathToken;
     }
 
-    fn isReservedHoleTokenName(
+    pub fn isRegisteredHoleToken(
         self: *const MM0Parser,
         token: []const u8,
     ) bool {
-        if (token.len < 2 or token[0] != '_') return false;
-        return self.sort_names.contains(token[1..]);
+        return self.hole_tokens.contains(token);
     }
 
-    fn existingHoleTokenCollisionForSort(
-        self: *const MM0Parser,
+    pub fn registerHoleTokenForSort(
+        self: *MM0Parser,
         sort_name: []const u8,
-    ) bool {
-        if (self.mapHasHoleTokenForSort(u32, self.term_names, sort_name)) {
-            return true;
+        token: []const u8,
+    ) !void {
+        if (token.len == 0) return error.InvalidHoleAnnotation;
+        const sort = self.sort_names.get(sort_name) orelse return error.UnknownSort;
+        if (self.sort_hole_tokens.contains(sort_name)) {
+            return error.DuplicateHoleAnnotation;
         }
-        if (self.mapHasHoleTokenForSort(u16, self.token_precs, sort_name)) {
-            return true;
+        if (self.hole_tokens.contains(token)) return error.DuplicateHoleToken;
+        if (self.term_names.contains(token) or
+            self.formula_markers.contains(token) or
+            self.prefix_notations.contains(token) or
+            self.infix_notations.contains(token))
+        {
+            return error.HoleTokenNameCollision;
         }
-        return self.mapHasHoleTokenForSort(void, self.formula_markers, sort_name);
+        try self.hole_tokens.put(token, sort);
+        try self.sort_hole_tokens.put(sort_name, token);
     }
 
-    fn mapHasHoleTokenForSort(
-        self: *const MM0Parser,
-        comptime V: type,
-        map: std.StringHashMap(V),
-        sort_name: []const u8,
-    ) bool {
-        _ = self;
-        var it = map.iterator();
-        while (it.next()) |entry| {
-            const token = entry.key_ptr.*;
-            if (token.len != sort_name.len + 1) continue;
-            if (token[0] != '_') continue;
-            if (std.mem.eql(u8, token[1..], sort_name)) return true;
-        }
-        return false;
-    }
-
-    fn rejectReservedHoleToken(
+    fn rejectRegisteredHoleToken(
         self: *MM0Parser,
         token: []const u8,
         span: ?MathSpan,
     ) !void {
-        if (!self.isReservedHoleTokenName(token)) return;
+        if (!self.isRegisteredHoleToken(token)) return;
         self.last_error_span = span;
         return error.HoleTokenNameCollision;
     }
@@ -1339,9 +1330,7 @@ pub const MM0Parser = struct {
         self: *MM0Parser,
         token: MathTokenInfo,
     ) !?*const Expr {
-        if (token.text.len < 2 or token.text[0] != '_') return null;
-        const sort_name = token.text[1..];
-        const sort = self.sort_names.get(sort_name) orelse return null;
+        const sort = self.hole_tokens.get(token.text) orelse return null;
         const expr = try self.allocator.create(Expr);
         expr.* = .{ .hole = .{
             .sort = @intCast(sort),
@@ -1524,7 +1513,7 @@ pub const MM0Parser = struct {
         self.skipWhitespaceAndComments();
         try self.expect('(');
         const token = try self.readConstantToken();
-        try self.rejectReservedHoleToken(token, self.last_math_span);
+        try self.rejectRegisteredHoleToken(token, self.last_math_span);
         self.skipWhitespaceAndComments();
         try self.expect(':');
         const prec = try self.parsePrecedence();

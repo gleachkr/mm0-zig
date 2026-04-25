@@ -1,4 +1,5 @@
 delimiter $ ( ) $;
+--| @hole _wff
 provable sort wff;
 term imp (a b: wff): wff; infixr imp: $->$ prec 25;
 def id (a: wff): wff = $ a -> a $;

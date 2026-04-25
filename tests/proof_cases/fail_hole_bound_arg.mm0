@@ -1,4 +1,5 @@
 delimiter $ ( ) $;
+--| @hole _wff
 provable sort wff;
 term sb (t: wff) {x: wff} (r: wff x): wff;
 axiom sb_intro (t: wff) {x: wff} (r: wff x): $ sb t x r $;

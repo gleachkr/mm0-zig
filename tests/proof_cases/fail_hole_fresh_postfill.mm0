@@ -1,5 +1,6 @@
 delimiter $ ( ) $;
 --| @vars x y
+--| @hole _wff
 provable sort wff;
 term top: wff;
 --| @fresh x

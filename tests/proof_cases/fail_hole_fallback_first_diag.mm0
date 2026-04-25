@@ -1,4 +1,5 @@
 delimiter $ ( ) $;
+--| @hole _wff
 provable sort wff;
 term left: wff;
 term right: wff;

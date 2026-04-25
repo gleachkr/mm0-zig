@@ -1,5 +1,6 @@
 delimiter $ ( ) $;
 provable sort wff;
+--| @hole _obj
 sort obj;
 
 term rel (a: obj): wff;

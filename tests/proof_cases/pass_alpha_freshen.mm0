@@ -1,5 +1,7 @@
 delimiter $ ( ) , $;
+--| @hole _wff
 provable sort wff;
+--| @hole _ctx
 sort ctx;
 --| @vars z w
 sort obj;
