@@ -1,0 +1,8 @@
+delimiter $ ( ) $;
+provable sort wff;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+def id (a: wff): wff = $ a -> a $;
+--| @view (a b: wff): $ a -> b $ > $ a $ > $ b $
+axiom ax_mp (a b: wff): $ a -> b $ > $ a $ > $ b $;
+axiom ax_id (a: wff): $ id a $;
+theorem hole_view (a: wff): $ a $ > $ a $;

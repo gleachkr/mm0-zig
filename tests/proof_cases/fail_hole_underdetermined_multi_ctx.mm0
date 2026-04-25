@@ -1,0 +1,10 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+
+term hyp (a: wff): ctx;
+term rel (g h: ctx) (a: wff): wff;
+
+axiom ax_two_ctx (g h: ctx) (a: wff): $ rel g h a $;
+
+theorem bad_multi_ctx (a: wff): $ rel (hyp a) (hyp a) a $;

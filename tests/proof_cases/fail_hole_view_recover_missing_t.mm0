@@ -1,0 +1,17 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
+term pred (t: obj): wff;
+prefix pred: $P$ prec 50;
+term sb (t: obj) {x: obj} (p: wff x): wff;
+
+--| @view {x: obj} (t: obj) (p: wff x) (q: wff): $ A. x p $ > $ q $
+--| @recover t q p x
+axiom all_elim {x: obj} (t: obj) (p: wff x):
+  $ A. x p $ > $ sb t x p $;
+
+theorem hole_view_recover_missing_t (u: obj) {x: obj}:
+  $ A. x (P x) $ > $ sb u x (P x) $;

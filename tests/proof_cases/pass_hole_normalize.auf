@@ -1,0 +1,4 @@
+comp_right_holey_omits
+-----------------------
+
+l1: $ emp ⊢ r ∘ (_mor ∘ a) ~ t ∘ (_mor ∘ a) $ by comp_right [#1]

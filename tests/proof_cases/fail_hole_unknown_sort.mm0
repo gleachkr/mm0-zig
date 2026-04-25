@@ -1,0 +1,5 @@
+delimiter $ ( ) $;
+provable sort wff;
+term top: wff;
+axiom top_i: $ top $;
+theorem bad: $ top $;

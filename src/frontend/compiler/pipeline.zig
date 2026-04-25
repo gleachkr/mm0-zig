@@ -1628,6 +1628,7 @@ fn validateExprTermsAvailable(
             }
             return true;
         },
+        .hole => return false,
     }
 }
 

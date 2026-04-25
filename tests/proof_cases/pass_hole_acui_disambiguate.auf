@@ -1,0 +1,9 @@
+hole_acui_refs_resolve
+----------------------
+
+l1: $ _ctx ==> _ctx $ by pair_cut [#1, #2]
+
+hole_acui_visible_resolve
+-------------------------
+
+l1: $ _ctx ==> a , b $ by discharge [#1]

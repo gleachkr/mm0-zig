@@ -1,0 +1,13 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+
+term imp (a b: wff): wff;
+infixr imp: $->$ prec 25;
+def alias (a: wff): wff = $ a -> a $;
+
+term nd (g: ctx) (p: wff): wff;
+
+axiom raw (g: ctx) (p: wff): $ nd g (p -> p) $;
+
+theorem hole_semantic_match (g: ctx) (p: wff): $ nd g (p -> p) $;

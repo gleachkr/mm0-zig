@@ -1,0 +1,4 @@
+hole_semantic_match
+-------------------
+
+l1: $ nd _ctx (alias p) $ by raw (g := $ g $, p := $ p $) []

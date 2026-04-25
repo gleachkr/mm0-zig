@@ -1,0 +1,4 @@
+bad
+---
+l1: $ top $ by alloc []
+l2: $ _wff $ by use_fresh []

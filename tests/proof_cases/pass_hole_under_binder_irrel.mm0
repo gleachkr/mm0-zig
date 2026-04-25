@@ -1,0 +1,6 @@
+delimiter $ ( ) $;
+provable sort wff;
+term top: wff;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+axiom sb_intro (t: wff) {x: wff} (r: wff x): $ sb t x r $;
+theorem hole_under_binder_irrel {x: wff} (a: wff): $ sb a x top $;

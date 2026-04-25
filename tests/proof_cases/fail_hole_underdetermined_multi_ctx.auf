@@ -1,0 +1,4 @@
+bad_multi_ctx
+-------------
+
+l1: $ rel _ctx _ctx a $ by ax_two_ctx []

@@ -1,0 +1,10 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+
+term hyp (a: wff): ctx;
+term nd (g: ctx) (a: wff): wff;
+
+axiom ax_ctx (g: ctx) (a: wff): $ nd g a $;
+
+theorem bad_ctx (a: wff): $ nd (hyp a) a $;

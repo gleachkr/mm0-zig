@@ -112,7 +112,7 @@ pub fn maybeBuildComparisonSnapshotWithDebug(
     };
 }
 
-fn normalizeExprForSnapshot(
+pub fn normalizeExprForSnapshot(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     registry: *RewriteRegistry,

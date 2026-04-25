@@ -1,0 +1,67 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term imp (a b: wff): wff;
+term neg (a: wff): wff;
+term bot: wff;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+term hyp (a: wff): ctx;
+term nd (g: ctx) (a: wff): wff;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq (join (join g h) i) (join g (join h i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (join g h) (join h g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (join g g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (join emp g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (join g1 h1) (join g2 h2) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a <-> b $ > $ nd g a <-> nd h b $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a <-> c $ > $ b <-> d $ > $ imp a b <-> imp c d $;
+
+--| @normalize hyp1
+axiom imp_intro (g: ctx) (a b: wff):
+  $ nd (join g (hyp a)) b $ > $ nd g (imp a b) $;
+
+axiom not_intro (g: ctx) (a: wff):
+  $ nd (join g (hyp a)) bot $ > $ nd g (neg a) $;
+
+axiom not_elim (g h: ctx) (a: wff):
+  $ nd g (neg a) $ > $ nd h a $ > $ nd (join g h) bot $;
+
+theorem hole_acui_min_ctx (p q: wff):
+  $ nd (hyp p) q $ > $ nd emp (imp p q) $;
+
+theorem hole_acui_residual_ctx (r p q: wff):
+  $ nd (join (hyp r) (hyp p)) q $ > $ nd (hyp r) (imp p q) $;
+
+theorem hole_acui_not_chain (p q: wff):
+  $ nd (hyp q) (neg q) $ >
+  $ nd (join (hyp p) (hyp q)) q $ >
+  $ nd (hyp q) (neg p) $;

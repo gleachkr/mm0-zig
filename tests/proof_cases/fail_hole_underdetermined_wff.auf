@@ -1,0 +1,4 @@
+bad_wff
+-------
+
+l1: $ pair _wff _wff $ by ax_pair []

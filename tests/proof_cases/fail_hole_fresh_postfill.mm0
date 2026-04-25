@@ -1,0 +1,9 @@
+delimiter $ ( ) $;
+--| @vars x y
+provable sort wff;
+term top: wff;
+--| @fresh x
+axiom alloc {x: wff}: $ top $;
+--| @fresh x
+axiom use_fresh {x: wff}: $ x $;
+theorem bad: $ top $;

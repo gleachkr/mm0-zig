@@ -1,0 +1,83 @@
+delimiter $ ( ) $;
+--| @vars x
+provable sort wff;
+sort ctx;
+
+term imp (a b: wff): wff;
+infixr imp: $->$ prec 25;
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term top: wff;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+term hyp (a: wff): ctx;
+term nd (g: ctx) (a: wff): wff;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq (join (join g h) i) (join g (join h i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (join g h) (join h g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (join g g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (join emp g) g $;
+
+--| @rewrite
+axiom sb_var (t: wff) {x: wff}: $ sb t x x <-> t $;
+--| @rewrite
+axiom sb_top (t: wff) {x: wff}: $ sb t x top <-> top $;
+--| @rewrite
+axiom sb_imp (t: wff) {x: wff} (a b: wff x):
+  $ sb t x (a -> b) <-> (sb t x a -> sb t x b) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (join g1 h1) (join g2 h2) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a <-> b $ > $ nd g a <-> nd h b $;
+
+--| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
+--| @abstract r p q x a b
+--| @normalize hyp1 conc
+axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
+  $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
+
+--| @view (g: ctx) {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ nd g p $ > $ nd g q $
+--| @abstract r p q x a b
+--| @normalize hyp1 conc
+axiom ax_ctx_nd (g: ctx) {x: wff} (a b: wff) (r: wff x):
+  $ a <-> b $ > $ nd g (sb a x r) $ > $ nd g (sb b x r) $;
+
+theorem abstract_hole_visible (a b: wff):
+  $ a <-> b $ > $ a -> top $ > $ b -> top $;
+
+theorem abstract_hole_explicit (a b: wff):
+  $ a <-> b $ > $ a -> top $ > $ b -> top $;
+
+theorem abstract_hole_normalized (a b: wff):
+  $ a <-> b $ > $ top -> (a -> top) $ > $ top -> (b -> top) $;
+
+theorem abstract_hole_acui_ctx (a b c d: wff):
+  $ a <-> b $ >
+  $ nd (join (hyp c) (hyp d)) (a -> top) $ >
+  $ nd (join (hyp d) (hyp c)) (b -> top) $;

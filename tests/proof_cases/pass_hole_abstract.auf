@@ -1,0 +1,3 @@
+pass_hole_abstract
+------------------
+l1: $ b -> _wff $ by ax_ctx (x := $ x $) [#1, #2]

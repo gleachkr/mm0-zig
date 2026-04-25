@@ -1,0 +1,9 @@
+hole_final_transparent
+----------------------
+
+l1: $ _wff $ by ax_expanded (a := $ a $) []
+
+hole_final_normalized
+---------------------
+
+l1: $ _wff $ by assoc_refl (f := $ f $, g := $ g $, h := $ h $) []

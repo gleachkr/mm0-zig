@@ -63,6 +63,7 @@ pub const InferencePath = enum {
     strict_replay,
     transparent_fallback,
     structural_solver,
+    holey_surface_match,
 };
 
 pub const InferenceDiagnosticDetail = struct {
@@ -236,6 +237,7 @@ pub fn inferencePathName(path: InferencePath) []const u8 {
         .strict_replay => "strict replay",
         .transparent_fallback => "transparent fallback",
         .structural_solver => "structural or def-aware solver",
+        .holey_surface_match => "holey assertion match",
     };
 }
 
@@ -625,7 +627,10 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
         .unknown_hypothesis_ref => "unknown theorem hypothesis reference",
         .unknown_label => "unknown proof line label",
         .hypothesis_mismatch => "rule reference does not match the expected hypothesis",
-        .conclusion_mismatch => "proof line assertion does not match the rule conclusion",
+        .conclusion_mismatch => if (diag.err == error.HoleConclusionMismatch)
+            compilerErrorSummary(diag.err)
+        else
+            "proof line assertion does not match the rule conclusion",
         .duplicate_label => "duplicate proof line label",
         .empty_proof_block => "proof block is empty",
         .final_line_mismatch => "last proof line does not prove the theorem conclusion",
@@ -637,10 +642,8 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
 
 fn definitionBodySummary(err: anyerror) []const u8 {
     return switch (err) {
-        error.DepViolation =>
-            "definition body leaves hidden binders free in the result",
-        error.SortMismatch =>
-            "definition body sort does not match the declared result sort",
+        error.DepViolation => "definition body leaves hidden binders free in the result",
+        error.SortMismatch => "definition body sort does not match the declared result sort",
         else => "definition body does not satisfy the declared result",
     };
 }
@@ -656,6 +659,9 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.UnifyStackNotEmpty,
         error.HypCountMismatch,
         => "could not infer omitted rule arguments from the line and refs",
+        error.HoleTokenNameCollision => "name conflicts with reserved proof hole syntax",
+        error.HoleyInferenceMismatch => "could not infer omitted rule arguments from the holey assertion",
+        error.HoleConclusionMismatch => "holey assertion does not match the candidate conclusion",
         // Legacy public error name. The repaired structural solver uses
         // this for ambiguity across AU, ACU, AUI, and ACUI matching.
         error.AmbiguousAcuiMatch => "omitted rule arguments remain ambiguous after structural " ++

@@ -1,0 +1,4 @@
+hole_recover_ctx
+----------------
+
+l1: $ nd _ctx (P u) $ by all_elim [#1]

@@ -1,0 +1,8 @@
+delimiter $ ( ) $;
+provable sort wff;
+
+term pair (a b: wff): wff;
+
+axiom ax_pair (a b: wff): $ pair a b $;
+
+theorem bad_wff (a b: wff): $ pair a b $;

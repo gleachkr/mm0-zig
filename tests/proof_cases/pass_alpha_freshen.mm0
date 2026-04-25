@@ -132,3 +132,12 @@ theorem alpha_all_left_demo {a b c: obj}:
 
 theorem alpha_ex_left_demo {a c: obj}:
   $ ∀ a (P a) , P c , ∃ a (P a) ==> P c $;
+
+theorem alpha_hole_all_right_ctx {a b: obj}:
+  $ ∀ a (P a) , P b ==> ∀ a (P b) $;
+
+theorem alpha_hole_all_right_wff {a b: obj}:
+  $ ∀ a (P a) , P b ==> ∀ a (P b) $;
+
+theorem alpha_hole_ex_right_wff {a b: obj}:
+  $ ∀ a (P a) , P b ==> ∃ a (P a) $;

@@ -173,7 +173,25 @@ pub fn collectUsedDeps(
     bindings: []const ?ExprId,
     extra_used_deps: u55,
 ) !u55 {
-    var deps = extra_used_deps | try exprDeps(env, theorem, line_expr);
+    return try collectUsedDepsFromLineDeps(
+        env,
+        theorem,
+        try exprDeps(env, theorem, line_expr),
+        ref_exprs,
+        bindings,
+        extra_used_deps,
+    );
+}
+
+pub fn collectUsedDepsFromLineDeps(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    line_deps: u55,
+    ref_exprs: []const ExprId,
+    bindings: []const ?ExprId,
+    extra_used_deps: u55,
+) !u55 {
+    var deps = extra_used_deps | line_deps;
     for (ref_exprs) |expr_id| {
         deps |= try exprDeps(env, theorem, expr_id);
     }

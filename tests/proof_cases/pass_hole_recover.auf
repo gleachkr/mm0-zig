@@ -1,0 +1,4 @@
+pass_hole_recover
+-----------------
+
+l1: $ rel _obj $ by pick_hidden (q := $ rel u $) [#1]

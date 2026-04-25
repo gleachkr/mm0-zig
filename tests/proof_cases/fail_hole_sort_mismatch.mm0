@@ -1,0 +1,7 @@
+delimiter $ ( ) $;
+provable sort wff;
+provable sort obj;
+term top: wff;
+term thing: obj;
+axiom top_i: $ top $;
+theorem bad: $ top $;

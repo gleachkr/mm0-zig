@@ -1,0 +1,4 @@
+delimiter $ ( ) $;
+provable sort wff;
+term top: wff;
+theorem bad: $ _wff $;

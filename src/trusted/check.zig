@@ -300,6 +300,7 @@ pub const CrossChecker = struct {
                     },
                     else => return false,
                 },
+                .hole => return false,
             }
         }
         return true;

@@ -38,6 +38,7 @@ pub const Frontend = struct {
 };
 
 pub const CompilerSupport = struct {
+    pub const Holes = @import("./frontend/compiler/holes.zig");
     pub const Inference = @import("./frontend/compiler/inference.zig");
     pub const Metadata = @import("./frontend/compiler/metadata.zig");
     pub const Vars = @import("./frontend/compiler/vars.zig");

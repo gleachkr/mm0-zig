@@ -2,6 +2,9 @@ const builtin = @import("builtin");
 const std = @import("std");
 const GlobalEnv = @import("./env.zig").GlobalEnv;
 const RuleDecl = @import("./env.zig").RuleDecl;
+const Expr = @import("../trusted/expressions.zig").Expr;
+const SurfaceExpr = @import("./surface_expr.zig");
+const TemplateExpr = @import("./rules.zig").TemplateExpr;
 const ExprId = @import("./expr.zig").ExprId;
 const TheoremContext = @import("./expr.zig").TheoremContext;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
@@ -17,12 +20,18 @@ const BranchStateOps = @import("./inference_solver/branch_state.zig");
 const SemanticCompare = @import("./inference_solver/semantic_compare.zig");
 const StructuralIntervals =
     @import("./inference_solver/structural_intervals.zig");
+const StructuralItems = @import("./inference_solver/structural_items.zig");
 const StructuralSearch = @import("./inference_solver/structural_search.zig");
 const types = @import("./inference_solver/types.zig");
 const BinderSpace = types.BinderSpace;
 const MatchConstraint = types.MatchConstraint;
 const StructuralJointObligation = types.StructuralJointObligation;
 const BranchState = types.BranchState;
+
+const SolutionPreference = enum {
+    first,
+    minimal_structural,
+};
 
 pub const AmbiguityReport = struct {
     distinct_solution_count: usize = 0,
@@ -107,11 +116,7 @@ pub const Solver = struct {
         ref_exprs: []const ExprId,
         line_expr: ExprId,
     ) anyerror![]const ExprId {
-        var states = std.ArrayListUnmanaged(BranchState){};
-        try states.append(
-            self.allocator,
-            try BranchStateOps.initState(self, partial_bindings),
-        );
+        var states = try self.initialStates(partial_bindings);
 
         if (self.view) |view| {
             var constraints = std.ArrayListUnmanaged(MatchConstraint){};
@@ -130,14 +135,7 @@ pub const Solver = struct {
                 constraints.items,
                 .view,
             );
-            states = try self.finalizeStructuralStates(states.items, .view);
-            states = try self.applyDerivedBindings(
-                states.items,
-                view.derived_bindings,
-            );
-            states = try self.finalizeStructuralStates(states.items, .view);
-            try self.propagateViewBindings(states.items, view);
-            states = try self.finalizeStructuralStates(states.items, .rule);
+            states = try self.finalizeViewAndRuleStates(states.items, view);
         } else {
             var constraints = std.ArrayListUnmanaged(MatchConstraint){};
             for (self.rule.hyps, ref_exprs) |hyp, actual| {
@@ -158,7 +156,88 @@ pub const Solver = struct {
             states = try self.finalizeStructuralStates(states.items, .rule);
         }
 
-        return try self.pickUniqueSolution(states.items);
+        return try self.pickUniqueSolution(states.items, .first);
+    }
+
+    pub fn solveHoleyConclusion(
+        self: *Solver,
+        partial_bindings: []const ?ExprId,
+        ref_exprs: []const ExprId,
+        holey_concl: *const Expr,
+    ) anyerror![]const ExprId {
+        var states = try self.initialStates(partial_bindings);
+
+        if (self.view) |view| {
+            var constraints = std.ArrayListUnmanaged(MatchConstraint){};
+            for (view.hyps, ref_exprs) |hyp, actual| {
+                try constraints.append(self.allocator, .{
+                    .template = hyp,
+                    .actual = actual,
+                });
+            }
+            states = try self.applyConstraints(
+                states.items,
+                constraints.items,
+                .view,
+            );
+            states = try self.applySurfaceConstraint(
+                states.items,
+                view.concl,
+                holey_concl,
+                .view,
+            );
+            states = try self.finalizeViewAndRuleStates(states.items, view);
+        } else {
+            var constraints = std.ArrayListUnmanaged(MatchConstraint){};
+            for (self.rule.hyps, ref_exprs) |hyp, actual| {
+                try constraints.append(self.allocator, .{
+                    .template = hyp,
+                    .actual = actual,
+                });
+            }
+            states = try self.applyConstraints(
+                states.items,
+                constraints.items,
+                .rule,
+            );
+            states = try self.applySurfaceConstraint(
+                states.items,
+                self.rule.concl,
+                holey_concl,
+                .rule,
+            );
+            states = try self.finalizeStructuralStates(states.items, .rule);
+        }
+
+        return try self.pickUniqueSolution(
+            states.items,
+            .minimal_structural,
+        );
+    }
+
+    fn initialStates(
+        self: *Solver,
+        partial_bindings: []const ?ExprId,
+    ) !std.ArrayListUnmanaged(BranchState) {
+        var states = std.ArrayListUnmanaged(BranchState){};
+        try states.append(
+            self.allocator,
+            try BranchStateOps.initState(self, partial_bindings),
+        );
+        return states;
+    }
+
+    fn finalizeViewAndRuleStates(
+        self: *Solver,
+        states: []const BranchState,
+        view: *const ViewDecl,
+    ) anyerror!std.ArrayListUnmanaged(BranchState) {
+        var next = try self.finalizeStructuralStates(states, .view);
+        next = try self.applyDerivedBindings(next.items, view.derived_bindings);
+        next = try self.finalizeStructuralStates(next.items, .view);
+        try self.propagateViewBindings(next.items, view);
+        next = try self.finalizeStructuralStates(next.items, .rule);
+        return next;
     }
 
     fn applyConstraints(
@@ -186,6 +265,92 @@ pub const Solver = struct {
             current = next;
         }
         return current;
+    }
+
+    fn applySurfaceConstraint(
+        self: *Solver,
+        states: []const BranchState,
+        template: TemplateExpr,
+        actual: *const Expr,
+        space: BinderSpace,
+    ) anyerror!std.ArrayListUnmanaged(BranchState) {
+        var next = std.ArrayListUnmanaged(BranchState){};
+        for (states) |state| {
+            const matches = try self.matchSurfaceExpr(
+                template,
+                actual,
+                space,
+                state,
+            );
+            try next.appendSlice(self.allocator, matches);
+        }
+        if (next.items.len == 0) return error.UnifyMismatch;
+        return next;
+    }
+
+    fn matchSurfaceExpr(
+        self: *Solver,
+        template: TemplateExpr,
+        actual: *const Expr,
+        space: BinderSpace,
+        state: BranchState,
+    ) anyerror![]BranchState {
+        if (actual.* == .hole) {
+            const out = try self.allocator.alloc(BranchState, 1);
+            out[0] = try BranchStateOps.cloneState(self, state);
+            return out;
+        }
+
+        if (!SurfaceExpr.containsHole(actual)) {
+            const actual_id = try self.theorem.internParsedExpr(actual);
+            return try StructuralSearch.matchExpr(
+                self,
+                template,
+                actual_id,
+                space,
+                state,
+            );
+        }
+
+        return switch (template) {
+            .binder => blk: {
+                const out = try self.allocator.alloc(BranchState, 1);
+                out[0] = try BranchStateOps.cloneState(self, state);
+                break :blk out;
+            },
+            .app => |app| blk: {
+                const actual_term = switch (actual.*) {
+                    .term => |term| term,
+                    .variable, .hole => break :blk &.{},
+                };
+                if (actual_term.id != app.term_id or
+                    actual_term.args.len != app.args.len)
+                {
+                    break :blk &.{};
+                }
+
+                var states = std.ArrayListUnmanaged(BranchState){};
+                try states.append(
+                    self.allocator,
+                    try BranchStateOps.cloneState(self, state),
+                );
+                for (app.args, actual_term.args) |tmpl_arg, actual_arg| {
+                    var next = std.ArrayListUnmanaged(BranchState){};
+                    for (states.items) |current| {
+                        const matches = try self.matchSurfaceExpr(
+                            tmpl_arg,
+                            actual_arg,
+                            space,
+                            current,
+                        );
+                        try next.appendSlice(self.allocator, matches);
+                    }
+                    if (next.items.len == 0) break :blk &.{};
+                    states = next;
+                }
+                break :blk try states.toOwnedSlice(self.allocator);
+            },
+        };
     }
 
     fn applyDerivedBindings(
@@ -416,6 +581,7 @@ pub const Solver = struct {
     fn pickUniqueSolution(
         self: *Solver,
         states: []const BranchState,
+        preference: SolutionPreference,
     ) anyerror![]const ExprId {
         if (states.len == 0) return error.UnifyMismatch;
 
@@ -443,18 +609,29 @@ pub const Solver = struct {
             }
         }
 
+        const chosen_distinct_idx = try self.chooseDistinctSolution(
+            states,
+            distinct_idxs.items,
+            preference,
+        );
         if (distinct_idxs.items.len > 1) {
             self.ambiguity_warning = true;
-            try self.captureAmbiguityReport(states, distinct_idxs.items);
+            try self.captureAmbiguityReport(
+                states,
+                distinct_idxs.items,
+                chosen_distinct_idx,
+            );
             if (self.debug.inference) {
                 try self.debugPrintAmbiguousSolutions(
                     states,
                     distinct_idxs.items,
+                    chosen_distinct_idx,
                 );
             }
         }
 
-        const chosen = states[distinct_idxs.items[0]].rule_bindings;
+        const chosen = states[distinct_idxs.items[chosen_distinct_idx]]
+            .rule_bindings;
         const result = try self.allocator.alloc(ExprId, chosen.len);
         for (chosen, 0..) |binding, idx| {
             result[idx] = binding.?;
@@ -462,20 +639,80 @@ pub const Solver = struct {
         return result;
     }
 
+    fn chooseDistinctSolution(
+        self: *Solver,
+        states: []const BranchState,
+        distinct_idxs: []const usize,
+        preference: SolutionPreference,
+    ) !usize {
+        if (distinct_idxs.len == 0) return error.UnifyMismatch;
+        switch (preference) {
+            .first => return 0,
+            .minimal_structural => {},
+        }
+
+        var best: usize = 0;
+        var best_rank = try self.structuralBindingRank(
+            states[distinct_idxs[0]].rule_bindings,
+        );
+        for (distinct_idxs[1..], 1..) |state_idx, distinct_idx| {
+            const rank = try self.structuralBindingRank(
+                states[state_idx].rule_bindings,
+            );
+            if (rank < best_rank) {
+                best = distinct_idx;
+                best_rank = rank;
+            }
+        }
+        return best;
+    }
+
+    fn structuralBindingRank(
+        self: *Solver,
+        bindings: []const ?ExprId,
+    ) !usize {
+        var rank: usize = 0;
+        for (bindings, 0..) |maybe_binding, idx| {
+            const binding = maybe_binding orelse continue;
+            const sort_name = StructuralItems.getBinderSort(
+                self,
+                .rule,
+                idx,
+            ) orelse continue;
+            const combiner = try self.registry.resolveStructuralCombinerForSort(
+                self.env,
+                sort_name,
+            ) orelse continue;
+            const profile = types.StructuralProfile.init(combiner);
+            var items = std.ArrayListUnmanaged(ExprId){};
+            defer items.deinit(self.allocator);
+            try StructuralItems.collectCanonicalStructuralItems(
+                self,
+                binding,
+                profile,
+                &items,
+            );
+            rank += items.items.len;
+        }
+        return rank;
+    }
+
     fn captureAmbiguityReport(
         self: *Solver,
         states: []const BranchState,
         distinct_idxs: []const usize,
+        chosen_distinct_idx: usize,
     ) !void {
         self.ambiguity_report.distinct_solution_count = distinct_idxs.len;
         if (distinct_idxs.len == 0) return;
 
         self.ambiguity_report.chosen_bindings = try self.formatBindingSummary(
-            states[distinct_idxs[0]].rule_bindings,
+            states[distinct_idxs[chosen_distinct_idx]].rule_bindings,
         );
         if (distinct_idxs.len > 1) {
+            const alt_idx: usize = if (chosen_distinct_idx == 0) 1 else 0;
             self.ambiguity_report.alternative_bindings = try self.formatBindingSummary(
-                states[distinct_idxs[1]].rule_bindings,
+                states[distinct_idxs[alt_idx]].rule_bindings,
             );
         }
     }
@@ -524,6 +761,7 @@ pub const Solver = struct {
         self: *Solver,
         states: []const BranchState,
         distinct_idxs: []const usize,
+        chosen_distinct_idx: usize,
     ) !void {
         if (comptime builtin.target.os.tag == .freestanding) return;
 
@@ -539,7 +777,7 @@ pub const Solver = struct {
                 "  solution {d}{s}",
                 .{
                     choice_idx + 1,
-                    if (choice_idx == 0) " (chosen)" else "",
+                    if (choice_idx == chosen_distinct_idx) " (chosen)" else "",
                 },
             );
             try self.debugPrintRuleBindings(states[state_idx].rule_bindings);

@@ -1134,6 +1134,55 @@ test "compiler preserves the first fallback failure diagnostic" {
     );
 }
 
+test "compiler notes exhausted fallback chains for holey assertions" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\provable sort obj;
+        \\term top: wff;
+        \\term bot: wff;
+        \\axiom step_b: $ bot $;
+        \\--| @fallback step_b
+        \\axiom step_a: $ top $;
+        \\theorem bad_fallback: $ top $;
+    ;
+    const proof_src =
+        \\bad_fallback
+        \\------------
+        \\l1: $ _obj $ by step_a []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.HoleConclusionMismatch,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.HoleConclusionMismatch, diag.err);
+    try std.testing.expectEqual(@as(usize, 2), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "hole _obj expected sort obj but matched wff",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqualStrings(
+        "fallback chain exhausted for holey assertion; " ++
+            "showing first candidate failure",
+        diag.noteSlice()[1].message,
+    );
+    const note_span = diag.noteSlice()[1].span orelse {
+        return error.ExpectedDiagnosticSpan;
+    };
+    try std.testing.expectEqualStrings(
+        "_obj",
+        proof_src[note_span.start..note_span.end],
+    );
+}
+
 test "compiler pinpoints proof parser identifier errors" {
     const mm0_src =
         \\provable sort wff;
@@ -1328,6 +1377,154 @@ test "compiler pinpoints unknown math tokens in proof assertions" {
         },
         else => return error.ExpectedUnknownMathTokenDetail,
     }
+}
+
+test "compiler explains proof hole sort mismatches" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\provable sort obj;
+        \\term top: wff;
+        \\term thing: obj;
+        \\axiom top_i: $ top $;
+        \\theorem bad: $ top $;
+    ;
+    const proof_src =
+        \\bad
+        \\---
+        \\l1: $ _obj $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.HoleConclusionMismatch,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.HoleConclusionMismatch, diag.err);
+    try std.testing.expectEqual(.conclusion_mismatch, diag.kind);
+    try std.testing.expectEqualStrings(
+        "holey assertion does not match the candidate conclusion",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("_obj", proof_src[span.start..span.end]);
+    try std.testing.expectEqual(@as(usize, 1), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "hole _obj expected sort obj but matched wff",
+        diag.noteSlice()[0].message,
+    );
+    const note_span = diag.noteSlice()[0].span orelse {
+        return error.ExpectedDiagnosticSpan;
+    };
+    try std.testing.expectEqualStrings(
+        "_obj",
+        proof_src[note_span.start..note_span.end],
+    );
+}
+
+test "compiler explains proof hole visible structure mismatches" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+        \\axiom ax_keep (a b: wff): $ a $ > $ a -> b -> a $;
+        \\theorem bad (a b: wff): $ a $ > $ a -> b -> a $;
+    ;
+    const proof_src =
+        \\bad
+        \\---
+        \\l1: $ b -> _wff $ by ax_keep (a := $ a $, b := $ b $) [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.HoleConclusionMismatch,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.HoleConclusionMismatch, diag.err);
+    try std.testing.expectEqual(.conclusion_mismatch, diag.kind);
+    try std.testing.expectEqualStrings(
+        "holey assertion does not match the candidate conclusion",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "$ b -> _wff $",
+        proof_src[span.start..span.end],
+    );
+    try std.testing.expectEqual(@as(usize, 1), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "visible structure in the holey assertion did not match " ++
+            "the candidate conclusion",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expect(diag.noteSlice()[0].span == null);
+}
+
+test "compiler explains proof holes that leave binders unsolved" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\axiom ax_vacuous (a b: wff): $ a $ > $ a $;
+        \\theorem bad (a b: wff): $ a $ > $ a $;
+    ;
+    const proof_src =
+        \\bad
+        \\---
+        \\l1: $ _wff $ by ax_vacuous [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.MissingBinderAssignment,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.MissingBinderAssignment, diag.err);
+    try std.testing.expectEqual(.missing_binder_assignment, diag.kind);
+    try std.testing.expectEqualStrings("b", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("_wff", proof_src[span.start..span.end]);
+    switch (diag.detail) {
+        .missing_binder_assignment => |detail| {
+            try std.testing.expectEqualStrings("b", detail.binder_name);
+            try std.testing.expectEqual(.holey_surface_match, detail.path);
+        },
+        else => return error.ExpectedMissingBinderDetail,
+    }
+    try std.testing.expectEqual(@as(usize, 2), diag.noteSlice().len);
+    try std.testing.expectEqualStrings(
+        "inference path: holey assertion match",
+        diag.noteSlice()[0].message,
+    );
+    try std.testing.expectEqualStrings(
+        "holey assertion left binder b unsolved",
+        diag.noteSlice()[1].message,
+    );
+    const note_span = diag.noteSlice()[1].span orelse {
+        return error.ExpectedDiagnosticSpan;
+    };
+    try std.testing.expectEqualStrings(
+        "_wff",
+        proof_src[note_span.start..note_span.end],
+    );
 }
 
 test "compiler reports which binder assignment is missing" {
@@ -2046,6 +2243,92 @@ test "-Werror upgrades ambiguity warnings into errors" {
         diag.severity,
     );
     try std.testing.expectEqual(error.AmbiguousAcuiMatch, diag.err);
+}
+
+test "holey ACUI conclusion can still report ambiguity" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_hole_acui_ambiguous",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_hole_acui_ambiguous",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+
+    const warnings = compiler.warningDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), warnings.len);
+    try std.testing.expectEqual(error.AmbiguousAcuiMatch, warnings[0].err);
+
+    var werror_compiler = Compiler.initWithProof(
+        allocator,
+        mm0_src,
+        proof_src,
+    );
+    werror_compiler.warnings_as_errors = true;
+    try std.testing.expectError(
+        error.AmbiguousAcuiMatch,
+        werror_compiler.compileMmb(allocator),
+    );
+}
+
+test "holey ACUI minimal residuals are warning-free" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_hole_acui_min_ctx",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_hole_acui_min_ctx",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        compiler.warningDiagnostics().len,
+    );
+}
+
+test "holey ACUI refs and visible structure disambiguate" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_hole_acui_disambiguate",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_hole_acui_disambiguate",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        compiler.warningDiagnostics().len,
+    );
 }
 
 test "compiler warns on unused theorem parameters" {
@@ -3358,6 +3641,108 @@ test "compiler analyze mm0 suppresses blocked sort follow-ons" {
     try std.testing.expectEqual(@as(usize, 1), diags.len);
     try std.testing.expectEqual(error.VarsStrictSort, diags[0].err);
     try std.testing.expectEqualStrings("nat", diags[0].name.?);
+}
+
+test "compiler rejects @vars tokens that conflict with hole syntax" {
+    const mm0_src =
+        \\--| @vars _wff
+        \\provable sort wff;
+        \\term top: wff;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.HoleTokenNameCollision, diags[0].err);
+}
+
+test "compiler rejects theorem binders that conflict with hole syntax" {
+    const mm0_src =
+        \\provable sort wff;
+        \\theorem bad (_wff: wff): $ _wff $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.HoleTokenNameCollision, diags[0].err);
+}
+
+test "compiler rejects term names that conflict with hole syntax" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term _wff: wff;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.HoleTokenNameCollision, diags[0].err);
+}
+
+test "compiler rejects notation tokens that conflict with hole syntax" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\prefix top: $_wff$ prec 10;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.HoleTokenNameCollision, diags[0].err);
+}
+
+test "compiler rejects bare notation markers with hole syntax" {
+    const mm0_src =
+        \\provable sort wff;
+        \\notation "_wff";
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.HoleTokenNameCollision, diags[0].err);
+}
+
+test "compiler rejects general notation tokens with hole syntax" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term box (a: wff): wff;
+        \\notation box (a: wff): wff = ($_wff$:10) a;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.HoleTokenNameCollision, diags[0].err);
+}
+
+test "compiler rejects sorts that make existing tokens into holes" {
+    const mm0_src =
+        \\sort base;
+        \\term _wff: base;
+        \\provable sort wff;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try compiler.analyzeMm0();
+
+    const diags = compiler.primaryDiagnostics();
+    try std.testing.expectEqual(@as(usize, 1), diags.len);
+    try std.testing.expectEqual(error.HoleTokenNameCollision, diags[0].err);
 }
 
 test "compiler analyze mm0 suppresses blocked term follow-ons" {

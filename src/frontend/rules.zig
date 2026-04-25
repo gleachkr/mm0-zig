@@ -32,6 +32,7 @@ pub const TemplateExpr = union(enum) {
                     .args = args,
                 } };
             },
+            .hole => return error.HoleNotAllowedInTemplate,
         };
     }
 

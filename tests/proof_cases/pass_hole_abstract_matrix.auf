@@ -1,0 +1,19 @@
+abstract_hole_visible
+---------------------
+
+l1: $ b -> _wff $ by ax_ctx (x := $ x $) [#1, #2]
+
+abstract_hole_explicit
+----------------------
+
+l1: $ _wff -> _wff $ by ax_ctx (x := $ x $, r := $ x -> top $) [#1, #2]
+
+abstract_hole_normalized
+------------------------
+
+l1: $ top -> (_wff -> top) $ by ax_ctx (x := $ x $) [#1, #2]
+
+abstract_hole_acui_ctx
+----------------------
+
+l1: $ nd _ctx (b -> top) $ by ax_ctx_nd (x := $ x $) [#1, #2]

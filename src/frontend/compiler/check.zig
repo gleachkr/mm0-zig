@@ -5,7 +5,9 @@ const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RuleDecl = @import("../env.zig").RuleDecl;
 const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
-const Expr = @import("../../trusted/expressions.zig").Expr;
+const ExprModule = @import("../../trusted/expressions.zig");
+const Expr = ExprModule.Expr;
+const SourceSpan = ExprModule.SourceSpan;
 const ProofLine = @import("../proof_script.zig").ProofLine;
 const Ref = @import("../proof_script.zig").Ref;
 const Span = @import("../proof_script.zig").Span;
@@ -30,6 +32,7 @@ const Matching = @import("./check/matching.zig");
 const TheoremBoundary = @import("./theorem_boundary.zig");
 const CompilerVars = @import("./vars.zig");
 const SortVarRegistry = CompilerVars.SortVarRegistry;
+const Holes = @import("./holes.zig");
 
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
@@ -38,6 +41,24 @@ const SuccessfulLineAttempt = struct {
     line_idx: usize,
     theorem: TheoremContext,
     theorem_vars: NameExprMap,
+};
+
+const LineAssertion = union(enum) {
+    concrete: ExprId,
+    holey: *const Expr,
+
+    fn fromParsed(parsed: Holes.ParsedAssertion) LineAssertion {
+        return switch (parsed) {
+            .concrete => |expr_id| .{ .concrete = expr_id },
+            .holey => |expr| .{ .holey = expr },
+        };
+    }
+};
+
+const CandidateElaboration = struct {
+    resolved_bindings: []const ExprId,
+    raw_conclusion: ExprId,
+    displayed_conclusion: ExprId,
 };
 
 pub fn checkTheoremBlock(
@@ -108,6 +129,16 @@ pub fn checkTheoremBlock(
             line,
         );
 
+        const parsed_line = try parseProofLineAssertion(
+            self,
+            parser,
+            theorem,
+            &theorem_vars,
+            sort_vars,
+            assertion,
+            line,
+        );
+
         const saved_diag = getDiagnostic(self);
 
         if (registry.getFallbackRule(initial_rule_id) == null) {
@@ -124,6 +155,7 @@ pub fn checkTheoremBlock(
                 sort_vars,
                 assertion,
                 line,
+                parsed_line,
                 initial_rule_id,
                 theorem,
                 &theorem_vars,
@@ -198,6 +230,7 @@ pub fn checkTheoremBlock(
                 sort_vars,
                 assertion,
                 line,
+                parsed_line,
                 candidate_rule_id,
                 &attempt_theorem,
                 &attempt_theorem_vars,
@@ -222,7 +255,18 @@ pub fn checkTheoremBlock(
                 candidate_rule_id = registry.getFallbackRule(
                     candidate_rule_id,
                 ) orelse {
-                    restoreDiagnostic(self, first_diag orelse saved_diag);
+                    var diag = first_diag orelse saved_diag;
+                    if (first_diag != null) {
+                        if (diag) |*actual_diag| {
+                            try addFallbackFailureNote(
+                                allocator,
+                                actual_diag,
+                                parsed_line,
+                                line,
+                            );
+                        }
+                    }
+                    restoreDiagnostic(self, diag);
                     return first_err.?;
                 };
                 continue;
@@ -351,33 +395,21 @@ pub fn checkTheoremBlock(
     return try checked.toOwnedSlice(allocator);
 }
 
-fn tryApplyLineWithCandidate(
+fn parseProofLineAssertion(
     self: anytype,
-    allocator: std.mem.Allocator,
     parser: *MM0Parser,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
-    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
-    views: *const std.AutoHashMap(u32, ViewDecl),
+    theorem: *TheoremContext,
+    theorem_vars: *NameExprMap,
     sort_vars: *const SortVarRegistry,
     assertion: AssertionStmt,
     line: ProofLine,
-    rule_id: u32,
-    theorem: *TheoremContext,
-    theorem_vars: *NameExprMap,
-    base_refs: []const CheckedRef,
-    base_ref_exprs: []const ExprId,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    diag_scratch: *CompilerDiag.Scratch,
-    rule_unify_cache: *Inference.RuleUnifyCache,
-) !SuccessfulLineAttempt {
-    const line_expr = parseLineAssertion(
+) !Holes.ParsedAssertion {
+    return Holes.parseAssertion(
         parser,
         theorem,
         theorem_vars,
         sort_vars,
-        line,
+        line.assertion.text,
     ) catch |err| {
         CompilerDiag.setProof(self, CompilerDiag.proofMathParseDiagnostic(
             parser,
@@ -391,6 +423,31 @@ fn tryApplyLineWithCandidate(
         ));
         return err;
     };
+}
+
+fn tryApplyLineWithCandidate(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
+    views: *const std.AutoHashMap(u32, ViewDecl),
+    sort_vars: *const SortVarRegistry,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    parsed_line: Holes.ParsedAssertion,
+    rule_id: u32,
+    theorem: *TheoremContext,
+    theorem_vars: *NameExprMap,
+    base_refs: []const CheckedRef,
+    base_ref_exprs: []const ExprId,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    diag_scratch: *CompilerDiag.Scratch,
+    rule_unify_cache: *Inference.RuleUnifyCache,
+) !SuccessfulLineAttempt {
+    const line_assertion = LineAssertion.fromParsed(parsed_line);
 
     const rule = &env.rules.items[rule_id];
     if (line.refs.len != rule.hyps.len) {
@@ -420,6 +477,13 @@ fn tryApplyLineWithCandidate(
     );
     defer allocator.free(partial_bindings);
 
+    // Keep the user's explicit bindings separate from @fresh selections.
+    // applyFreshBindings mutates partial_bindings in-place, and later
+    // hole-filled validation must still know which @fresh targets were
+    // generated automatically rather than written by the user.
+    const explicit_bindings = try allocator.dupe(?ExprId, partial_bindings);
+    defer allocator.free(explicit_bindings);
+
     if (fresh_bindings.get(rule_id)) |rule_fresh| {
         try applyFreshBindings(
             self,
@@ -431,7 +495,7 @@ fn tryApplyLineWithCandidate(
             assertion.name,
             rule,
             line,
-            line_expr,
+            try lineAssertionKnownDeps(env, theorem, line_assertion),
             base_ref_exprs,
             partial_bindings,
             rule_fresh,
@@ -439,34 +503,41 @@ fn tryApplyLineWithCandidate(
     }
     const maybe_view = views.get(rule_id);
     const had_omitted = Inference.hasOmittedBindings(partial_bindings);
-    const use_advanced_inference = had_omitted and
+    const rule_has_advanced_inference =
         Inference.shouldUseAdvancedInference(rule_id, maybe_view, registry);
+    const use_advanced_inference = had_omitted and
+        rule_has_advanced_inference;
 
     if (maybe_view) |view| {
         if (!use_advanced_inference) {
-            CompilerViews.applyViewBindings(
-                allocator,
-                theorem,
-                env,
-                registry,
-                &view,
-                line_expr,
-                base_ref_exprs,
-                partial_bindings,
-                null,
-                null,
-                self.debug.views,
-            ) catch |err| {
-                CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
-                    .kind = .generic,
-                    .err = err,
-                    .theorem_name = assertion.name,
-                    .line_label = line.label,
-                    .rule_name = line.rule_name,
-                    .span = line.ruleApplicationSpan(),
-                }, .theorem_application));
-                return err;
-            };
+            switch (line_assertion) {
+                .concrete => |line_expr| {
+                    CompilerViews.applyViewBindings(
+                        allocator,
+                        theorem,
+                        env,
+                        registry,
+                        &view,
+                        line_expr,
+                        base_ref_exprs,
+                        partial_bindings,
+                        null,
+                        null,
+                        self.debug.views,
+                    ) catch |err| {
+                        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+                            .kind = .generic,
+                            .err = err,
+                            .theorem_name = assertion.name,
+                            .line_label = line.label,
+                            .rule_name = line.rule_name,
+                            .span = line.ruleApplicationSpan(),
+                        }, .theorem_application));
+                        return err;
+                    };
+                },
+                .holey => {},
+            }
         }
     }
 
@@ -476,33 +547,29 @@ fn tryApplyLineWithCandidate(
         .sort_vars = sort_vars,
     };
 
-    const bindings = if (had_omitted) blk: {
-        break :blk try Inference.inferBindings(
-            self,
-            allocator,
-            env,
-            registry,
-            diag_scratch,
-            theorem,
-            assertion,
-            rule_id,
-            rule,
-            line,
-            partial_bindings,
-            base_ref_exprs,
-            line_expr,
-            fresh_context,
-            maybe_view,
-            use_advanced_inference,
-            rule_unify_cache,
-        );
-    } else blk: {
-        const b = try Inference.requireConcreteBindings(
-            allocator,
-            partial_bindings,
-        );
-        break :blk b;
-    };
+    const bindings = try inferCandidateBindings(
+        self,
+        allocator,
+        env,
+        registry,
+        diag_scratch,
+        theorem,
+        assertion,
+        rule_id,
+        rule,
+        line,
+        line_assertion,
+        partial_bindings,
+        base_ref_exprs,
+        fresh_context,
+        maybe_view,
+        had_omitted,
+        rule_has_advanced_inference,
+        use_advanced_inference,
+        rule_unify_cache,
+    );
+
+    const norm_spec = registry.getNormalizeSpec(rule_id);
 
     var resolved_bindings = bindings;
     var freshened_bindings: ?CompilerFreshen.FreshenResult = null;
@@ -536,7 +603,21 @@ fn tryApplyLineWithCandidate(
             theorem_vars,
             sort_vars,
             rule,
-            line_expr,
+            try resolveLineAssertionForBindings(
+                self,
+                allocator,
+                parser,
+                theorem,
+                env,
+                registry,
+                diag_scratch,
+                assertion,
+                line,
+                norm_spec,
+                rule,
+                line_assertion,
+                resolved_bindings,
+            ),
             base_ref_exprs,
             resolved_bindings,
             rule_freshen,
@@ -595,9 +676,37 @@ fn tryApplyLineWithCandidate(
     };
     restoreDiagnostic(self, null);
 
-    const norm_spec = registry.getNormalizeSpec(rule_id);
-
     if (freshened_bindings) |freshened| {
+        if (fresh_bindings.get(rule_id)) |rule_fresh| {
+            try validateFreshBindingsAgainstLine(
+                self,
+                allocator,
+                env,
+                theorem,
+                assertion.name,
+                rule,
+                line,
+                try resolveLineAssertionForBindings(
+                    self,
+                    allocator,
+                    parser,
+                    theorem,
+                    env,
+                    registry,
+                    diag_scratch,
+                    assertion,
+                    line,
+                    norm_spec,
+                    rule,
+                    line_assertion,
+                    bindings,
+                ),
+                base_ref_exprs,
+                explicit_bindings,
+                bindings,
+                rule_fresh,
+            );
+        }
         const line_idx = applyFreshenedRuleLine(
             allocator,
             theorem,
@@ -606,7 +715,21 @@ fn tryApplyLineWithCandidate(
             checked,
             diag_scratch,
             norm_spec,
-            line_expr,
+            try resolveLineAssertionForBindings(
+                self,
+                allocator,
+                parser,
+                theorem,
+                env,
+                registry,
+                diag_scratch,
+                assertion,
+                line,
+                norm_spec,
+                rule,
+                line_assertion,
+                bindings,
+            ),
             rule,
             rule_id,
             bindings,
@@ -720,10 +843,38 @@ fn tryApplyLineWithCandidate(
         return error.HypothesisMismatch;
     }
 
-    const expected_line = try theorem.instantiateTemplate(
-        rule.concl,
+    const candidate = try elaborateCandidateLine(
+        self,
+        allocator,
+        parser,
+        theorem,
+        env,
+        registry,
+        diag_scratch,
+        assertion,
+        line,
+        norm_spec,
+        rule,
+        line_assertion,
         resolved_bindings,
     );
+
+    if (fresh_bindings.get(rule_id)) |rule_fresh| {
+        try validateFreshBindingsAgainstLine(
+            self,
+            allocator,
+            env,
+            theorem,
+            assertion.name,
+            rule,
+            line,
+            candidate.displayed_conclusion,
+            base_ref_exprs,
+            explicit_bindings,
+            candidate.resolved_bindings,
+            rule_fresh,
+        );
+    }
 
     const concl_mark = diag_scratch.mark();
     const line_idx = (Matching.tryBuildConclusionLine(
@@ -735,10 +886,10 @@ fn tryApplyLineWithCandidate(
         diag_scratch,
         norm_spec,
         self.debug,
-        line_expr,
-        expected_line,
+        candidate.displayed_conclusion,
+        candidate.raw_conclusion,
         rule_id,
-        resolved_bindings,
+        candidate.resolved_bindings,
         refs,
     ) catch |err| {
         if (CompilerDiag.setProofScratchDiagnosticIfPresent(
@@ -775,8 +926,8 @@ fn tryApplyLineWithCandidate(
             env,
             registry,
             diag_scratch,
-            expected_line,
-            line_expr,
+            candidate.raw_conclusion,
+            candidate.displayed_conclusion,
             if (norm_spec) |spec| spec.concl else false,
         );
         CompilerDiag.setProof(self, diag);
@@ -789,6 +940,365 @@ fn tryApplyLineWithCandidate(
         .theorem = theorem.*,
         .theorem_vars = theorem_vars.*,
     };
+}
+
+fn resolveLineAssertionForBindings(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    diag_scratch: *CompilerDiag.Scratch,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
+    rule: *const RuleDecl,
+    line_assertion: LineAssertion,
+    bindings: []const ExprId,
+) !ExprId {
+    return switch (line_assertion) {
+        .concrete => |line_expr| line_expr,
+        .holey => |holey| blk: {
+            const expected_line = try theorem.instantiateTemplate(
+                rule.concl,
+                bindings,
+            );
+            break :blk try validateHoleyAssertionAgainstCandidate(
+                self,
+                allocator,
+                parser,
+                theorem,
+                env,
+                registry,
+                diag_scratch,
+                assertion,
+                line,
+                norm_spec,
+                holey,
+                expected_line,
+            );
+        },
+    };
+}
+
+fn inferCandidateBindings(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    diag_scratch: *CompilerDiag.Scratch,
+    theorem: *TheoremContext,
+    assertion: AssertionStmt,
+    rule_id: u32,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    line_assertion: LineAssertion,
+    partial_bindings: []const ?ExprId,
+    base_ref_exprs: []const ExprId,
+    fresh_context: Inference.HiddenWitnessFreshContext,
+    maybe_view: ?ViewDecl,
+    had_omitted: bool,
+    rule_has_advanced_inference: bool,
+    use_advanced_inference: bool,
+    rule_unify_cache: *Inference.RuleUnifyCache,
+) ![]const ExprId {
+    return switch (line_assertion) {
+        .holey => |holey| blk: {
+            const has_structural_hole = try Holes.containsStructuralHole(
+                env,
+                registry,
+                holey,
+            );
+            // Exact refs can identify a candidate before the visible holey
+            // assertion is checked.  Keep this shortcut conservative: it must
+            // solve every binder, and it must not bypass structural-hole
+            // inference such as `_ctx` ACUI minimal-residual solving.
+            if (had_omitted and !has_structural_hole) {
+                if (try Inference.inferBindingsFromRefsOnly(
+                    allocator,
+                    theorem,
+                    rule,
+                    partial_bindings,
+                    base_ref_exprs,
+                )) |refs_only_bindings| {
+                    break :blk refs_only_bindings;
+                }
+            }
+
+            const use_holey_advanced = had_omitted and
+                (rule_has_advanced_inference or has_structural_hole);
+            if (use_holey_advanced) {
+                break :blk Inference.inferBindingsFromHoleyAdvanced(
+                    self,
+                    allocator,
+                    env,
+                    registry,
+                    diag_scratch,
+                    theorem,
+                    assertion,
+                    rule_id,
+                    rule,
+                    line,
+                    partial_bindings,
+                    base_ref_exprs,
+                    holey,
+                    maybe_view,
+                ) catch |err| {
+                    if (getDiagnostic(self) == null) {
+                        try setHoleyInferenceDiagnostic(
+                            self,
+                            allocator,
+                            assertion,
+                            line,
+                            rule,
+                            holey,
+                            err,
+                            .{},
+                        );
+                    }
+                    return err;
+                };
+            }
+            if (!had_omitted) {
+                break :blk try Inference.requireConcreteBindings(
+                    allocator,
+                    partial_bindings,
+                );
+            }
+            var hole_report = Holes.InferenceReport{};
+            break :blk Holes.inferBindingsFromAssertionDetailed(
+                allocator,
+                theorem,
+                rule,
+                partial_bindings,
+                base_ref_exprs,
+                holey,
+                &hole_report,
+            ) catch |err| {
+                // The lightweight hole matcher is deliberately exact.  If
+                // the visible assertion is too holey, exact ref replay can
+                // fail before it gets to the candidate conclusion, even when
+                // transparent rule matching would identify a unique concrete
+                // candidate from the refs.  Try that def-aware path before
+                // reporting the exact matcher's failure.
+                if (err == error.UnifyMismatch or
+                    err == error.HoleyInferenceMismatch)
+                {
+                    if (Inference.inferBindingsFromHoleyAdvanced(
+                        self,
+                        allocator,
+                        env,
+                        registry,
+                        diag_scratch,
+                        theorem,
+                        assertion,
+                        rule_id,
+                        rule,
+                        line,
+                        partial_bindings,
+                        base_ref_exprs,
+                        holey,
+                        maybe_view,
+                    )) |bindings| {
+                        restoreDiagnostic(self, null);
+                        break :blk bindings;
+                    } else |_| {
+                        restoreDiagnostic(self, null);
+                    }
+                }
+                try setHoleyInferenceDiagnostic(
+                    self,
+                    allocator,
+                    assertion,
+                    line,
+                    rule,
+                    holey,
+                    err,
+                    hole_report,
+                );
+                return err;
+            };
+        },
+        .concrete => |line_expr| blk: {
+            if (had_omitted) {
+                break :blk try Inference.inferBindings(
+                    self,
+                    allocator,
+                    env,
+                    registry,
+                    diag_scratch,
+                    theorem,
+                    assertion,
+                    rule_id,
+                    rule,
+                    line,
+                    partial_bindings,
+                    base_ref_exprs,
+                    line_expr,
+                    fresh_context,
+                    maybe_view,
+                    use_advanced_inference,
+                    rule_unify_cache,
+                );
+            }
+            break :blk try Inference.requireConcreteBindings(
+                allocator,
+                partial_bindings,
+            );
+        },
+    };
+}
+
+fn elaborateCandidateLine(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    diag_scratch: *CompilerDiag.Scratch,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
+    rule: *const RuleDecl,
+    line_assertion: LineAssertion,
+    resolved_bindings: []const ExprId,
+) !CandidateElaboration {
+    const raw_conclusion = try theorem.instantiateTemplate(
+        rule.concl,
+        resolved_bindings,
+    );
+    const displayed_conclusion = switch (line_assertion) {
+        .concrete => |line_expr| line_expr,
+        .holey => |holey| try validateHoleyAssertionAgainstCandidate(
+            self,
+            allocator,
+            parser,
+            theorem,
+            env,
+            registry,
+            diag_scratch,
+            assertion,
+            line,
+            norm_spec,
+            holey,
+            raw_conclusion,
+        ),
+    };
+    return .{
+        .resolved_bindings = resolved_bindings,
+        .raw_conclusion = raw_conclusion,
+        .displayed_conclusion = displayed_conclusion,
+    };
+}
+
+fn validateHoleyAssertionAgainstCandidate(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    diag_scratch: *CompilerDiag.Scratch,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
+    holey: *const Expr,
+    expected_line: ExprId,
+) !ExprId {
+    var hole_report = Holes.ConcreteMatchReport{};
+    if (try holeyAssertionMatchesCandidate(
+        allocator,
+        parser,
+        theorem,
+        env,
+        holey,
+        expected_line,
+        &hole_report,
+    )) {
+        return expected_line;
+    }
+
+    if (norm_spec) |spec| {
+        if (spec.concl) {
+            var scratch_checked = std.ArrayListUnmanaged(CheckedLine){};
+            defer scratch_checked.deinit(allocator);
+            const normalized_line = try Normalize.normalizeExprForSnapshot(
+                allocator,
+                theorem,
+                registry,
+                env,
+                &scratch_checked,
+                diag_scratch,
+                expected_line,
+            );
+            var normalized_report = Holes.ConcreteMatchReport{};
+            if (try holeyAssertionMatchesCandidate(
+                allocator,
+                parser,
+                theorem,
+                env,
+                holey,
+                normalized_line,
+                &normalized_report,
+            )) {
+                return normalized_line;
+            }
+            hole_report = normalized_report;
+        }
+    }
+
+    var diag = CompilerDiag.withPhase(.{
+        .kind = .conclusion_mismatch,
+        .err = error.HoleConclusionMismatch,
+        .theorem_name = assertion.name,
+        .line_label = line.label,
+        .rule_name = line.rule_name,
+        .span = concreteMatchFailureSpan(line, hole_report) orelse
+            line.assertion.span,
+    }, .theorem_application);
+    try addHoleConcreteMatchNotes(allocator, &diag, line, hole_report);
+    CompilerDiag.setProof(self, diag);
+    return error.HoleConclusionMismatch;
+}
+
+fn holeyAssertionMatchesCandidate(
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    holey: *const Expr,
+    candidate: ExprId,
+    report: *Holes.ConcreteMatchReport,
+) !bool {
+    var exact_report = Holes.ConcreteMatchReport{};
+    if (try Holes.matchesConcreteDetailed(
+        parser,
+        theorem,
+        env,
+        holey,
+        candidate,
+        &exact_report,
+    )) {
+        return true;
+    }
+
+    var semantic_report = Holes.ConcreteMatchReport{};
+    if (try Holes.matchesConcreteSemanticallyDetailed(
+        allocator,
+        parser,
+        theorem,
+        env,
+        holey,
+        candidate,
+        &semantic_report,
+    )) {
+        return true;
+    }
+
+    report.* = semantic_report;
+    return false;
 }
 
 fn applyFreshenedRuleLine(
@@ -1235,24 +1745,6 @@ fn restoreDiagnostic(self: anytype, diag: ?Diagnostic) void {
     }
 }
 
-fn parseLineAssertion(
-    parser: *MM0Parser,
-    theorem: *TheoremContext,
-    theorem_vars: *NameExprMap,
-    sort_vars: *const SortVarRegistry,
-    line: ProofLine,
-) !ExprId {
-    try CompilerVars.ensureMathTextVars(
-        parser,
-        theorem,
-        theorem_vars,
-        sort_vars,
-        line.assertion.text,
-    );
-    const expr = try parser.parseFormulaText(line.assertion.text, theorem_vars);
-    return try theorem.internParsedExpr(expr);
-}
-
 fn parseBindings(
     self: anytype,
     allocator: std.mem.Allocator,
@@ -1339,6 +1831,73 @@ fn parseBindings(
     return bindings;
 }
 
+fn lineAssertionKnownDeps(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    line_assertion: LineAssertion,
+) !u55 {
+    return switch (line_assertion) {
+        .concrete => |expr_id| (try Inference.exprInfo(
+            env,
+            theorem,
+            theorem.arg_infos,
+            expr_id,
+        )).deps,
+        .holey => |expr| expr.deps(),
+    };
+}
+
+fn validateFreshBindingsAgainstLine(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *TheoremContext,
+    theorem_name: []const u8,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    line_expr: ExprId,
+    ref_exprs: []const ExprId,
+    partial_bindings: []const ?ExprId,
+    resolved_bindings: []const ExprId,
+    fresh_list: []const FreshDecl,
+) !void {
+    const optional_bindings = try allocator.dupe(?ExprId, partial_bindings);
+    defer allocator.free(optional_bindings);
+    for (fresh_list) |fresh| {
+        optional_bindings[fresh.target_arg_idx] = null;
+    }
+
+    const used_deps = try CompilerFresh.collectUsedDeps(
+        env,
+        theorem,
+        line_expr,
+        ref_exprs,
+        optional_bindings,
+        0,
+    );
+    for (fresh_list) |fresh| {
+        if (partial_bindings[fresh.target_arg_idx] != null) continue;
+        const selected = resolved_bindings[fresh.target_arg_idx];
+        const selected_deps = (try Inference.exprInfo(
+            env,
+            theorem,
+            theorem.arg_infos,
+            selected,
+        )).deps;
+        if ((used_deps & selected_deps) == 0) continue;
+        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            .kind = .parse_fresh,
+            .err = error.FreshNoAvailableVar,
+            .theorem_name = theorem_name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .name = rule.arg_names[fresh.target_arg_idx].?,
+            .span = line.ruleApplicationSpan(),
+        }, .theorem_application));
+        return error.FreshNoAvailableVar;
+    }
+}
+
 fn applyFreshBindings(
     self: anytype,
     parser: *MM0Parser,
@@ -1349,15 +1908,15 @@ fn applyFreshBindings(
     theorem_name: []const u8,
     rule: *const RuleDecl,
     line: ProofLine,
-    line_expr: ExprId,
+    line_deps: u55,
     ref_exprs: []const ExprId,
     bindings: []?ExprId,
     fresh_list: []const FreshDecl,
 ) !void {
-    const used_deps = try CompilerFresh.collectUsedDeps(
+    const used_deps = try CompilerFresh.collectUsedDepsFromLineDeps(
         env,
         theorem,
-        line_expr,
+        line_deps,
         ref_exprs,
         bindings,
         0,
@@ -1389,6 +1948,184 @@ fn applyFreshBindings(
         };
         bindings[fresh.target_arg_idx] = selection.expr_id;
         reserved_deps |= selection.deps;
+    }
+}
+
+fn addFallbackFailureNote(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    parsed_line: Holes.ParsedAssertion,
+    line: ProofLine,
+) !void {
+    _ = allocator;
+    switch (parsed_line) {
+        .concrete => {},
+        .holey => |holey| {
+            addStaticProofNoteSpan(
+                diag,
+                "fallback chain exhausted for holey assertion; " ++
+                    "showing first candidate failure",
+                firstHoleProofSpan(line, holey),
+            );
+        },
+    }
+}
+
+fn concreteMatchFailureSpan(
+    line: ProofLine,
+    report: Holes.ConcreteMatchReport,
+) ?Span {
+    const failure = report.failure orelse return null;
+    return switch (failure) {
+        .hole_sort_mismatch => |mismatch| proofSpanForSourceSpan(
+            line,
+            mismatch.token_span,
+        ),
+        .visible_structure_mismatch => null,
+    };
+}
+
+fn firstHoleProofSpan(line: ProofLine, expr: *const Expr) ?Span {
+    return proofSpanForSourceSpan(line, Holes.firstHoleSourceSpan(expr));
+}
+
+fn proofSpanForSourceSpan(
+    line: ProofLine,
+    maybe_span: ?SourceSpan,
+) ?Span {
+    const span = maybe_span orelse return null;
+    const inner_start = line.assertion.span.start + 1;
+    return .{
+        .start = inner_start + span.start,
+        .end = inner_start + span.end,
+    };
+}
+
+fn setHoleyInferenceDiagnostic(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    assertion: AssertionStmt,
+    line: ProofLine,
+    rule: *const RuleDecl,
+    holey: *const Expr,
+    err: anyerror,
+    report: Holes.InferenceReport,
+) !void {
+    const failure = report.failure;
+    const missing = if (failure) |actual| switch (actual) {
+        .missing_binder => |info| info,
+        else => null,
+    } else null;
+
+    const kind: CompilerDiag.DiagnosticKind = if (missing != null)
+        .missing_binder_assignment
+    else
+        .inference_failed;
+    const hole_span = firstHoleProofSpan(line, holey);
+    const span = if (err == error.HoleyInferenceMismatch)
+        hole_span orelse line.assertion.span
+    else if (missing != null)
+        hole_span orelse line.assertion.span
+    else
+        line.ruleApplicationSpan();
+    const binder_name = if (missing) |info|
+        info.name orelse "_"
+    else
+        null;
+    var diag = CompilerDiag.withPhase(.{
+        .kind = kind,
+        .err = err,
+        .theorem_name = assertion.name,
+        .line_label = line.label,
+        .rule_name = line.rule_name,
+        .name = binder_name,
+        .span = span,
+        .detail = if (missing) |info| .{ .missing_binder_assignment = .{
+            .binder_name = info.name orelse "_",
+            .path = .holey_surface_match,
+        } } else .{ .inference_failure = .{
+            .path = .holey_surface_match,
+            .first_unsolved_binder_name = null,
+        } },
+    }, .inference);
+    try addHoleyInferenceNotes(allocator, &diag, rule, line, holey, report);
+    CompilerDiag.setProof(self, diag);
+}
+
+fn addHoleyInferenceNotes(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    holey: *const Expr,
+    report: Holes.InferenceReport,
+) !void {
+    try addFormattedProofNote(
+        allocator,
+        diag,
+        "inference path: {s}",
+        .{CompilerDiag.inferencePathName(.holey_surface_match)},
+    );
+    const failure = report.failure orelse return;
+    const hole_span = firstHoleProofSpan(line, holey);
+    switch (failure) {
+        .hypothesis_mismatch => addStaticProofNote(
+            diag,
+            "referenced hypotheses did not match the candidate rule",
+        ),
+        .visible_structure_mismatch => addStaticProofNoteSpan(
+            diag,
+            "visible structure in the holey assertion did not match " ++
+                "the candidate conclusion",
+            hole_span,
+        ),
+        .missing_binder => |info| {
+            const name = info.name orelse "_";
+            try addFormattedProofNoteSpan(
+                allocator,
+                diag,
+                "holey assertion left binder {s} unsolved",
+                .{name},
+                hole_span,
+            );
+            if (info.index < rule.arg_names.len and rule.arg_names[info.index] == null) {
+                try addFormattedProofNote(
+                    allocator,
+                    diag,
+                    "unsolved binder index: {d}",
+                    .{info.index + 1},
+                );
+            }
+        },
+    }
+}
+
+fn addHoleConcreteMatchNotes(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    line: ProofLine,
+    report: Holes.ConcreteMatchReport,
+) !void {
+    const failure = report.failure orelse return;
+    switch (failure) {
+        .visible_structure_mismatch => addStaticProofNote(
+            diag,
+            "visible structure in the holey assertion did not match " ++
+                "the candidate conclusion",
+        ),
+        .hole_sort_mismatch => |mismatch| {
+            try addFormattedProofNoteSpan(
+                allocator,
+                diag,
+                "hole {s} expected sort {s} but matched {s}",
+                .{
+                    mismatch.token,
+                    mismatch.expected_sort_name,
+                    mismatch.actual_sort_name,
+                },
+                proofSpanForSourceSpan(line, mismatch.token_span),
+            );
+        },
     }
 }
 
@@ -1547,7 +2284,15 @@ fn addBoundaryAttemptNotes(
 }
 
 fn addStaticProofNote(diag: *Diagnostic, message: []const u8) void {
-    CompilerDiag.addNote(diag, message, .proof, null);
+    addStaticProofNoteSpan(diag, message, null);
+}
+
+fn addStaticProofNoteSpan(
+    diag: *Diagnostic,
+    message: []const u8,
+    span: ?Span,
+) void {
+    CompilerDiag.addNote(diag, message, .proof, span);
 }
 
 fn addFormattedProofNote(
@@ -1556,8 +2301,18 @@ fn addFormattedProofNote(
     comptime fmt: []const u8,
     args: anytype,
 ) !void {
+    try addFormattedProofNoteSpan(allocator, diag, fmt, args, null);
+}
+
+fn addFormattedProofNoteSpan(
+    allocator: std.mem.Allocator,
+    diag: *Diagnostic,
+    comptime fmt: []const u8,
+    args: anytype,
+    span: ?Span,
+) !void {
     const message = try std.fmt.allocPrint(allocator, fmt, args);
-    CompilerDiag.addNote(diag, message, .proof, null);
+    CompilerDiag.addNote(diag, message, .proof, span);
 }
 
 fn refSpan(ref: Ref) Span {

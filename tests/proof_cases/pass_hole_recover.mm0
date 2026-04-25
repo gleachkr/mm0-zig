@@ -1,0 +1,20 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+
+term rel (a: obj): wff;
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
+
+def hidden_rel {.a: obj}: wff =
+  $ A. a (rel a) $;
+
+axiom hidden_rel_ax: $ hidden_rel $;
+
+--| @view {x: obj} (t: obj) (p: wff x) (q: wff): $ A. x p $ > $ q $
+--| @recover t q p x
+axiom pick_hidden (t: obj) (q: wff):
+  $ hidden_rel $ > $ q $;
+
+theorem pass_hole_recover (u: obj):
+  $ hidden_rel $ > $ rel u $;

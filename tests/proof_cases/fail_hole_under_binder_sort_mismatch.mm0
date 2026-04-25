@@ -1,0 +1,8 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+term top: wff;
+term thing: obj;
+term sb (t: wff) {x: wff} (r: wff x): wff;
+axiom sb_intro (t: wff) {x: wff} (r: wff x): $ sb t x r $;
+theorem bad {x: wff} (a: wff): $ sb a x top $;

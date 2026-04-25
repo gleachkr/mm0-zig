@@ -1,11 +1,13 @@
 pub const Expr = union(enum) {
     variable: Variable,
     term: TermApp,
+    hole: Hole,
 
     pub fn sort(self: *const Expr) u7 {
         return switch (self.*) {
             .variable => |v| v.sort,
             .term => |t| t.sort,
+            .hole => |h| h.sort,
         };
     }
 
@@ -13,6 +15,7 @@ pub const Expr = union(enum) {
         return switch (self.*) {
             .variable => |v| v.deps,
             .term => |t| t.deps,
+            .hole => 0,
         };
     }
 
@@ -20,6 +23,7 @@ pub const Expr = union(enum) {
         return switch (self.*) {
             .variable => |v| v.bound,
             .term => false,
+            .hole => false,
         };
     }
 };
@@ -41,4 +45,18 @@ pub const TermApp = struct {
     id: u32,
     /// pointers into the arena
     args: []const *const Expr,
+};
+
+pub const SourceSpan = struct {
+    start: usize,
+    end: usize,
+};
+
+pub const Hole = struct {
+    /// index into sort table
+    sort: u7,
+    /// source token, for diagnostics and debugging
+    token: []const u8,
+    /// token span inside the parsed math string, when available
+    token_span: ?SourceSpan = null,
 };

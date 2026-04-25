@@ -1,0 +1,13 @@
+delimiter $ ( ) $;
+provable sort wff;
+term left: wff;
+term right: wff;
+term wrap (a: wff): wff;
+axiom fallback_good: $ wrap right $;
+--| @fallback fallback_good
+axiom fallback_bad: $ left $;
+axiom unused_bad: $ left $;
+--| @fallback unused_bad
+axiom initial_good: $ wrap right $;
+theorem fallback_succeeds: $ wrap right $;
+theorem initial_succeeds: $ wrap right $;

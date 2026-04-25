@@ -1,0 +1,70 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+sort set;
+
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+term hyp (a: wff): ctx;
+term nd (g: ctx) (a: wff): wff;
+term all {x: set} (p: wff x): wff;
+prefix all: $A.$ prec 41;
+term pred (t: set): wff;
+prefix pred: $P$ prec 50;
+term sb (t: set) {x: set} (p: wff x): wff;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq (join (join g h) i) (join g (join h i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (join g h) (join h g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (join g g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (join emp g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (join g1 h1) (join g2 h2) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a <-> b $ > $ nd g a <-> nd h b $;
+
+--| @rewrite
+axiom sb_pred (t: set) {x: set}: $ sb t x (P x) <-> P t $;
+
+--| @view (g: ctx) {x: set} (t: set) (p: wff x) (q: wff): $ nd g (A. x p) $ > $ nd g q $
+--| @recover t q p x
+--| @normalize conc
+axiom all_elim (g: ctx) {x: set} (t: set) (p: wff x):
+  $ nd g (A. x p) $ > $ nd g (sb t x p) $;
+
+theorem view_recover_visible_formula (a b: wff) (u: set) {x: set}:
+  $ nd (join (hyp a) (hyp b)) (A. x (P x)) $
+  > $ nd (join (hyp b) (hyp a)) (P u) $;
+
+theorem view_recover_explicit_whole (a b: wff) (u: set) {x: set}:
+  $ nd (join (hyp a) (hyp b)) (A. x (P x)) $
+  > $ nd (join (hyp b) (hyp a)) (P u) $;
+
+theorem view_recover_explicit_term_hole (a b: wff) (u: set) {x: set}:
+  $ nd (join (hyp a) (hyp b)) (A. x (P x)) $
+  > $ nd (join (hyp b) (hyp a)) (P u) $;
+
+theorem view_recover_visible_ctx (a b: wff) (u: set) {x: set}:
+  $ nd (join (hyp a) (hyp b)) (A. x (P x)) $
+  > $ nd (join (hyp b) (hyp a)) (P u) $;

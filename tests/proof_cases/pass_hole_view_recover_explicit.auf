@@ -1,0 +1,4 @@
+hole_view_recover_explicit
+--------------------------
+
+l1: $ _wff $ by all_elim (t := $ u $) [#1]

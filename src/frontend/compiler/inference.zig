@@ -8,6 +8,7 @@ const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
 const Expr = @import("../../trusted/expressions.zig").Expr;
+const SurfaceExpr = @import("../surface_expr.zig");
 const UnifyReplay = @import("../../trusted/unify_replay.zig");
 const ProofLine = @import("../proof_script.zig").ProofLine;
 const Span = @import("../proof_script.zig").Span;
@@ -831,18 +832,13 @@ fn hypMarkedForNormalize(norm_spec: ?NormalizeSpec, hyp_idx: usize) bool {
     return false;
 }
 
-fn matchRulePartNormalized(
+fn finishNormalizedComparison(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
     scratch: *CompilerDiag.Scratch,
-    session: *DefOps.RuleMatchSession,
-    template: TemplateExpr,
-    actual: ExprId,
+    comparison: *DefOps.NormalizedComparison,
 ) !bool {
-    var comparison = try session.beginNormalizedComparison(template, actual);
-    defer comparison.deinit();
-
     var checked = std.ArrayListUnmanaged(CheckedLine){};
     defer checked.deinit(allocator);
 
@@ -882,6 +878,80 @@ fn matchRulePartNormalized(
     return try comparison.finish(
         canonical_expected,
         canonical_actual,
+    );
+}
+
+fn matchRulePartNormalized(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
+    session: *DefOps.RuleMatchSession,
+    template: TemplateExpr,
+    actual: ExprId,
+) !bool {
+    var comparison = try session.beginNormalizedComparison(template, actual);
+    defer comparison.deinit();
+    return try finishNormalizedComparison(
+        allocator,
+        env,
+        registry,
+        scratch,
+        &comparison,
+    );
+}
+
+/// Try to infer a complete candidate from referenced hypotheses only.
+///
+/// This is deliberately exact: no transparent, normalized, or structural
+/// matching is performed here.  The caller is expected to use it only when
+/// exact refs are allowed to select the candidate before line validation.
+pub fn inferBindingsFromRefsOnly(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    rule: *const RuleDecl,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+) !?[]const ExprId {
+    const bindings = try allocator.dupe(?ExprId, partial_bindings);
+    defer allocator.free(bindings);
+
+    for (rule.hyps, ref_exprs) |hyp, ref_expr| {
+        if (!theorem.matchTemplate(hyp, ref_expr, bindings)) return null;
+    }
+
+    for (bindings) |binding| {
+        if (binding == null) return null;
+    }
+
+    const concrete = try allocator.alloc(ExprId, bindings.len);
+    for (bindings, 0..) |binding, idx| {
+        concrete[idx] = binding.?;
+    }
+    return concrete;
+}
+
+fn matchRulePartNormalizedSurface(
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
+    session: *DefOps.RuleMatchSession,
+    template: TemplateExpr,
+    actual: *const Expr,
+) !bool {
+    var comparison = try session.beginNormalizedSurfaceComparison(
+        env,
+        template,
+        actual,
+    );
+    defer comparison.deinit();
+    return try finishNormalizedComparison(
+        allocator,
+        env,
+        registry,
+        scratch,
+        &comparison,
     );
 }
 
@@ -1123,6 +1193,443 @@ fn inferBindingsByMatchSeedState(
         line_expr,
         explicit_bindings,
     );
+}
+
+fn matchRulePartSurface(
+    theorem: *TheoremContext,
+    session: *DefOps.RuleMatchSession,
+    template: TemplateExpr,
+    actual: *const Expr,
+) !bool {
+    if (actual.* == .hole) return true;
+    return switch (template) {
+        .binder => blk: {
+            if (SurfaceExpr.containsHole(actual)) break :blk true;
+            const actual_id = try theorem.internParsedExpr(actual);
+            break :blk try session.matchTransparent(template, actual_id);
+        },
+        .app => |app| blk: {
+            const actual_term = switch (actual.*) {
+                .term => |term| term,
+                .variable, .hole => break :blk false,
+            };
+            if (actual_term.id != app.term_id) break :blk false;
+            if (actual_term.args.len != app.args.len) break :blk false;
+            for (app.args, actual_term.args) |tmpl_arg, actual_arg| {
+                if (!try matchRulePartSurface(
+                    theorem,
+                    session,
+                    tmpl_arg,
+                    actual_arg,
+                )) {
+                    break :blk false;
+                }
+            }
+            break :blk true;
+        },
+    };
+}
+
+fn finishHoleyRuleMatchSession(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
+    theorem: *TheoremContext,
+    assertion: AssertionStmt,
+    rule_id: u32,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    session: *DefOps.RuleMatchSession,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    holey_concl: *const Expr,
+    diagnostic_bindings: []const ?ExprId,
+) !RuleMatchResult {
+    const norm_spec = registry.getNormalizeSpec(rule_id);
+    for (rule.hyps, ref_exprs, 0..) |hyp, ref_expr, hyp_idx| {
+        if (try session.matchTransparent(hyp, ref_expr)) continue;
+        if (hypMarkedForNormalize(norm_spec, hyp_idx) and
+            try matchRulePartNormalized(
+                allocator,
+                env,
+                registry,
+                scratch,
+                session,
+                hyp,
+                ref_expr,
+            ))
+        {
+            continue;
+        }
+        return .no_match;
+    }
+
+    const matched_concl = if (norm_spec != null and norm_spec.?.concl)
+        try matchRulePartNormalizedSurface(
+            allocator,
+            env,
+            registry,
+            scratch,
+            session,
+            rule.concl,
+            holey_concl,
+        )
+    else
+        try matchRulePartSurface(
+            theorem,
+            session,
+            rule.concl,
+            holey_concl,
+        );
+    if (!matched_concl) return .no_match;
+
+    const bindings = session.finalizeConcreteBindings() catch |err| {
+        if (err == error.MissingBinderAssignment) {
+            const snapshot = try session.materializeOptionalBindings();
+            defer allocator.free(snapshot);
+            for (snapshot, 0..) |binding, idx| {
+                if (binding != null) continue;
+                CompilerDiag.setProof(
+                    self,
+                    try buildMissingBinderDiagnostic(
+                        allocator,
+                        env,
+                        theorem,
+                        assertion,
+                        rule,
+                        line,
+                        .structural_solver,
+                        partial_bindings,
+                        snapshot,
+                        idx,
+                    ),
+                );
+                break;
+            }
+        } else if (err == error.UnresolvedDummyWitness) {
+            CompilerDiag.setProof(
+                self,
+                try buildInferenceFailureDiagnostic(
+                    allocator,
+                    env,
+                    theorem,
+                    assertion,
+                    rule,
+                    line,
+                    .structural_solver,
+                    err,
+                    partial_bindings,
+                    diagnostic_bindings,
+                ),
+            );
+        }
+        return err;
+    };
+    return .{ .concrete = bindings };
+}
+
+pub fn inferBindingsFromHoleyAdvanced(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
+    theorem: *TheoremContext,
+    assertion: AssertionStmt,
+    rule_id: u32,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    holey_concl: *const Expr,
+    maybe_view: ?ViewDecl,
+) ![]const ExprId {
+    var seeded_bindings_storage: ?[]?ExprId = null;
+    defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
+    var view_seed_state: ?DefOps.MatchSeedState = null;
+    defer if (view_seed_state) |*seed_state| seed_state.deinit(allocator);
+    var session_seeds: ?[]DefOps.BindingSeed = null;
+    defer if (session_seeds) |seeds| allocator.free(seeds);
+
+    if (try tryInferMinimalStructuralHoles(
+        self,
+        allocator,
+        env,
+        registry,
+        theorem,
+        assertion,
+        rule,
+        line,
+        partial_bindings,
+        ref_exprs,
+        holey_concl,
+        maybe_view,
+    )) |bindings| {
+        self.last_diagnostic = null;
+        return bindings;
+    }
+
+    if (maybe_view) |view| {
+        const seeded = try allocator.dupe(?ExprId, partial_bindings);
+        CompilerViews.applyViewBindingsSurfaceConclusion(
+            allocator,
+            theorem,
+            env,
+            registry,
+            &view,
+            holey_concl,
+            ref_exprs,
+            seeded,
+            null,
+            &view_seed_state,
+            self.debug.views,
+        ) catch |err| {
+            DebugTrace.traceViews(
+                self.debug,
+                "applyViewBindings failed for rule {s}: {s}",
+                .{ rule.name, @errorName(err) },
+            );
+            allocator.free(seeded);
+            session_seeds = try exactBindingSeeds(allocator, partial_bindings);
+        };
+        if (session_seeds == null) {
+            seeded_bindings_storage = seeded;
+            if (!hasOmittedBindings(seeded)) {
+                return try requireConcreteBindings(allocator, seeded);
+            }
+
+            const semantic_mask = try derivedViewRuleSeedMask(
+                allocator,
+                rule.args.len,
+                view,
+            );
+            defer allocator.free(semantic_mask);
+
+            const concrete_seeds = try bindingSeedsForViewReuse(
+                allocator,
+                partial_bindings,
+                seeded,
+                semantic_mask,
+                .transparent,
+            );
+            if (view_seed_state) |*seed_state| {
+                for (concrete_seeds, 0..) |seed, idx| {
+                    switch (seed) {
+                        .none => {},
+                        else => seed_state.bindings[idx] = seed,
+                    }
+                }
+                allocator.free(concrete_seeds);
+            } else {
+                session_seeds = concrete_seeds;
+            }
+        }
+    } else {
+        session_seeds = try exactBindingSeeds(allocator, partial_bindings);
+    }
+
+    var def_ops = DefOps.Context.initWithRegistry(
+        allocator,
+        theorem,
+        env,
+        registry,
+    );
+    defer def_ops.deinit();
+
+    var session = if (view_seed_state) |*seed_state|
+        try def_ops.beginRuleMatchFromSeedState(rule.args, seed_state)
+    else
+        try def_ops.beginRuleMatch(rule.args, session_seeds.?);
+    defer session.deinit();
+
+    const diagnostic_bindings = if (seeded_bindings_storage) |seeded|
+        seeded
+    else
+        partial_bindings;
+    const result = finishHoleyRuleMatchSession(
+        self,
+        allocator,
+        env,
+        registry,
+        scratch,
+        theorem,
+        assertion,
+        rule_id,
+        rule,
+        line,
+        &session,
+        partial_bindings,
+        ref_exprs,
+        holey_concl,
+        diagnostic_bindings,
+    ) catch |err| {
+        if (try tryInferMinimalStructuralHoles(
+            self,
+            allocator,
+            env,
+            registry,
+            theorem,
+            assertion,
+            rule,
+            line,
+            partial_bindings,
+            ref_exprs,
+            holey_concl,
+            maybe_view,
+        )) |bindings| {
+            self.last_diagnostic = null;
+            return bindings;
+        }
+        return err;
+    };
+    return switch (result) {
+        .concrete => |bindings| bindings,
+        .no_match => {
+            if (try tryInferMinimalStructuralHoles(
+                self,
+                allocator,
+                env,
+                registry,
+                theorem,
+                assertion,
+                rule,
+                line,
+                partial_bindings,
+                ref_exprs,
+                holey_concl,
+                maybe_view,
+            )) |bindings| {
+                self.last_diagnostic = null;
+                return bindings;
+            }
+            CompilerDiag.setProof(
+                self,
+                try buildInferenceFailureDiagnostic(
+                    allocator,
+                    env,
+                    theorem,
+                    assertion,
+                    rule,
+                    line,
+                    .structural_solver,
+                    error.UnifyMismatch,
+                    partial_bindings,
+                    diagnostic_bindings,
+                ),
+            );
+            return error.UnifyMismatch;
+        },
+        .unresolved_dummy_witness => {
+            CompilerDiag.setProof(
+                self,
+                try buildInferenceFailureDiagnostic(
+                    allocator,
+                    env,
+                    theorem,
+                    assertion,
+                    rule,
+                    line,
+                    .structural_solver,
+                    error.UnresolvedDummyWitness,
+                    partial_bindings,
+                    diagnostic_bindings,
+                ),
+            );
+            return error.UnresolvedDummyWitness;
+        },
+    };
+}
+
+fn tryInferMinimalStructuralHoles(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    theorem: *TheoremContext,
+    assertion: AssertionStmt,
+    rule: *const RuleDecl,
+    line: ProofLine,
+    partial_bindings: []const ?ExprId,
+    ref_exprs: []const ExprId,
+    holey_concl: *const Expr,
+    maybe_view: ?ViewDecl,
+) !?[]const ExprId {
+    if (!try SurfaceExpr.containsStructuralHole(env, registry, holey_concl)) {
+        return null;
+    }
+
+    const minimal_line = try SurfaceExpr.lowerStructuralHolesToUnits(
+        theorem,
+        env,
+        registry,
+        holey_concl,
+    );
+
+    var solver = InferenceSolver.init(
+        allocator,
+        env,
+        theorem,
+        registry,
+        rule,
+        if (maybe_view) |*view| view else null,
+        self.debug,
+    );
+    defer solver.deinit();
+
+    const bindings = solver.solveHoleyConclusion(
+        partial_bindings,
+        ref_exprs,
+        holey_concl,
+    ) catch |holey_err| blk: {
+        DebugTrace.traceInference(
+            self.debug,
+            "holey structural solver failed for rule {s}: {s}",
+            .{ rule.name, @errorName(holey_err) },
+        );
+        const lowered = minimal_line orelse return null;
+        break :blk solver.solve(
+            partial_bindings,
+            ref_exprs,
+            lowered,
+        ) catch |minimal_err| {
+            DebugTrace.traceInference(
+                self.debug,
+                "minimal structural solver failed for rule {s}: {s}",
+                .{ rule.name, @errorName(minimal_err) },
+            );
+            return null;
+        };
+    };
+
+    if (solver.hadAmbiguityWarning()) {
+        var diag = CompilerDiag.withPhase(.{
+            .severity = .warning,
+            .kind = .inference_failed,
+            .err = error.AmbiguousAcuiMatch,
+            .source = .proof,
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .rule_name = line.rule_name,
+            .span = line.ruleApplicationSpan(),
+            .detail = .{ .inference_failure = .{
+                .path = .structural_solver,
+                .first_unsolved_binder_name = null,
+            } },
+        }, .inference);
+        try addFormattedInferenceNote(
+            allocator,
+            &diag,
+            "inference path: {s}",
+            .{CompilerDiag.inferencePathName(.structural_solver)},
+        );
+        if (solver.getAmbiguityReport()) |report| {
+            try addAmbiguityWarningNotes(allocator, &diag, report);
+        }
+        self.addWarning(diag);
+    }
+    return bindings;
 }
 
 pub fn shouldUseAdvancedInference(

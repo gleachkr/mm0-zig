@@ -1,0 +1,7 @@
+fallback_succeeds
+-----------------
+l1: $ wrap _wff $ by fallback_bad []
+
+initial_succeeds
+----------------
+l1: $ wrap _wff $ by initial_good []

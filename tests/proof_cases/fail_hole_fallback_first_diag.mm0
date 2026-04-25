@@ -1,0 +1,9 @@
+delimiter $ ( ) $;
+provable sort wff;
+term left: wff;
+term right: wff;
+term wrap (a: wff): wff;
+axiom fallback_other: $ right $ > $ right $;
+--| @fallback fallback_other
+axiom initial_bad: $ left $;
+theorem bad: $ wrap right $;

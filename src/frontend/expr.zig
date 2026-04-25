@@ -549,6 +549,7 @@ pub const TheoremContext = struct {
                 }
                 break :blk try self.interner.internAppOwned(term.id, args);
             },
+            .hole => return error.HoleNotConcrete,
         };
     }
 

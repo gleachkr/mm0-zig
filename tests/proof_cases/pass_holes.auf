@@ -1,0 +1,7 @@
+hole_explicit
+-------------
+l1: $ a -> _wff -> a $ by ax_keep (a := $ a $, b := $ b $) [#1]
+
+hole_infer_hyp
+--------------
+l1: $ _wff $ by ax_elim [#1]

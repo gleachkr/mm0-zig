@@ -220,6 +220,7 @@ pub const MM0Parser = struct {
     last_annotation_spans: []const MathSpan = &.{},
     last_math_error: ?MathParseError = null,
     last_math_span: ?MathSpan = null,
+    allow_math_holes: bool = false,
     current_decl_name: ?[]const u8 = null,
     current_decl_name_span: ?MathSpan = null,
     last_error_span: ?MathSpan = null,
@@ -547,6 +548,10 @@ pub const MM0Parser = struct {
                     self.last_error_span = name_info.span;
                     return error.DuplicateSort;
                 }
+                if (self.existingHoleTokenCollisionForSort(name_info.text)) {
+                    self.last_error_span = name_info.span;
+                    return error.HoleTokenNameCollision;
+                }
                 const sort_id = try self.nextSortId();
                 try self.sort_names.put(name_info.text, sort_id);
                 try self.sort_infos.append(self.allocator, modifiers);
@@ -569,6 +574,10 @@ pub const MM0Parser = struct {
         _ = self.consumeIdent();
         const name_info = try self.consumeRequiredIdentInfo();
         self.recordNameContext(name_info);
+        if (self.isReservedHoleTokenName(name_info.text)) {
+            self.last_error_span = name_info.span;
+            return error.HoleTokenNameCollision;
+        }
 
         var ctx = BinderContext.init(self.allocator);
         self.skipWhitespaceAndComments();
@@ -710,8 +719,12 @@ pub const MM0Parser = struct {
                 if (self.peek() == ':') break;
                 const is_dummy = self.peek() == '.';
                 if (is_dummy) self.pos += 1;
-                const ident = try self.consumeRequiredIdent();
-                try names.append(self.allocator, ident);
+                const ident_info = try self.consumeRequiredIdentInfo();
+                if (self.isReservedHoleTokenName(ident_info.text)) {
+                    self.last_error_span = ident_info.span;
+                    return error.HoleTokenNameCollision;
+                }
+                try names.append(self.allocator, ident_info.text);
                 try is_dummy_buf.append(self.allocator, is_dummy);
             }
             self.pos += 1;
@@ -865,6 +878,7 @@ pub const MM0Parser = struct {
         self.skipWhitespaceAndComments();
         try self.expect(':');
         const token = try self.readConstantToken();
+        try self.rejectReservedHoleToken(token, self.last_math_span);
         self.skipWhitespaceAndComments();
         const kw_info = try self.consumeRequiredIdentInfo();
         if (!std.mem.eql(u8, kw_info.text, "prec")) {
@@ -919,7 +933,12 @@ pub const MM0Parser = struct {
             self.pos = saved_pos;
             return false;
         }
+        const token_start = self.pos + 1;
         const token = try self.readQuotedString();
+        try self.rejectReservedHoleToken(token, .{
+            .start = token_start,
+            .end = token_start + token.len,
+        });
         self.skipWhitespaceAndComments();
         try self.expect(';');
         try self.formula_markers.put(token, {});
@@ -958,6 +977,10 @@ pub const MM0Parser = struct {
                 if (std.mem.eql(u8, ident_info.text, "_")) {
                     self.last_error_span = ident_info.span;
                     return error.AnonymousNotationBinder;
+                }
+                if (self.isReservedHoleTokenName(ident_info.text)) {
+                    self.last_error_span = ident_info.span;
+                    return error.HoleTokenNameCollision;
                 }
                 try names.append(self.allocator, ident_info.text);
             }
@@ -1099,6 +1122,18 @@ pub const MM0Parser = struct {
         return try self.coerceExprToProvable(expr);
     }
 
+    pub fn parseHoleyFormulaText(
+        self: *MM0Parser,
+        math: []const u8,
+        vars: *const std.StringHashMap(*const Expr),
+    ) anyerror!*const Expr {
+        const old_allow = self.allow_math_holes;
+        self.allow_math_holes = true;
+        defer self.allow_math_holes = old_allow;
+        const expr = try self.parseMathText(math, vars);
+        return try self.coerceExprToProvable(expr);
+    }
+
     pub fn parseArgText(
         self: *MM0Parser,
         math: []const u8,
@@ -1211,6 +1246,10 @@ pub const MM0Parser = struct {
 
         if (vars.get(token.text)) |expr| return expr;
 
+        if (self.allow_math_holes) {
+            if (try self.parseHoleToken(token)) |hole| return hole;
+        }
+
         if (self.formula_markers.contains(token.text)) {
             return try self.parsePrefixExpr(cursor, vars, min_prec);
         }
@@ -1246,6 +1285,73 @@ pub const MM0Parser = struct {
             .unknown_token = token,
         };
         return error.UnknownMathToken;
+    }
+
+    fn isReservedHoleTokenName(
+        self: *const MM0Parser,
+        token: []const u8,
+    ) bool {
+        if (token.len < 2 or token[0] != '_') return false;
+        return self.sort_names.contains(token[1..]);
+    }
+
+    fn existingHoleTokenCollisionForSort(
+        self: *const MM0Parser,
+        sort_name: []const u8,
+    ) bool {
+        if (self.mapHasHoleTokenForSort(u32, self.term_names, sort_name)) {
+            return true;
+        }
+        if (self.mapHasHoleTokenForSort(u16, self.token_precs, sort_name)) {
+            return true;
+        }
+        return self.mapHasHoleTokenForSort(void, self.formula_markers, sort_name);
+    }
+
+    fn mapHasHoleTokenForSort(
+        self: *const MM0Parser,
+        comptime V: type,
+        map: std.StringHashMap(V),
+        sort_name: []const u8,
+    ) bool {
+        _ = self;
+        var it = map.iterator();
+        while (it.next()) |entry| {
+            const token = entry.key_ptr.*;
+            if (token.len != sort_name.len + 1) continue;
+            if (token[0] != '_') continue;
+            if (std.mem.eql(u8, token[1..], sort_name)) return true;
+        }
+        return false;
+    }
+
+    fn rejectReservedHoleToken(
+        self: *MM0Parser,
+        token: []const u8,
+        span: ?MathSpan,
+    ) !void {
+        if (!self.isReservedHoleTokenName(token)) return;
+        self.last_error_span = span;
+        return error.HoleTokenNameCollision;
+    }
+
+    fn parseHoleToken(
+        self: *MM0Parser,
+        token: MathTokenInfo,
+    ) !?*const Expr {
+        if (token.text.len < 2 or token.text[0] != '_') return null;
+        const sort_name = token.text[1..];
+        const sort = self.sort_names.get(sort_name) orelse return null;
+        const expr = try self.allocator.create(Expr);
+        expr.* = .{ .hole = .{
+            .sort = @intCast(sort),
+            .token = token.text,
+            .token_span = .{
+                .start = token.span.start,
+                .end = token.span.end,
+            },
+        } };
+        return expr;
     }
 
     fn parsePrefixNotation(
@@ -1418,6 +1524,7 @@ pub const MM0Parser = struct {
         self.skipWhitespaceAndComments();
         try self.expect('(');
         const token = try self.readConstantToken();
+        try self.rejectReservedHoleToken(token, self.last_math_span);
         self.skipWhitespaceAndComments();
         try self.expect(':');
         const prec = try self.parsePrecedence();

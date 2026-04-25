@@ -7,7 +7,9 @@ const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const DefOps = @import("../def_ops.zig");
 const DerivedBindings = @import("../derived_bindings.zig");
+const BindingValidation = @import("../binding_validation.zig");
 const Expr = @import("../../trusted/expressions.zig").Expr;
+const SurfaceExpr = @import("../surface_expr.zig");
 const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
 const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
@@ -139,6 +141,11 @@ pub fn processViewAnnotations(
     }
 }
 
+const ViewConclusion = union(enum) {
+    concrete: ExprId,
+    surface: *const Expr,
+};
+
 pub fn applyViewBindings(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
@@ -146,6 +153,62 @@ pub fn applyViewBindings(
     registry: *RewriteRegistry,
     view: *const ViewDecl,
     line_expr: ExprId,
+    ref_exprs: []const ExprId,
+    partial_bindings: []?ExprId,
+    seed_overrides: ?[]const DefOps.BindingSeed,
+    exported_state: ?*?DefOps.MatchSeedState,
+    debug_views: bool,
+) !void {
+    return applyViewBindingsWithConclusion(
+        allocator,
+        theorem,
+        env,
+        registry,
+        view,
+        .{ .concrete = line_expr },
+        ref_exprs,
+        partial_bindings,
+        seed_overrides,
+        exported_state,
+        debug_views,
+    );
+}
+
+pub fn applyViewBindingsSurfaceConclusion(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    view: *const ViewDecl,
+    surface_concl: *const Expr,
+    ref_exprs: []const ExprId,
+    partial_bindings: []?ExprId,
+    seed_overrides: ?[]const DefOps.BindingSeed,
+    exported_state: ?*?DefOps.MatchSeedState,
+    debug_views: bool,
+) !void {
+    return applyViewBindingsWithConclusion(
+        allocator,
+        theorem,
+        env,
+        registry,
+        view,
+        .{ .surface = surface_concl },
+        ref_exprs,
+        partial_bindings,
+        seed_overrides,
+        exported_state,
+        debug_views,
+    );
+}
+
+fn applyViewBindingsWithConclusion(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    view: *const ViewDecl,
+    conclusion: ViewConclusion,
     ref_exprs: []const ExprId,
     partial_bindings: []?ExprId,
     seed_overrides: ?[]const DefOps.BindingSeed,
@@ -186,21 +249,32 @@ pub fn applyViewBindings(
     var session = try def_ops.beginRuleMatch(view.arg_infos, seeds);
     defer session.deinit();
 
+    var surface_bindings: ?[]?*const Expr = null;
+    defer if (surface_bindings) |bindings| allocator.free(bindings);
+    if (conclusion == .surface) {
+        const bindings = try allocator.alloc(?*const Expr, view.num_binders);
+        @memset(bindings, null);
+        surface_bindings = bindings;
+    }
+
     if (debug_views) {
-        try matchViewAgainstConcreteExprsDebug(
+        try matchViewAgainstConclusionDebug(
             allocator,
             theorem,
             env,
             &session,
             view,
-            line_expr,
+            conclusion,
+            surface_bindings,
             ref_exprs,
         );
     } else {
-        try matchViewAgainstConcreteExprs(
+        try matchViewAgainstConclusion(
+            env,
             &session,
             view,
-            line_expr,
+            conclusion,
+            surface_bindings,
             ref_exprs,
         );
     }
@@ -267,6 +341,16 @@ pub fn applyViewBindings(
     defer allocator.free(view_snapshot.view_bindings);
     defer allocator.free(view_snapshot.view_seeds.?);
     defer allocator.free(view_snapshot.dummy_witnesses.?);
+
+    if (surface_bindings) |bindings| {
+        try applySurfaceDerivedBindings(
+            theorem,
+            env,
+            view,
+            bindings,
+            view_snapshot.view_bindings,
+        );
+    }
 
     var guide_passes: usize = 0;
     while (true) {
@@ -477,22 +561,29 @@ fn guideRecoverBindingsTowardSources(
     return guided;
 }
 
-fn matchViewAgainstConcreteExprs(
+fn matchViewAgainstConclusion(
+    env: *const GlobalEnv,
     session: *DefOps.RuleMatchSession,
     view: *const ViewDecl,
-    line_expr: ExprId,
+    conclusion: ViewConclusion,
+    surface_bindings: ?[]?*const Expr,
     ref_exprs: []const ExprId,
 ) !void {
-    if (!try session.matchTransparent(
-        view.concl,
-        line_expr,
-    ) and !try session.matchSemantic(
-        view.concl,
-        line_expr,
-        DefOps.default_semantic_match_budget,
-    )) {
-        return error.ViewConclusionMismatch;
-    }
+    const matched = switch (conclusion) {
+        .concrete => |line_expr| try matchConcreteViewConclusion(
+            session,
+            view,
+            line_expr,
+        ),
+        .surface => |surface| try matchSurfaceViewConclusion(
+            env,
+            session,
+            view,
+            surface,
+            surface_bindings,
+        ),
+    };
+    if (!matched) return error.ViewConclusionMismatch;
     try matchViewHypsAgainstConcreteExprs(
         session,
         view,
@@ -500,42 +591,67 @@ fn matchViewAgainstConcreteExprs(
     );
 }
 
-fn matchViewAgainstConcreteExprsDebug(
+fn matchViewAgainstConclusionDebug(
     allocator: std.mem.Allocator,
     theorem: *const TheoremContext,
     env: *const GlobalEnv,
     session: *DefOps.RuleMatchSession,
     view: *const ViewDecl,
-    line_expr: ExprId,
+    conclusion: ViewConclusion,
+    surface_bindings: ?[]?*const Expr,
     ref_exprs: []const ExprId,
 ) !void {
-    const concl_text = try ViewTrace.formatExpr(
-        allocator,
-        theorem,
-        env,
-        line_expr,
-    );
-    defer allocator.free(concl_text);
-    if (try session.matchTransparent(view.concl, line_expr)) {
-        ViewTrace.printMessage(
-            "view conclusion matched transparently: {s}",
-            .{concl_text},
-        );
-    } else if (try session.matchSemantic(
-        view.concl,
-        line_expr,
-        DefOps.default_semantic_match_budget,
-    )) {
-        ViewTrace.printMessage(
-            "view conclusion matched semantically: {s}",
-            .{concl_text},
-        );
-    } else {
-        ViewTrace.printMessage(
-            "view conclusion mismatch: {s}",
-            .{concl_text},
-        );
-        return error.ViewConclusionMismatch;
+    switch (conclusion) {
+        .concrete => |line_expr| {
+            const concl_text = try ViewTrace.formatExpr(
+                allocator,
+                theorem,
+                env,
+                line_expr,
+            );
+            defer allocator.free(concl_text);
+            if (try session.matchTransparent(view.concl, line_expr)) {
+                ViewTrace.printMessage(
+                    "view conclusion matched transparently: {s}",
+                    .{concl_text},
+                );
+            } else if (try session.matchSemantic(
+                view.concl,
+                line_expr,
+                DefOps.default_semantic_match_budget,
+            )) {
+                ViewTrace.printMessage(
+                    "view conclusion matched semantically: {s}",
+                    .{concl_text},
+                );
+            } else {
+                ViewTrace.printMessage(
+                    "view conclusion mismatch: {s}",
+                    .{concl_text},
+                );
+                return error.ViewConclusionMismatch;
+            }
+        },
+        .surface => |surface| {
+            if (try matchSurfaceViewConclusion(
+                env,
+                session,
+                view,
+                surface,
+                surface_bindings,
+            )) {
+                ViewTrace.printMessage(
+                    "view conclusion matched holey surface assertion",
+                    .{},
+                );
+            } else {
+                ViewTrace.printMessage(
+                    "view conclusion mismatch with holey surface assertion",
+                    .{},
+                );
+                return error.ViewConclusionMismatch;
+            }
+        },
     }
     try matchViewHypsAgainstConcreteExprsDebug(
         allocator,
@@ -546,6 +662,190 @@ fn matchViewAgainstConcreteExprsDebug(
         ref_exprs,
         "initial hypothesis match",
     );
+}
+
+fn matchConcreteViewConclusion(
+    session: *DefOps.RuleMatchSession,
+    view: *const ViewDecl,
+    line_expr: ExprId,
+) !bool {
+    if (try session.matchTransparent(view.concl, line_expr)) return true;
+    return try session.matchSemantic(
+        view.concl,
+        line_expr,
+        DefOps.default_semantic_match_budget,
+    );
+}
+
+fn matchSurfaceViewConclusion(
+    env: *const GlobalEnv,
+    session: *DefOps.RuleMatchSession,
+    view: *const ViewDecl,
+    surface: *const Expr,
+    surface_bindings: ?[]?*const Expr,
+) !bool {
+    if (SurfaceExpr.containsHole(surface)) {
+        if (view.concl == .binder) {
+            if (surface_bindings) |bindings| {
+                bindings[view.concl.binder] = surface;
+            }
+            return true;
+        }
+    }
+
+    var comparison = try session.beginNormalizedSurfaceComparison(
+        env,
+        view.concl,
+        surface,
+    );
+    defer comparison.deinit();
+    return try comparison.finish(
+        comparison.expected_expr,
+        comparison.actual_expr,
+    );
+}
+
+fn applySurfaceDerivedBindings(
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    view: *const ViewDecl,
+    surface_bindings: []const ?*const Expr,
+    view_bindings: []?ExprId,
+) !void {
+    for (view.derived_bindings) |binding| {
+        const abstract = switch (binding) {
+            .abstract => |value| value,
+            .recover => continue,
+        };
+        if (view_bindings[abstract.target_view_idx] != null) continue;
+        const right_surface =
+            surface_bindings[abstract.right_view_idx] orelse continue;
+        const left_expr = view_bindings[abstract.left_view_idx] orelse {
+            continue;
+        };
+        const hole_expr = view_bindings[abstract.hole_view_idx] orelse {
+            continue;
+        };
+        const left_plug = view_bindings[abstract.left_plug_view_idx] orelse {
+            continue;
+        };
+        const right_plug = view_bindings[abstract.right_plug_view_idx] orelse {
+            continue;
+        };
+
+        var found_plug = false;
+        const candidate = abstractContextSurface(
+            theorem,
+            env,
+            left_expr,
+            right_surface,
+            hole_expr,
+            left_plug,
+            right_plug,
+            &found_plug,
+        ) catch |err| switch (err) {
+            error.AbstractStructureMismatch => continue,
+            else => return err,
+        };
+        if (!found_plug) continue;
+        view_bindings[abstract.target_view_idx] = candidate;
+    }
+}
+
+fn abstractContextSurface(
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    left_expr: ExprId,
+    right_surface: *const Expr,
+    hole_expr: ExprId,
+    left_plug: ExprId,
+    right_plug: ExprId,
+    found_plug: *bool,
+) !ExprId {
+    if (left_expr == left_plug and
+        try surfaceMatchesConcrete(theorem, env, right_surface, right_plug))
+    {
+        found_plug.* = true;
+        return hole_expr;
+    }
+
+    if (right_surface.* == .hole) {
+        if (!try surfaceMatchesConcrete(
+            theorem,
+            env,
+            right_surface,
+            left_expr,
+        )) return error.AbstractStructureMismatch;
+        return left_expr;
+    }
+
+    const left_node = theorem.interner.node(left_expr);
+    return switch (left_node.*) {
+        .variable, .placeholder => blk: {
+            if (!try surfaceMatchesConcrete(
+                theorem,
+                env,
+                right_surface,
+                left_expr,
+            )) return error.AbstractStructureMismatch;
+            break :blk left_expr;
+        },
+        .app => |left_app| blk: {
+            const right_term = switch (right_surface.*) {
+                .term => |term| term,
+                .variable, .hole => return error.AbstractStructureMismatch,
+            };
+            if (left_app.term_id != right_term.id) {
+                return error.AbstractStructureMismatch;
+            }
+            if (left_app.args.len != right_term.args.len) {
+                return error.AbstractStructureMismatch;
+            }
+            const args = try theorem.allocator.alloc(ExprId, left_app.args.len);
+            errdefer theorem.allocator.free(args);
+            for (left_app.args, right_term.args, 0..) |
+                left_arg,
+                right_arg,
+                idx,
+            | {
+                args[idx] = try abstractContextSurface(
+                    theorem,
+                    env,
+                    left_arg,
+                    right_arg,
+                    hole_expr,
+                    left_plug,
+                    right_plug,
+                    found_plug,
+                );
+            }
+            break :blk try theorem.interner.internAppOwned(
+                left_app.term_id,
+                args,
+            );
+        },
+    };
+}
+
+fn surfaceMatchesConcrete(
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    surface: *const Expr,
+    expr_id: ExprId,
+) !bool {
+    if (surface.* == .hole) {
+        const hole_sort = SurfaceExpr.sortNameById(env, surface.hole.sort) orelse {
+            return error.UnknownSort;
+        };
+        const info = try BindingValidation.currentExprInfo(
+            env,
+            theorem,
+            expr_id,
+        );
+        return std.mem.eql(u8, hole_sort, info.sort_name);
+    }
+    if (SurfaceExpr.containsHole(surface)) return false;
+    return (try theorem.internParsedExpr(surface)) == expr_id;
 }
 
 fn matchViewHypsAgainstConcreteExprs(

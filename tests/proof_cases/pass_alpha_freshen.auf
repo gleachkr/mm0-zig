@@ -27,3 +27,24 @@ l1: $ P c ==> P c $ by ax
 l2: $ P c , P a ==> P c $ by weak_left [l1]
 l3: $ ∀ a (P a) , P c , P a ==> P c $ by weak_left [l2]
 l4: $ ∀ a (P a) , P c , ∃ a (P a) ==> P c $ by ex_left [l3]
+
+alpha_hole_all_right_ctx
+------------------------
+
+l1: $ _wff $ by ax (a := $ P b $)
+l2: $ _ctx ==> P b $ by weak_left (a := $ ∀ a (P a) $) [l1]
+l3: $ _ctx ==> ∀ a (P b) $ by all_right [l2]
+
+alpha_hole_all_right_wff
+------------------------
+
+l1: $ P b ==> P b $ by ax
+l2: $ ∀ a (P a) , P b ==> P b $ by weak_left [l1]
+l3: $ _wff $ by all_right (g := $ ∀ a (P a), P b $, d := $_$, x := $ a $, p := $ P b $) [l2]
+
+alpha_hole_ex_right_wff
+-----------------------
+
+l1: $ P b ==> P b $ by ax
+l2: $ ∀ a (P a) , P b ==> P b $ by weak_left [l1]
+l3: $ _wff $ by ex_right (g := $ ∀ a (P a), P b $, d := $_$, x := $ a $, t := $ b $, p := $ P a $) [l2]

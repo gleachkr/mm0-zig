@@ -2,6 +2,9 @@ const std = @import("std");
 const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const TemplateExpr = @import("../rules.zig").TemplateExpr;
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const Expr = @import("../../trusted/expressions.zig").Expr;
+const SurfaceExpr = @import("../surface_expr.zig");
 const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
 const MirrorSupport = @import("./mirror_support.zig");
 const Types = @import("./types.zig");
@@ -29,6 +32,7 @@ const MatchSession = MatchState.MatchSession;
 const NormalizedPlaceholderTarget = union(enum) {
     binder: usize,
     symbolic_slot: usize,
+    surface_hole: []const u8,
 };
 
 const NormalizedView = struct {
@@ -173,6 +177,61 @@ const NormalizedView = struct {
         self.mirror_binders[idx] = value;
         self.binder_status[idx] = 2;
         return value;
+    }
+
+    fn internSurfaceExpr(
+        self: *NormalizedView,
+        session: *RuleMatchSession,
+        env: *const GlobalEnv,
+        expr: *const Expr,
+    ) anyerror!ExprId {
+        return switch (expr.*) {
+            .variable => blk: {
+                const var_id = session.shared.theorem.parser_vars.get(expr) orelse return error.UnknownTheoremVariable;
+                break :blk switch (var_id) {
+                    .theorem_var => |idx| blk_inner: {
+                        if (idx >= self.mirror.theorem.theorem_vars.items.len) {
+                            return error.UnknownTheoremVariable;
+                        }
+                        break :blk_inner self.mirror.theorem.theorem_vars
+                            .items[idx];
+                    },
+                    .dummy_var => |idx| blk_inner: {
+                        if (idx >= self.mirror.source_dummy_map.len) {
+                            return error.UnknownDummyVar;
+                        }
+                        break :blk_inner self.mirror.source_dummy_map[idx];
+                    },
+                };
+            },
+            .term => |term| blk: {
+                const args = try session.shared.allocator.alloc(
+                    ExprId,
+                    term.args.len,
+                );
+                errdefer session.shared.allocator.free(args);
+                for (term.args, 0..) |arg, idx| {
+                    args[idx] = try self.internSurfaceExpr(
+                        session,
+                        env,
+                        arg,
+                    );
+                }
+                break :blk try self.mirror.theorem.interner
+                    .internAppOwned(term.id, args);
+            },
+            .hole => |hole| blk: {
+                const sort_name = SurfaceExpr.sortNameById(env, hole.sort) orelse return error.UnknownSort;
+                const placeholder = try self.mirror.theorem
+                    .addPlaceholderResolved(sort_name);
+                try self.placeholder_targets.put(
+                    session.shared.allocator,
+                    placeholder,
+                    .{ .surface_hole = sort_name },
+                );
+                break :blk placeholder;
+            },
+        };
     }
 
     fn ensureMirrorSymbolicSlot(
@@ -454,6 +513,32 @@ pub const RuleMatchSession = struct {
         );
         const actual_expr = try view.copyFromSource(
             self,
+            actual,
+        );
+        return .{
+            .session = self,
+            .view = view,
+            .expected_expr = expected_expr,
+            .actual_expr = actual_expr,
+        };
+    }
+
+    pub fn beginNormalizedSurfaceComparison(
+        self: *RuleMatchSession,
+        env: *const GlobalEnv,
+        template: TemplateExpr,
+        actual: *const Expr,
+    ) anyerror!NormalizedComparison {
+        var view = try NormalizedView.init(self);
+        errdefer view.deinit(self.shared.allocator);
+
+        const expected_expr = try view.mirror.theorem.instantiateTemplate(
+            template,
+            view.mirror_binders,
+        );
+        const actual_expr = try view.internSurfaceExpr(
+            self,
+            env,
             actual,
         );
         return .{
@@ -799,7 +884,11 @@ pub const RuleMatchSession = struct {
         actual_expr: ExprId,
     ) anyerror!bool {
         if (view.placeholderTarget(pattern_expr)) |target| {
+            if (target == .surface_hole) return true;
             return try self.assignNormalizedTarget(target, actual_expr, view);
+        }
+        if (view.placeholderTarget(actual_expr)) |target| {
+            if (target == .surface_hole) return true;
         }
 
         var symbolic_engine = self.engine();
@@ -863,12 +952,14 @@ pub const RuleMatchSession = struct {
         view: *NormalizedView,
     ) anyerror!bool {
         if (view.placeholderTarget(actual_expr)) |actual_target| {
+            if (actual_target == .surface_hole) return true;
             if (samePlaceholderTarget(target, actual_target)) return true;
         }
 
         var symbolic_engine = self.engine();
         const translated = try self.mirrorExprToBoundValue(actual_expr, view);
         return switch (target) {
+            .surface_hole => true,
             .binder => |idx| blk: {
                 if (translated == .symbolic and
                     self.symbolicContainsBinder(translated.symbolic.expr, idx))
@@ -1004,6 +1095,7 @@ pub const RuleMatchSession = struct {
                     .symbolic_slot => |slot| try symbolic_engine.allocSymbolic(
                         .{ .dummy = slot },
                     ),
+                    .surface_hole => return error.SurfaceHoleNotSymbolic,
                 }
             else if (view.sourceExprForMirror(expr_id)) |source_expr|
                 try symbolic_engine.allocSymbolic(.{ .fixed = source_expr })
@@ -1108,11 +1200,19 @@ fn samePlaceholderTarget(
     return switch (lhs) {
         .binder => |idx| switch (rhs) {
             .binder => |rhs_idx| idx == rhs_idx,
-            .symbolic_slot => false,
+            .symbolic_slot, .surface_hole => false,
         },
         .symbolic_slot => |idx| switch (rhs) {
-            .binder => false,
+            .binder, .surface_hole => false,
             .symbolic_slot => |rhs_idx| idx == rhs_idx,
+        },
+        .surface_hole => |sort_name| switch (rhs) {
+            .binder, .symbolic_slot => false,
+            .surface_hole => |rhs_sort| std.mem.eql(
+                u8,
+                sort_name,
+                rhs_sort,
+            ),
         },
     };
 }

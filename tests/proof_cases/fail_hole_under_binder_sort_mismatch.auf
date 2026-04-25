@@ -1,0 +1,3 @@
+bad
+---
+l1: $ sb a x _obj $ by sb_intro (x := $ x $, r := $ top $) []

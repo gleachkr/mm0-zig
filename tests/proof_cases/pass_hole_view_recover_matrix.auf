@@ -1,0 +1,19 @@
+view_recover_visible_formula
+----------------------------
+
+l1: $ nd _ctx (P u) $ by all_elim [#1]
+
+view_recover_explicit_whole
+---------------------------
+
+l1: $ _wff $ by all_elim (t := $ u $) [#1]
+
+view_recover_explicit_term_hole
+-------------------------------
+
+l1: $ nd _ctx (P _set) $ by all_elim (t := $ u $) [#1]
+
+view_recover_visible_ctx
+------------------------
+
+l1: $ nd (join (hyp b) (hyp a)) (P u) $ by all_elim [#1]

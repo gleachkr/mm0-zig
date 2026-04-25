@@ -1,0 +1,3 @@
+hole_under_binder
+-----------------
+l1: $ sb a x _wff $ by sb_intro (x := $ x $, r := $ x -> top $) []

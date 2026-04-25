@@ -1,0 +1,4 @@
+hole_view
+---------
+l1: $ id a $ by ax_id []
+l2: $ _wff $ by ax_mp [l1, #1]

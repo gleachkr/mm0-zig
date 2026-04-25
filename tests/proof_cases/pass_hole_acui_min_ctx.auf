@@ -1,0 +1,15 @@
+hole_acui_min_ctx
+-----------------
+
+l1: $ nd _ctx (imp p _wff) $ by imp_intro [#1]
+
+hole_acui_residual_ctx
+----------------------
+
+l1: $ nd _ctx (imp p q) $ by imp_intro [#1]
+
+hole_acui_not_chain
+-------------------
+
+l1: $ nd _ctx bot $ by not_elim [#1, #2]
+l2: $ nd _ctx (neg p) $ by not_intro [l1]
