@@ -332,6 +332,81 @@ pub fn matchesConcreteDetailed(
     }
 }
 
+/// Fill holes from the same visible positions in a selected candidate.
+///
+/// This does not prove that non-hole subtrees match the candidate. Callers
+/// that use the result must still validate the resulting concrete line through
+/// the ordinary rule-application pipeline.
+pub fn materializeSurfaceWithCandidate(
+    parser: *MM0Parser,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    holey: *const Expr,
+    candidate: ExprId,
+    report: *ConcreteMatchReport,
+) !?ExprId {
+    if (!contains(holey)) {
+        const visible = try theorem.internParsedExpr(holey);
+        const visible_sort = try exprIdSortName(theorem, env, visible);
+        const candidate_sort = try exprIdSortName(theorem, env, candidate);
+        if (std.mem.eql(u8, visible_sort, candidate_sort)) return visible;
+        setConcreteFailure(report, .visible_structure_mismatch);
+        return null;
+    }
+
+    switch (holey.*) {
+        .hole => |hole| {
+            const actual_sort_name = try exprIdSortName(theorem, env, candidate);
+            const actual_sort = parser.sort_names.get(actual_sort_name) orelse {
+                return error.UnknownSort;
+            };
+            if (hole.sort == actual_sort) return candidate;
+            setConcreteFailure(report, .{ .hole_sort_mismatch = .{
+                .token = hole.token,
+                .token_span = hole.token_span,
+                .expected_sort_name = sortName(parser, hole.sort),
+                .actual_sort_name = actual_sort_name,
+            } });
+            return null;
+        },
+        .variable => unreachable,
+        .term => |holey_term| {
+            const node = theorem.interner.node(candidate);
+            const candidate_app = switch (node.*) {
+                .app => |app| app,
+                else => {
+                    setConcreteFailure(report, .visible_structure_mismatch);
+                    return null;
+                },
+            };
+            if (holey_term.id != candidate_app.term_id or
+                holey_term.args.len != candidate_app.args.len)
+            {
+                setConcreteFailure(report, .visible_structure_mismatch);
+                return null;
+            }
+
+            const args = try theorem.allocator.alloc(ExprId, holey_term.args.len);
+            errdefer theorem.allocator.free(args);
+            for (holey_term.args, candidate_app.args, 0..) |
+                arg,
+                candidate_arg,
+                idx,
+            | {
+                args[idx] = (try materializeSurfaceWithCandidate(
+                    parser,
+                    theorem,
+                    env,
+                    arg,
+                    candidate_arg,
+                    report,
+                )) orelse return null;
+            }
+            return try theorem.interner.internAppOwned(holey_term.id, args);
+        },
+    }
+}
+
 /// Match a holey assertion against a selected concrete candidate.
 ///
 /// This is intentionally a candidate-validation relation, not a candidate

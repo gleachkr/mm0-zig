@@ -1,0 +1,101 @@
+pb_preserves_mono_step
+----------------------
+
+l1: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ mono f $ by ax
+l2: $ _ctx ⊢ ∀ y ((f ∘ (h ∘ alpha) ~ f ∘ y) → (h ∘ alpha ~ y)) $ by all_elim [l1]
+l3: $ _ctx ⊢ (f ∘ (h ∘ alpha) ~ f ∘ (h ∘ beta)) → (h ∘ alpha ~ h ∘ beta) $ by all_elim [l2]
+l4: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ pullback f g h k $ by ax
+l5: $ _ctx ⊢ f ∘ h ~ g ∘ k $ by and_elim_l [l4]
+l6: $ _ctx ⊢ f ∘ (h ∘ alpha) ~ g ∘ (k ∘ alpha) $ by comp_right [l5]
+l7: $ _ctx ⊢ f ∘ (h ∘ beta) ~ g ∘ (k ∘ beta) $ by comp_right [l5]
+l8: $ mono f , pullback f g h k , (k ∘ alpha ~ k ∘ beta) ⊢ k ∘ alpha ~ k ∘ beta $ by ax
+l9: $ _ctx ⊢ g ∘ (k ∘ alpha) ~ g ∘ (k ∘ beta) $ by comp_left [l8]
+l10: $ _ctx ⊢ f ∘ (h ∘ alpha) ~ g ∘ (k ∘ beta) $ by mor_trans [l6, l9]
+l11: $ _ctx ⊢ g ∘ (k ∘ beta) ~ f ∘ (h ∘ beta) $ by mor_sym [l7]
+l12: $ _ctx ⊢ f ∘ (h ∘ alpha) ~ f ∘ (h ∘ beta) $ by mor_trans [l10, l11]
+l13: $ _ctx ⊢ h ∘ alpha ~ h ∘ beta $ by imp_elim [l3, l12]
+l14: $ _ctx ⊢ ∀ x ∀ y ∀ z ((f ∘ x ~ g ∘ y) → ((h ∘ z ~ x) → ((k ∘ z ~ y) → (z ~ pb_med f g h k x y)))) $ by and_elim_r [l4]
+l14a: $ _ctx ⊢ ∀ y ∀ z ((f ∘ (h ∘ alpha) ~ g ∘ y) → ((h ∘ z ~ h ∘ alpha) → ((k ∘ z ~ y) → (z ~ pb_med f g h k (h ∘ alpha) y)))) $ by all_elim [l14]
+l14b: $ _ctx ⊢ ∀ z ((f ∘ (h ∘ alpha) ~ g ∘ (k ∘ alpha)) → ((h ∘ z ~ h ∘ alpha) → ((k ∘ z ~ k ∘ alpha) → (z ~ pb_med f g h k (h ∘ alpha) (k ∘ alpha))))) $ by all_elim [l14a]
+l14c: $ _ctx ⊢ (f ∘ (h ∘ alpha) ~ g ∘ (k ∘ alpha)) → ((h ∘ alpha ~ h ∘ alpha) → ((k ∘ alpha ~ k ∘ alpha) → (alpha ~ pb_med f g h k (h ∘ alpha) (k ∘ alpha)))) $ by all_elim [l14b]
+l15: $ _ctx ⊢ h ∘ alpha ~ h ∘ alpha $ by mor_refl 
+l16: $ _ctx ⊢ k ∘ alpha ~ k ∘ alpha $ by mor_refl
+l17: $ _ctx ⊢ (h ∘ alpha ~ h ∘ alpha) → ((k ∘ alpha ~ k ∘ alpha) → (alpha ~ pb_med f g h k (h ∘ alpha) (k ∘ alpha))) $ by imp_elim  [l14c, l6]
+l18: $ _ctx ⊢ (k ∘ alpha ~ k ∘ alpha) → (alpha ~ pb_med f g h k (h ∘ alpha) (k ∘ alpha)) $ by imp_elim [l17, l15]
+l19: $ _ctx ⊢ alpha ~ pb_med f g h k (h ∘ alpha) (k ∘ alpha) $ by imp_elim  [l18, l16]
+l20: $ _ctx ⊢ ∀ y ∀ z ((f ∘ (h ∘ beta) ~ g ∘ y) → ((h ∘ z ~ h ∘ beta) → ((k ∘ z ~ y) → (z ~ pb_med f g h k (h ∘ beta) y)))) $ by all_elim [l14]
+l20a: $ _ctx ⊢ ∀ z ((f ∘ (h ∘ beta) ~ g ∘ (k ∘ beta)) → ((h ∘ z ~ h ∘ beta) → ((k ∘ z ~ k ∘ beta) → (z ~ pb_med f g h k (h ∘ beta) (k ∘ beta))))) $ by all_elim [l20]
+l20b: $ _ctx ⊢ (f ∘ (h ∘ beta) ~ g ∘ (k ∘ beta)) → ((h ∘ beta ~ h ∘ beta) → ((k ∘ beta ~ k ∘ beta) → (beta ~ pb_med f g h k (h ∘ beta) (k ∘ beta)))) $ by all_elim [l20a]
+l21: $ _ctx ⊢ h ∘ beta ~ h ∘ beta $ by mor_refl
+l22: $ _ctx ⊢ k ∘ beta ~ k ∘ beta $ by mor_refl
+l23: $ _ctx ⊢ (h ∘ beta ~ h ∘ beta) → ((k ∘ beta ~ k ∘ beta) → (beta ~ pb_med f g h k (h ∘ beta) (k ∘ beta))) $ by imp_elim  [l20b, l7]
+l24: $ _ctx ⊢ (k ∘ beta ~ k ∘ beta) → (beta ~ pb_med f g h k (h ∘ beta) (k ∘ beta)) $ by imp_elim [l23, l21]
+l25: $ _ctx ⊢ beta ~ pb_med f g h k (h ∘ beta) (k ∘ beta) $ by imp_elim[l24, l22]
+l26: $ _ctx ⊢ pb_med f g h k (h ∘ alpha) (k ∘ alpha) ~ pb_med f g h k (h ∘ beta) (k ∘ beta) $ by pb_med_congr [l13, l8]
+l27: $ _ctx ⊢ alpha ~ pb_med f g h k (h ∘ beta) (k ∘ beta) $ by mor_trans [l19, l26]
+l28: $ _ctx ⊢ pb_med f g h k (h ∘ beta) (k ∘ beta) ~ beta $ by mor_sym [l25]
+l29: $ _ctx ⊢ alpha ~ beta $ by mor_trans [l27, l28]
+pb_preserves_mono
+-----------------
+
+l1: $ _ctx ⊢ alpha ~ beta $ by pb_preserves_mono_step (f := $ f $, g := $ g $, h := $ h $, k := $ k $)
+l2: $ _ctx ⊢ (k ∘ alpha ~ k ∘ beta) → (alpha ~ beta) $ by imp_intro [l1]
+l3: $ _ctx ⊢ ∀ beta ((k ∘ alpha ~ k ∘ beta) → (alpha ~ beta)) $ by all_intro [l2]
+l4: $ _ctx ⊢ ∀ alpha ∀ beta ((k ∘ alpha ~ k ∘ beta) → (alpha ~ beta)) $ by all_intro [l3]
+
+comp_mono
+--------------
+
+l1: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ mono f $ by ax
+l2: $ _ctx ⊢ ∀ x ((f ∘ (g ∘ alpha) ~ f ∘ x) → (g ∘ alpha ~ x)) $ by all_elim [l1]
+l3: $ _ctx ⊢ (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) → (g ∘ alpha ~ g ∘ beta) $ by all_elim [l2]
+l4: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta) $ by ax
+l5: $ _ctx ⊢ g ∘ alpha ~ g ∘ beta $ by imp_elim [l3, l4]
+l6: $ mono f , mono g , (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) ⊢ mono g $ by ax
+l7: $ _ctx ⊢ ∀ y ((g ∘ alpha ~ g ∘ y) → (alpha ~ y)) $ by all_elim [l6]
+l8: $ _ctx ⊢ (g ∘ alpha ~ g ∘ beta) → (alpha ~ beta) $ by all_elim [l7]
+l9: $ _ctx ⊢ alpha ~ beta $ by imp_elim [l8, l5]
+l10: $ _ctx ⊢ (f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) → (alpha ~ beta) $ by imp_intro [l9]
+l11: $ _ctx ⊢ ∀ beta ((f ∘ (g ∘ alpha) ~ f ∘ (g ∘ beta)) → (alpha ~ beta)) $ by all_intro [l10]
+l12: $ _ctx ⊢ ∀ alpha ∀ beta (((f ∘ g) ∘ alpha ~ (f ∘ g) ∘ beta) → (alpha ~ beta)) $ by all_intro [l11]
+
+mono_cancel_left
+----------------
+
+l1: $ mono (g ∘ f) , (f ∘ alpha ~ f ∘ beta) ⊢ mono (g ∘ f) $ by ax
+l2: $ _ctx ⊢ ∀ x (((g ∘ f) ∘ alpha ~ (g ∘ f) ∘ x) → (alpha ~ x)) $ by all_elim [l1]
+l3: $ _ctx ⊢ ((g ∘ f) ∘ alpha ~ (g ∘ f) ∘ beta) → (alpha ~ beta) $ by all_elim [l2]
+l4: $ mono (g ∘ f) , (f ∘ alpha ~ f ∘ beta) ⊢ f ∘ alpha ~ f ∘ beta $ by ax
+l5: $ _ctx ⊢ g ∘ (f ∘ alpha) ~ g ∘ (f ∘ beta) $ by comp_left [l4]
+l6: $ _ctx ⊢ alpha ~ beta $ by imp_elim [l3, l5]
+l7: $ _ctx ⊢ (f ∘ alpha ~ f ∘ beta) → (alpha ~ beta) $ by imp_intro [l6]
+l8: $ _ctx ⊢ ∀ beta ((f ∘ alpha ~ f ∘ beta) → (alpha ~ beta)) $ by all_intro [l7]
+l9: $ _ctx ⊢ ∀ alpha ∀ beta ((f ∘ alpha ~ f ∘ beta) → (alpha ~ beta)) $ by all_intro [l8]
+
+comp_epi
+--------
+
+l1: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ epi g $ by ax
+l2: $ _ctx ⊢ ∀ x (((alpha ∘ f) ∘ g ~ x ∘ g) → (alpha ∘ f ~ x)) $ by all_elim [l1]
+l3: $ _ctx ⊢ ((alpha ∘ f) ∘ g ~ (beta ∘ f) ∘ g) → (alpha ∘ f ~ beta ∘ f) $ by all_elim [l2]
+l4: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g) $ by ax
+l5: $ _ctx ⊢ alpha ∘ f ~ beta ∘ f $ by imp_elim [l3, l4]
+l6: $ epi f , epi g , (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) ⊢ epi f $ by ax
+l7: $ _ctx ⊢ ∀ x ((alpha ∘ f ~ x ∘ f) → (alpha ~ x)) $ by all_elim [l6]
+l8: $ _ctx ⊢ (alpha ∘ f ~ beta ∘ f) → (alpha ~ beta) $ by all_elim [l7]
+l9: $ _ctx ⊢ alpha ~ beta $ by imp_elim [l8, l5]
+l10: $ _ctx ⊢ (alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) → (alpha ~ beta) $ by imp_intro [l9]
+l11: $ _ctx ⊢ ∀ beta ((alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) → (alpha ~ beta)) $ by all_intro [l10]
+l12: $ _ctx ⊢ ∀ alpha ∀ beta ((alpha ∘ (f ∘ g) ~ beta ∘ (f ∘ g)) → (alpha ~ beta)) $ by all_intro [l11]
+
+epi_cancel_right
+----------------
+l1: $ epi (g ∘ f), alpha ∘ g ~ beta ∘ g ⊢ epi (g ∘ f) $ by ax
+l2: $ _ctx ⊢ ∀ x ((alpha ∘ (g ∘ f) ~ x ∘ (g ∘ f)) → (alpha ~ x)) $ by all_elim [l1]
+l3: $ _ctx ⊢ (alpha ∘ (g ∘ f) ~ beta ∘ (g ∘ f)) → (alpha ~ beta) $ by all_elim [l2]
+l4: $ epi (g ∘ f), alpha ∘ g ~ beta ∘ g ⊢ alpha ∘ g ~ beta ∘ g $ by ax
+l5: $ _ctx ⊢ (alpha ∘ g) ∘ f ~ (beta ∘ g) ∘ f $ by comp_right [l4]
+l6: $ _ctx ⊢ alpha ~ beta $ by imp_elim [l3, l5]
+l7: $ _ctx ⊢ (alpha ∘ g ~ beta ∘ g) → (alpha ~ beta) $ by imp_intro [l6]
+l8: $ _ctx ⊢ ∀ beta ((alpha ∘ g ~ beta ∘ g) → (alpha ~ beta)) $ by all_intro [l7]
+l9: $ _ctx ⊢ ∀ alpha ∀ beta ((alpha ∘ g ~ beta ∘ g) → (alpha ~ beta)) $ by all_intro [l8]

@@ -216,10 +216,39 @@ pub fn assignHiddenRootsFromVarsPool(
     extra_used_deps: u55,
     needs: []const HiddenRootNeed,
 ) ![]HiddenRootAssignment {
-    const used_deps = try collectUsedDeps(
+    const line_deps = try exprDeps(env, theorem, line_expr);
+    return try assignHiddenRootsFromVarsPoolWithLineDeps(
+        allocator,
+        parser,
         env,
         theorem,
-        line_expr,
+        theorem_vars,
+        sort_vars,
+        line_deps,
+        ref_exprs,
+        explicit_bindings,
+        extra_used_deps,
+        needs,
+    );
+}
+
+pub fn assignHiddenRootsFromVarsPoolWithLineDeps(
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *const GlobalEnv,
+    theorem: *TheoremContext,
+    theorem_vars: anytype,
+    sort_vars: *const SortVarRegistry,
+    line_deps: u55,
+    ref_exprs: []const ExprId,
+    explicit_bindings: []const ?ExprId,
+    extra_used_deps: u55,
+    needs: []const HiddenRootNeed,
+) ![]HiddenRootAssignment {
+    const used_deps = try collectUsedDepsFromLineDeps(
+        env,
+        theorem,
+        line_deps,
         ref_exprs,
         explicit_bindings,
         extra_used_deps,

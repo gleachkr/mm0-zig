@@ -1044,6 +1044,7 @@ fn inferCandidateBindings(
                     base_ref_exprs,
                     holey,
                     maybe_view,
+                    fresh_context,
                 ) catch |err| {
                     if (getDiagnostic(self) == null) {
                         try setHoleyInferenceDiagnostic(
@@ -1100,6 +1101,7 @@ fn inferCandidateBindings(
                         base_ref_exprs,
                         holey,
                         maybe_view,
+                        fresh_context,
                     )) |bindings| {
                         restoreDiagnostic(self, null);
                         break :blk bindings;
@@ -1244,6 +1246,20 @@ fn validateHoleyAssertionAgainstCandidate(
                 &normalized_report,
             )) {
                 return normalized_line;
+            }
+
+            var materialized_report = Holes.ConcreteMatchReport{};
+            if (try Holes.materializeSurfaceWithCandidate(
+                parser,
+                theorem,
+                env,
+                holey,
+                expected_line,
+                &materialized_report,
+            )) |materialized_line| {
+                return materialized_line;
+            } else if (materialized_report.failure != null) {
+                normalized_report = materialized_report;
             }
             hole_report = normalized_report;
         }

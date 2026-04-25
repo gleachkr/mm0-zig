@@ -974,7 +974,7 @@ fn tryFinalizeRuleMatchSession(
     env: *const GlobalEnv,
     session: *DefOps.RuleMatchSession,
     fresh_context: ?HiddenWitnessFreshContext,
-    line_expr: ExprId,
+    line_deps: u55,
     ref_exprs: []const ExprId,
     explicit_bindings: []const ?ExprId,
 ) !RuleMatchResult {
@@ -1009,14 +1009,14 @@ fn tryFinalizeRuleMatchSession(
         };
     }
 
-    const hidden_assignments = CompilerFresh.assignHiddenRootsFromVarsPool(
+    const hidden_assignments = CompilerFresh.assignHiddenRootsFromVarsPoolWithLineDeps(
         allocator,
         fresh.parser,
         env,
         session.shared.theorem,
         fresh.theorem_vars,
         fresh.sort_vars,
-        line_expr,
+        line_deps,
         ref_exprs,
         explicit_bindings,
         extra_used_deps,
@@ -1101,12 +1101,18 @@ fn finishRuleMatchSession(
         return .no_match;
     }
 
+    const line_deps = (try exprInfo(
+        env,
+        session.shared.theorem,
+        session.shared.theorem.arg_infos,
+        line_expr,
+    )).deps;
     return try tryFinalizeRuleMatchSession(
         allocator,
         env,
         session,
         fresh_context,
-        line_expr,
+        line_deps,
         ref_exprs,
         explicit_bindings,
     );
@@ -1242,6 +1248,7 @@ fn finishHoleyRuleMatchSession(
     rule: *const RuleDecl,
     line: ProofLine,
     session: *DefOps.RuleMatchSession,
+    fresh_context: ?HiddenWitnessFreshContext,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     holey_concl: *const Expr,
@@ -1285,7 +1292,15 @@ fn finishHoleyRuleMatchSession(
         );
     if (!matched_concl) return .no_match;
 
-    const bindings = session.finalizeConcreteBindings() catch |err| {
+    return tryFinalizeRuleMatchSession(
+        allocator,
+        env,
+        session,
+        fresh_context,
+        holey_concl.deps(),
+        ref_exprs,
+        partial_bindings,
+    ) catch |err| {
         if (err == error.MissingBinderAssignment) {
             const snapshot = try session.materializeOptionalBindings();
             defer allocator.free(snapshot);
@@ -1327,7 +1342,6 @@ fn finishHoleyRuleMatchSession(
         }
         return err;
     };
-    return .{ .concrete = bindings };
 }
 
 pub fn inferBindingsFromHoleyAdvanced(
@@ -1345,6 +1359,7 @@ pub fn inferBindingsFromHoleyAdvanced(
     ref_exprs: []const ExprId,
     holey_concl: *const Expr,
     maybe_view: ?ViewDecl,
+    fresh_context: ?HiddenWitnessFreshContext,
 ) ![]const ExprId {
     var seeded_bindings_storage: ?[]?ExprId = null;
     defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
@@ -1460,6 +1475,7 @@ pub fn inferBindingsFromHoleyAdvanced(
         rule,
         line,
         &session,
+        fresh_context,
         partial_bindings,
         ref_exprs,
         holey_concl,
