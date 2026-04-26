@@ -14,11 +14,13 @@ pub const Stack = struct {
     pub fn pop(self: *Stack) !Entry {
         if (self.top == 0) return error.StackUnderflow;
         self.top -= 1;
-        return self.entries[self.top];
+        const entries = &self.entries;
+        return entries[self.top];
     }
 
     pub fn peek(self: *Stack) !Entry {
         if (self.top == 0) return error.StackUnderflow;
-        return self.entries[self.top - 1];
+        const entries = &self.entries;
+        return entries[self.top - 1];
     }
 };

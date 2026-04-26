@@ -13,6 +13,7 @@ pub const Heap = struct {
 
     pub fn get(self: *Heap, index: u32) !Entry {
         if (index >= self.len) return error.HeapOutOfBounds;
-        return self.entries[index];
+        const entries = &self.entries;
+        return entries[index];
     }
 };

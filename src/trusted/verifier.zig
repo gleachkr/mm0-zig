@@ -119,13 +119,14 @@ pub const Verifier = struct {
         self.available_thms = available_thms;
         try self.initHeapFromThmArgs(thm);
         try self.runProofStream(proof_pos, proof_end);
-        const top = try self.stack.pop();
+        const stack = &self.stack;
+        const top = try stack.pop();
         const proof_expr = switch (top) {
             .proof => |e| e,
             else => return error.ExpectedProof,
         };
         if (!self.sort_table[proof_expr.sort()].provable) return error.NotProvable;
-        if (self.stack.top != 0) return error.StackNotEmpty;
+        if (stack.top != 0) return error.StackNotEmpty;
         if (self.sorry_used) return error.SorryUsed;
     }
 
@@ -145,14 +146,15 @@ pub const Verifier = struct {
         self.available_thms = available_thms;
         try self.initHeapFromTermArgs(term);
         try self.runProofStream(proof_pos, proof_end);
-        const top = try self.stack.pop();
+        const stack = &self.stack;
+        const top = try stack.pop();
         const def_expr = switch (top) {
             .expr => |e| e,
             else => return error.ExpectedExpr,
         };
         const ret = try term.getRetArgChecked(self.file_bytes);
         try self.checkExprAgainstArg(def_expr, ret);
-        if (self.stack.top != 0) return error.StackNotEmpty;
+        if (stack.top != 0) return error.StackNotEmpty;
         try self.initUHeapFromHeapArgs(term.num_args);
         try self.runUnifyStream(
             try term.getUnifyPtrChecked(self.file_bytes) orelse
@@ -179,13 +181,14 @@ pub const Verifier = struct {
         self.available_thms = available_thms;
         try self.initHeapFromThmArgs(thm);
         try self.runProofStream(proof_pos, proof_end);
-        const top = try self.stack.pop();
+        const stack = &self.stack;
+        const top = try stack.pop();
         const concl_expr = switch (top) {
             .expr => |e| e,
             else => return error.ExpectedExpr,
         };
         if (!self.sort_table[concl_expr.sort()].provable) return error.NotProvable;
-        if (self.stack.top != 0) return error.StackNotEmpty;
+        if (stack.top != 0) return error.StackNotEmpty;
         if (self.sorry_used) return error.SorryUsed;
     }
 
@@ -254,13 +257,15 @@ pub const Verifier = struct {
     }
 
     fn initUHeapFromHeapArgs(self: *Verifier, arg_count: u16) !void {
-        self.uheap.len = 0;
+        const heap = &self.heap;
+        const uheap = &self.uheap;
+        uheap.len = 0;
         for (0..arg_count) |i| {
-            const expr = switch (self.heap.entries[i]) {
+            const expr = switch (try heap.get(@intCast(i))) {
                 .expr => |e| e,
                 else => return error.ExpectedExpr,
             };
-            try self.uheap.push(expr);
+            try uheap.push(expr);
         }
     }
 
@@ -565,42 +570,45 @@ pub const Verifier = struct {
         }
         if (thm_id >= self.available_thms) return error.ForwardTheoremRef;
 
-        self.uheap.len = 0;
+        const stack = &self.stack;
+        const uheap = &self.uheap;
+        uheap.len = 0;
         const thm = self.thm_table[thm_id];
         const args = try thm.getArgsChecked(self.file_bytes);
         const n = thm.num_args;
 
         // Pop the conclusion expression
-        const concl_entry = try self.stack.pop();
+        const concl_entry = try stack.pop();
         const concl = switch (concl_entry) {
             .expr => |e| e,
             else => return error.ExpectedExpr,
         };
 
         // Pop n args in reverse order, filling uheap in forward order
-        self.uheap.len = n;
+        uheap.len = n;
+        const uheap_entries = &uheap.entries;
         var i: usize = n;
         while (i > 0) {
             i -= 1;
-            const entry = try self.stack.pop();
+            const entry = try stack.pop();
             const expr = switch (entry) {
                 .expr => |e| e,
                 else => return error.ExpectedExpr,
             };
             if (expr.sort() != args[i].sort) return error.SortMismatch;
             if (args[i].bound and !expr.bound()) return error.ExpectedBoundVar;
-            self.uheap.entries[i] = .{ .expr = expr, .saved = false };
+            uheap_entries[i] = .{ .expr = expr, .saved = false };
         }
 
         // Dep checks in forward order
         var deps_buf: [56]u55 = undefined;
         var deps_len: usize = 0;
         for (0..n) |j| {
-            const expr = self.uheap.entries[j].expr;
+            const expr = uheap_entries[j].expr;
             if (args[j].bound) {
                 // Bound var must not overlap with any previously seen bound var
                 for (0..j) |k| {
-                    const prev = self.uheap.entries[k].expr;
+                    const prev = uheap_entries[k].expr;
                     if (prev.deps() & expr.deps() != 0) {
                         return error.DepViolation;
                     }
@@ -628,14 +636,13 @@ pub const Verifier = struct {
         );
 
         // Push |- concl
-        try self.stack.push(.{ .proof = concl });
+        try stack.push(.{ .proof = concl });
         if (save) try self.heap.push(.{ .proof = concl });
     }
 
     pub fn uopRef(self: *Verifier, heap_id: u32) !void {
         const expr = try self.ustack.pop();
-        if (heap_id >= self.uheap.len) return error.UHeapOutOfBounds;
-        const expected = self.uheap.entries[heap_id].expr;
+        const expected = try self.uheap.get(heap_id);
         // Pointer equality per spec
         if (expr != expected) return error.UnifyMismatch;
     }
@@ -679,13 +686,16 @@ pub const Verifier = struct {
         // third_party/mm0/mm0-rs/components/mm1_parser/src/ast.rs.
         if (!v.bound) return error.ExpectedBoundVar;
         if (v.sort != @as(u7, @intCast(sort_id))) return error.SortMismatch;
-        for (self.uheap.entries[0..self.uheap.len]) |prev| {
+        const uheap = &self.uheap;
+        const entries = &uheap.entries;
+        for (0..uheap.len) |i| {
+            const prev = entries[i];
             if (prev.saved) continue;
             if (prev.expr.deps() & expr.deps() != 0) {
                 return error.DepViolation;
             }
         }
-        try self.uheap.push(expr);
+        try uheap.push(expr);
     }
 
     pub fn uopHyp(self: *Verifier) !void {
@@ -704,23 +714,29 @@ pub const Verifier = struct {
     }
 
     fn opRef(self: *Verifier, heap_id: u32) !void {
-        if (heap_id >= self.heap.len) return error.HeapOutOfBounds;
-        const entry = self.heap.entries[heap_id];
+        const heap = &self.heap;
+        const stack = &self.stack;
+        const entry = try heap.get(heap_id);
 
         // Fast path: most refs just push the heap entry.
-        if (entry == .conv and self.stack.top > 0) {
-            const top = self.stack.entries[self.stack.top - 1];
-            if (top == .conv_obligation) {
-                self.stack.top -= 1;
-                const obl = self.stack.entries[self.stack.top].conv_obligation;
-                const conv = entry.conv;
-                if (obl.left != conv.left or obl.right != conv.right)
-                    return error.ConvMismatch;
-                return;
-            }
+        switch (entry) {
+            .conv => |conv| {
+                if (stack.top > 0) {
+                    switch (try stack.peek()) {
+                        .conv_obligation => |obl| {
+                            _ = try stack.pop();
+                            if (obl.left != conv.left or obl.right != conv.right)
+                                return error.ConvMismatch;
+                            return;
+                        },
+                        else => {},
+                    }
+                }
+            },
+            else => {},
         }
 
-        try self.stack.push(entry);
+        try stack.push(entry);
     }
 
     fn opDummy(self: *Verifier, sort_id: u32) !void {
@@ -829,19 +845,20 @@ pub const Verifier = struct {
     fn opSorry(self: *Verifier) !void {
         // Sorry is not a valid proof command but we handle it gracefully
         // Check what's on top and either push a proof or discharge an obligation
-        if (self.stack.top > 0) {
-            const top = try self.stack.peek();
+        const stack = &self.stack;
+        if (stack.top > 0) {
+            const top = try stack.peek();
             if (top == .conv_obligation) {
-                _ = try self.stack.pop();
+                _ = try stack.pop();
                 return;
             }
         }
-        const entry = try self.stack.pop();
+        const entry = try stack.pop();
         const expr = switch (entry) {
             .expr => |e| e,
             else => return error.ExpectedExpr,
         };
-        try self.stack.push(.{ .proof = expr });
+        try stack.push(.{ .proof = expr });
         self.sorry_used = true;
     }
 

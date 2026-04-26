@@ -14,7 +14,8 @@ pub const UStack = struct {
     pub fn pop(self: *UStack) !*const Expr {
         if (self.top == 0) return error.UStackUnderflow;
         self.top -= 1;
-        return self.entries[self.top];
+        const entries = &self.entries;
+        return entries[self.top];
     }
 
     pub fn reset(self: *UStack) void {

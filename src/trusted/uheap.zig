@@ -26,7 +26,8 @@ pub const UHeap = struct {
 
     pub fn get(self: *UHeap, index: u32) !*const Expr {
         if (index >= self.len) return error.UHeapOutOfBounds;
-        return self.entries[index].expr;
+        const entries = &self.entries;
+        return entries[index].expr;
     }
 
     pub fn reset(self: *UHeap) void {
