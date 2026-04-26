@@ -9,15 +9,15 @@ alice_imp
 
 -- Step 1. Derive H ⊢ ka → kb directly: assume ka, then H's first
 -- conjunct gives ka → (ka → kb), apply twice with ka to obtain kb.
-l1: $ says ka (ka → kb) , ka ⊢ says ka (ka → kb) $ by ax
+l1: $ says ka "ka → kb" , ka ⊢ says ka "ka → kb" $ by ax
 l2: $ _ctx ⊢ ka → (ka → kb) $ by and_elim_l [l1]
-l3: $ says ka (ka → kb) , ka ⊢ ka $ by ax
+l3: $ says ka "ka → kb" , ka ⊢ ka $ by ax
 l4: $ _ctx ⊢ ka → kb $ by imp_elim [l2, l3]
 l5: $ _ctx ⊢ kb $ by imp_elim [l4, l3]
 l6: $ _ctx ⊢ ka → kb $ by imp_intro [l5]
 
 -- Step 2. Use H's second conjunct (ka → kb) → ka to obtain ka.
-l7: $ says ka (ka → kb) ⊢ says ka (ka → kb) $ by ax
+l7: $ says ka "ka → kb" ⊢ says ka "ka → kb" $ by ax
 l8: $ _ctx ⊢ (ka → kb) → ka $ by and_elim_r [l7]
 l9: $ _ctx ⊢ ka $ by imp_elim [l8, l6]
 
@@ -30,9 +30,9 @@ alice_both_knaves
 
 -- Step 1. Derive ¬ ka. Under H, ka the first conjunct of H gives
 -- ka → (¬ ka ∧ ¬ kb), so we can extract ¬ ka and contradict ka.
-l1: $ says ka (¬ ka ∧ ¬ kb) , ka ⊢ says ka (¬ ka ∧ ¬ kb) $ by ax
+l1: $ says ka "¬ ka ∧ ¬ kb" , ka ⊢ says ka "¬ ka ∧ ¬ kb" $ by ax
 l2: $ _ctx ⊢ ka → (¬ ka ∧ ¬ kb) $ by and_elim_l [l1]
-l3: $ says ka (¬ ka ∧ ¬ kb) , ka ⊢ ka $ by ax
+l3: $ says ka "¬ ka ∧ ¬ kb" , ka ⊢ ka $ by ax
 l4: $ _ctx ⊢ ¬ ka ∧ ¬ kb $ by imp_elim [l2, l3]
 l5: $ _ctx ⊢ ¬ ka $ by and_elim_l [l4]
 l6: $ _ctx ⊢ bot $ by bot_intro [l3, l5]
@@ -41,16 +41,16 @@ l7: $ _ctx ⊢ ¬ ka $ by neg_intro [l6]
 -- Step 2. Derive kb classically. Re-derive ¬ ka in the larger context
 -- H, ¬ kb (no implicit weakening here), then assemble ¬ ka ∧ ¬ kb
 -- and apply H's second conjunct to land at ka — contradicting ¬ ka.
-l8: $ says ka (¬ ka ∧ ¬ kb) , ¬ kb , ka ⊢ says ka (¬ ka ∧ ¬ kb) $ by ax
+l8: $ says ka "¬ ka ∧ ¬ kb" , ¬ kb , ka ⊢ says ka "¬ ka ∧ ¬ kb" $ by ax
 l9: $ _ctx ⊢ ka → (¬ ka ∧ ¬ kb) $ by and_elim_l [l8]
-l10: $ says ka (¬ ka ∧ ¬ kb) , ¬ kb , ka ⊢ ka $ by ax
+l10: $ says ka "¬ ka ∧ ¬ kb" , ¬ kb , ka ⊢ ka $ by ax
 l11: $ _ctx ⊢ ¬ ka ∧ ¬ kb $ by imp_elim [l9, l10]
 l12: $ _ctx ⊢ ¬ ka $ by and_elim_l [l11]
 l13: $ _ctx ⊢ bot $ by bot_intro [l10, l12]
 l14: $ _ctx ⊢ ¬ ka $ by neg_intro [l13]
-l15: $ says ka (¬ ka ∧ ¬ kb) , ¬ kb ⊢ ¬ kb $ by ax
+l15: $ says ka "¬ ka ∧ ¬ kb" , ¬ kb ⊢ ¬ kb $ by ax
 l16: $ _ctx ⊢ ¬ ka ∧ ¬ kb $ by and_intro [l14, l15]
-l17: $ says ka (¬ ka ∧ ¬ kb) , ¬ kb ⊢ says ka (¬ ka ∧ ¬ kb) $ by ax
+l17: $ says ka "¬ ka ∧ ¬ kb" , ¬ kb ⊢ says ka "¬ ka ∧ ¬ kb" $ by ax
 l18: $ _ctx ⊢ (¬ ka ∧ ¬ kb) → ka $ by and_elim_r [l17]
 l19: $ _ctx ⊢ ka $ by imp_elim [l18, l16]
 l20: $ _ctx ⊢ bot $ by bot_intro [l19, l14]
@@ -65,9 +65,9 @@ alice_one_knave
 -- Step 1. Derive ka by classical reasoning. Under H, ¬ ka, build
 -- ¬ ka ∨ ¬ kb on the cheap (or_intro_l on ¬ ka), then H's second
 -- conjunct yields ka, contradicting ¬ ka.
-l1: $ says ka (¬ ka ∨ ¬ kb) , ¬ ka ⊢ ¬ ka $ by ax
+l1: $ says ka "¬ ka ∨ ¬ kb" , ¬ ka ⊢ ¬ ka $ by ax
 l2: $ _ctx ⊢ ¬ ka ∨ ¬ kb $ by or_intro_l [l1]
-l3: $ says ka (¬ ka ∨ ¬ kb) , ¬ ka ⊢ says ka (¬ ka ∨ ¬ kb) $ by ax
+l3: $ says ka "¬ ka ∨ ¬ kb" , ¬ ka ⊢ says ka "¬ ka ∨ ¬ kb" $ by ax
 l4: $ _ctx ⊢ (¬ ka ∨ ¬ kb) → ka $ by and_elim_r [l3]
 l5: $ _ctx ⊢ ka $ by imp_elim [l4, l2]
 l6: $ _ctx ⊢ bot $ by bot_intro [l5, l1]
@@ -79,9 +79,9 @@ l8: $ _ctx ⊢ ka $ by dne [l7]
 -- then or_elim sends both branches to bot.
 
 -- Re-derive ka under H, kb (same shape as Step 1 with extra `, kb`).
-l9: $ says ka (¬ ka ∨ ¬ kb) , kb , ¬ ka ⊢ ¬ ka $ by ax
+l9: $ says ka "¬ ka ∨ ¬ kb" , kb , ¬ ka ⊢ ¬ ka $ by ax
 l10: $ _ctx ⊢ ¬ ka ∨ ¬ kb $ by or_intro_l [l9]
-l11: $ says ka (¬ ka ∨ ¬ kb) , kb , ¬ ka ⊢ says ka (¬ ka ∨ ¬ kb) $ by ax
+l11: $ says ka "¬ ka ∨ ¬ kb" , kb , ¬ ka ⊢ says ka "¬ ka ∨ ¬ kb" $ by ax
 l12: $ _ctx ⊢ (¬ ka ∨ ¬ kb) → ka $ by and_elim_r [l11]
 l13: $ _ctx ⊢ ka $ by imp_elim [l12, l10]
 l14: $ _ctx ⊢ bot $ by bot_intro [l13, l9]
@@ -89,14 +89,14 @@ l15: $ _ctx ⊢ ¬ ¬ ka $ by neg_intro [l14]
 l16: $ _ctx ⊢ ka $ by dne [l15]
 
 -- Apply H's first conjunct to get the disjunction under H, kb.
-l17: $ says ka (¬ ka ∨ ¬ kb) , kb ⊢ says ka (¬ ka ∨ ¬ kb) $ by ax
+l17: $ says ka "¬ ka ∨ ¬ kb" , kb ⊢ says ka "¬ ka ∨ ¬ kb" $ by ax
 l18: $ _ctx ⊢ ka → (¬ ka ∨ ¬ kb) $ by and_elim_l [l17]
 l19: $ _ctx ⊢ ¬ ka ∨ ¬ kb $ by imp_elim [l18, l16]
 
 -- Branch 1 (¬ ka): contradict the ka we already have. l14 fits.
 -- Branch 2 (¬ kb): contradict the kb sitting in the context.
-l20: $ says ka (¬ ka ∨ ¬ kb) , kb , ¬ kb ⊢ kb $ by ax
-l21: $ says ka (¬ ka ∨ ¬ kb) , kb , ¬ kb ⊢ ¬ kb $ by ax
+l20: $ says ka "¬ ka ∨ ¬ kb" , kb , ¬ kb ⊢ kb $ by ax
+l21: $ says ka "¬ ka ∨ ¬ kb" , kb , ¬ kb ⊢ ¬ kb $ by ax
 l22: $ _ctx ⊢ bot $ by bot_intro [l20, l21]
 
 l23: $ _ctx ⊢ bot $ by or_elim [l19, l14, l22]

@@ -9,7 +9,7 @@
 -- We encode that biconditional in the natural-deduction calculus as
 -- the conjunction of its two directions:
 --
---     says kx s  =  (kx → s) ∧ (s → kx)
+--     says kx "s"  =  (kx → s) ∧ (s → kx)
 --
 -- Each puzzle below takes one such "says" hypothesis and pins down
 -- both islanders' types. The reasoning is pure classical propositional
@@ -27,7 +27,7 @@
 --   3. alice_one_knave  — Alice: "At least one of us is a knave."
 --                         ⇒ Alice knight, Bob knave (Goodman's puzzle).
 
-delimiter $ ( ) , $;
+delimiter $ ( ) , " $;
 provable sort wff;
 --| @hole _ctx
 sort ctx;
@@ -123,18 +123,19 @@ axiom dne (g: ctx) (a: wff): $ g ⊢ ¬ ¬ a $ > $ g ⊢ a $;
 -- "x says s": the truthful biconditional, presented as the conjunction
 -- of its two directions so that and_elim recovers either half.
 def says (kx s: wff): wff = $ (kx → s) ∧ (s → kx) $;
+notation says (kx s: wff): wff = ($says$:50) kx ($"$:0) s ($"$:0);
 
 -- Puzzle 1. Alice says: "If I am a knight, then so is Bob."
 -- Solution: both Alice and Bob are knights.
 theorem alice_imp (ka kb: wff):
-  $ says ka (ka → kb) ⊢ ka ∧ kb $;
+  $ says ka "ka → kb" ⊢ ka ∧ kb $;
 
 -- Puzzle 2. Alice says: "We are both knaves." A knave's lie still
 -- pins Bob down: Alice is a knave and Bob is a knight.
 theorem alice_both_knaves (ka kb: wff):
-  $ says ka (¬ ka ∧ ¬ kb) ⊢ ¬ ka ∧ kb $;
+  $ says ka "¬ ka ∧ ¬ kb" ⊢ ¬ ka ∧ kb $;
 
 -- Puzzle 3 (Goodman). Alice says: "At least one of us is a knave."
 -- Solution: Alice is a knight, Bob is a knave.
 theorem alice_one_knave (ka kb: wff):
-  $ says ka (¬ ka ∨ ¬ kb) ⊢ ka ∧ ¬ kb $;
+  $ says ka "¬ ka ∨ ¬ kb" ⊢ ka ∧ ¬ kb $;
