@@ -16,6 +16,7 @@
 delimiter $ ( ) [ | ] / $;
 provable sort wff;
 --| @vars r v w
+--| @hole _real
 sort real;
 
 term eq (a b: real): wff;
@@ -109,6 +110,8 @@ axiom div_add (a b c: real):
   $ (a + b) / c = a / c + b / c $;
 axiom div_mul (a b c: real):
   $ a * b / c = a * (b / c) $;
+axiom div_cancel (a b c: real):
+  $ (a / b) * (b / c) = a / c $;
 
 -- Limit algebra (without convergence hypotheses; see note above)
 axiom lim_add {h: real} (a b: real h):
@@ -153,3 +156,21 @@ theorem product_rule {h: real} (f g df dg: real) (fh gh: real h):
   $ lim h ((gh - g) / h) = dg $ >
   $ lim h fh = f $ >
   $ lim h ((fh * gh - f * g) / h) = f * dg + g * df $;
+
+-- Chain Rule: (f∘g)' = f'(g(x)) · g'(x)
+--
+-- We work with the difference quotients directly rather than introduce
+-- function composition syntax. The names refer to:
+--   g, gh:    g(x), g(x+h)
+--   fg, fgh:  f(g(x)), f(g(x+h))
+--   dg:       g'(x)
+--   df:       f'(g(x))  (Carathéodory form: see hypothesis 2)
+--
+-- Hypothesis 2 packages "f differentiable at g(x)" together with the
+-- substitution k = gh - g (which goes to 0 with h). It collapses
+-- continuity-of-g and the inner limit into a single statement, the
+-- way Carathéodory's reformulation does.
+theorem chain_rule {h: real} (g df dg fg: real) (gh: real h) (fgh: real h):
+  $ lim h ((gh - g) / h) = dg $ >
+  $ lim h ((fgh - fg) / (gh - g)) = df $ >
+  $ lim h ((fgh - fg) / h) = df * dg $;

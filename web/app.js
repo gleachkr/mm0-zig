@@ -79,6 +79,11 @@ const examples = {
     mm0: "./fixtures/peano.mm0",
     proof: "./fixtures/peano.auf",
   },
+  smullyan: {
+    label: "smullyan",
+    mm0: "./fixtures/smullyan.mm0",
+    proof: "./fixtures/smullyan.auf",
+  },
 };
 
 const editorTheme = EditorView.theme({

@@ -1,0 +1,140 @@
+-- Knights and Knaves on Smullyan's Island
+--
+-- Every inhabitant of the island is either a knight (always speaks the
+-- truth) or a knave (always lies). For each inhabitant x, the wff K(x)
+-- — written `kx` here — abbreviates "x is a knight". When x utters a
+-- statement S, the utterance is truthful iff x is a knight, so the
+-- meaning of "x says S" is the biconditional K(x) ↔ S.
+--
+-- We encode that biconditional in the natural-deduction calculus as
+-- the conjunction of its two directions:
+--
+--     says kx s  =  (kx → s) ∧ (s → kx)
+--
+-- Each puzzle below takes one such "says" hypothesis and pins down
+-- both islanders' types. The reasoning is pure classical propositional
+-- logic; the only real cleverness is choosing the right contradiction
+-- to chase.
+--
+-- Three classics follow:
+--
+--   1. alice_imp        — Alice: "If I'm a knight, so is Bob."
+--                         ⇒ both are knights.
+--
+--   2. alice_both_knaves — Alice: "We're both knaves."
+--                         ⇒ Alice knave, Bob knight.
+--
+--   3. alice_one_knave  — Alice: "At least one of us is a knave."
+--                         ⇒ Alice knight, Bob knave (Goodman's puzzle).
+
+delimiter $ ( ) , $;
+provable sort wff;
+--| @hole _ctx
+sort ctx;
+
+term imp (a b: wff): wff;
+infixr imp: $→$ prec 25;
+infixr imp: $->$ prec 25;
+term and (a b: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
+term or (a b: wff): wff;
+infixr or: $∨$ prec 30;
+infixr or: $\\/$ prec 30;
+term not (a: wff): wff;
+prefix not: $¬$ prec 35;
+prefix not: $~$ prec 35;
+term bot: wff;
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp : ctx = ($_$:max);
+
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+-- Wff-level equivalence (used by the normalization engine).
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff): $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+-- Context congruence machinery.
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ > $ ctx_eq (g1 , h1) (g2 , h2) $;
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+-- Natural-deduction rules over the ACUI sequent context.
+--| @normalize conc
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+
+--| @normalize hyp0 hyp1 conc
+axiom and_intro (g: ctx) (a b: wff):
+  $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
+--| @normalize hyp0 conc
+axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
+--| @normalize hyp0 conc
+axiom and_elim_r (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ b $;
+
+--| @normalize hyp0 conc
+axiom or_intro_l (g: ctx) (a b: wff): $ g ⊢ a $ > $ g ⊢ a ∨ b $;
+--| @normalize hyp0 conc
+axiom or_intro_r (g: ctx) (a b: wff): $ g ⊢ b $ > $ g ⊢ a ∨ b $;
+--| @normalize hyp0 hyp1 hyp2 conc
+axiom or_elim (g: ctx) (a b c: wff):
+  $ g ⊢ a ∨ b $ > $ g , a ⊢ c $ > $ g , b ⊢ c $ > $ g ⊢ c $;
+
+--| @normalize hyp0 conc
+axiom imp_intro (g: ctx) (a b: wff): $ g , a ⊢ b $ > $ g ⊢ a → b $;
+--| @normalize hyp0 hyp1 conc
+axiom imp_elim (g: ctx) (a b: wff):
+  $ g ⊢ a → b $ > $ g ⊢ a $ > $ g ⊢ b $;
+
+--| @normalize hyp0 hyp1 conc
+axiom bot_intro (g: ctx) (a: wff):
+  $ g ⊢ a $ > $ g ⊢ ¬ a $ > $ g ⊢ bot $;
+--| @normalize hyp0 conc
+axiom neg_intro (g: ctx) (a: wff): $ g , a ⊢ bot $ > $ g ⊢ ¬ a $;
+--| @normalize hyp0 conc
+axiom dne (g: ctx) (a: wff): $ g ⊢ ¬ ¬ a $ > $ g ⊢ a $;
+
+-- "x says s": the truthful biconditional, presented as the conjunction
+-- of its two directions so that and_elim recovers either half.
+def says (kx s: wff): wff = $ (kx → s) ∧ (s → kx) $;
+
+-- Puzzle 1. Alice says: "If I am a knight, then so is Bob."
+-- Solution: both Alice and Bob are knights.
+theorem alice_imp (ka kb: wff):
+  $ says ka (ka → kb) ⊢ ka ∧ kb $;
+
+-- Puzzle 2. Alice says: "We are both knaves." A knave's lie still
+-- pins Bob down: Alice is a knave and Bob is a knight.
+theorem alice_both_knaves (ka kb: wff):
+  $ says ka (¬ ka ∧ ¬ kb) ⊢ ¬ ka ∧ kb $;
+
+-- Puzzle 3 (Goodman). Alice says: "At least one of us is a knave."
+-- Solution: Alice is a knight, Bob is a knave.
+theorem alice_one_knave (ka kb: wff):
+  $ says ka (¬ ka ∨ ¬ kb) ⊢ ka ∧ ¬ kb $;

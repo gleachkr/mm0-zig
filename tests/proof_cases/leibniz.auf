@@ -16,10 +16,10 @@ l7: $ lim h ((fh - f) / h + (gh - g) / h) = lim h ((fh - f) / h) + lim h ((gh - 
 l8: $ lim h ((fh - f) / h) + lim h ((gh - g) / h) = df + lim h ((gh - g) / h) $ by eq_subst [#1]
 l9: $ df + lim h ((gh - g) / h) = df + dg $ by eq_subst [#2]
 
--- Chain
-l10: $ lim h ((fh + gh - (f + g)) / h) = lim h ((fh - f) / h) + lim h ((gh - g) / h) $ by eq_trans [l6, l7]
-l11: $ lim h ((fh + gh - (f + g)) / h) = df + lim h ((gh - g) / h) $ by eq_trans [l10, l8]
-l12: $ lim h ((fh + gh - (f + g)) / h) = df + dg $ by eq_trans [l11, l9]
+-- Calc-mode chain (each step preserves the LHS, written as _real)
+l10: $ _real = lim h ((fh - f) / h) + lim h ((gh - g) / h) $ by eq_trans [l6, l7]
+l11: $ _real = df + lim h ((gh - g) / h) $ by eq_trans [l10, l8]
+l12: $ _real = df + dg $ by eq_trans [l11, l9]
 
 const_mul_rule
 --------------
@@ -40,10 +40,10 @@ l8: $ lim h c = c $ by lim_const []
 l9: $ (lim h c) * (lim h ((fh - f) / h)) = c * (lim h ((fh - f) / h)) $ by eq_subst [l8]
 l10: $ c * (lim h ((fh - f) / h)) = c * df $ by eq_subst [#1]
 
--- Chain
-l11: $ lim h ((c * fh - c * f) / h) = (lim h c) * (lim h ((fh - f) / h)) $ by eq_trans [l6, l7]
-l12: $ lim h ((c * fh - c * f) / h) = c * (lim h ((fh - f) / h)) $ by eq_trans [l11, l9]
-l13: $ lim h ((c * fh - c * f) / h) = c * df $ by eq_trans [l12, l10]
+-- Calc-mode chain
+l11: $ _real = (lim h c) * (lim h ((fh - f) / h)) $ by eq_trans [l6, l7]
+l12: $ _real = c * (lim h ((fh - f) / h)) $ by eq_trans [l11, l9]
+l13: $ _real = c * df $ by eq_trans [l12, l10]
 
 product_rule
 ------------
@@ -97,11 +97,36 @@ l19: $ f * dg + (lim h g) * (lim h ((fh - f) / h)) = f * dg + g * (lim h ((fh - 
 -- #1: lim h ((fh - f) / h) = df  (derivative of f)
 l20: $ f * dg + g * (lim h ((fh - f) / h)) = f * dg + g * df $ by eq_subst [#1]
 
--- Chain all equalities
-l21: $ lim h ((fh * gh - f * g) / h) = lim h (fh * ((gh - g) / h)) + lim h (g * ((fh - f) / h)) $ by eq_trans [l10, l11]
-l22: $ lim h ((fh * gh - f * g) / h) = (lim h fh) * (lim h ((gh - g) / h)) + lim h (g * ((fh - f) / h)) $ by eq_trans [l21, l14]
-l23: $ lim h ((fh * gh - f * g) / h) = (lim h fh) * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l22, l15]
-l24: $ lim h ((fh * gh - f * g) / h) = f * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l23, l16]
-l25: $ lim h ((fh * gh - f * g) / h) = f * dg + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l24, l17]
-l26: $ lim h ((fh * gh - f * g) / h) = f * dg + g * (lim h ((fh - f) / h)) $ by eq_trans [l25, l19]
-l27: $ lim h ((fh * gh - f * g) / h) = f * dg + g * df $ by eq_trans [l26, l20]
+-- Calc-mode chain. Each step's _real is the original LHS, lim h ((fh*gh - f*g)/h).
+l21: $ _real = lim h (fh * ((gh - g) / h)) + lim h (g * ((fh - f) / h)) $ by eq_trans [l10, l11]
+l22: $ _real = (lim h fh) * (lim h ((gh - g) / h)) + lim h (g * ((fh - f) / h)) $ by eq_trans [l21, l14]
+l23: $ _real = (lim h fh) * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l22, l15]
+l24: $ _real = f * (lim h ((gh - g) / h)) + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l23, l16]
+l25: $ _real = f * dg + (lim h g) * (lim h ((fh - f) / h)) $ by eq_trans [l24, l17]
+l26: $ _real = f * dg + g * (lim h ((fh - f) / h)) $ by eq_trans [l25, l19]
+l27: $ _real = f * dg + g * df $ by eq_trans [l26, l20]
+
+chain_rule
+----------
+
+-- Algebraic identity: (fgh - fg)/h = ((fgh - fg)/(gh - g)) * ((gh - g)/h)
+-- The right-hand side splits the difference quotient through the
+-- intermediate value gh - g, which is the algebraic core of the
+-- chain rule.
+l1: $ ((fgh - fg) / (gh - g)) * ((gh - g) / h) = (fgh - fg) / h $ by div_cancel []
+l2: $ (fgh - fg) / h = ((fgh - fg) / (gh - g)) * ((gh - g) / h) $ by eq_sym [l1]
+
+-- Lift to lim and distribute lim over multiplication
+l3: $ lim h ((fgh - fg) / h) = lim h (((fgh - fg) / (gh - g)) * ((gh - g) / h)) $ by lim_congr [l2]
+l4: $ lim h (((fgh - fg) / (gh - g)) * ((gh - g) / h)) = (lim h ((fgh - fg) / (gh - g))) * (lim h ((gh - g) / h)) $ by lim_mul []
+
+-- Apply hypotheses to evaluate each inner limit
+-- #2: lim h ((fgh - fg)/(gh - g)) = df  (derivative of f at g(x), Carathéodory form)
+l5: $ (lim h ((fgh - fg) / (gh - g))) * (lim h ((gh - g) / h)) = df * (lim h ((gh - g) / h)) $ by eq_subst [#2]
+-- #1: lim h ((gh - g)/h) = dg  (derivative of g at x)
+l6: $ df * (lim h ((gh - g) / h)) = df * dg $ by eq_subst [#1]
+
+-- Calc-mode chain. Each step's _real is lim h ((fgh - fg)/h).
+l7: $ _real = (lim h ((fgh - fg) / (gh - g))) * (lim h ((gh - g) / h)) $ by eq_trans [l3, l4]
+l8: $ _real = df * (lim h ((gh - g) / h)) $ by eq_trans [l7, l5]
+l9: $ _real = df * dg $ by eq_trans [l8, l6]

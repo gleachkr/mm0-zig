@@ -264,6 +264,7 @@ const proof_cases = [_]ProofCase{
         .outcome = .{ .fail = error.AlphaRewriteSearchFailed },
     },
     .{ .stem = "leibniz", .outcome = .pass },
+    .{ .stem = "smullyan", .outcome = .pass },
     .{ .stem = "mac_lane", .outcome = .pass },
     .{ .stem = "pass_mac_lane_holes", .outcome = .pass },
     .{ .stem = "mac_lane_unfold", .outcome = .pass },
