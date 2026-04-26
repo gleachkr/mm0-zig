@@ -224,7 +224,15 @@ from the resulting concrete conclusion `rel u`.
 Holey surface expressions are **not** normalized directly. The compiler
 still normalizes the candidate's instantiated conclusion (and any
 `@normalize`-marked hypotheses) as it does for hole-free lines. The
-holey assertion is only compared against the normalized concrete result.
+holey assertion is then compared against the normalized concrete result.
+
+If the visible, non-hole part of the assertion is already in the form the
+user wants to write, but a hole covers a normalized position such as an
+ACUI context, the compiler may fill the hole from the raw candidate and
+then let the ordinary normalized conclusion check validate the filled
+line. This keeps the normalized proof line user-shaped while still
+requiring the final checked line to be a concrete, verifier-justified
+rule application.
 
 This avoids inventing rewrite semantics for `.hole`, and it lines up
 with user intent: a hole means "fill whatever subtree belongs here
@@ -290,11 +298,15 @@ should fill the holes only when the first cannot.
 ## Interaction with `@fresh` and hidden witnesses
 
 A hole is not an existential theorem variable. The compiler does **not**
-allocate a fresh theorem-local dummy because a hole is present. Hole
-filling runs on the candidate's concrete conclusion, so any
-dependency-tracking machinery (fresh selection, hidden-witness
-materialization, dummy-budget checks) sees ordinary concrete
-expressions, not raw holey syntax.
+allocate a fresh theorem-local dummy merely because a hole is present.
+When holey matching has produced enough information to instantiate a
+candidate, hidden-witness finalization uses the same dependency-aware
+`@vars`-pool path used by ordinary advanced inference.
+
+For a holey line, freshness is computed from the visible surface
+assertion, the cited refs, explicit bindings, and any concrete data
+collected during matching. The holes themselves do not contribute dummy
+variables or dependencies.
 
 If a hidden witness escape genuinely needs a theorem-local variable,
 that allocation goes through the same `@vars`-pool path used by

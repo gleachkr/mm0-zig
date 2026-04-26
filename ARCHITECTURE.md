@@ -160,9 +160,10 @@ Theorem checking and emission:
 `compiler/holes.zig` owns proof-side hole elaboration: parsing a
 holey assertion via the trusted hole-aware parser entry point,
 matching visible structure against rule templates while deferring hole
-positions, and validating filled lines against a candidate's concrete
-conclusion (with sort checks at every hole). Holes never reach the
-theorem-local DAG, the checked IR, or the MMB emitter.
+positions, materializing filled surface lines from selected candidates,
+and validating them against the candidate's concrete conclusion (with
+sort checks at every hole). Holes never reach the theorem-local DAG, the
+checked IR, or the MMB emitter.
 
 Definition-aware matching and normalization support:
 
@@ -456,6 +457,9 @@ pipeline concrete:
   `@fallback`); strict replay is not extended to solve holes;
 - visible (non-hole) structure participates in matching as usual,
   while hole positions defer to the candidate's concrete conclusion;
+- for normalized conclusions, a holey surface line can be materialized
+  from the raw candidate first, and the ordinary normalized comparison
+  then proves that concrete user-shaped line;
 - hole filling is candidate-local and late: each candidate is
   instantiated, the filled line is compared against the surface
   assertion, and the first candidate whose elaboration succeeds
