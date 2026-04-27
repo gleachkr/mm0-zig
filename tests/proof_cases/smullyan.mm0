@@ -16,7 +16,7 @@
 -- logic; the only real cleverness is choosing the right contradiction
 -- to chase.
 --
--- Three classics follow:
+-- Four classics follow:
 --
 --   1. alice_imp        — Alice: "If I'm a knight, so is Bob."
 --                         ⇒ both are knights.
@@ -26,6 +26,10 @@
 --
 --   3. alice_one_knave  — Alice: "At least one of us is a knave."
 --                         ⇒ Alice knight, Bob knave (Goodman's puzzle).
+--
+--   4. alice_liar       — Alice: "I am a knave."
+--                         ⇒ ⊢ ¬ says ka "¬ ka": no islander can
+--                         actually utter this sentence.
 
 delimiter $ ( ) , " $;
 provable sort wff;
@@ -86,13 +90,18 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom nd_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
 
--- Natural-deduction rules over the ACUI sequent context.
+-- Natural-deduction rules in multiplicative form. Contexts are ACUI
+-- sets; rule applications combine the contexts of their premises via
+-- union, so `ax` only ever produces P ⊢ P and there is no implicit
+-- weakening. Discharging rules (imp_intro, neg_intro) still use the
+-- premise pattern `g , a ⊢ ...` and rely on ACUI matching to locate
+-- the assumption inside the assembled context.
 --| @normalize conc
-axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+axiom ax (a: wff): $ a ⊢ a $;
 
 --| @normalize hyp0 hyp1 conc
-axiom and_intro (g: ctx) (a b: wff):
-  $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
+axiom and_intro (g h: ctx) (a b: wff):
+  $ g ⊢ a $ > $ h ⊢ b $ > $ g , h ⊢ a ∧ b $;
 --| @normalize hyp0 conc
 axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
 --| @normalize hyp0 conc
@@ -103,18 +112,18 @@ axiom or_intro_l (g: ctx) (a b: wff): $ g ⊢ a $ > $ g ⊢ a ∨ b $;
 --| @normalize hyp0 conc
 axiom or_intro_r (g: ctx) (a b: wff): $ g ⊢ b $ > $ g ⊢ a ∨ b $;
 --| @normalize hyp0 hyp1 hyp2 conc
-axiom or_elim (g: ctx) (a b c: wff):
-  $ g ⊢ a ∨ b $ > $ g , a ⊢ c $ > $ g , b ⊢ c $ > $ g ⊢ c $;
+axiom or_elim (g h1 h2: ctx) (a b c: wff):
+  $ g ⊢ a ∨ b $ > $ h1 , a ⊢ c $ > $ h2 , b ⊢ c $ > $ g , h1 , h2 ⊢ c $;
 
 --| @normalize hyp0 conc
 axiom imp_intro (g: ctx) (a b: wff): $ g , a ⊢ b $ > $ g ⊢ a → b $;
 --| @normalize hyp0 hyp1 conc
-axiom imp_elim (g: ctx) (a b: wff):
-  $ g ⊢ a → b $ > $ g ⊢ a $ > $ g ⊢ b $;
+axiom imp_elim (g h: ctx) (a b: wff):
+  $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
 --| @normalize hyp0 hyp1 conc
-axiom bot_intro (g: ctx) (a: wff):
-  $ g ⊢ a $ > $ g ⊢ ¬ a $ > $ g ⊢ bot $;
+axiom bot_intro (g h: ctx) (a: wff):
+  $ g ⊢ a $ > $ h ⊢ ¬ a $ > $ g , h ⊢ bot $;
 --| @normalize hyp0 conc
 axiom neg_intro (g: ctx) (a: wff): $ g , a ⊢ bot $ > $ g ⊢ ¬ a $;
 --| @normalize hyp0 conc
@@ -139,3 +148,10 @@ theorem alice_both_knaves (ka kb: wff):
 -- Solution: Alice is a knight, Bob is a knave.
 theorem alice_one_knave (ka kb: wff):
   $ says ka "¬ ka ∨ ¬ kb" ⊢ ka ∧ ¬ kb $;
+
+-- Puzzle 4 (the Liar). Alice says: "I am a knave." On Smullyan's
+-- island this very utterance is impossible: from no premises at all
+-- we can refute it. Discharging the would-be hypothesis with
+-- neg_intro yields ⊢ ¬ says ka "¬ ka" — Alice cannot say this.
+theorem alice_liar (ka: wff):
+  $ _ ⊢ ¬ says ka "¬ ka" $;
