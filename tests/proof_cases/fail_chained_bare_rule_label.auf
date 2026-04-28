@@ -1,0 +1,3 @@
+fail_chained_bare_rule_label
+----------------------------
+l1: $ top $ by keep [top_i]

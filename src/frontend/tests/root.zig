@@ -30,18 +30,18 @@ test "proof script parser reads theorem blocks and proof lines" {
     try std.testing.expectEqual(@as(usize, 2), first.lines.len);
     try std.testing.expectEqualStrings("l1", first.lines[0].label);
     try std.testing.expectEqualStrings(" a -> a ", first.lines[0].assertion.text);
-    try std.testing.expectEqualStrings("ax_mp", first.lines[1].rule_name);
-    try std.testing.expectEqual(@as(usize, 2), first.lines[1].arg_bindings.len);
+    try std.testing.expectEqualStrings("ax_mp", first.lines[1].application.rule_name);
+    try std.testing.expectEqual(@as(usize, 2), first.lines[1].application.arg_bindings.len);
     try std.testing.expectEqualStrings(
         "a",
-        first.lines[1].arg_bindings[0].name,
+        first.lines[1].application.arg_bindings[0].name,
     );
-    try std.testing.expectEqual(@as(usize, 2), first.lines[1].refs.len);
-    switch (first.lines[1].refs[0]) {
+    try std.testing.expectEqual(@as(usize, 2), first.lines[1].application.refs.len);
+    switch (first.lines[1].application.refs[0]) {
         .hyp => |hyp| try std.testing.expectEqual(@as(usize, 1), hyp.index),
         else => return error.UnexpectedRefKind,
     }
-    switch (first.lines[1].refs[1]) {
+    switch (first.lines[1].application.refs[1]) {
         .line => |line| try std.testing.expectEqualStrings("l1", line.label),
         else => return error.UnexpectedRefKind,
     }
@@ -53,9 +53,97 @@ test "proof script parser reads theorem blocks and proof lines" {
     try std.testing.expectEqual(@as(usize, 1), second.lines.len);
     try std.testing.expectEqual(
         @as(usize, 0),
-        second.lines[0].arg_bindings.len,
+        second.lines[0].application.arg_bindings.len,
     );
     try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser reads nested rule applications" {
+    const src =
+        \\demo
+        \\----
+        \\l1: $ c $ by rule1 [rule2 (a := $ t $) [#1, prev], #2]
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expectEqual(@as(usize, 1), block.lines.len);
+    const line = block.lines[0];
+    try std.testing.expectEqualStrings("rule1", line.application.rule_name);
+    try std.testing.expectEqual(@as(usize, 2), line.application.refs.len);
+    switch (line.application.refs[0]) {
+        .application => |child| {
+            try std.testing.expectEqualStrings("rule2", child.rule_name);
+            try std.testing.expectEqual(@as(usize, 1), child.arg_bindings.len);
+            try std.testing.expectEqualStrings("a", child.arg_bindings[0].name);
+            try std.testing.expectEqual(@as(usize, 2), child.refs.len);
+            switch (child.refs[0]) {
+                .hyp => |hyp| {
+                    try std.testing.expectEqual(@as(usize, 1), hyp.index);
+                },
+                else => return error.UnexpectedRefKind,
+            }
+            switch (child.refs[1]) {
+                .line => |ref_line| {
+                    try std.testing.expectEqualStrings("prev", ref_line.label);
+                },
+                else => return error.UnexpectedRefKind,
+            }
+        },
+        else => return error.UnexpectedRefKind,
+    }
+    switch (line.application.refs[1]) {
+        .hyp => |hyp| try std.testing.expectEqual(@as(usize, 2), hyp.index),
+        else => return error.UnexpectedRefKind,
+    }
+}
+
+test "proof script parser keeps bare identifiers as line refs" {
+    const src =
+        \\demo
+        \\----
+        \\l1: $ c $ by rule1 [rule2]
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const block = (try parser.nextBlock()).?;
+    const line = block.lines[0];
+    try std.testing.expectEqual(@as(usize, 1), line.application.refs.len);
+    switch (line.application.refs[0]) {
+        .line => |ref_line| {
+            try std.testing.expectEqualStrings("rule2", ref_line.label);
+        },
+        else => return error.UnexpectedRefKind,
+    }
+}
+
+test "proof script parser reads zero-ref inline applications" {
+    const src =
+        \\demo
+        \\----
+        \\l1: $ c $ by rule1 [rule2 []]
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const block = (try parser.nextBlock()).?;
+    const line = block.lines[0];
+    switch (line.application.refs[0]) {
+        .application => |child| {
+            try std.testing.expectEqualStrings("rule2", child.rule_name);
+            try std.testing.expectEqual(@as(usize, 0), child.refs.len);
+            try std.testing.expect(child.refs_span != null);
+        },
+        else => return error.UnexpectedRefKind,
+    }
 }
 
 test "proof script parser requires theorem underlines" {
@@ -191,10 +279,10 @@ test "proof script parser allows newlines inside math strings" {
         " a ->\n  a ",
         block.lines[0].assertion.text,
     );
-    try std.testing.expectEqual(@as(usize, 1), block.lines[0].arg_bindings.len);
+    try std.testing.expectEqual(@as(usize, 1), block.lines[0].application.arg_bindings.len);
     try std.testing.expectEqualStrings(
         " a ->\n  a ",
-        block.lines[0].arg_bindings[0].formula.text,
+        block.lines[0].application.arg_bindings[0].formula.text,
     );
 }
 
@@ -227,14 +315,14 @@ test "proof script parser allows continuation newlines and comments" {
     try std.testing.expect(block.kind == .theorem);
     try std.testing.expectEqual(@as(usize, 2), block.lines.len);
     try std.testing.expectEqualStrings(" a ", block.lines[0].assertion.text);
-    try std.testing.expectEqualStrings("ax_keep", block.lines[0].rule_name);
-    try std.testing.expectEqual(@as(usize, 2), block.lines[0].arg_bindings.len);
-    try std.testing.expectEqual(@as(usize, 2), block.lines[0].refs.len);
-    switch (block.lines[0].refs[0]) {
+    try std.testing.expectEqualStrings("ax_keep", block.lines[0].application.rule_name);
+    try std.testing.expectEqual(@as(usize, 2), block.lines[0].application.arg_bindings.len);
+    try std.testing.expectEqual(@as(usize, 2), block.lines[0].application.refs.len);
+    switch (block.lines[0].application.refs[0]) {
         .hyp => |hyp| try std.testing.expectEqual(@as(usize, 1), hyp.index),
         else => return error.UnexpectedRefKind,
     }
-    switch (block.lines[0].refs[1]) {
+    switch (block.lines[0].application.refs[1]) {
         .line => |line| try std.testing.expectEqualStrings("l0", line.label),
         else => return error.UnexpectedRefKind,
     }

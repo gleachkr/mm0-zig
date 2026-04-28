@@ -202,13 +202,40 @@ pub fn applyViewBindingsSurfaceConclusion(
     );
 }
 
+pub fn applyViewBindingsRefsOnly(
+    allocator: std.mem.Allocator,
+    theorem: *TheoremContext,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    view: *const ViewDecl,
+    ref_exprs: []const ExprId,
+    partial_bindings: []?ExprId,
+    seed_overrides: ?[]const DefOps.BindingSeed,
+    exported_state: ?*?DefOps.MatchSeedState,
+    debug_views: bool,
+) !void {
+    return applyViewBindingsWithConclusion(
+        allocator,
+        theorem,
+        env,
+        registry,
+        view,
+        null,
+        ref_exprs,
+        partial_bindings,
+        seed_overrides,
+        exported_state,
+        debug_views,
+    );
+}
+
 fn applyViewBindingsWithConclusion(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
     view: *const ViewDecl,
-    conclusion: ViewConclusion,
+    conclusion: ?ViewConclusion,
     ref_exprs: []const ExprId,
     partial_bindings: []?ExprId,
     seed_overrides: ?[]const DefOps.BindingSeed,
@@ -251,10 +278,18 @@ fn applyViewBindingsWithConclusion(
 
     var surface_bindings: ?[]?*const Expr = null;
     defer if (surface_bindings) |bindings| allocator.free(bindings);
-    if (conclusion == .surface) {
-        const bindings = try allocator.alloc(?*const Expr, view.num_binders);
-        @memset(bindings, null);
-        surface_bindings = bindings;
+    if (conclusion) |actual_conclusion| {
+        switch (actual_conclusion) {
+            .surface => {
+                const bindings = try allocator.alloc(
+                    ?*const Expr,
+                    view.num_binders,
+                );
+                @memset(bindings, null);
+                surface_bindings = bindings;
+            },
+            .concrete => {},
+        }
     }
 
     if (debug_views) {
@@ -565,25 +600,27 @@ fn matchViewAgainstConclusion(
     env: *const GlobalEnv,
     session: *DefOps.RuleMatchSession,
     view: *const ViewDecl,
-    conclusion: ViewConclusion,
+    conclusion: ?ViewConclusion,
     surface_bindings: ?[]?*const Expr,
     ref_exprs: []const ExprId,
 ) !void {
-    const matched = switch (conclusion) {
-        .concrete => |line_expr| try matchConcreteViewConclusion(
-            session,
-            view,
-            line_expr,
-        ),
-        .surface => |surface| try matchSurfaceViewConclusion(
-            env,
-            session,
-            view,
-            surface,
-            surface_bindings,
-        ),
-    };
-    if (!matched) return error.ViewConclusionMismatch;
+    if (conclusion) |actual_conclusion| {
+        const matched = switch (actual_conclusion) {
+            .concrete => |line_expr| try matchConcreteViewConclusion(
+                session,
+                view,
+                line_expr,
+            ),
+            .surface => |surface| try matchSurfaceViewConclusion(
+                env,
+                session,
+                view,
+                surface,
+                surface_bindings,
+            ),
+        };
+        if (!matched) return error.ViewConclusionMismatch;
+    }
     try matchViewHypsAgainstConcreteExprs(
         session,
         view,
@@ -597,61 +634,68 @@ fn matchViewAgainstConclusionDebug(
     env: *const GlobalEnv,
     session: *DefOps.RuleMatchSession,
     view: *const ViewDecl,
-    conclusion: ViewConclusion,
+    conclusion: ?ViewConclusion,
     surface_bindings: ?[]?*const Expr,
     ref_exprs: []const ExprId,
 ) !void {
-    switch (conclusion) {
-        .concrete => |line_expr| {
-            const concl_text = try ViewTrace.formatExpr(
-                allocator,
-                theorem,
-                env,
-                line_expr,
-            );
-            defer allocator.free(concl_text);
-            if (try session.matchTransparent(view.concl, line_expr)) {
-                ViewTrace.printMessage(
-                    "view conclusion matched transparently: {s}",
-                    .{concl_text},
+    if (conclusion) |actual_conclusion| {
+        switch (actual_conclusion) {
+            .concrete => |line_expr| {
+                const concl_text = try ViewTrace.formatExpr(
+                    allocator,
+                    theorem,
+                    env,
+                    line_expr,
                 );
-            } else if (try session.matchSemantic(
-                view.concl,
-                line_expr,
-                DefOps.default_semantic_match_budget,
-            )) {
-                ViewTrace.printMessage(
-                    "view conclusion matched semantically: {s}",
-                    .{concl_text},
-                );
-            } else {
-                ViewTrace.printMessage(
-                    "view conclusion mismatch: {s}",
-                    .{concl_text},
-                );
-                return error.ViewConclusionMismatch;
-            }
-        },
-        .surface => |surface| {
-            if (try matchSurfaceViewConclusion(
-                env,
-                session,
-                view,
-                surface,
-                surface_bindings,
-            )) {
-                ViewTrace.printMessage(
-                    "view conclusion matched holey surface assertion",
-                    .{},
-                );
-            } else {
-                ViewTrace.printMessage(
-                    "view conclusion mismatch with holey surface assertion",
-                    .{},
-                );
-                return error.ViewConclusionMismatch;
-            }
-        },
+                defer allocator.free(concl_text);
+                if (try session.matchTransparent(view.concl, line_expr)) {
+                    ViewTrace.printMessage(
+                        "view conclusion matched transparently: {s}",
+                        .{concl_text},
+                    );
+                } else if (try session.matchSemantic(
+                    view.concl,
+                    line_expr,
+                    DefOps.default_semantic_match_budget,
+                )) {
+                    ViewTrace.printMessage(
+                        "view conclusion matched semantically: {s}",
+                        .{concl_text},
+                    );
+                } else {
+                    ViewTrace.printMessage(
+                        "view conclusion mismatch: {s}",
+                        .{concl_text},
+                    );
+                    return error.ViewConclusionMismatch;
+                }
+            },
+            .surface => |surface| {
+                if (try matchSurfaceViewConclusion(
+                    env,
+                    session,
+                    view,
+                    surface,
+                    surface_bindings,
+                )) {
+                    ViewTrace.printMessage(
+                        "view conclusion matched holey surface assertion",
+                        .{},
+                    );
+                } else {
+                    ViewTrace.printMessage(
+                        "view conclusion mismatch with holey surface assertion",
+                        .{},
+                    );
+                    return error.ViewConclusionMismatch;
+                }
+            },
+        }
+    } else {
+        ViewTrace.printMessage(
+            "view conclusion skipped for implicit application",
+            .{},
+        );
     }
     try matchViewHypsAgainstConcreteExprsDebug(
         allocator,

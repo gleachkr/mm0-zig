@@ -1,0 +1,5 @@
+provable sort wff;
+term top: wff;
+axiom top_i: $ top $;
+axiom keep: $ top $ > $ top $;
+theorem fail_chained_bare_rule_label: $ top $;

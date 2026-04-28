@@ -1,0 +1,3 @@
+fail_chained_ref_count
+----------------------
+l1: $ top $ by keep [keep []]

@@ -1,0 +1,19 @@
+chained_view
+------------
+l1: $ a -> ((a -> a) -> a) $ by ax_1 []
+l2: $ a -> (a -> a) $ by ax_1 []
+l3: $ (a -> ((a -> a) -> a)) -> ((a -> (a -> a)) -> (a -> a)) $ by ax_2 []
+l4: $ (a -> (a -> a)) -> (a -> a) $ by ax_mp [l3, keep [l1]]
+l5: $ a -> a $ by keep [ax_mp [l4, l2]]
+
+chained_recover
+---------------
+l1: $ A. x (Q x) -> Q u $ by ax_inst_hyp [pred_i (u := $ u $) []]
+
+chained_abstract
+----------------
+l1: $ b -> top $ by ax_ctx (x := $ x $) [#1, keep [#2]]
+
+chained_fresh
+-------------
+l1: $ top $ by keep [use_fresh []]

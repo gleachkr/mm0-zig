@@ -1,0 +1,11 @@
+provable sort wff;
+term top: wff;
+term wrap (a: wff): wff;
+axiom top_i: $ top $;
+axiom keep (a: wff): $ a $ > $ a $;
+axiom wrap_i (a: wff): $ a $ > $ wrap a $;
+theorem chain_zero_ref: $ top $;
+theorem chain_hyp_ref (a: wff): $ a $ > $ a $;
+theorem chain_prev_line: $ top $;
+theorem chain_explicit_binding: $ top $;
+theorem chain_two_level: $ wrap top $;

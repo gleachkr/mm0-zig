@@ -26,33 +26,25 @@ pub const LineRef = struct {
     span: Span,
 };
 
-pub const Ref = union(enum) {
-    hyp: HypRef,
-    line: LineRef,
-};
-
-pub const ProofLine = struct {
-    label: []const u8,
-    label_span: Span,
-    assertion: MathString,
+pub const RuleApplication = struct {
     rule_name: []const u8,
     rule_span: Span,
-    binding_list_span: ?Span,
-    arg_bindings: []const ArgBinding,
-    refs_span: ?Span,
-    refs: []const Ref,
+    binding_list_span: ?Span = null,
+    arg_bindings: []const ArgBinding = &.{},
+    refs_span: ?Span = null,
+    refs: []const Ref = &.{},
     span: Span,
 
-    pub fn ruleApplicationSpan(self: ProofLine) Span {
+    pub fn ruleApplicationSpan(self: RuleApplication) Span {
         return self.binding_list_span orelse self.rule_span;
     }
 
-    pub fn refsOrRuleSpan(self: ProofLine) Span {
+    pub fn refsOrRuleSpan(self: RuleApplication) Span {
         return self.refs_span orelse self.rule_span;
     }
 
     pub fn bindingSpan(
-        self: ProofLine,
+        self: RuleApplication,
         binder_name: ?[]const u8,
     ) ?Span {
         const name = binder_name orelse return null;
@@ -62,6 +54,28 @@ pub const ProofLine = struct {
             }
         }
         return null;
+    }
+};
+
+pub const Ref = union(enum) {
+    hyp: HypRef,
+    line: LineRef,
+    application: RuleApplication,
+};
+
+pub const ProofLine = struct {
+    label: []const u8,
+    label_span: Span,
+    assertion: MathString,
+    application: RuleApplication,
+    span: Span,
+
+    pub fn ruleApplicationSpan(self: ProofLine) Span {
+        return self.application.ruleApplicationSpan();
+    }
+
+    pub fn refsOrRuleSpan(self: ProofLine) Span {
+        return self.application.refsOrRuleSpan();
     }
 };
 
@@ -239,9 +253,32 @@ pub const Parser = struct {
         try self.expect(':');
         const assertion = try self.parseMathString();
         try self.expectProofKeyword("by");
+        const application = try self.parseRuleApplication();
+        try self.expectLineEnd();
+        return .{
+            .label = label,
+            .label_span = label_span,
+            .assertion = assertion,
+            .application = application,
+            .span = .{
+                .start = start,
+                .end = self.pos,
+            },
+        };
+    }
+
+    fn parseRuleApplication(self: *Parser) anyerror!RuleApplication {
         self.skipProofWhitespace();
         const rule_start = self.pos;
         const rule_name = try self.parseIdentifier();
+        return try self.parseRuleApplicationAfterName(rule_start, rule_name);
+    }
+
+    fn parseRuleApplicationAfterName(
+        self: *Parser,
+        rule_start: usize,
+        rule_name: []const u8,
+    ) anyerror!RuleApplication {
         const rule_span = Span{
             .start = rule_start,
             .end = rule_start + rule_name.len,
@@ -268,11 +305,7 @@ pub const Parser = struct {
                 .end = self.pos,
             };
         }
-        try self.expectLineEnd();
         return .{
-            .label = label,
-            .label_span = label_span,
-            .assertion = assertion,
             .rule_name = rule_name,
             .rule_span = rule_span,
             .binding_list_span = binding_list_span,
@@ -280,8 +313,13 @@ pub const Parser = struct {
             .refs_span = refs_span,
             .refs = refs,
             .span = .{
-                .start = start,
-                .end = self.pos,
+                .start = rule_start,
+                .end = if (refs_span) |span|
+                    span.end
+                else if (binding_list_span) |span|
+                    span.end
+                else
+                    rule_span.end,
             },
         };
     }
@@ -346,13 +384,29 @@ pub const Parser = struct {
             } };
         }
         const label = try self.parseIdentifier();
+        const label_end = self.pos;
+        if (self.nextProofTokenIsApplicationDelimiter()) {
+            return .{
+                .application = try self.parseRuleApplicationAfterName(
+                    start,
+                    label,
+                ),
+            };
+        }
         return .{ .line = .{
             .label = label,
             .span = .{
                 .start = start,
-                .end = self.pos,
+                .end = label_end,
             },
         } };
+    }
+
+    fn nextProofTokenIsApplicationDelimiter(self: *Parser) bool {
+        const saved = self.pos;
+        defer self.pos = saved;
+        self.skipProofWhitespace();
+        return self.peek() == '(' or self.peek() == '[';
     }
 
     fn parseMathString(self: *Parser) !MathString {

@@ -1,0 +1,8 @@
+provable sort wff;
+term top: wff;
+term bot: wff;
+axiom top_i: $ top $;
+axiom keep: $ top $ > $ top $;
+--| @fallback step_a
+axiom step_a: $ bot $ > $ top $;
+theorem fail_chained_fallback_cycle: $ top $;

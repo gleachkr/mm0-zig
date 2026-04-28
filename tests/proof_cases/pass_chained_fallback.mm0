@@ -1,0 +1,13 @@
+provable sort wff;
+term top: wff;
+term bot: wff;
+axiom top_i: $ top $;
+axiom keep: $ top $ > $ top $;
+axiom child_good: $ top $ > $ top $;
+--| @fallback child_good
+axiom child_bad: $ bot $ > $ top $;
+axiom outer_good: $ top $ > $ top $;
+--| @fallback outer_good
+axiom outer_bad: $ bot $ > $ top $;
+theorem child_fallback: $ top $;
+theorem outer_fallback: $ top $;

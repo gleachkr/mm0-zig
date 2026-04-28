@@ -1,0 +1,3 @@
+fail_chained_hyp_mismatch
+-------------------------
+l1: $ top $ by need_bot [top_i []]

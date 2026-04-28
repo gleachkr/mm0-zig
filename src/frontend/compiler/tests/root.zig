@@ -855,6 +855,485 @@ test "compiler pinpoints wrong reference count at the ref list" {
     try std.testing.expectEqualStrings("[]", proof_src[span.start..span.end]);
 }
 
+test "compiler accepts nested rule applications as refs" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep: $ top $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [top_i []]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler accepts deeply nested rule applications as refs" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep: $ top $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [keep [keep [keep [top_i []]]]]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler accepts inline applications using refs and bindings" {
+    const mm0_src =
+        \\provable sort wff;
+        \\axiom keep (a: wff): $ a $ > $ a $;
+        \\theorem target (a: wff): $ a $ > $ a $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ a $ by keep [#1]
+        \\l2: $ a $ by keep [keep (a := $ a $) [l1]]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler infers inline application conclusions from refs" {
+    const mm0_src =
+        \\provable sort wff;
+        \\axiom keep (a: wff): $ a $ > $ a $;
+        \\theorem target (a: wff): $ a $ > $ a $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ a $ by keep [keep [#1]]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler infers inline child binders through views" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\term raw (a: wff): wff;
+        \\def surf (a: wff): wff = $ raw a $;
+        \\axiom surf_top: $ surf top $;
+        \\axiom keep (a: wff): $ a $ > $ a $;
+        \\--| @view (a: wff): $ surf a $ > $ raw a $
+        \\axiom raw_keep (a: wff): $ raw a $ > $ raw a $;
+        \\theorem target: $ raw top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ raw top $ by keep [raw_keep [surf_top []]]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler does not treat hidden applications as proof labels" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep: $ top $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [top_i []]
+        \\top_i: $ top $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler cannot reference hidden applications by rule name" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep: $ top $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [top_i []]
+        \\l2: $ top $ by keep [top_i]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.UnknownLabel, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnknownLabel, diag.err);
+    try std.testing.expectEqualStrings("target", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l2", diag.line_label.?);
+    try std.testing.expectEqualStrings("top_i", diag.name.?);
+}
+
+test "compiler pinpoints unknown nested rule applications" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom keep: $ top $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [missing_rule []]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.UnknownRule, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.UnknownRule, diag.err);
+    try std.testing.expectEqualStrings("target", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("missing_rule", diag.rule_name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "missing_rule",
+        proof_src[span.start..span.end],
+    );
+}
+
+test "compiler pinpoints nested application ref-count mismatches" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom keep: $ top $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [keep []]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.RefCountMismatch, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.RefCountMismatch, diag.err);
+    try std.testing.expectEqualStrings("target", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("keep", diag.rule_name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("[]", proof_src[span.start..span.end]);
+}
+
+test "compiler pinpoints missing nested application bindings" {
+    const mm0_src =
+        \\provable sort wff;
+        \\axiom need_b (a b: wff): $ a $;
+        \\axiom keep (a: wff): $ a $ > $ a $;
+        \\theorem target (a b: wff): $ a $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ a $ by keep [need_b (a := $ a $) []]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.MissingBinderAssignment,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.MissingBinderAssignment, diag.err);
+    try std.testing.expectEqual(.missing_binder_assignment, diag.kind);
+    try std.testing.expectEqualStrings("target", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("need_b", diag.rule_name.?);
+    try std.testing.expectEqualStrings("b", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "(a := $ a $)",
+        proof_src[span.start..span.end],
+    );
+}
+
+test "compiler reports child applications rejected by parent hypotheses" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\term bot: wff;
+        \\axiom top_i: $ top $;
+        \\axiom need_bot: $ bot $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by need_bot [top_i []]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.HypothesisMismatch, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.HypothesisMismatch, diag.err);
+    try std.testing.expectEqualStrings("target", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("need_bot", diag.rule_name.?);
+    try std.testing.expectEqualStrings("top_i", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("top_i []", proof_src[span.start..span.end]);
+}
+
+test "compiler pinpoints nested binding validation failures" {
+    const mm0_src =
+        \\sort obj;
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom keep: $ top $ > $ top $;
+        \\axiom use_obj (x: obj): $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [use_obj (x := $ top $) []]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.SortMismatch,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.SortMismatch, diag.err);
+    try std.testing.expectEqual(.parse_binding, diag.kind);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.parse,
+        diag.phase.?,
+    );
+    try std.testing.expectEqualStrings("target", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("use_obj", diag.rule_name.?);
+    try std.testing.expectEqualStrings("x", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings(
+        "$ top $",
+        proof_src[span.start..span.end],
+    );
+}
+
+test "compiler preserves nested fallback first failure diagnostics" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\term mid: wff;
+        \\term bot: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep: $ top $ > $ top $;
+        \\axiom need_bot: $ bot $ > $ top $;
+        \\--| @fallback need_bot
+        \\axiom need_mid: $ mid $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [need_mid [top_i []]]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.HypothesisMismatch,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.HypothesisMismatch, diag.err);
+    try std.testing.expectEqual(.hypothesis_mismatch, diag.kind);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.theorem_application,
+        diag.phase.?,
+    );
+    try std.testing.expectEqualStrings("target", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("need_mid", diag.rule_name.?);
+    try std.testing.expectEqualStrings("top_i", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("top_i []", proof_src[span.start..span.end]);
+}
+
+test "compiler pinpoints nested fallback cycles" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\term bot: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep: $ top $ > $ top $;
+        \\--| @fallback step_a
+        \\axiom step_a: $ bot $ > $ top $;
+        \\theorem target: $ top $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ top $ by keep [step_a [top_i []]]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(error.FallbackCycle, compiler.compileMmb(
+        std.testing.allocator,
+    ));
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.FallbackCycle, diag.err);
+    try std.testing.expectEqual(.generic, diag.kind);
+    try std.testing.expectEqual(
+        mm0.CompilerDiagnosticPhase.theorem_application,
+        diag.phase.?,
+    );
+    try std.testing.expectEqualStrings("target", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("step_a", diag.rule_name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("step_a", proof_src[span.start..span.end]);
+}
+
+test "compiler pinpoints later nested rules" {
+    const mm0_src =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep: $ top $ > $ top $;
+        \\theorem first: $ top $;
+        \\theorem later: $ top $;
+    ;
+    const proof_src =
+        \\first
+        \\-----
+        \\l1: $ top $ by keep [later []]
+        \\
+        \\later
+        \\-----
+        \\l1: $ top $ by top_i []
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    try std.testing.expectError(
+        error.RuleNotYetAvailable,
+        compiler.compileMmb(std.testing.allocator),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.RuleNotYetAvailable, diag.err);
+    try std.testing.expectEqual(.rule_not_yet_available, diag.kind);
+    try std.testing.expectEqualStrings("first", diag.theorem_name.?);
+    try std.testing.expectEqualStrings("l1", diag.line_label.?);
+    try std.testing.expectEqualStrings("later", diag.rule_name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("later", proof_src[span.start..span.end]);
+}
+
 test "compiler pinpoints duplicate proof labels" {
     const mm0_src =
         \\provable sort wff;
@@ -2643,19 +3122,22 @@ test "compiler points binding validation errors at explicit assignments" {
             .text = " top ",
             .span = .{ .start = 19, .end = 26 },
         },
-        .rule_name = "use_obj",
-        .rule_span = .{ .start = 30, .end = 37 },
-        .binding_list_span = binding_span,
-        .arg_bindings = &.{.{
-            .name = "x",
-            .formula = .{
-                .text = " top ",
-                .span = .{ .start = 0, .end = 0 },
-            },
-            .span = binding_span,
-        }},
-        .refs_span = null,
-        .refs = &.{},
+        .application = .{
+            .rule_name = "use_obj",
+            .rule_span = .{ .start = 30, .end = 37 },
+            .binding_list_span = binding_span,
+            .arg_bindings = &.{.{
+                .name = "x",
+                .formula = .{
+                    .text = " top ",
+                    .span = .{ .start = 0, .end = 0 },
+                },
+                .span = binding_span,
+            }},
+            .refs_span = null,
+            .refs = &.{},
+            .span = .{ .start = 30, .end = proof_src.len },
+        },
         .span = .{ .start = 15, .end = proof_src.len },
     };
 
@@ -3233,12 +3715,15 @@ test "strict replay does not open defs during omitted inference" {
             .text = " a -> a ",
             .span = .{ .start = 0, .end = 0 },
         },
-        .rule_name = "ax_id",
-        .rule_span = .{ .start = 0, .end = 0 },
-        .binding_list_span = null,
-        .arg_bindings = &.{},
-        .refs_span = null,
-        .refs = &.{},
+        .application = .{
+            .rule_name = "ax_id",
+            .rule_span = .{ .start = 0, .end = 0 },
+            .binding_list_span = null,
+            .arg_bindings = &.{},
+            .refs_span = null,
+            .refs = &.{},
+            .span = .{ .start = 0, .end = 0 },
+        },
         .span = .{ .start = 0, .end = 0 },
     };
 
@@ -3523,7 +4008,7 @@ test "compiler analyze with proof recovers to later lemmas with binders" {
 
     try std.testing.expectEqual(error.ExpectedIdentifier, diags[0].err);
     try std.testing.expectEqualStrings("target", diags[0].theorem_name.?);
-    try std.testing.expectEqual(error.UnknownHypothesisRef, diags[1].err);
+    try std.testing.expectEqual(error.UnknownRule, diags[1].err);
     try std.testing.expectEqualStrings("helper", diags[1].theorem_name.?);
     try std.testing.expectEqual(error.UnknownRule, diags[2].err);
     try std.testing.expectEqualStrings("target", diags[2].theorem_name.?);

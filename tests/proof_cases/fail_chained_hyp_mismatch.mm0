@@ -1,0 +1,6 @@
+provable sort wff;
+term top: wff;
+term bot: wff;
+axiom top_i: $ top $;
+axiom need_bot: $ bot $ > $ top $;
+theorem fail_chained_hyp_mismatch: $ top $;

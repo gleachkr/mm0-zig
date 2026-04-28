@@ -1,0 +1,20 @@
+chain_zero_ref
+--------------
+l1: $ top $ by keep [top_i []]
+
+chain_hyp_ref
+-------------
+l1: $ a $ by keep [keep [#1]]
+
+chain_prev_line
+---------------
+l1: $ top $ by top_i []
+l2: $ top $ by keep [keep [l1]]
+
+chain_explicit_binding
+----------------------
+l1: $ top $ by keep [keep (a := $ top $) [top_i []]]
+
+chain_two_level
+---------------
+l1: $ wrap top $ by wrap_i [keep [keep [top_i []]]]

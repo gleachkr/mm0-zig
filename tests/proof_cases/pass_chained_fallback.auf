@@ -1,0 +1,7 @@
+child_fallback
+--------------
+l1: $ top $ by keep [child_bad [top_i []]]
+
+outer_fallback
+--------------
+l1: $ top $ by outer_bad [top_i []]

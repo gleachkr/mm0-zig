@@ -10,7 +10,6 @@ const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
 const Expr = @import("../../trusted/expressions.zig").Expr;
 const SurfaceExpr = @import("../surface_expr.zig");
 const UnifyReplay = @import("../../trusted/unify_replay.zig");
-const ProofLine = @import("../proof_script.zig").ProofLine;
 const Span = @import("../proof_script.zig").Span;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const NormalizeSpec = @import("../rewrite_registry.zig").NormalizeSpec;
@@ -197,7 +196,7 @@ fn buildInferenceFailureDiagnostic(
     theorem: *const TheoremContext,
     assertion: AssertionStmt,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: anytype,
     path: InferencePath,
     err: anyerror,
     explicit_bindings: []const ?ExprId,
@@ -208,7 +207,7 @@ fn buildInferenceFailureDiagnostic(
         .err = err,
         .theorem_name = assertion.name,
         .line_label = line.label,
-        .rule_name = line.rule_name,
+        .rule_name = line.application.rule_name,
         .span = line.ruleApplicationSpan(),
         .detail = .{ .inference_failure = .{
             .path = path,
@@ -228,13 +227,13 @@ fn buildInferenceFailureDiagnostic(
     return diag;
 }
 
-fn buildMissingBinderDiagnostic(
+pub fn buildMissingBinderDiagnostic(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
     assertion: AssertionStmt,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: anytype,
     path: InferencePath,
     explicit_bindings: []const ?ExprId,
     current_bindings: []const ?ExprId,
@@ -246,9 +245,9 @@ fn buildMissingBinderDiagnostic(
         .err = error.MissingBinderAssignment,
         .theorem_name = assertion.name,
         .line_label = line.label,
-        .rule_name = line.rule_name,
+        .rule_name = line.application.rule_name,
         .name = rule.arg_names[missing_idx],
-        .span = line.binding_list_span orelse line.rule_span,
+        .span = line.application.binding_list_span orelse line.application.rule_span,
         .detail = .{ .missing_binder_assignment = .{
             .binder_name = binder_name,
             .path = path,
@@ -1246,7 +1245,7 @@ fn finishHoleyRuleMatchSession(
     assertion: AssertionStmt,
     rule_id: u32,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: anytype,
     session: *DefOps.RuleMatchSession,
     fresh_context: ?HiddenWitnessFreshContext,
     partial_bindings: []const ?ExprId,
@@ -1354,7 +1353,7 @@ pub fn inferBindingsFromHoleyAdvanced(
     assertion: AssertionStmt,
     rule_id: u32,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     holey_concl: *const Expr,
@@ -1566,7 +1565,7 @@ fn tryInferMinimalStructuralHoles(
     theorem: *TheoremContext,
     assertion: AssertionStmt,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     holey_concl: *const Expr,
@@ -1627,7 +1626,7 @@ fn tryInferMinimalStructuralHoles(
             .source = .proof,
             .theorem_name = assertion.name,
             .line_label = line.label,
-            .rule_name = line.rule_name,
+            .rule_name = line.application.rule_name,
             .span = line.ruleApplicationSpan(),
             .detail = .{ .inference_failure = .{
                 .path = .structural_solver,
@@ -1667,7 +1666,7 @@ pub fn inferBindings(
     assertion: AssertionStmt,
     rule_id: u32,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
@@ -1904,7 +1903,7 @@ pub fn inferBindings(
                 err,
                 assertion.name,
                 line.label,
-                line.rule_name,
+                line.application.rule_name,
                 line.ruleApplicationSpan(),
             )) {
                 return err;
@@ -2009,7 +2008,7 @@ pub fn inferBindings(
                 .source = .proof,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
-                .rule_name = line.rule_name,
+                .rule_name = line.application.rule_name,
                 .span = line.ruleApplicationSpan(),
                 .detail = .{ .inference_failure = .{
                     .path = .structural_solver,
@@ -2169,7 +2168,7 @@ fn strictInferBindingsDetailed(
     theorem: *const TheoremContext,
     assertion: AssertionStmt,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
@@ -2259,7 +2258,7 @@ fn strictInferBindingsDetailed(
                 .err = err,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
-                .rule_name = line.rule_name,
+                .rule_name = line.application.rule_name,
                 .name = rule.arg_names[idx],
                 .span = CompilerDiag.proofBindingDiagnosticSpan(
                     line,
@@ -2304,7 +2303,7 @@ fn strictInferBindingsDetailed(
             .err = error.DepViolation,
             .theorem_name = assertion.name,
             .line_label = line.label,
-            .rule_name = line.rule_name,
+            .rule_name = line.application.rule_name,
             .span = line.ruleApplicationSpan(),
             .detail = .{ .dep_violation = detail },
         }, .theorem_application));
@@ -2324,7 +2323,7 @@ pub fn strictInferBindings(
     theorem: *const TheoremContext,
     assertion: AssertionStmt,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
@@ -2357,7 +2356,7 @@ pub fn validateResolvedBindingsWithDebug(
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
     assertion: AssertionStmt,
-    line: ProofLine,
+    line: anytype,
     rule: *const RuleDecl,
     bindings: []const ExprId,
 ) !void {
@@ -2374,7 +2373,7 @@ pub fn validateResolvedBindingsWithDebug(
                 .err = err,
                 .theorem_name = assertion.name,
                 .line_label = line.label,
-                .rule_name = line.rule_name,
+                .rule_name = line.application.rule_name,
                 .name = rule.arg_names[idx],
                 .span = CompilerDiag.proofBindingDiagnosticSpan(line, rule.arg_names[idx]),
             }, .inference));
@@ -2414,7 +2413,7 @@ pub fn validateResolvedBindingsWithDebug(
             .err = error.DepViolation,
             .theorem_name = assertion.name,
             .line_label = line.label,
-            .rule_name = line.rule_name,
+            .rule_name = line.application.rule_name,
             .span = line.ruleApplicationSpan(),
             .detail = .{ .dep_violation = detail },
         }, .theorem_application));
@@ -2427,7 +2426,7 @@ pub fn validateResolvedBindings(
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
     assertion: AssertionStmt,
-    line: ProofLine,
+    line: anytype,
     rule: *const RuleDecl,
     bindings: []const ExprId,
 ) !void {

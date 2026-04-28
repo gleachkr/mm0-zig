@@ -1,0 +1,54 @@
+delimiter $ ( ) , $;
+--| @vars x y z
+provable sort wff;
+sort set;
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+term iff (a b: wff): wff; infixr iff: $<->$ prec 20;
+term top: wff;
+term sbs (t: set) {x: set} (p: wff x): wff;
+term pred (t: set): wff; prefix pred: $Q$ prec 50;
+term all {x: set} (p: wff x): wff; prefix all: $A.$ prec 41;
+term sbw (t: wff) {x: wff} (r: wff x): wff;
+axiom keep (a: wff): $ a $ > $ a $;
+--| @normalize hyp0
+axiom keep_norm (a: wff): $ a $ > $ a $;
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+--| @rewrite
+axiom sbs_pred (t: set) {x: set}: $ sbs t x (Q x) <-> Q t $;
+--| @rewrite
+axiom sbw_var (t: wff) {x: wff}: $ sbw t x x <-> t $;
+--| @rewrite
+axiom sbw_top (t: wff) {x: wff}: $ sbw t x top <-> top $;
+--| @rewrite
+axiom sbw_imp (t: wff) {x: wff} (a b: wff x):
+  $ sbw t x (a -> b) <-> (sbw t x a -> sbw t x b) $;
+--| @view (a b: wff): $ a -> b $ > $ a $ > $ b $
+axiom ax_mp (a b: wff): $ a -> b $ > $ a $ > $ b $;
+axiom ax_1 (a b: wff): $ a -> (b -> a) $;
+axiom ax_2 (a b c: wff):
+  $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $;
+--| @view {x: set} (t: set) (p: wff x) (q: wff): $ q $ > $ A. x p -> q $
+--| @recover t q p x
+--| @normalize conc
+axiom ax_inst_hyp {x: set} (t: set) (p: wff x):
+  $ sbs t x p $ > $ A. x p -> sbs t x p $;
+axiom pred_i (u: set): $ Q u $;
+--| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
+--| @abstract r p q x a b
+--| @normalize hyp1 conc
+axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
+  $ a <-> b $ > $ sbw a x r $ > $ sbw b x r $;
+--| @fresh y
+axiom use_fresh {y: wff}: $ top $;
+theorem chained_view (a: wff): $ a -> a $;
+theorem chained_recover (u: set) {x: set}: $ A. x (Q x) -> Q u $;
+theorem chained_abstract (a b: wff):
+  $ a <-> b $ > $ a -> top $ > $ b -> top $;
+theorem chained_fresh: $ top $;

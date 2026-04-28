@@ -56,6 +56,35 @@ const proof_case_ext = "auf";
 const proof_cases = [_]ProofCase{
     .{ .stem = "pass_keep", .outcome = .pass },
     .{ .stem = "pass_label", .outcome = .pass },
+    .{ .stem = "pass_chained_alpha", .outcome = .pass },
+    .{ .stem = "pass_chained_basic", .outcome = .pass },
+    .{ .stem = "pass_chained_fallback", .outcome = .pass },
+    .{ .stem = "pass_chained_metadata", .outcome = .pass },
+    .{ .stem = "pass_chained_normalize", .outcome = .pass },
+    .{
+        .stem = "fail_chained_bare_rule_label",
+        .outcome = .{ .fail = error.UnknownLabel },
+    },
+    .{
+        .stem = "fail_chained_unknown_rule",
+        .outcome = .{ .fail = error.UnknownRule },
+    },
+    .{
+        .stem = "fail_chained_ref_count",
+        .outcome = .{ .fail = error.RefCountMismatch },
+    },
+    .{
+        .stem = "fail_chained_hyp_mismatch",
+        .outcome = .{ .fail = error.HypothesisMismatch },
+    },
+    .{
+        .stem = "fail_chained_missing_binding",
+        .outcome = .{ .fail = error.MissingBinderAssignment },
+    },
+    .{
+        .stem = "fail_chained_fallback_cycle",
+        .outcome = .{ .fail = error.FallbackCycle },
+    },
     .{ .stem = "pass_gen", .outcome = .pass },
     .{ .stem = "pass_dup", .outcome = .pass },
     .{ .stem = "pass_def", .outcome = .pass },

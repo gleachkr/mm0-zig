@@ -1,0 +1,3 @@
+fail_chained_unknown_rule
+-------------------------
+l1: $ top $ by keep [missing_rule []]

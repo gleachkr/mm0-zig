@@ -1,0 +1,3 @@
+chained_hyp_norm
+----------------
+l1: $ Q $ by use_sub (a := $ Q $, b := $ P -> P $) [all_elim (a := $ Q $, b := $ P -> P $) []]

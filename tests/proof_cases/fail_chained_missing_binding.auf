@@ -1,0 +1,3 @@
+fail_chained_missing_binding
+----------------------------
+l1: $ top $ by keep [choose []]

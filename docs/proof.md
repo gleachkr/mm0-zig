@@ -129,10 +129,10 @@ l1: $ a -> a $ by ax_id (a := $ a $) []
 Each proof line has the form:
 
 ```text
-proof-line ::= label ':' formula 'by' rule-name
-               ('(' arg-bindings ')')?
-               ('[' refs ']')?
+proof-line ::= label ':' formula 'by' rule-application
                comment? newline*
+
+rule-application ::= rule-name ('(' arg-bindings ')')? ('[' refs ']')?
 ```
 
 The parser treats spaces, newlines, blank lines, and `--` comments as
@@ -169,13 +169,15 @@ l3:
 
 ## References
 
-References inside `[...]` may be either theorem hypotheses or previous
-proof lines.
+References inside `[...]` may be theorem hypotheses, previous proof
+lines, or inline rule applications.
 
 ```text
-ref ::= hyp-ref | line-ref
+refs ::= empty | ref (',' ref)*
+ref ::= hyp-ref | line-ref | inline-application
 hyp-ref ::= '#' number
 line-ref ::= identifier
+inline-application ::= rule-application
 ```
 
 Meaning:
@@ -183,9 +185,71 @@ Meaning:
 - `#1`, `#2`, ... refer to the hypotheses of the theorem being proved
 - inside a lemma block, `#1`, `#2`, ... refer to the lemma hypotheses
 - `l1`, `l2`, ... refer to prior proof lines in the current block
+- `rule [...]` applies `rule` anonymously and uses its conclusion as the
+  reference expression
 
 Hypotheses are numbered in the order they appear in the theorem or lemma
 header after MM0 parsing.
+
+A bare identifier in a reference list is always a line reference, even if
+it is also the name of a rule. This preserves the older syntax. A
+zero-hypothesis inline application with no explicit bindings must
+therefore use a reference delimiter:
+
+```text
+l1: $ top $ by keep [top_i []]
+```
+
+If an inline application has an explicit binding list, the binding list
+already disambiguates it from a line reference. Its reference list is
+optional when it has no references:
+
+```text
+l1: $ p $ by keep [make_p (a := $ p $)]
+```
+
+## Chained rule applications
+
+An inline rule application is an anonymous proof line inserted before the
+application that uses it. For example:
+
+```text
+l1: $ c $ by outer [inner [#1], #2]
+```
+
+behaves like a proof with an unnamed intermediate line proving the
+conclusion of `inner [#1]`, followed by `outer` using that hidden line as
+its first reference. Hidden lines have no user-visible label and cannot
+be referenced later.
+
+Inline applications may be nested arbitrarily and may use explicit
+bindings, omitted-binder inference, theorem-hypothesis refs, prior line
+refs, and other inline applications:
+
+```text
+l2: $ c $ by outer [middle (a := $ t $) [inner [l1]], #1]
+```
+
+The child application is checked without using the parent rule's
+expected hypothesis as an input constraint. It must infer a unique
+conclusion from its own rule name, bindings, refs, and metadata. After
+that, the parent application checks whether the child's conclusion
+matches the corresponding parent hypothesis. The parent may reject the
+child result, but it does not guide or backtrack the child search.
+
+Fallback remains candidate-local. If an inline application cites a rule
+with `@fallback`, the compiler tries the written rule first. If that
+whole candidate fails, including its nested children, the compiler rolls
+back the hidden lines and theorem-local mutations from that candidate and
+tries the fallback rule. The same rule applies independently at each
+nesting level.
+
+Inline applications use the same rule-application pipeline as top-level
+proof lines. Rule metadata such as `@view`, `@recover`, `@abstract`,
+`@normalize`, `@fresh`, `@alpha`, and `@fallback` therefore applies in
+the usual way. The only difference is the assertion mode: a top-level
+line has a user-written assertion, while an inline application infers its
+whole conclusion from the selected candidate rule.
 
 ## Named argument bindings
 
@@ -218,25 +282,29 @@ L: $ C $ by RULE (ARG_BINDINGS) [R1, ..., Rn]
 
 is checked roughly as follows:
 
-1. Resolve `RULE` to a previously declared axiom, theorem, or lemma.
-2. Resolve and parse any explicit argument bindings.
-3. Parse `$ C $` in the local assertion context.
-4. Resolve `R1, ..., Rn` to theorem hypotheses or earlier proof lines.
-5. Infer any omitted rule binders.
-6. Instantiate the rule's hypotheses and conclusion with those concrete
+1. Parse `$ C $` in the local assertion context.
+2. Resolve `RULE` to a previously declared axiom, theorem, or lemma.
+3. Check the syntactic reference count against that rule's hypotheses.
+4. Elaborate `R1, ..., Rn`. A ref may recursively elaborate an inline
+   application and return the hidden line proving its conclusion.
+5. Resolve and parse any explicit argument bindings.
+6. Infer any omitted rule binders from the line assertion, elaborated
+   refs, and rule metadata.
+7. Instantiate the rule's hypotheses and conclusion with those concrete
    binders.
-7. Compare the instantiated rule against the user's line and refs,
+8. Compare the instantiated rule against the user's line and refs,
    allowing frontend features such as transparent defs, views, recover /
    abstract bindings, fresh binders, targeted alpha-freshening, and
    normalization when the rule's metadata permits them.
-8. If that attempt fails and the cited rule has `@fallback`, retry the
-   whole line with the fallback target, then continue through the
+9. If that attempt fails and the cited rule has `@fallback`, retry the
+   whole application with the fallback target, then continue through the
    fallback chain if needed.
-9. Record label `L` as proving `C`.
+10. Record label `L` as proving `C`.
 
-The line formula is always explicit and must be written out by the user.
-The compiler may elaborate the application internally, but it does not
-infer the whole asserted formula from the cited rule.
+Top-level proof-line formulas are always explicit and must be written
+out by the user. Inline applications are the exception: they have no
+source assertion, so the compiler accepts the selected rule's instantiated
+conclusion as the hidden line's assertion.
 
 Fallback metadata is resolved eagerly while processing the `.mm0` file,
 so `@fallback target_rule` may refer only to a rule already in scope at

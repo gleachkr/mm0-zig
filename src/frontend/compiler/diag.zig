@@ -1,7 +1,6 @@
 const std = @import("std");
 const Span = @import("../proof_script.zig").Span;
 const ProofScriptParser = @import("../proof_script.zig").Parser;
-const ProofLine = @import("../proof_script.zig").ProofLine;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const DiagScratch = @import("../diag_scratch.zig");
 const MathParseError = @import("../../trusted/parse.zig").MathParseError;
@@ -425,10 +424,11 @@ pub fn proofMathParseDiagnostic(
 }
 
 pub fn proofBindingDiagnosticSpan(
-    line: ProofLine,
+    line: anytype,
     binder_name: ?[]const u8,
 ) Span {
-    return line.bindingSpan(binder_name) orelse line.ruleApplicationSpan();
+    return line.application.bindingSpan(binder_name) orelse
+        line.application.ruleApplicationSpan();
 }
 
 pub fn setProofScratchDiagnosticIfPresent(

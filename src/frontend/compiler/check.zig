@@ -10,7 +10,9 @@ const Expr = ExprModule.Expr;
 const SourceSpan = ExprModule.SourceSpan;
 const ProofLine = @import("../proof_script.zig").ProofLine;
 const Ref = @import("../proof_script.zig").Ref;
+const RuleApplication = @import("../proof_script.zig").RuleApplication;
 const Span = @import("../proof_script.zig").Span;
+const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerViews = @import("./views.zig");
@@ -46,6 +48,7 @@ const SuccessfulLineAttempt = struct {
 const LineAssertion = union(enum) {
     concrete: ExprId,
     holey: *const Expr,
+    implicit_whole_conclusion,
 
     fn fromParsed(parsed: Holes.ParsedAssertion) LineAssertion {
         return switch (parsed) {
@@ -59,6 +62,71 @@ const CandidateElaboration = struct {
     resolved_bindings: []const ExprId,
     raw_conclusion: ExprId,
     displayed_conclusion: ExprId,
+};
+
+const ApplicationDiagnosticContext = struct {
+    theorem_name: []const u8,
+    line_label: ?[]const u8,
+    span: ?Span,
+
+    fn fromLine(assertion: AssertionStmt, line: ProofLine) @This() {
+        return .{
+            .theorem_name = assertion.name,
+            .line_label = line.label,
+            .span = line.span,
+        };
+    }
+};
+
+const ApplicationLine = struct {
+    label: []const u8,
+    application: RuleApplication,
+    assertion_span: Span,
+
+    fn fromLine(line: ProofLine) @This() {
+        return .{
+            .label = line.label,
+            .application = line.application,
+            .assertion_span = line.assertion.span,
+        };
+    }
+
+    fn forInline(parent: ApplicationLine, application: RuleApplication) @This() {
+        return .{
+            .label = parent.label,
+            .application = application,
+            .assertion_span = application.span,
+        };
+    }
+
+    pub fn ruleApplicationSpan(self: @This()) Span {
+        return self.application.ruleApplicationSpan();
+    }
+
+    pub fn refsOrRuleSpan(self: @This()) Span {
+        return self.application.refsOrRuleSpan();
+    }
+
+    pub fn bindingSpan(self: @This(), binder_name: ?[]const u8) ?Span {
+        return self.application.bindingSpan(binder_name);
+    }
+};
+
+const RuleApplyContext = struct {
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    rule_catalog: *const RuleCatalog.Catalog,
+    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
+    views: *const std.AutoHashMap(u32, ViewDecl),
+    sort_vars: *const SortVarRegistry,
+    assertion: AssertionStmt,
+    labels: *const LabelIndexMap,
+    checked: *std.ArrayListUnmanaged(CheckedLine),
+    diag_scratch: *CompilerDiag.Scratch,
+    rule_unify_cache: *Inference.RuleUnifyCache,
 };
 
 pub fn checkTheoremBlock(
@@ -106,30 +174,7 @@ pub fn checkTheoremBlock(
             return error.DuplicateLabel;
         }
 
-        const base_refs = try allocator.alloc(CheckedRef, line.refs.len);
-        defer allocator.free(base_refs);
-        const base_ref_exprs = try allocator.alloc(ExprId, line.refs.len);
-        defer allocator.free(base_ref_exprs);
-        try resolveBaseRefs(
-            self,
-            theorem,
-            assertion,
-            line,
-            &labels,
-            checked.items,
-            base_refs,
-            base_ref_exprs,
-        );
-
-        const initial_rule_id = try lookupRuleId(
-            self,
-            env,
-            rule_catalog,
-            assertion,
-            line,
-        );
-
-        const parsed_line = try parseProofLineAssertion(
+        const parsed_assertion = try parseProofLineAssertion(
             self,
             parser,
             theorem,
@@ -138,175 +183,40 @@ pub fn checkTheoremBlock(
             assertion,
             line,
         );
+        const line_assertion = LineAssertion.fromParsed(parsed_assertion);
 
-        const saved_diag = getDiagnostic(self);
+        const apply_context: RuleApplyContext = .{
+            .allocator = allocator,
+            .parser = parser,
+            .env = env,
+            .registry = registry,
+            .rule_catalog = rule_catalog,
+            .fresh_bindings = fresh_bindings,
+            .freshen_bindings = freshen_bindings,
+            .views = views,
+            .sort_vars = sort_vars,
+            .assertion = assertion,
+            .labels = &labels,
+            .checked = &checked,
+            .diag_scratch = &diag_scratch,
+            .rule_unify_cache = &rule_unify_cache,
+        };
+        const attempt = try applyRuleApplication(
+            self,
+            &apply_context,
+            line.application,
+            line_assertion,
+            ApplicationDiagnosticContext.fromLine(assertion, line),
+            ApplicationLine.fromLine(line),
+            theorem,
+            &theorem_vars,
+        );
 
-        if (registry.getFallbackRule(initial_rule_id) == null) {
-            const checked_mark = checked.items.len;
-            const attempt = try tryApplyLineWithCandidate(
-                self,
-                allocator,
-                parser,
-                env,
-                registry,
-                fresh_bindings,
-                freshen_bindings,
-                views,
-                sort_vars,
-                assertion,
-                line,
-                parsed_line,
-                initial_rule_id,
-                theorem,
-                &theorem_vars,
-                base_refs,
-                base_ref_exprs,
-                &checked,
-                &diag_scratch,
-                &rule_unify_cache,
-            );
-
-            try validateAttemptCheckedIrRange(
-                self,
-                env,
-                theorem,
-                assertion.name,
-                checked.items[checked_mark..],
-                line.label,
-                line.span,
-                .theorem_application,
-                saved_diag,
-            );
-
-            restoreDiagnostic(self, saved_diag);
-            try labels.put(line.label, attempt.line_idx);
-            last_line = checked.items[attempt.line_idx].expr;
-            last_line_idx = attempt.line_idx;
-            last_label = line.label;
-            last_span = line.span;
-            continue;
-        }
-
-        var first_diag: ?Diagnostic = null;
-        var first_err: ?anyerror = null;
-        var seen_candidates = std.AutoHashMap(u32, void).init(allocator);
-        defer seen_candidates.deinit();
-        var candidate_rule_id = initial_rule_id;
-
-        while (true) {
-            const seen = try seen_candidates.getOrPut(candidate_rule_id);
-            if (seen.found_existing) {
-                CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
-                    .kind = .generic,
-                    .err = error.FallbackCycle,
-                    .theorem_name = assertion.name,
-                    .line_label = line.label,
-                    .rule_name = line.rule_name,
-                    .span = line.rule_span,
-                }, .theorem_application));
-                return error.FallbackCycle;
-            }
-
-            restoreDiagnostic(self, null);
-            const checked_mark = checked.items.len;
-            var attempt_theorem = try theorem.clone();
-            var attempt_theorem_vars = cloneNameExprMap(
-                allocator,
-                &theorem_vars,
-            ) catch |err| {
-                attempt_theorem.deinit();
-                return err;
-            };
-
-            var attempt = tryApplyLineWithCandidate(
-                self,
-                allocator,
-                parser,
-                env,
-                registry,
-                fresh_bindings,
-                freshen_bindings,
-                views,
-                sort_vars,
-                assertion,
-                line,
-                parsed_line,
-                candidate_rule_id,
-                &attempt_theorem,
-                &attempt_theorem_vars,
-                base_refs,
-                base_ref_exprs,
-                &checked,
-                &diag_scratch,
-                &rule_unify_cache,
-            ) catch |err| {
-                CheckedIr.rollbackToMark(
-                    allocator,
-                    &checked,
-                    checked_mark,
-                );
-                attempt_theorem_vars.deinit();
-                attempt_theorem.deinit();
-                if (first_err == null) {
-                    first_err = err;
-                    first_diag = getDiagnostic(self);
-                }
-                restoreDiagnostic(self, null);
-                candidate_rule_id = registry.getFallbackRule(
-                    candidate_rule_id,
-                ) orelse {
-                    var diag = first_diag orelse saved_diag;
-                    if (first_diag != null) {
-                        if (diag) |*actual_diag| {
-                            try addFallbackFailureNote(
-                                allocator,
-                                actual_diag,
-                                parsed_line,
-                                line,
-                            );
-                        }
-                    }
-                    restoreDiagnostic(self, diag);
-                    return first_err.?;
-                };
-                continue;
-            };
-
-            validateAttemptCheckedIrRange(
-                self,
-                env,
-                &attempt.theorem,
-                assertion.name,
-                checked.items[checked_mark..],
-                line.label,
-                line.span,
-                .theorem_application,
-                saved_diag,
-            ) catch |err| {
-                CheckedIr.rollbackToMark(
-                    allocator,
-                    &checked,
-                    checked_mark,
-                );
-                attempt.theorem_vars.deinit();
-                attempt.theorem.deinit();
-                return err;
-            };
-
-            var old_theorem = theorem.*;
-            theorem.* = attempt.theorem;
-            old_theorem.deinit();
-            theorem_vars.deinit();
-            theorem_vars = attempt.theorem_vars;
-            restoreDiagnostic(self, saved_diag);
-
-            try labels.put(line.label, attempt.line_idx);
-            last_line = checked.items[attempt.line_idx].expr;
-            last_line_idx = attempt.line_idx;
-            last_label = line.label;
-            last_span = line.span;
-            break;
-        }
+        try labels.put(line.label, attempt.line_idx);
+        last_line = checked.items[attempt.line_idx].expr;
+        last_line_idx = attempt.line_idx;
+        last_label = line.label;
+        last_span = line.span;
     }
 
     const final_line = last_line orelse {
@@ -417,7 +327,7 @@ fn parseProofLineAssertion(
             err,
             assertion.name,
             line.label,
-            line.rule_name,
+            line.application.rule_name,
             null,
             line.assertion.span,
         ));
@@ -425,44 +335,207 @@ fn parseProofLineAssertion(
     };
 }
 
-fn tryApplyLineWithCandidate(
+fn applyRuleApplication(
     self: anytype,
-    allocator: std.mem.Allocator,
-    parser: *MM0Parser,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
-    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
-    views: *const std.AutoHashMap(u32, ViewDecl),
-    sort_vars: *const SortVarRegistry,
-    assertion: AssertionStmt,
-    line: ProofLine,
-    parsed_line: Holes.ParsedAssertion,
+    context: *const RuleApplyContext,
+    application: RuleApplication,
+    line_assertion: LineAssertion,
+    diag_context: ApplicationDiagnosticContext,
+    line: ApplicationLine,
+    theorem: *TheoremContext,
+    theorem_vars: *NameExprMap,
+) anyerror!SuccessfulLineAttempt {
+    const allocator = context.allocator;
+    const initial_rule_id = try lookupRuleApplicationId(
+        self,
+        context.env,
+        context.rule_catalog,
+        diag_context,
+        application,
+    );
+    const saved_diag = getDiagnostic(self);
+
+    var first_diag: ?Diagnostic = null;
+    var first_err: ?anyerror = null;
+    var seen_candidates = std.AutoHashMap(u32, void).init(allocator);
+    defer seen_candidates.deinit();
+    var candidate_rule_id = initial_rule_id;
+
+    while (true) {
+        const seen = try seen_candidates.getOrPut(candidate_rule_id);
+        if (seen.found_existing) {
+            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+                .kind = .generic,
+                .err = error.FallbackCycle,
+                .theorem_name = diag_context.theorem_name,
+                .line_label = diag_context.line_label,
+                .rule_name = application.rule_name,
+                .span = application.rule_span,
+            }, .theorem_application));
+            return error.FallbackCycle;
+        }
+
+        const next_fallback = context.registry.getFallbackRule(
+            candidate_rule_id,
+        );
+        const speculative = first_err != null or next_fallback != null;
+        restoreDiagnostic(self, if (speculative) null else saved_diag);
+        const checked_mark = context.checked.items.len;
+
+        if (speculative) {
+            var attempt_theorem = try theorem.clone();
+            var attempt_theorem_vars = cloneNameExprMap(
+                allocator,
+                theorem_vars,
+            ) catch |err| {
+                attempt_theorem.deinit();
+                return err;
+            };
+
+            var attempt = tryApplyRuleApplicationWithCandidate(
+                self,
+                context,
+                application,
+                line_assertion,
+                line,
+                candidate_rule_id,
+                &attempt_theorem,
+                &attempt_theorem_vars,
+            ) catch |err| {
+                CheckedIr.rollbackToMark(allocator, context.checked, checked_mark);
+                attempt_theorem_vars.deinit();
+                attempt_theorem.deinit();
+                if (first_err == null) {
+                    first_err = err;
+                    first_diag = getDiagnostic(self);
+                }
+                candidate_rule_id = next_fallback orelse {
+                    var diag = first_diag orelse saved_diag;
+                    if (first_diag != null) {
+                        if (diag) |*actual_diag| {
+                            addFallbackFailureNote(
+                                actual_diag,
+                                line_assertion,
+                                line,
+                            );
+                        }
+                    }
+                    restoreDiagnostic(self, diag);
+                    return first_err.?;
+                };
+                continue;
+            };
+
+            validateAttemptCheckedIrRange(
+                self,
+                context.env,
+                &attempt.theorem,
+                diag_context.theorem_name,
+                context.checked.items[checked_mark..],
+                diag_context.line_label,
+                diag_context.span,
+                .theorem_application,
+                saved_diag,
+            ) catch |err| {
+                CheckedIr.rollbackToMark(allocator, context.checked, checked_mark);
+                attempt.theorem_vars.deinit();
+                attempt.theorem.deinit();
+                return err;
+            };
+
+            var old_theorem = theorem.*;
+            theorem.* = attempt.theorem;
+            old_theorem.deinit();
+            theorem_vars.deinit();
+            theorem_vars.* = attempt.theorem_vars;
+            restoreDiagnostic(self, saved_diag);
+            return attempt;
+        }
+
+        const attempt = tryApplyRuleApplicationWithCandidate(
+            self,
+            context,
+            application,
+            line_assertion,
+            line,
+            candidate_rule_id,
+            theorem,
+            theorem_vars,
+        ) catch |err| {
+            return err;
+        };
+
+        try validateAttemptCheckedIrRange(
+            self,
+            context.env,
+            theorem,
+            diag_context.theorem_name,
+            context.checked.items[checked_mark..],
+            diag_context.line_label,
+            diag_context.span,
+            .theorem_application,
+            saved_diag,
+        );
+
+        restoreDiagnostic(self, saved_diag);
+        return attempt;
+    }
+}
+
+fn tryApplyRuleApplicationWithCandidate(
+    self: anytype,
+    context: *const RuleApplyContext,
+    application: RuleApplication,
+    line_assertion: LineAssertion,
+    line: ApplicationLine,
     rule_id: u32,
     theorem: *TheoremContext,
     theorem_vars: *NameExprMap,
-    base_refs: []const CheckedRef,
-    base_ref_exprs: []const ExprId,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    diag_scratch: *CompilerDiag.Scratch,
-    rule_unify_cache: *Inference.RuleUnifyCache,
-) !SuccessfulLineAttempt {
-    const line_assertion = LineAssertion.fromParsed(parsed_line);
-
+) anyerror!SuccessfulLineAttempt {
+    const allocator = context.allocator;
+    const parser = context.parser;
+    const env = context.env;
+    const registry = context.registry;
+    const assertion = context.assertion;
+    const checked = context.checked;
+    const diag_scratch = context.diag_scratch;
     const rule = &env.rules.items[rule_id];
-    if (line.refs.len != rule.hyps.len) {
+    const diag_line = line;
+    if (application.refs.len != rule.hyps.len) {
         CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
             .kind = .ref_count_mismatch,
             .err = error.RefCountMismatch,
             .theorem_name = assertion.name,
-            .line_label = line.label,
-            .rule_name = line.rule_name,
-            .span = line.refsOrRuleSpan(),
+            .line_label = diag_line.label,
+            .rule_name = application.rule_name,
+            .span = application.refsOrRuleSpan(),
         }, .theorem_application));
         return error.RefCountMismatch;
     }
 
-    const refs = try allocator.dupe(CheckedRef, base_refs);
+    // Ownership of `refs` flows asymmetrically. The freshen path duplicates it
+    // internally and we free our copy explicitly on success below. The normal
+    // path passes it to `Matching.tryBuildConclusionLine`, which transfers
+    // ownership to a CheckedLine via `appendRuleLine`; from then on,
+    // `rollbackToMark` (in the fallback handler) or final teardown will free it.
+    // We therefore deliberately omit an `errdefer free(refs)` here: it would
+    // double-free in the late-error case where `appendRuleLine` already stored
+    // refs in a CheckedLine before a subsequent step (e.g. `appendTransportLine`
+    // or `emitTransport`) failed. The trade-off is that errors before refs is
+    // stored leak this small allocation; that matches pre-refactor behavior.
+    const refs = try allocator.alloc(CheckedRef, application.refs.len);
+    const ref_exprs = try allocator.alloc(ExprId, application.refs.len);
+    defer allocator.free(ref_exprs);
+    try elaborateRefs(
+        self,
+        context,
+        diag_line,
+        theorem,
+        theorem_vars,
+        application.refs,
+        refs,
+        ref_exprs,
+    );
 
     const partial_bindings = try parseBindings(
         self,
@@ -470,10 +543,11 @@ fn tryApplyLineWithCandidate(
         parser,
         theorem,
         theorem_vars,
-        sort_vars,
+        context.sort_vars,
         assertion.name,
         rule,
-        line,
+        application,
+        diag_line,
     );
     defer allocator.free(partial_bindings);
 
@@ -484,24 +558,30 @@ fn tryApplyLineWithCandidate(
     const explicit_bindings = try allocator.dupe(?ExprId, partial_bindings);
     defer allocator.free(explicit_bindings);
 
-    if (fresh_bindings.get(rule_id)) |rule_fresh| {
+    if (context.fresh_bindings.get(rule_id)) |rule_fresh| {
         try applyFreshBindings(
             self,
             parser,
             env,
             theorem,
             theorem_vars,
-            sort_vars,
+            context.sort_vars,
             assertion.name,
             rule,
-            line,
-            try lineAssertionKnownDeps(env, theorem, line_assertion),
-            base_ref_exprs,
+            diag_line,
+            try lineAssertionKnownDeps(
+                env,
+                theorem,
+                rule,
+                line_assertion,
+                partial_bindings,
+            ),
+            ref_exprs,
             partial_bindings,
             rule_fresh,
         );
     }
-    const maybe_view = views.get(rule_id);
+    const maybe_view = context.views.get(rule_id);
     const had_omitted = Inference.hasOmittedBindings(partial_bindings);
     const rule_has_advanced_inference =
         Inference.shouldUseAdvancedInference(rule_id, maybe_view, registry);
@@ -519,7 +599,7 @@ fn tryApplyLineWithCandidate(
                         registry,
                         &view,
                         line_expr,
-                        base_ref_exprs,
+                        ref_exprs,
                         partial_bindings,
                         null,
                         null,
@@ -529,14 +609,14 @@ fn tryApplyLineWithCandidate(
                             .kind = .generic,
                             .err = err,
                             .theorem_name = assertion.name,
-                            .line_label = line.label,
-                            .rule_name = line.rule_name,
-                            .span = line.ruleApplicationSpan(),
+                            .line_label = diag_line.label,
+                            .rule_name = diag_line.application.rule_name,
+                            .span = diag_line.ruleApplicationSpan(),
                         }, .theorem_application));
                         return err;
                     };
                 },
-                .holey => {},
+                .holey, .implicit_whole_conclusion => {},
             }
         }
     }
@@ -544,7 +624,7 @@ fn tryApplyLineWithCandidate(
     const fresh_context: Inference.HiddenWitnessFreshContext = .{
         .parser = parser,
         .theorem_vars = theorem_vars,
-        .sort_vars = sort_vars,
+        .sort_vars = context.sort_vars,
     };
 
     const bindings = try inferCandidateBindings(
@@ -557,16 +637,16 @@ fn tryApplyLineWithCandidate(
         assertion,
         rule_id,
         rule,
-        line,
+        diag_line,
         line_assertion,
         partial_bindings,
-        base_ref_exprs,
+        ref_exprs,
         fresh_context,
         maybe_view,
         had_omitted,
         rule_has_advanced_inference,
         use_advanced_inference,
-        rule_unify_cache,
+        context.rule_unify_cache,
     );
 
     const norm_spec = registry.getNormalizeSpec(rule_id);
@@ -579,12 +659,12 @@ fn tryApplyLineWithCandidate(
         env,
         theorem,
         assertion,
-        line,
+        diag_line,
         rule,
         resolved_bindings,
     ) catch |err| {
         if (err != error.DepViolation) return err;
-        const rule_freshen = freshen_bindings.get(rule_id) orelse return err;
+        const rule_freshen = context.freshen_bindings.get(rule_id) orelse return err;
         const dep_detail = (try Inference.firstDepViolation(
             env,
             theorem,
@@ -601,7 +681,7 @@ fn tryApplyLineWithCandidate(
             registry,
             theorem,
             theorem_vars,
-            sort_vars,
+            context.sort_vars,
             rule,
             try resolveLineAssertionForBindings(
                 self,
@@ -612,13 +692,13 @@ fn tryApplyLineWithCandidate(
                 registry,
                 diag_scratch,
                 assertion,
-                line,
+                diag_line,
                 norm_spec,
                 rule,
                 line_assertion,
                 resolved_bindings,
             ),
-            base_ref_exprs,
+            ref_exprs,
             resolved_bindings,
             rule_freshen,
             dep_detail,
@@ -631,9 +711,9 @@ fn tryApplyLineWithCandidate(
                 .kind = .generic,
                 .err = fresh_err,
                 .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.ruleApplicationSpan(),
+                .line_label = diag_line.label,
+                .rule_name = application.rule_name,
+                .span = application.ruleApplicationSpan(),
                 .detail = .{ .dep_violation = dep_detail },
             }, .theorem_application);
             try addFreshenAttemptNotes(allocator, &diag, rule, freshen_report);
@@ -653,9 +733,9 @@ fn tryApplyLineWithCandidate(
                 .kind = .generic,
                 .err = error.AlphaRewriteSearchFailed,
                 .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.ruleApplicationSpan(),
+                .line_label = diag_line.label,
+                .rule_name = application.rule_name,
+                .span = application.ruleApplicationSpan(),
                 .detail = .{ .dep_violation = remaining_dep_detail },
             }, .theorem_application);
             try addFreshenAttemptNotes(allocator, &diag, rule, freshen_report);
@@ -669,7 +749,7 @@ fn tryApplyLineWithCandidate(
             env,
             theorem,
             assertion,
-            line,
+            diag_line,
             rule,
             resolved_bindings,
         );
@@ -677,7 +757,7 @@ fn tryApplyLineWithCandidate(
     restoreDiagnostic(self, null);
 
     if (freshened_bindings) |freshened| {
-        if (fresh_bindings.get(rule_id)) |rule_fresh| {
+        if (context.fresh_bindings.get(rule_id)) |rule_fresh| {
             try validateFreshBindingsAgainstLine(
                 self,
                 allocator,
@@ -685,7 +765,7 @@ fn tryApplyLineWithCandidate(
                 theorem,
                 assertion.name,
                 rule,
-                line,
+                diag_line,
                 try resolveLineAssertionForBindings(
                     self,
                     allocator,
@@ -695,13 +775,13 @@ fn tryApplyLineWithCandidate(
                     registry,
                     diag_scratch,
                     assertion,
-                    line,
+                    diag_line,
                     norm_spec,
                     rule,
                     line_assertion,
                     bindings,
                 ),
-                base_ref_exprs,
+                ref_exprs,
                 explicit_bindings,
                 bindings,
                 rule_fresh,
@@ -724,7 +804,7 @@ fn tryApplyLineWithCandidate(
                 registry,
                 diag_scratch,
                 assertion,
-                line,
+                diag_line,
                 norm_spec,
                 rule,
                 line_assertion,
@@ -735,18 +815,19 @@ fn tryApplyLineWithCandidate(
             bindings,
             freshened,
             refs,
-            base_ref_exprs,
+            ref_exprs,
         ) catch |err| {
             CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = err,
                 .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.ruleApplicationSpan(),
+                .line_label = diag_line.label,
+                .rule_name = diag_line.application.rule_name,
+                .span = diag_line.ruleApplicationSpan(),
             }, .theorem_application));
             return err;
         };
+        allocator.free(refs);
         return .{
             .line_idx = line_idx,
             .theorem = theorem.*,
@@ -754,7 +835,7 @@ fn tryApplyLineWithCandidate(
         };
     }
 
-    for (base_ref_exprs, line.refs, 0..) |actual, ref, idx| {
+    for (ref_exprs, application.refs, 0..) |actual, ref, idx| {
         const expected = try theorem.instantiateTemplate(
             rule.hyps[idx],
             resolved_bindings,
@@ -783,9 +864,9 @@ fn tryApplyLineWithCandidate(
                 .generic,
                 err,
                 assertion.name,
-                line.label,
-                line.rule_name,
-                refSpan(line.refs[idx]),
+                diag_line.label,
+                application.rule_name,
+                refSpan(application.refs[idx]),
             )) {
                 return err;
             }
@@ -800,14 +881,15 @@ fn tryApplyLineWithCandidate(
         const span = switch (ref) {
             .hyp => |hyp| hyp.span,
             .line => |label| label.span,
+            .application => |inline_app| inline_app.span,
         };
         var diag = switch (ref) {
             .hyp => |hyp| CompilerDiag.withPhase(Diagnostic{
                 .kind = .hypothesis_mismatch,
                 .err = error.HypothesisMismatch,
                 .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
+                .line_label = diag_line.label,
+                .rule_name = diag_line.application.rule_name,
                 .span = span,
                 .detail = .{
                     .hypothesis_ref = .{
@@ -819,9 +901,18 @@ fn tryApplyLineWithCandidate(
                 .kind = .hypothesis_mismatch,
                 .err = error.HypothesisMismatch,
                 .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
+                .line_label = diag_line.label,
+                .rule_name = diag_line.application.rule_name,
                 .name = label.label,
+                .span = span,
+            }, .theorem_application),
+            .application => |inline_app| CompilerDiag.withPhase(Diagnostic{
+                .kind = .hypothesis_mismatch,
+                .err = error.HypothesisMismatch,
+                .theorem_name = assertion.name,
+                .line_label = diag_line.label,
+                .rule_name = diag_line.application.rule_name,
+                .name = inline_app.rule_name,
                 .span = span,
             }, .theorem_application),
         };
@@ -852,14 +943,14 @@ fn tryApplyLineWithCandidate(
         registry,
         diag_scratch,
         assertion,
-        line,
+        diag_line,
         norm_spec,
         rule,
         line_assertion,
         resolved_bindings,
     );
 
-    if (fresh_bindings.get(rule_id)) |rule_fresh| {
+    if (context.fresh_bindings.get(rule_id)) |rule_fresh| {
         try validateFreshBindingsAgainstLine(
             self,
             allocator,
@@ -867,9 +958,9 @@ fn tryApplyLineWithCandidate(
             theorem,
             assertion.name,
             rule,
-            line,
+            diag_line,
             candidate.displayed_conclusion,
-            base_ref_exprs,
+            ref_exprs,
             explicit_bindings,
             candidate.resolved_bindings,
             rule_fresh,
@@ -901,9 +992,9 @@ fn tryApplyLineWithCandidate(
             .generic,
             err,
             assertion.name,
-            line.label,
-            line.rule_name,
-            line.assertion.span,
+            diag_line.label,
+            diag_line.application.rule_name,
+            diag_line.assertion_span,
         )) {
             return err;
         }
@@ -915,9 +1006,9 @@ fn tryApplyLineWithCandidate(
             .kind = .conclusion_mismatch,
             .err = error.ConclusionMismatch,
             .theorem_name = assertion.name,
-            .line_label = line.label,
-            .rule_name = line.rule_name,
-            .span = line.assertion.span,
+            .line_label = diag_line.label,
+            .rule_name = diag_line.application.rule_name,
+            .span = diag_line.assertion_span,
         }, .theorem_application);
         try addComparisonSnapshotNotes(
             allocator,
@@ -951,7 +1042,7 @@ fn resolveLineAssertionForBindings(
     registry: *RewriteRegistry,
     diag_scratch: *CompilerDiag.Scratch,
     assertion: AssertionStmt,
-    line: ProofLine,
+    line: ApplicationLine,
     norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
     rule: *const RuleDecl,
     line_assertion: LineAssertion,
@@ -959,6 +1050,10 @@ fn resolveLineAssertionForBindings(
 ) !ExprId {
     return switch (line_assertion) {
         .concrete => |line_expr| line_expr,
+        .implicit_whole_conclusion => try theorem.instantiateTemplate(
+            rule.concl,
+            bindings,
+        ),
         .holey => |holey| blk: {
             const expected_line = try theorem.instantiateTemplate(
                 rule.concl,
@@ -982,6 +1077,38 @@ fn resolveLineAssertionForBindings(
     };
 }
 
+fn requireConcreteBindingsWithDiagnostic(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    assertion: AssertionStmt,
+    rule: *const RuleDecl,
+    line: ApplicationLine,
+    partial_bindings: []const ?ExprId,
+) ![]const ExprId {
+    for (partial_bindings, 0..) |binding, idx| {
+        if (binding != null) continue;
+        CompilerDiag.setProof(
+            self,
+            try Inference.buildMissingBinderDiagnostic(
+                allocator,
+                env,
+                theorem,
+                assertion,
+                rule,
+                line,
+                .strict_replay,
+                partial_bindings,
+                partial_bindings,
+                idx,
+            ),
+        );
+        return error.MissingBinderAssignment;
+    }
+    return try Inference.requireConcreteBindings(allocator, partial_bindings);
+}
+
 fn inferCandidateBindings(
     self: anytype,
     allocator: std.mem.Allocator,
@@ -992,7 +1119,7 @@ fn inferCandidateBindings(
     assertion: AssertionStmt,
     rule_id: u32,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: ApplicationLine,
     line_assertion: LineAssertion,
     partial_bindings: []const ?ExprId,
     base_ref_exprs: []const ExprId,
@@ -1122,6 +1249,70 @@ fn inferCandidateBindings(
                 return err;
             };
         },
+        .implicit_whole_conclusion => blk: {
+            if (had_omitted) {
+                if (maybe_view) |view| {
+                    const seeded = try allocator.dupe(
+                        ?ExprId,
+                        partial_bindings,
+                    );
+                    defer allocator.free(seeded);
+                    const view_applied = if (CompilerViews.applyViewBindingsRefsOnly(
+                        allocator,
+                        theorem,
+                        env,
+                        registry,
+                        &view,
+                        base_ref_exprs,
+                        seeded,
+                        null,
+                        null,
+                        self.debug.views,
+                    ))
+                        true
+                    else |err| blk_view: {
+                        if (err == error.OutOfMemory) return err;
+                        break :blk_view false;
+                    };
+                    if (view_applied) {
+                        if (!Inference.hasOmittedBindings(seeded)) {
+                            break :blk try Inference.requireConcreteBindings(
+                                allocator,
+                                seeded,
+                            );
+                        }
+                        if (try Inference.inferBindingsFromRefsOnly(
+                            allocator,
+                            theorem,
+                            rule,
+                            seeded,
+                            base_ref_exprs,
+                        )) |refs_only_bindings| {
+                            break :blk refs_only_bindings;
+                        }
+                    }
+                }
+                if (try Inference.inferBindingsFromRefsOnly(
+                    allocator,
+                    theorem,
+                    rule,
+                    partial_bindings,
+                    base_ref_exprs,
+                )) |refs_only_bindings| {
+                    break :blk refs_only_bindings;
+                }
+            }
+            break :blk try requireConcreteBindingsWithDiagnostic(
+                self,
+                allocator,
+                env,
+                theorem,
+                assertion,
+                rule,
+                line,
+                partial_bindings,
+            );
+        },
         .concrete => |line_expr| blk: {
             if (had_omitted) {
                 break :blk try Inference.inferBindings(
@@ -1161,7 +1352,7 @@ fn elaborateCandidateLine(
     registry: *RewriteRegistry,
     diag_scratch: *CompilerDiag.Scratch,
     assertion: AssertionStmt,
-    line: ProofLine,
+    line: ApplicationLine,
     norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
     rule: *const RuleDecl,
     line_assertion: LineAssertion,
@@ -1173,6 +1364,7 @@ fn elaborateCandidateLine(
     );
     const displayed_conclusion = switch (line_assertion) {
         .concrete => |line_expr| line_expr,
+        .implicit_whole_conclusion => raw_conclusion,
         .holey => |holey| try validateHoleyAssertionAgainstCandidate(
             self,
             allocator,
@@ -1204,11 +1396,17 @@ fn validateHoleyAssertionAgainstCandidate(
     registry: *RewriteRegistry,
     diag_scratch: *CompilerDiag.Scratch,
     assertion: AssertionStmt,
-    line: ProofLine,
+    line: ApplicationLine,
     norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
     holey: *const Expr,
     expected_line: ExprId,
 ) !ExprId {
+    // Prefer the raw instantiated conclusion when the holey surface permits
+    // it. A whole-line hole such as `_wff` can match anything; returning the
+    // normalized form there hides the rule's raw constructor from later
+    // omitted-binder inference that uses this line as a ref. If the raw shape
+    // does not match the visible surface, normalized and materialized checks
+    // below still handle @normalize conclusions.
     var hole_report = Holes.ConcreteMatchReport{};
     if (try holeyAssertionMatchesCandidate(
         allocator,
@@ -1270,9 +1468,9 @@ fn validateHoleyAssertionAgainstCandidate(
         .err = error.HoleConclusionMismatch,
         .theorem_name = assertion.name,
         .line_label = line.label,
-        .rule_name = line.rule_name,
+        .rule_name = line.application.rule_name,
         .span = concreteMatchFailureSpan(line, hole_report) orelse
-            line.assertion.span,
+            line.assertion_span,
     }, .theorem_application);
     try addHoleConcreteMatchNotes(allocator, &diag, line, hole_report);
     CompilerDiag.setProof(self, diag);
@@ -1598,24 +1796,24 @@ test "checked ir leak diagnostics replace saved diagnostics" {
     try std.testing.expectEqual(.proof, diag.source);
 }
 
-fn lookupRuleId(
+fn lookupRuleApplicationId(
     self: anytype,
     env: *const GlobalEnv,
     rule_catalog: *const RuleCatalog.Catalog,
-    assertion: AssertionStmt,
-    line: ProofLine,
+    diag_context: ApplicationDiagnosticContext,
+    application: RuleApplication,
 ) !u32 {
-    if (env.getRuleId(line.rule_name)) |rule_id| return rule_id;
+    if (env.getRuleId(application.rule_name)) |rule_id| return rule_id;
 
-    if (rule_catalog.get(line.rule_name)) |entry| {
+    if (rule_catalog.get(application.rule_name)) |entry| {
         if (entry.ordinal >= env.rules.items.len) {
             var diag: Diagnostic = .{
                 .kind = .rule_not_yet_available,
                 .err = error.RuleNotYetAvailable,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.rule_span,
+                .theorem_name = diag_context.theorem_name,
+                .line_label = diag_context.line_label,
+                .rule_name = application.rule_name,
+                .span = application.rule_span,
             };
             CompilerDiag.setPhase(&diag, .theorem_application);
             CompilerDiag.addNote(
@@ -1638,25 +1836,26 @@ fn lookupRuleId(
     CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
         .kind = .unknown_rule,
         .err = error.UnknownRule,
-        .theorem_name = assertion.name,
-        .line_label = line.label,
-        .rule_name = line.rule_name,
-        .span = line.rule_span,
+        .theorem_name = diag_context.theorem_name,
+        .line_label = diag_context.line_label,
+        .rule_name = application.rule_name,
+        .span = application.rule_span,
     }, .theorem_application));
     return error.UnknownRule;
 }
 
-fn resolveBaseRefs(
+fn elaborateRefs(
     self: anytype,
-    theorem: *const TheoremContext,
-    assertion: AssertionStmt,
-    line: ProofLine,
-    labels: *const LabelIndexMap,
-    checked: []const CheckedLine,
+    context: *const RuleApplyContext,
+    line: ApplicationLine,
+    theorem: *TheoremContext,
+    theorem_vars: *NameExprMap,
+    source_refs: []const Ref,
     refs: []CheckedRef,
     ref_exprs: []ExprId,
-) !void {
-    for (line.refs, 0..) |ref, idx| {
+) anyerror!void {
+    const assertion = context.assertion;
+    for (source_refs, 0..) |ref, idx| {
         ref_exprs[idx] = switch (ref) {
             .hyp => |hyp| blk: {
                 if (hyp.index == 0 or
@@ -1680,7 +1879,7 @@ fn resolveBaseRefs(
                 break :blk theorem.theorem_hyps.items[hyp.index - 1];
             },
             .line => |label| blk: {
-                const line_idx = labels.get(label.label) orelse {
+                const line_idx = context.labels.get(label.label) orelse {
                     CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                         .kind = .unknown_label,
                         .err = error.UnknownLabel,
@@ -1692,7 +1891,25 @@ fn resolveBaseRefs(
                     return error.UnknownLabel;
                 };
                 refs[idx] = .{ .line = line_idx };
-                break :blk checked[line_idx].expr;
+                break :blk context.checked.items[line_idx].expr;
+            },
+            .application => |inline_app| blk: {
+                const attempt = try applyRuleApplication(
+                    self,
+                    context,
+                    inline_app,
+                    .implicit_whole_conclusion,
+                    .{
+                        .theorem_name = assertion.name,
+                        .line_label = line.label,
+                        .span = inline_app.span,
+                    },
+                    line.forInline(inline_app),
+                    theorem,
+                    theorem_vars,
+                );
+                refs[idx] = .{ .line = attempt.line_idx };
+                break :blk context.checked.items[attempt.line_idx].expr;
             },
         };
     }
@@ -1770,7 +1987,8 @@ fn parseBindings(
     sort_vars: *const SortVarRegistry,
     theorem_name: []const u8,
     rule: *const RuleDecl,
-    line: ProofLine,
+    application: RuleApplication,
+    line: ApplicationLine,
 ) ![]?ExprId {
     for (rule.arg_names) |arg_name| {
         if (arg_name == null) {
@@ -1779,8 +1997,8 @@ fn parseBindings(
                 .err = error.UnnamedRuleBinder,
                 .theorem_name = theorem_name,
                 .line_label = line.label,
-                .rule_name = line.rule_name,
-                .span = line.ruleApplicationSpan(),
+                .rule_name = application.rule_name,
+                .span = application.ruleApplicationSpan(),
             }, .theorem_application));
             return error.UnnamedRuleBinder;
         }
@@ -1789,14 +2007,14 @@ fn parseBindings(
     const bindings = try allocator.alloc(?ExprId, rule.args.len);
     @memset(bindings, null);
 
-    for (line.arg_bindings) |binding| {
+    for (application.arg_bindings) |binding| {
         const arg_index = findRuleArgIndex(rule, binding.name) orelse {
             CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
                 .kind = .unknown_binder_name,
                 .err = error.UnknownBinderName,
                 .theorem_name = theorem_name,
                 .line_label = line.label,
-                .rule_name = line.rule_name,
+                .rule_name = application.rule_name,
                 .name = binding.name,
                 .span = binding.span,
             }, .theorem_application));
@@ -1808,7 +2026,7 @@ fn parseBindings(
                 .err = error.DuplicateBinderAssignment,
                 .theorem_name = theorem_name,
                 .line_label = line.label,
-                .rule_name = line.rule_name,
+                .rule_name = application.rule_name,
                 .name = binding.name,
                 .span = binding.span,
             }, .theorem_application));
@@ -1835,7 +2053,7 @@ fn parseBindings(
                 err,
                 theorem_name,
                 line.label,
-                line.rule_name,
+                application.rule_name,
                 binding.name,
                 binding.formula.span,
             ));
@@ -1850,7 +2068,9 @@ fn parseBindings(
 fn lineAssertionKnownDeps(
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
+    rule: *const RuleDecl,
     line_assertion: LineAssertion,
+    partial_bindings: []const ?ExprId,
 ) !u55 {
     return switch (line_assertion) {
         .concrete => |expr_id| (try Inference.exprInfo(
@@ -1860,6 +2080,43 @@ fn lineAssertionKnownDeps(
             expr_id,
         )).deps,
         .holey => |expr| expr.deps(),
+        .implicit_whole_conclusion => try templateKnownDeps(
+            env,
+            theorem,
+            rule.concl,
+            partial_bindings,
+        ),
+    };
+}
+
+fn templateKnownDeps(
+    env: *const GlobalEnv,
+    theorem: *const TheoremContext,
+    template: TemplateExpr,
+    partial_bindings: []const ?ExprId,
+) !u55 {
+    return switch (template) {
+        .binder => |idx| blk: {
+            const expr_id = partial_bindings[idx] orelse break :blk 0;
+            break :blk (try Inference.exprInfo(
+                env,
+                theorem,
+                theorem.arg_infos,
+                expr_id,
+            )).deps;
+        },
+        .app => |app| blk: {
+            var deps: u55 = 0;
+            for (app.args) |arg| {
+                deps |= try templateKnownDeps(
+                    env,
+                    theorem,
+                    arg,
+                    partial_bindings,
+                );
+            }
+            break :blk deps;
+        },
     };
 }
 
@@ -1870,7 +2127,7 @@ fn validateFreshBindingsAgainstLine(
     theorem: *TheoremContext,
     theorem_name: []const u8,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: ApplicationLine,
     line_expr: ExprId,
     ref_exprs: []const ExprId,
     partial_bindings: []const ?ExprId,
@@ -1906,7 +2163,7 @@ fn validateFreshBindingsAgainstLine(
             .err = error.FreshNoAvailableVar,
             .theorem_name = theorem_name,
             .line_label = line.label,
-            .rule_name = line.rule_name,
+            .rule_name = line.application.rule_name,
             .name = rule.arg_names[fresh.target_arg_idx].?,
             .span = line.ruleApplicationSpan(),
         }, .theorem_application));
@@ -1923,7 +2180,7 @@ fn applyFreshBindings(
     sort_vars: *const SortVarRegistry,
     theorem_name: []const u8,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: ApplicationLine,
     line_deps: u55,
     ref_exprs: []const ExprId,
     bindings: []?ExprId,
@@ -1956,7 +2213,7 @@ fn applyFreshBindings(
                 .err = err,
                 .theorem_name = theorem_name,
                 .line_label = line.label,
-                .rule_name = line.rule_name,
+                .rule_name = line.application.rule_name,
                 .name = rule.arg_names[fresh.target_arg_idx].?,
                 .span = line.ruleApplicationSpan(),
             }, .theorem_application));
@@ -1968,14 +2225,12 @@ fn applyFreshBindings(
 }
 
 fn addFallbackFailureNote(
-    allocator: std.mem.Allocator,
     diag: *Diagnostic,
-    parsed_line: Holes.ParsedAssertion,
-    line: ProofLine,
-) !void {
-    _ = allocator;
-    switch (parsed_line) {
-        .concrete => {},
+    line_assertion: LineAssertion,
+    line: ApplicationLine,
+) void {
+    switch (line_assertion) {
+        .concrete, .implicit_whole_conclusion => {},
         .holey => |holey| {
             addStaticProofNoteSpan(
                 diag,
@@ -1988,7 +2243,7 @@ fn addFallbackFailureNote(
 }
 
 fn concreteMatchFailureSpan(
-    line: ProofLine,
+    line: ApplicationLine,
     report: Holes.ConcreteMatchReport,
 ) ?Span {
     const failure = report.failure orelse return null;
@@ -2001,16 +2256,16 @@ fn concreteMatchFailureSpan(
     };
 }
 
-fn firstHoleProofSpan(line: ProofLine, expr: *const Expr) ?Span {
+fn firstHoleProofSpan(line: ApplicationLine, expr: *const Expr) ?Span {
     return proofSpanForSourceSpan(line, Holes.firstHoleSourceSpan(expr));
 }
 
 fn proofSpanForSourceSpan(
-    line: ProofLine,
+    line: ApplicationLine,
     maybe_span: ?SourceSpan,
 ) ?Span {
     const span = maybe_span orelse return null;
-    const inner_start = line.assertion.span.start + 1;
+    const inner_start = line.assertion_span.start + 1;
     return .{
         .start = inner_start + span.start,
         .end = inner_start + span.end,
@@ -2021,7 +2276,7 @@ fn setHoleyInferenceDiagnostic(
     self: anytype,
     allocator: std.mem.Allocator,
     assertion: AssertionStmt,
-    line: ProofLine,
+    line: ApplicationLine,
     rule: *const RuleDecl,
     holey: *const Expr,
     err: anyerror,
@@ -2039,9 +2294,9 @@ fn setHoleyInferenceDiagnostic(
         .inference_failed;
     const hole_span = firstHoleProofSpan(line, holey);
     const span = if (err == error.HoleyInferenceMismatch)
-        hole_span orelse line.assertion.span
+        hole_span orelse line.assertion_span
     else if (missing != null)
-        hole_span orelse line.assertion.span
+        hole_span orelse line.assertion_span
     else
         line.ruleApplicationSpan();
     const binder_name = if (missing) |info|
@@ -2053,7 +2308,7 @@ fn setHoleyInferenceDiagnostic(
         .err = err,
         .theorem_name = assertion.name,
         .line_label = line.label,
-        .rule_name = line.rule_name,
+        .rule_name = line.application.rule_name,
         .name = binder_name,
         .span = span,
         .detail = if (missing) |info| .{ .missing_binder_assignment = .{
@@ -2072,7 +2327,7 @@ fn addHoleyInferenceNotes(
     allocator: std.mem.Allocator,
     diag: *Diagnostic,
     rule: *const RuleDecl,
-    line: ProofLine,
+    line: ApplicationLine,
     holey: *const Expr,
     report: Holes.InferenceReport,
 ) !void {
@@ -2119,7 +2374,7 @@ fn addHoleyInferenceNotes(
 fn addHoleConcreteMatchNotes(
     allocator: std.mem.Allocator,
     diag: *Diagnostic,
-    line: ProofLine,
+    line: ApplicationLine,
     report: Holes.ConcreteMatchReport,
 ) !void {
     const failure = report.failure orelse return;
@@ -2335,6 +2590,7 @@ fn refSpan(ref: Ref) Span {
     return switch (ref) {
         .hyp => |hyp| hyp.span,
         .line => |line| line.span,
+        .application => |application| application.span,
     };
 }
 

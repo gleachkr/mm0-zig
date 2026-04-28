@@ -1,0 +1,3 @@
+chained_alpha
+-------------
+l1: $ ∀ a (P a) , P b ==> ∀ a (P b) $ by keep (a := $ ∀ a (P a) , P b ==> ∀ a (P b) $) [all_right (g := $ ∀ a (P a), P b $, d := $_$, x := $ a $, p := $ P b $) [#1]]

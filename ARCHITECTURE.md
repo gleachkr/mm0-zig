@@ -404,9 +404,13 @@ A proof line contains:
 
 - a label
 - an asserted formula
-- a cited rule
-- optional explicit named bindings
-- references to theorem hypotheses or prior lines
+- a rule application
+
+A rule application contains the cited rule name, optional explicit named
+bindings, and optional refs. Refs are recursive: they may point to
+theorem hypotheses, prior lines, or inline rule applications. A bare
+identifier in a ref list remains a line ref; an identifier followed by
+`(` or `[` is parsed as an inline application.
 
 The explicit binding list is optional. If omitted, it means "infer all
 binders that can be inferred".
@@ -419,15 +423,17 @@ checking.
 For each proof line it does roughly this:
 
 1. parse the asserted expression into the theorem-local DAG
-2. resolve the cited rule and referenced hypotheses / prior lines
-3. parse explicit bindings
-4. apply `@fresh` annotations and, when relevant, view annotations
-5. infer omitted binders if needed
-6. instantiate the rule's expected hypotheses and conclusion
-7. insert transport or normalization lines when metadata permits a
+2. resolve the cited rule
+3. check the cited rule's reference count
+4. recursively elaborate refs, including any inline rule applications
+5. parse explicit bindings
+6. apply `@fresh` annotations and, when relevant, view annotations
+7. infer omitted binders if needed
+8. instantiate the rule's expected hypotheses and conclusion
+9. insert transport or normalization lines when metadata permits a
    non-exact comparison
-8. store a `CheckedLine` representation that later emission can lower to
-   MMB
+10. store a `CheckedLine` representation that later emission can lower to
+    MMB
 
 `compiler/check/matching.zig` holds the comparison helpers used once a
 candidate binding list exists.
@@ -435,6 +441,39 @@ candidate binding list exists.
 The checker does not adopt a general alpha-equivalence policy. Any extra
 flexibility is consumed earlier by symbolic matching or is turned into
 explicit transport proof lines.
+
+### Chained rule applications
+
+Inline rule applications are frontend-only syntax for anonymous proof
+steps inside a reference list. They are represented directly in the proof
+script AST by the recursive `Ref.application` case, not by text-level
+desugaring. Top-level proof lines and inline applications share the same
+`RuleApplication` node shape.
+
+`compiler/check.zig` handles both forms through a shared application
+entry point. Top-level lines pass a concrete or holey assertion mode from
+the user-written formula. Inline applications pass
+`implicit_whole_conclusion`, which accepts the selected candidate rule's
+instantiated conclusion as the hidden line's assertion.
+
+Child applications are elaborated context-free. The checker first chooses
+and validates the child from its own rule name, bindings, refs, and rule
+metadata. The resulting hidden line then becomes an ordinary checked-line
+reference for the parent. The parent may reject that expression when it
+checks the corresponding hypothesis, but it does not push an expected
+expression into the child or backtrack globally across parent and child
+choices.
+
+Fallback remains candidate-local. A candidate attempt elaborates its
+children inside the attempt. On failure, the checker rolls back checked
+IR and theorem-local mutations before trying the fallback rule. That is
+slightly repetitive when fallback chains share children, but it keeps the
+snapshot and diagnostic model simple.
+
+Hidden chained steps are ordinary checked lines. They are appended before
+the line that uses them, are not entered into the user's label map, and
+are lowered by the existing emitter as normal proof dependencies. The
+MMB verifier never sees chained syntax.
 
 ### Proof-side holes
 
@@ -479,6 +518,11 @@ The theorem checker records two kinds of checked lines:
 
 - direct rule applications
 - transport lines
+
+Inline chained applications do not add a third IR kind. They produce the
+same checked lines as user-written proof lines, but without adding a
+source label. A parent application stores a normal `.line` reference to
+the hidden line that the child produced.
 
 A transport line says that the source line proves an expression that can
 be converted to the needed target expression. This is the bridge between
