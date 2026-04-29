@@ -439,6 +439,11 @@ theorem mul_1_left (a: nat): $ suc 0 * a = a $;
 theorem mul_eq_left_all (a b: nat) {x: nat}: $ ∀ x (a = b → x * a = x * b) $;
 theorem mul_eq_left (c a b: nat): $ a = b → c * a = c * b $;
 
+-- Mirror of mul_eq_left: a = b → a * c = b * c.  Proved by induction on
+-- the outer argument; instance form via ax_inst.
+theorem mul_eq_right_all (a b: nat) {x: nat}: $ ∀ x (a = b → a * x = b * x) $;
+theorem mul_eq_right (c a b: nat): $ a = b → a * c = b * c $;
+
 -- Commutativity of multiplication, proved by induction on x.
 theorem mul_comm (a: nat) {x: nat}: $ ∀ x (a * x = x * a) $;
 theorem mul_comm_inst (a b: nat): $ a * b = b * a $;
@@ -457,3 +462,90 @@ theorem mul_distrib_right (a b c: nat): $ (a + b) * c = a * c + b * c $;
 theorem mul_assoc (a b: nat) {x: nat}:
   $ ∀ x ((a * b) * x = a * (b * x)) $;
 theorem mul_assoc_inst (a b c: nat): $ (a * b) * c = a * (b * c) $;
+
+-- Re-association variants of multiplication: swap the leading factor with
+-- the middle/right by chaining mul_assoc_inst with a commuted step.  Mirror
+-- the add_lass / add_rass derivations.
+theorem mul_lass (a b c: nat): $ a * (b * c) = b * (a * c) $;
+theorem mul_rass (a b c: nat): $ (a * b) * c = (a * c) * b $;
+
+-- ---------------------------------------------------------------
+-- Sets of natural numbers and definite description.
+--
+-- This is the first small slice of peano.mm1's set layer.  Sets are
+-- represented by abstraction `{x | p}`, membership `a e. A`, and
+-- extensional equality `A == B`.  Subtraction is then the definite
+-- description of the set of witnesses to `b + x = a`.
+-- ---------------------------------------------------------------
+
+strict sort set;
+
+term ab {x: nat} (p: wff x): set;
+notation ab {x: nat} (p: wff x): set =
+  (${$:max) x ($|$:0) p ($}$:0);
+
+term el (a: nat) (A: set): wff;
+infixl el: $e.$ prec 50;
+
+-- Membership in an abstraction computes by substitution.
+axiom elab (a: nat) {x: nat} (p: wff x):
+  $ a e. {x | p} ↔ sb_f x a p $;
+
+-- Set equality is extensional equality of membership predicates.
+def eqs (A B: set) {.x: nat}: wff =
+  $ ∀ x (x e. A ↔ x e. B) $;
+infixl eqs: $==$ prec 50;
+
+--| @relation set eqs eqsid eqstr eqscom _
+axiom eqsid (A: set): $ A == A $;
+axiom eqstr (A B C: set): $ A == B $ > $ B == C $ > $ A == C $;
+axiom eqscom (A B: set): $ A == B $ > $ B == A $;
+
+--| @congr
+axiom ab_congr {x: nat} (p q: wff x):
+  $ p ↔ q $ > $ {x | p} == {x | q} $;
+
+--| @congr
+axiom el_congr (a b: nat) (A B: set):
+  $ nat_eq a b $ > $ A == B $ > $ (a e. A) ↔ (b e. B) $;
+
+term sb_s {x: nat} (t: nat x) (A: set x): set;
+
+--| @rewrite
+axiom sb_f_el {x: nat} (t a: nat x) (A: set x):
+  $ sb_f x t (a e. A) ↔ (sb_t x t a e. sb_s x t A) $;
+
+--| @rewrite
+axiom sb_s_irrel {x: nat} (t: nat x) (A: set):
+  $ sb_s x t A == A $;
+
+term the (A: set): nat;
+prefix the: $the$ prec 41;
+
+--| @congr
+axiom the_congr (A B: set):
+  $ A == B $ > $ nat_eq (the A) (the B) $;
+
+-- Positive definite description.  This follows peano.mm1's singleton
+-- set premise, but lets the set argument depend on the displayed binder.
+-- That avoids an alpha-freshening detour when the singleton proof is
+-- itself built from an abstraction using the same proof-local variable.
+axiom theid {x: nat} (A: set x) (a: nat):
+  $ A == {x | x = a} $ > $ (the A) = a $;
+
+-- Biconditional introduction from the two implication directions.
+-- peano.mm1 derives this from /\ + ian; we add it directly since
+-- ↔ is primitive in this fragment.
+axiom ibii (a b: wff): $ a → b $ > $ b → a $ > $ a ↔ b $;
+
+-- Subtraction:  `a - b` is the described element of the set of x with
+-- `b + x = a`, matching peano.mm1's `$ the {x | b + x = a} $`.
+def sub (a b: nat) {.x: nat}: nat = $ the {x | b + x = a} $;
+infixl sub: $-$ prec 60;
+
+-- a + b - a = b.  The witness set `{x | a + x = a + b}` is the
+-- singleton `{x | x = b}` by cancellation.
+theorem pncan2 (a b: nat): $ a + b - a = b $;
+
+-- a + b - b = a.  Mirror of pncan2 through add_comm_inst.
+theorem pncan (a b: nat): $ a + b - b = a $;

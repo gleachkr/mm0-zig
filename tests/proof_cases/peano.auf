@@ -903,6 +903,63 @@ mul_eq_left
 l1: $ ∀ x (a = b → x * a = x * b) $ by mul_eq_left_all
 l2: $ a = b → c * a = c * b $ by ax_inst [l1]
 
+mul_eq_right_all
+----------------
+-- Induction on x of (a = b → a * x = b * x), mirror of mul_eq_left_all
+-- but stepping the inner argument.
+-- Base: a = b → a * 0 = b * 0.  Both sides collapse to 0 via mul_0.
+l1: $ a * 0 = 0 $ by mul_0
+l2: $ b * 0 = 0 $ by mul_0
+l3: $ b * 0 = 0 → 0 = b * 0 $ by eq_sym
+l4: $ 0 = b * 0 $ by ax_mp [l3, l2]
+l5: $ a * 0 = 0 → 0 = b * 0 → a * 0 = b * 0 $ by eq_trans
+l6: $ 0 = b * 0 → a * 0 = b * 0 $ by ax_mp [l5, l1]
+l7: $ a * 0 = b * 0 $ by ax_mp [l6, l4]
+l8: $ a = b → a * 0 = b * 0 $ by a1i [l7]
+
+-- Step body: H = (a = b), K = (a * x = b * x); goal a * suc x = b * suc x.
+-- Route via the bridge U := (a * x + a = b * x + b); both sides mul_suc to U.
+
+-- K → a*x + a = b*x + a.
+l9: $ a * x = b * x → a * x + a = b * x + a $ by add_eq_right
+-- H → b*x + a = b*x + b.
+l10: $ a = b → b * x + a = b * x + b $ by add_eq_left
+-- eq_trans at (a*x + a, b*x + a, b*x + b).
+l11: $ a * x + a = b * x + a → b * x + a = b * x + b → a * x + a = b * x + b $ by eq_trans
+-- K → (b*x + a = b*x + b → a*x + a = b*x + b).
+l12: $ a * x = b * x → b * x + a = b * x + b → a * x + a = b * x + b $ by syl [l11, l9]
+-- K → (H → U) via syl5.
+l13: $ a * x = b * x → a = b → a * x + a = b * x + b $ by syl5 [l10, l12]
+-- com12: H → (K → U).
+l14: $ a = b → a * x = b * x → a * x + a = b * x + b $ by com12 [l13]
+
+-- U → V: a * x + a = b * x + b → a * suc x = b * suc x.
+l15: $ a * suc x = a * x + a $ by mul_suc
+l16: $ b * suc x = b * x + b $ by mul_suc
+l17: $ b * suc x = b * x + b → b * x + b = b * suc x $ by eq_sym
+l18: $ b * x + b = b * suc x $ by ax_mp [l17, l16]
+l19: $ a * suc x = a * x + a → a * x + a = b * x + b → a * suc x = b * x + b $ by eq_trans
+l20: $ a * x + a = b * x + b → a * suc x = b * x + b $ by ax_mp [l19, l15]
+l21: $ a * suc x = b * x + b → b * x + b = b * suc x → a * suc x = b * suc x $ by eq_trans
+l22: $ a * suc x = b * x + b → a * suc x = b * suc x $ by mpi [l18, l21]
+l23: $ a * x + a = b * x + b → a * suc x = b * suc x $ by syl [l22, l20]
+
+-- Lift U → V through (K → _) and (H → _) via imim2i twice.
+l24: $ (a * x = b * x → a * x + a = b * x + b) → (a * x = b * x → a * suc x = b * suc x) $ by imim2i [l23]
+l25: $ (a = b → a * x = b * x → a * x + a = b * x + b) → (a = b → a * x = b * x → a * suc x = b * suc x) $ by imim2i [l24]
+l26: $ a = b → a * x = b * x → a * suc x = b * suc x $ by ax_mp [l25, l14]
+-- a2i collapses (H → K → V) to (H → K) → (H → V).
+l27: $ (a = b → a * x = b * x) → (a = b → a * suc x = b * suc x) $ by a2i [l26]
+
+l28: $ ∀ x ((a = b → a * x = b * x) → (a = b → a * suc x = b * suc x)) $ by ax_gen [l27]
+l29: $ ∀ x (a = b → a * x = b * x) $ by peano5 [l8, l28]
+
+mul_eq_right
+------------
+-- Specialise mul_eq_right_all at t := c.
+l1: $ ∀ x (a = b → a * x = b * x) $ by mul_eq_right_all
+l2: $ a = b → a * c = b * c $ by ax_inst [l1]
+
 mul_comm
 --------
 -- Induction on x of (a * x = x * a).
@@ -1083,3 +1140,79 @@ mul_assoc_inst
 -- Specialise mul_assoc at t := c.
 l1: $ ∀ x ((a * b) * x = a * (b * x)) $ by mul_assoc
 l2: $ (a * b) * c = a * (b * c) $ by ax_inst [l1]
+
+mul_lass
+--------
+-- a * (b * c)  =  (a * b) * c   (eq_sym on mul_assoc_inst)
+--             =  (b * a) * c    (mul_eq_right of mul_comm_inst)
+--             =  b * (a * c)    (mul_assoc_inst).
+l1: $ (a * b) * c = a * (b * c) $ by mul_assoc_inst
+l2: $ (a * b) * c = a * (b * c) → a * (b * c) = (a * b) * c $ by eq_sym
+l3: $ a * (b * c) = (a * b) * c $ by ax_mp [l2, l1]
+l4: $ a * b = b * a $ by mul_comm_inst
+l5: $ a * b = b * a → (a * b) * c = (b * a) * c $ by mul_eq_right
+l6: $ (a * b) * c = (b * a) * c $ by ax_mp [l5, l4]
+l7: $ (b * a) * c = b * (a * c) $ by mul_assoc_inst
+l8: $ a * (b * c) = (a * b) * c → (a * b) * c = (b * a) * c → a * (b * c) = (b * a) * c $ by eq_trans
+l9: $ (a * b) * c = (b * a) * c → a * (b * c) = (b * a) * c $ by ax_mp [l8, l3]
+l10: $ a * (b * c) = (b * a) * c $ by ax_mp [l9, l6]
+l11: $ a * (b * c) = (b * a) * c → (b * a) * c = b * (a * c) → a * (b * c) = b * (a * c) $ by eq_trans
+l12: $ (b * a) * c = b * (a * c) → a * (b * c) = b * (a * c) $ by ax_mp [l11, l10]
+l13: $ a * (b * c) = b * (a * c) $ by ax_mp [l12, l7]
+
+mul_rass
+--------
+-- (a * b) * c  =  a * (b * c)   (mul_assoc_inst)
+--              =  a * (c * b)   (mul_eq_left of mul_comm_inst)
+--              =  (a * c) * b   (eq_sym on mul_assoc_inst).
+l1: $ (a * b) * c = a * (b * c) $ by mul_assoc_inst
+l2: $ b * c = c * b $ by mul_comm_inst
+l3: $ b * c = c * b → a * (b * c) = a * (c * b) $ by mul_eq_left
+l4: $ a * (b * c) = a * (c * b) $ by ax_mp [l3, l2]
+l5: $ (a * c) * b = a * (c * b) $ by mul_assoc_inst
+l6: $ (a * c) * b = a * (c * b) → a * (c * b) = (a * c) * b $ by eq_sym
+l7: $ a * (c * b) = (a * c) * b $ by ax_mp [l6, l5]
+l8: $ (a * b) * c = a * (b * c) → a * (b * c) = a * (c * b) → (a * b) * c = a * (c * b) $ by eq_trans
+l9: $ a * (b * c) = a * (c * b) → (a * b) * c = a * (c * b) $ by ax_mp [l8, l1]
+l10: $ (a * b) * c = a * (c * b) $ by ax_mp [l9, l4]
+l11: $ (a * b) * c = a * (c * b) → a * (c * b) = (a * c) * b → (a * b) * c = (a * c) * b $ by eq_trans
+l12: $ a * (c * b) = (a * c) * b → (a * b) * c = (a * c) * b $ by ax_mp [l11, l10]
+l13: $ (a * b) * c = (a * c) * b $ by ax_mp [l12, l7]
+
+pncan2
+------
+-- a + b - a unfolds to `the {x | a + x = a + b}`.  By theid this
+-- equals b once the witness set is shown equal to the singleton `{x | x = b}`.
+-- The biconditional proof is lifted to set equality by ab_congr.
+l1: $ a + x = a + b → x = b $ by add_cancel_left
+l2: $ x = b → a + x = a + b $ by add_eq_left
+l3: $ (a + x = a + b) ↔ (x = b) $ by ibii [l1, l2]
+l4: $ {x | a + x = a + b} == {x | x = b} $ by ab_congr [l3]
+l5: $ (the {x | a + x = a + b}) = b $ by theid [l4]
+
+pncan
+-----
+-- a + b - b unfolds to `the {x | b + x = a + b}`.  Cancellation now
+-- needs a commutativity bridge: rewrite b + x to b + a so
+-- add_cancel_left applies.  Forward and backward directions both route
+-- through add_comm_inst; ibii, ab_congr, and theid finish the job.
+
+-- Forward: b + x = a + b → x = a, via the bridge b + x = b + a.
+l1: $ a + b = b + a $ by add_comm_inst
+l2: $ b + x = a + b → a + b = b + a → b + x = b + a $ by eq_trans
+l3: $ a + b = b + a → b + x = a + b → b + x = b + a $ by com12 [l2]
+l4: $ b + x = a + b → b + x = b + a $ by ax_mp [l3, l1]
+l5: $ b + x = b + a → x = a $ by add_cancel_left
+l6: $ b + x = a + b → x = a $ by syl [l5, l4]
+
+-- Backward: x = a → b + x = a + b, via the bridge b + x = b + a = a + b.
+l7: $ x = a → b + x = b + a $ by add_eq_left
+l8: $ b + a = a + b $ by add_comm_inst
+l9: $ b + x = b + a → b + a = a + b → b + x = a + b $ by eq_trans
+l10: $ b + a = a + b → b + x = b + a → b + x = a + b $ by com12 [l9]
+l11: $ b + x = b + a → b + x = a + b $ by ax_mp [l10, l8]
+l12: $ x = a → b + x = a + b $ by syl [l11, l7]
+
+l13: $ (b + x = a + b) ↔ (x = a) $ by ibii [l6, l12]
+l14: $ {x | b + x = a + b} == {x | x = a} $ by ab_congr [l13]
+l15: $ (the {x | b + x = a + b}) = a $ by theid [l14]
