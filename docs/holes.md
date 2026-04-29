@@ -42,8 +42,10 @@ The same idea covers more interesting cases:
   succeed is the one that fills the holes.
 
 Holes are intentionally *not* a proof-search facility. Each hole is
-filled by exactly one rule application, by reading the concrete
-subtree that the application's binders force into that position.
+filled by one selected rule application, by reading the concrete subtree
+that the application's binders force into that position. For inline rule
+applications, a parent may provide an expected-conclusion hint, but there
+is still no global backtracking across parent and child choices.
 
 ---
 
@@ -107,9 +109,9 @@ or shared hole in v1.
 - in refs (only the assertion may contain holes);
 - in explicit binding formulas like `(name := $ _wff $)`.
 
-A line whose holes can be filled in more than one consistent way is
-rejected as ambiguous, with one exception for ACUI contexts described
-below.
+A line whose holes can be filled in more than one non-structural way is
+rejected as ambiguous. Structural ACUI contexts have a ranked preference
+order described below.
 
 ---
 
@@ -222,9 +224,11 @@ from the resulting concrete conclusion `rel u`.
 ## Interaction with `@normalize`
 
 Holey surface expressions are **not** normalized directly. The compiler
-still normalizes the candidate's instantiated conclusion (and any
-`@normalize`-marked hypotheses) as it does for hole-free lines. The
-holey assertion is then compared against the normalized concrete result.
+still normalizes the candidate's instantiated conclusion when the rule
+marks the conclusion with `@normalize`. Hypothesis references may also be
+transported by normalized conversion when the checker can prove the
+expected and actual forms equivalent. The holey assertion is then
+compared against the concrete result chosen for the line.
 
 If the visible, non-hole part of the assertion is already in the form the
 user wants to write, but a hole covers a normalized position such as an
@@ -265,6 +269,11 @@ order to the *rule binder* before filling the hole:
 So `_ctx` ordinarily resolves to the discharged context the user
 expects (e.g. `∅` for `imp_intro`), and an explicit user-written
 binder can still override the chosen residual.
+
+The same structural solver can run when the visible hole is not itself a
+context. A whole-line `_wff` may hide a conclusion whose rule has an
+omitted ACUI context binder; in that case the solver uses the rule's
+hypotheses and conclusion shape to recover the minimal residual context.
 
 This preserves the principle that holes do not introduce new ACUI
 search beyond what the matcher already does for the rule itself.

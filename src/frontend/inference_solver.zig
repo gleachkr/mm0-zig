@@ -156,7 +156,10 @@ pub const Solver = struct {
             states = try self.finalizeStructuralStates(states.items, .rule);
         }
 
-        return try self.pickUniqueSolution(states.items, .first);
+        return try self.pickUniqueSolution(
+            states.items,
+            .minimal_structural,
+        );
     }
 
     pub fn solveHoleyConclusion(
@@ -626,6 +629,7 @@ pub const Solver = struct {
                     states,
                     distinct_idxs.items,
                     chosen_distinct_idx,
+                    preference,
                 );
             }
         }
@@ -762,14 +766,15 @@ pub const Solver = struct {
         states: []const BranchState,
         distinct_idxs: []const usize,
         chosen_distinct_idx: usize,
+        preference: SolutionPreference,
     ) !void {
         if (comptime builtin.target.os.tag == .freestanding) return;
 
         DebugTrace.traceInference(
             self.debug,
             "omitted binders left {d} distinct final solutions; " ++
-                "choosing the first",
-            .{distinct_idxs.len},
+                "choosing by {s}",
+            .{ distinct_idxs.len, solutionPreferenceName(preference) },
         );
         for (distinct_idxs, 0..) |state_idx, choice_idx| {
             DebugTrace.traceInference(
@@ -813,6 +818,13 @@ pub const Solver = struct {
         }
     }
 };
+
+fn solutionPreferenceName(preference: SolutionPreference) []const u8 {
+    return switch (preference) {
+        .first => "first solution",
+        .minimal_structural => "minimal structural residual",
+    };
+}
 
 fn appendTruncatedText(
     out: *std.ArrayListUnmanaged(u8),

@@ -46,6 +46,10 @@ pub fn tryMatchHypothesis(
         ) };
     }
 
+    // Hypothesis normalization is not limited to the consuming rule's
+    // `@normalize hypN` markers. A referenced line may be in a raw producer
+    // form, and this final validation path can insert a transport to the
+    // expected hypothesis when the normalizer proves equivalence.
     _ = norm_spec;
     _ = hyp_idx;
 

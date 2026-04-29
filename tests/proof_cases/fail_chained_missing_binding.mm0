@@ -1,5 +1,5 @@
 provable sort wff;
 term top: wff;
 axiom choose (a: wff): $ a $;
-axiom keep: $ top $ > $ top $;
+axiom keep (a: wff): $ a $ > $ top $;
 theorem fail_chained_missing_binding: $ top $;

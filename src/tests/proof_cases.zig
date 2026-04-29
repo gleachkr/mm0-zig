@@ -218,6 +218,8 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_hole_abstract", .outcome = .pass },
     .{ .stem = "pass_hole_abstract_matrix", .outcome = .pass },
     .{ .stem = "pass_prawitz_holes", .outcome = .pass },
+    .{ .stem = "pass_prawitz_holes_hard", .outcome = .pass },
+    .{ .stem = "pass_prawitz_chained", .outcome = .pass },
     .{
         .stem = "fail_hole_mm0_not_allowed",
         .outcome = .{ .fail = error.UnknownMathToken },

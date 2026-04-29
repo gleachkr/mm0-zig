@@ -1,0 +1,233 @@
+quant_functionality
+------------------
+
+l1: $ (F w (g x y) ∧ F w (g x z)) ⊢ (F w (g x y) ∧ F w (g x z)) $
+  by ax []
+l2: $ _ ⊢ ∀ w ∀ x ∀ y ∀ z
+      ((F w (g x y) ∧ F w (g x z)) → F w (g y z)) $
+  by all_intro (x := $ w $)
+  [all_intro (x := $ x $)
+    [all_intro (x := $ y $)
+      [all_intro (x := $ z $)
+        [imp_intro
+          [iff_elim_r
+            [all_elim (t := $ z $)
+              [all_elim (t := $ y $)
+                [all_elim (t := $ w $) [#1]]],
+             eq_transitivity
+              [eq_symm
+                [iff_elim_l
+                  [all_elim (t := $ y $)
+                    [all_elim (t := $ x $)
+                      [all_elim (t := $ w $) [#1]]],
+                   and_elim_l [l1]]],
+               iff_elim_l
+                [all_elim (t := $ z $)
+                  [all_elim (t := $ x $)
+                    [all_elim (t := $ w $) [#1]]],
+                 and_elim_r [l1]]]]]]]]]
+identity
+--------
+
+l1: $ a ⊢ a $ by ax []
+l2: $ _ ⊢ a → a $ by imp_intro [l1]
+
+explosion
+---------
+
+l1: $ ⊥ ⊢ ⊥ $ by ax []
+l2: $ _ ⊢ ⊥ → a $ by imp_intro [bot_elim [l1]]
+
+double_neg_intro
+----------------
+
+l1: $ ¬ a ⊢ ¬ a $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ _ ⊢ a → ¬ ¬ a $
+  by imp_intro [not_intro (a := $ ¬ a $) [not_elim [l1, l2]]]
+
+modus_tollens
+-------------
+
+l1: $ (a → b) ⊢ a → b $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ ¬ b ⊢ ¬ b $ by ax []
+l4: $ _ ⊢ (a → b) → ¬ b → ¬ a $
+  by imp_intro
+  [imp_intro
+    [not_intro
+      [not_elim [l3, imp_elim [l1, l2]]]]]
+and_comm_iff
+------------
+
+-- Forward: (a /\ b) -> (b /\ a)
+l1: $ (a ∧ b) ⊢ a ∧ b $ by ax []
+-- Backward: (b /\ a) -> (a /\ b)
+l2: $ (b ∧ a) ⊢ b ∧ a $ by ax []
+-- Combine
+l3: $ _ ⊢ (a ∧ b) ↔ (b ∧ a) $
+  by iff_intro
+  [imp_intro [and_intro [and_elim_r [l1], and_elim_l [l1]]],
+   imp_intro [and_intro [and_elim_r [l2], and_elim_l [l2]]]]
+
+or_comm
+-------
+
+l1: $ (a ∨ b) ⊢ a ∨ b $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ b ⊢ b $ by ax []
+l4: $ _ ⊢ (a ∨ b) → (b ∨ a) $
+  by imp_intro
+  [or_elim
+    [l1,
+     or_intro_r (a := $ b $) [l2],
+     or_intro_l (b := $ a $) [l3]]]
+
+disjunctive_syllogism
+---------------------
+
+l1: $ (a ∨ b) ⊢ a ∨ b $ by ax []
+l2: $ ¬ a ⊢ ¬ a $ by ax []
+l3: $ a ⊢ a $ by ax []
+l4: $ b ⊢ b $ by ax []
+l5: $ _ ⊢ (a ∨ b) → ¬ a → b $
+  by imp_intro
+  [imp_intro
+    [or_elim [l1, bot_elim (a := $ b $) [not_elim [l2, l3]], l4]]]
+
+de_morgan_or
+------------
+
+-- Forward: ~(a \/ b) -> (~a /\ ~b)
+l1: $ ¬ (a ∨ b) ⊢ ¬ (a ∨ b) $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ b ⊢ b $ by ax []
+-- Backward: (~a /\ ~b) -> ~(a \/ b)
+l4: $ (¬ a ∧ ¬ b) ⊢ ¬ a ∧ ¬ b $ by ax []
+l5: $ (a ∨ b) ⊢ a ∨ b $ by ax []
+-- Combine
+l6: $ _ ⊢ ¬ (a ∨ b) ↔ (¬ a ∧ ¬ b) $
+  by iff_intro
+  [imp_intro
+    [and_intro
+      [not_intro (a := $ a $)
+        [not_elim [l1, or_intro_l (b := $ b $) [l2]]],
+       not_intro (a := $ b $)
+        [not_elim [l1, or_intro_r (a := $ a $) [l3]]]]],
+   imp_intro
+    [not_intro (a := $ a ∨ b $)
+      [or_elim
+        [l5,
+         not_elim [and_elim_l [l4], l2],
+         not_elim [and_elim_r [l4], l3]]]]]
+curry_iff
+---------
+
+-- Forward: ((a /\ b) -> c) -> (a -> b -> c)
+l1: $ (a ∧ b) → c ⊢ (a ∧ b) → c $ by ax []
+l2: $ a , b ⊢ a $ by ax []
+l3: $ a , b ⊢ b $ by ax []
+-- Backward: (a -> b -> c) -> ((a /\ b) -> c)
+l4: $ a → b → c ⊢ a → b → c $ by ax []
+l5: $ (a ∧ b) ⊢ a ∧ b $ by ax []
+-- Combine
+l6: $ _ ⊢ ((a ∧ b) → c) ↔ (a → b → c) $
+  by iff_intro
+    (b := $ a → b → c $)
+  [imp_intro
+    [imp_intro 
+      [imp_intro (a := $ b $)
+        [imp_elim [l1, and_intro [l2, l3]]]]],
+   imp_intro
+    [imp_intro (a := $ a ∧ b $)
+      [imp_elim [imp_elim [l4, and_elim_l [l5]],
+                 and_elim_r [l5]]]]]
+
+imp_trans
+---------
+
+l1: $ (a → b) ⊢ a → b $ by ax []
+l2: $ (b → c) ⊢ b → c $ by ax []
+l3: $ a ⊢ a $ by ax []
+l4: $ _ ⊢ (a → b) → (b → c) → (a → c) $
+  by imp_intro [imp_intro [imp_intro [imp_elim [l2, imp_elim [l1, l3]]]]]
+
+not_not_lem
+-----------
+
+-- Proof that ~~(a \/ ~a) is intuitionistically valid
+l1: $ ¬ (a ∨ ¬ a) ⊢ ¬ (a ∨ ¬ a) $ by ax []
+l2: $ a ⊢ a $ by ax []
+l3: $ _ ⊢ ¬ ¬ (a ∨ ¬ a) $
+  by not_intro 
+  [not_elim
+    [l1,
+     or_intro_r (a := $ a $)
+      [not_intro (a := $ a $)
+        [not_elim
+          [l1, or_intro_l (b := $ ¬ a $) [l2]]]]]]
+
+alpha_all_intro_demo
+--------------------
+
+l1: $ ∀ a (F a b) , F b b ⊢ F b b $ by ax []
+l2: $ ∀ a (F a b) , F b b ⊢ ∀ a (F b b) $ by all_intro [l1]
+
+alpha_ex_intro_demo
+-------------------
+
+l1: $ ∀ a (F a b) , F b b ⊢ F b b $ by ax []
+l2: $ ∀ a (F a b) , F b b ⊢ ∃ a (F a b) $ by ex_intro (t := $ b $) [l1]
+
+alpha_ex_elim_demo
+------------------
+
+l1: $ ∀ a (F a b) , ∃ a (F a b) ⊢ ∃ a (F a b) $ by ax []
+l2: $ ∀ a (F a b) , F a b ⊢ ∀ a (F a b) $ by ax []
+l3: $ ∀ a (F a b) , ∃ a (F a b) ⊢ ∀ a (F a b) $ by ex_elim [l1, l2]
+
+forall_swap
+-----------
+
+l1: $ _ ⊢ ∀ b ∀ a (F a b) $
+  by all_intro (x := $ b $)
+  [all_intro (x := $ a $)
+    [all_elim (t := $ b $) [all_elim (t := $ a $) [#1]]]]
+
+forall_specialize
+-----------------
+
+l1: $ _ ⊢ F c a $ by all_elim (t := $ a $)
+  [all_elim (t := $ c $) [#1]]
+
+forall_and_combine
+------------------
+
+l1: $ _ ⊢ ∀ a (F a b ∧ F b a) $
+  by all_intro (x := $ a $)
+  [and_intro [all_elim (t := $ a $) [#1], all_elim (t := $ a $) [#2]]]
+
+exists_from_forall
+------------------
+
+l1: $ _ ⊢ ∃ a (F a b) $ by ex_intro
+  [all_elim (t := $ a $) [#1]]
+
+forall_imp_distribute
+---------------------
+
+l1: $ _ ⊢ ∀ a (F b a) $
+  by all_intro (x := $ a $)
+  [imp_elim [all_elim (t := $ a $) [#1], all_elim (t := $ a $) [#2]]]
+
+forall_not_to_not_exists
+------------------------
+
+l1: $ (∀ a (¬ (F a b))) ⊢ ∀ a (¬ (F a b)) $ by ax []
+l2: $ (F a b) ⊢ F a b $ by ax []
+l3: $ (∃ a (F a b)) ⊢ ∃ a (F a b) $ by ax []
+l4: $ _ ⊢ (∀ a (¬ (F a b))) → ¬ (∃ a (F a b)) $
+  by imp_intro
+  [not_intro (a := $ ∃ a (F a b) $)
+    [ex_elim
+      [l3, not_elim [all_elim (t := $ a $) [l1], l2]]]]

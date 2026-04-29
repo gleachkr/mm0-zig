@@ -156,22 +156,25 @@ rather than a general-purpose "open this hidden-dummy def" operation.
 
 ## Omitted-binder inference
 
-There are two different omitted-binder paths now, and this distinction is
+There are several omitted-binder paths now, and this distinction is
 important:
 
 - **Exact replay fast path.** For ordinary rules, the compiler replays the
   cited rule's unify stream against the line assertion and cited references.
   This path is exact: it requires the same concrete heads that the rule
   expects, and it does not open defs.
+- **Transparent fallback after replay.** If strict replay fails without a
+  hard diagnostic, ordinary rules may get a def-aware rule-match fallback
+  seeded by whatever replay had already learned.
 - **Advanced inference paths.** Rules with `@view` or `@normalize`, and some
   harder solver-driven cases, go through the frontend's def-aware matching
-  machinery instead of relying only on raw replay.
+  machinery and structural solver instead of relying only on raw replay.
 
-So the old broad statement "omitted-binder inference is transparent" is no
-longer true, but neither is "all omitted-binder inference is exact". What is
-exact is the replay path itself.
+So the old broad statement "omitted-binder inference is transparent" is too
+coarse, but so is "all omitted-binder inference is exact". What is exact is
+the replay path itself.
 
-### Defined and expanded forms no longer infer through exact replay
+### Defined and expanded forms can infer through fallback matching
 
 ```
 def id (a: wff): wff = $ a -> a $;
@@ -179,16 +182,19 @@ axiom ax_id (a: wff): $ id a $;
 theorem def_infer_expected (a: wff): $ a -> a $;
 ```
 
-This proof is now rejected:
+This proof is accepted:
 
 ```
 l1: $ a -> a $ by ax_id []
 ```
 
-Strict replay sees the rule conclusion headed by `id` and the proof line headed
-by `->`, so inference stops at that mismatch.
+Strict replay itself still sees the rule conclusion headed by `id` and
+the proof line headed by `->`, so the exact path stops at that mismatch.
+Because the strict failure did not already produce a hard diagnostic, the
+compiler then tries a transparent rule-match fallback and can solve
+`a := a` through the def boundary.
 
-The opposite direction is rejected for the same reason:
+The opposite direction works for the same reason:
 
 ```
 def id (a: wff): wff = $ a -> a $;
@@ -200,29 +206,23 @@ theorem def_infer_actual (a: wff): $ id a $;
 l1: $ id a $ by ax_expanded []
 ```
 
-### Nested defs also need explicit binders here
+The distinction is that replay is still exact, while the surrounding
+omitted-binder pipeline may fall back to a def-aware match when that is a
+safe local inference problem.
 
-For example, with:
+### Harder def/rewrite cases still need metadata
 
-```
-def double (a: wff): wff = $ a -> a $;
-axiom use_nested (a b: wff): $ (a -> b) $ > $ ((a -> b) -> a) $;
-```
-
-this omitted-binder proof is rejected:
-
-```
-l1: $ (double a) -> a $ by use_nested [#1]
-```
-
-because replay reaches the concrete `double` head where the rule expects `->`.
-
-If the binders are given explicitly, ordinary theorem-application checking may
-still bridge the def boundary afterwards.
+Transparent inference does not mean the compiler unfolds defs and then
+runs arbitrary rewrite search to discover binders. If the only way to
+recover a binder is to expose a def body and then use rewrite, ACUI, view,
+or recover/abstract structure, the rule should say so with the relevant
+metadata. Explicit binders are still the simplest way to disambiguate
+cases that are not local transparent matches.
 
 ### Higher-level solver paths are separate
 
-The examples above are about the exact replay fast path only.
+The examples above are local transparent matches after exact replay has
+failed. They do not require the heavier solver.
 
 Higher-level solver paths such as `@view`-guided matching,
 normalization-aware inference, and structural inference under an `@acui`
@@ -233,15 +233,16 @@ with `@view` or `@normalize` does not have to live or die by raw unify
 replay: the compiler may switch to a `RuleMatchSession`-based path that can
 compare through defs when that is part of the intended rule behavior.
 
-### Ambiguity is still an error
+### Ambiguity is still constrained
 
-Def-aware higher-level inference still does **not** mean the compiler guesses
-when several solutions remain possible.
+Def-aware higher-level inference still does **not** mean the compiler makes
+arbitrary guesses when several solutions remain possible.
 
-In particular, when def-aware matching combines with structural matching
-under an `@acui` combiner, two or more omitted-binder assignments may
-survive all constraints. In that case the compiler rejects the line as
-ambiguous rather than picking one arbitrarily.
+For ordinary non-structural binders, unresolved ambiguity remains an
+inference failure. For structural binders under an `@acui` combiner, the
+solver ranks surviving solutions by minimal structural residual. If more
+than one distinct solution survives, the compiler chooses the ranked
+solution and emits an ambiguity warning describing the alternatives.
 
 ---
 
@@ -345,9 +346,12 @@ l1: $ id Q $ by ax_id (a := $ Q $) []
 l2: $ Q $ by use_sub (a := $ Q $, b := $ P -> P $) [l1]
 ```
 
-The expected hypothesis is normalized, then the cited reference may still be
-bridged by transparent unfolding before it is fed into the theorem
-application.
+The checker can build the same normalized conversion for hypothesis
+references that final theorem-application validation uses. In practice,
+the cited reference may be normalized and then bridged by transparent
+unfolding before it is fed into the theorem application. This can happen
+when the conversion is provable even if the consuming rule did not mark
+that specific hypothesis with `@normalize`.
 
 ---
 
@@ -377,8 +381,9 @@ A few boundaries are worth keeping in mind.
   system, congruence rules, or ACUI metadata.
 - The frontend does not generally rewrite *through* defs in order to expose new
   rewrite redexes.
-- Omitted-binder inference still requires a unique solution. Def-aware matching
-  can fail with ambiguity.
+- Omitted-binder inference still requires a determined solution. Ordinary
+  ambiguity can fail the line, while structural ACUI ambiguity is ranked by
+  minimal residual context and reported as a warning when alternatives remain.
 - The normalizer still has the same step limit and termination caveats as the
   rest of the rewrite system.
 

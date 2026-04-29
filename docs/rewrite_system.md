@@ -16,8 +16,7 @@ the rewrite system enters the picture, the compiler needs to determine
 the *concrete arguments* to that rule application: what expressions to
 substitute for each binder declared by the rule.
 
-There are four mechanisms that can supply these arguments, and they
-compose:
+Several mechanisms can supply these arguments, and they compose:
 
 1. **Explicit bindings.** The proof line names arguments directly:
    `(x := $ x $, t := $ S zer $, p := $ x = zer $)`. These take precedence
@@ -31,14 +30,18 @@ compose:
    unspecified binders. This path is exact: it does not open defs or do
    rewrite / canonicalization search.
 
-3. **`@view` matching.** A `@view` annotation provides an alternative surface
+3. **Transparent fallback.** If exact replay fails without producing a hard
+   diagnostic, the compiler may retry the same local matching problem through
+   transparent definitions, seeded by the partial replay result.
+
+4. **`@view` matching.** A `@view` annotation provides an alternative surface
    shape for the same rule. The compiler matches this alternate shape against
    the user's line and refs in a def-aware rule-match session, then maps the
    solved binders back to the underlying rule's argument list. `@recover` and
    `@abstract` run on that resolved view state and can derive additional
    binders from it. See `docs/view_recover.md` for the details.
 
-4. **`@fresh` annotations.** For omitted bound binders that serve only as
+5. **`@fresh` annotations.** For omitted bound binders that serve only as
    fresh local variables (no inference can solve them), `@fresh` tells the
    compiler to choose a theorem-local variable from the binder sort's `@vars`
    pool rather than requiring the user to name one.
@@ -471,10 +474,12 @@ A term annotated with `@acui` must also have:
 ### Purpose
 
 `@normalize` marks an axiom or theorem so that its conclusion and/or specified
-hypotheses are automatically normalized after instantiation. Without this
-annotation, the compiler checks proof lines by exact equality between the
-raw instantiated form and the expression you wrote. With it, both sides are
-normalized first and the normalized forms are compared.
+hypotheses are automatically normalized after instantiation. Without
+`@normalize conc`, the rule's conclusion is not normalized as part of
+conclusion checking, although transparent-def conversion and ordinary
+hypothesis transports may still apply at theorem-application boundaries.
+With `@normalize conc`, the raw instantiated conclusion and the user's
+assertion are normalized and compared.
 
 ### Syntax
 ```
@@ -522,11 +527,16 @@ a `ConclusionMismatch` error.
 
 ### Hypothesis normalization
 
-When `hyp0` (or another hypothesis index) is listed, the same process applies
-in reverse: the compiler normalizes the *expected* hypothesis form (from the
-rule's instantiated signature) and checks that your cited reference, after
-normalization, matches it. A transport step is emitted to bridge the gap
-before the reference is fed into the theorem application.
+When `hyp0` (or another hypothesis index) is listed, the annotation records
+that the expected hypothesis is intended to be used in normalized form. The
+checker can also use normalized conversion as a final validation step for any
+hypothesis reference: if the cited line and the expected hypothesis normalize
+to equivalent forms, a transport step is emitted before the reference is fed
+into the theorem application.
+
+That broader validation rule matters for chained and holey proofs, where a
+referenced line may be stored in a raw producer form while the consuming rule
+expects the normalized form.
 
 ---
 
@@ -561,6 +571,7 @@ normally, including:
 - `@view`, `@recover`, and `@abstract`
 - `@fresh`
 - `@normalize`
+- inline reference elaboration, including nested chained applications
 
 If that whole attempt fails, and `R` has `@fallback S`, the compiler throws
 away the failed tentative state and retries the same proof line using `S`.

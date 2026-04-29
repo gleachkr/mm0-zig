@@ -422,17 +422,19 @@ checking.
 
 For each proof line it does roughly this:
 
-1. parse the asserted expression into the theorem-local DAG
+1. parse the asserted expression, or a holey surface assertion
 2. resolve the cited rule
 3. check the cited rule's reference count
-4. recursively elaborate refs, including any inline rule applications
-5. parse explicit bindings
-6. apply `@fresh` annotations and, when relevant, view annotations
-7. infer omitted binders if needed
-8. instantiate the rule's expected hypotheses and conclusion
-9. insert transport or normalization lines when metadata permits a
-   non-exact comparison
-10. store a `CheckedLine` representation that later emission can lower to
+4. parse explicit bindings for the candidate rule
+5. compute any expected reference expressions that can guide nested
+   inline applications
+6. recursively elaborate refs, including any inline rule applications
+7. apply `@fresh` annotations and, when relevant, view annotations
+8. infer omitted binders if needed
+9. instantiate the rule's expected hypotheses and conclusion
+10. insert transport or normalization lines when metadata permits a
+    non-exact comparison
+11. store a `CheckedLine` representation that later emission can lower to
     MMB
 
 `compiler/check/matching.zig` holds the comparison helpers used once a
@@ -456,13 +458,18 @@ the user-written formula. Inline applications pass
 `implicit_whole_conclusion`, which accepts the selected candidate rule's
 instantiated conclusion as the hidden line's assertion.
 
-Child applications are elaborated context-free. The checker first chooses
-and validates the child from its own rule name, bindings, refs, and rule
-metadata. The resulting hidden line then becomes an ordinary checked-line
-reference for the parent. The parent may reject that expression when it
-checks the corresponding hypothesis, but it does not push an expected
-expression into the child or backtrack globally across parent and child
-choices.
+Child applications may receive a contextual expected-conclusion hint from
+the parent. The checker computes the parent's expected hypothesis when it
+can match the parent conclusion against the line assertion and the
+candidate's explicit bindings. That expected hypothesis is passed to an
+inline child as a first inference attempt.
+
+This is still not global proof search. If the hinted child attempt fails,
+the child falls back to ordinary inference from its own rule name,
+bindings, refs, and metadata. The parent does not backtrack across child
+choices. The resulting hidden line then becomes an ordinary checked-line
+reference for the parent, which still validates the corresponding
+hypothesis in the normal way.
 
 Fallback remains candidate-local. A candidate attempt elaborates its
 children inside the attempt. On failure, the checker rolls back checked
@@ -491,9 +498,10 @@ pipeline concrete:
   any one candidate;
 - if no hole is present, the existing concrete fast path runs
   unchanged, including strict unify replay where it already applies;
-- if a hole is present, the line is routed through the advanced
+- if a hole is present, the line is routed through the hole-aware
   candidate path (`@view`, `@recover`, `@abstract`, `@normalize`,
-  `@fallback`); strict replay is not extended to solve holes;
+  `@fallback`, and structural solving where needed); strict replay is
+  not extended to solve holes;
 - visible (non-hole) structure participates in matching as usual,
   while hole positions defer to the candidate's concrete conclusion;
 - for normalized conclusions, a holey surface line can be materialized
@@ -503,7 +511,10 @@ pipeline concrete:
   instantiated, the filled line is compared against the surface
   assertion, and the first candidate whose elaboration succeeds
   end-to-end (refs match, view / recover / abstract / normalize
-  succeed, hole sorts agree, no ambiguity) wins.
+  succeed, and hole sorts agree) wins;
+- whole-line holes can act as structural inference surfaces even when the
+  hole sort is not itself structural, so an outer `_wff` can still let an
+  inner ACUI context binder be recovered from the rule's hypotheses.
 
 The theorem-local interner stays concrete-only. Surface `.hole` leaves
 are never lowered into the theorem DAG; the checked IR and MMB emitter
@@ -548,8 +559,10 @@ on the trusted unify-stream walker in `unify_replay.zig`.
 one deliberate difference: the first encounter with an omitted binder
 records its value.
 
-This path is exact. It does not open defs. It is still the default for
-ordinary rules that do not request the heavier machinery.
+This path is exact. It does not open defs. It is still the first path for
+ordinary rules that do not request the heavier machinery. If exact replay
+fails without producing a hard diagnostic, the checker may try a local
+transparent rule-match fallback seeded by replay's partial result.
 
 ### Advanced rule matching for views and `@normalize`
 
@@ -576,8 +589,9 @@ A rule-match session can:
   dummy defs through witness-driven symbolic state rather than eager
   theorem-dummy creation
 - keep hidden-dummy witnesses symbolic until the whole match succeeds
-- compare normalized forms for rule parts that are explicitly marked by
-  `@normalize`
+- compare normalized forms for conclusions explicitly marked by
+  `@normalize`, and for hypothesis comparisons when the same normalized
+  conversion is available to final reference validation
 
 This is the current semantic center for binder-aware, def-aware
 matching. It is intentionally stronger than exact unify replay, but it
@@ -683,8 +697,10 @@ It is mainly responsible for cases where omitted-binder inference needs:
   session
 
 The solver keeps branch-local binding arrays plus ACUI interval
-constraints, uses `canonicalizer.zig` and `def_ops.zig` as helper
-predicates, and then requires a unique concrete solution.
+constraints, and uses `canonicalizer.zig` and `def_ops.zig` as helper
+predicates. When several ACUI-compatible concrete solutions remain, it
+ranks them by minimal structural residual and emits an ambiguity warning
+if more than one distinct solution survived.
 
 ## Definition-aware comparison and conversion
 

@@ -13,6 +13,7 @@ Related docs:
 - `docs/transparent_defs.md`
 - `docs/view_recover.md`
 - `docs/fresh_binders.md`
+- `docs/holes.md`
 
 In particular, `@alpha` and `@freshen` are frontend-only annotations used
 for targeted alpha-renaming retries during rule application.
@@ -230,12 +231,18 @@ refs, and other inline applications:
 l2: $ c $ by outer [middle (a := $ t $) [inner [l1]], #1]
 ```
 
-The child application is checked without using the parent rule's
-expected hypothesis as an input constraint. It must infer a unique
-conclusion from its own rule name, bindings, refs, and metadata. After
-that, the parent application checks whether the child's conclusion
-matches the corresponding parent hypothesis. The parent may reject the
-child result, but it does not guide or backtrack the child search.
+The checker may give the child a contextual hint from the parent rule's
+expected hypothesis when the parent conclusion and explicit bindings make
+that hypothesis predictable. The child first tries to use that expected
+conclusion as an extra inference constraint. If the hinted attempt fails,
+the child falls back to ordinary inference from its own rule name,
+bindings, refs, and metadata.
+
+This is still not global proof search. The parent does not backtrack
+over child choices, and the child must still elaborate to one concrete
+hidden line before the parent application can finish. After that, the
+parent checks whether the child's conclusion matches the corresponding
+parent hypothesis.
 
 Fallback remains candidate-local. If an inline application cites a rule
 with `@fallback`, the compiler tries the written rule first. If that
@@ -285,21 +292,23 @@ is checked roughly as follows:
 1. Parse `$ C $` in the local assertion context.
 2. Resolve `RULE` to a previously declared axiom, theorem, or lemma.
 3. Check the syntactic reference count against that rule's hypotheses.
-4. Elaborate `R1, ..., Rn`. A ref may recursively elaborate an inline
+4. Resolve and parse any explicit argument bindings for this candidate.
+5. Use the assertion and those partial bindings to compute any expected
+   reference expressions that can guide nested inline applications.
+6. Elaborate `R1, ..., Rn`. A ref may recursively elaborate an inline
    application and return the hidden line proving its conclusion.
-5. Resolve and parse any explicit argument bindings.
-6. Infer any omitted rule binders from the line assertion, elaborated
-   refs, and rule metadata.
-7. Instantiate the rule's hypotheses and conclusion with those concrete
+7. Infer any omitted rule binders from the line assertion, elaborated
+   refs, contextual hints, and rule metadata.
+8. Instantiate the rule's hypotheses and conclusion with those concrete
    binders.
-8. Compare the instantiated rule against the user's line and refs,
+9. Compare the instantiated rule against the user's line and refs,
    allowing frontend features such as transparent defs, views, recover /
    abstract bindings, fresh binders, targeted alpha-freshening, and
    normalization when the rule's metadata permits them.
-9. If that attempt fails and the cited rule has `@fallback`, retry the
-   whole application with the fallback target, then continue through the
-   fallback chain if needed.
-10. Record label `L` as proving `C`.
+10. If that attempt fails and the cited rule has `@fallback`, retry the
+    whole application with the fallback target, then continue through the
+    fallback chain if needed.
+11. Record label `L` as proving `C`.
 
 Top-level proof-line formulas are always explicit and must be written
 out by the user. Inline applications are the exception: they have no
