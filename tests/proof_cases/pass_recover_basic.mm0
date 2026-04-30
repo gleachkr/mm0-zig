@@ -18,6 +18,5 @@ axiom imp_congr (a b c d: wff):
   $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
 --| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
 --| @recover t q p x
---| @normalize conc
 axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> sb t x p $;
 theorem inst_use (u: set) {x: set}: $ A. x (P x) -> P u $;

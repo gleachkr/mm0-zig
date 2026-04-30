@@ -42,7 +42,6 @@ axiom seq_congr (g h: ctx) (a b: wff):
 
 def dbl (a: wff): ctx = $ a , a $;
 
---| @normalize conc
 axiom keep_dbl (g: ctx) (a: wff): $ g , dbl a ⇒ a $;
 
 theorem acui_same_side_absorb (a: wff): $ emp , dbl a , a ⇒ a $;

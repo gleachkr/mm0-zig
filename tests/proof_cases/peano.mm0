@@ -14,7 +14,7 @@
 --   * Induction (peano5) and addition, with left-identity,
 --     commutativity, and associativity proved from the axioms.
 --
--- Annotations (@relation, @congr, @rewrite, @view, @normalize) drive
+-- Annotations (@relation, @congr, @rewrite, @view, automatic normalization) drive
 -- the compiler's rewriting automation where helpful.
 --
 -- The math notation is unicode (→ ¬ ↔ ∀); ASCII aliases (->, ~, <->,
@@ -138,7 +138,7 @@ theorem suc_cancel (a b: nat):
 
 -- ---------------------------------------------------------------
 -- Biconditional + @relation bundle for wff-level rewriting.
--- Enables the @congr / @rewrite / @normalize automation below.
+-- Enables the @congr / @rewrite / automatic normalization automation below.
 -- ---------------------------------------------------------------
 
 term bi (a b: wff): wff;
@@ -210,7 +210,7 @@ axiom ax_5 {x: nat} (p: wff): $ p → ∀ x p $;
 -- ---------------------------------------------------------------
 -- Explicit substitution and its rewrite rules.  sb_t is nat-level
 -- (pushed through suc / var / 0); sb_f is wff-level (pushed through
--- → / ¬ / =).  Instantiation via ax_inst + @normalize collapses
+-- → / ¬ / =).  Instantiation via ax_inst + automatic normalization collapses
 -- sb_f at a concrete term into its already-substituted form.
 -- ---------------------------------------------------------------
 
@@ -246,7 +246,6 @@ axiom sb_t_irrel {x: nat} (t: nat x) (a: nat):
 
 --| @view {x: nat} (t: nat x) (p: wff x) (q: wff): $ ∀ x p $ > $ q $
 --| @recover t q p x
---| @normalize conc
 axiom ax_inst {x: nat} (t: nat x) (p: wff x):
   $ ∀ x p $ > $ sb_f x t p $;
 
@@ -285,7 +284,7 @@ theorem gen_mono {x: nat} (p q: wff x):
 -- Universally quantified peano1.
 theorem peano1_all {x: nat}: $ ∀ x ¬ suc x = 0 $;
 
--- Specialisation via ax_inst's @normalize conc: sb_f folds through
+-- Specialisation via ax_inst's conclusion normalization: sb_f folds through
 -- the rewrite rules down to the instantiated claim.
 theorem inst_refl {x: nat}: $ ∀ x (x = x) $ > $ suc 0 = suc 0 $;
 
@@ -302,7 +301,7 @@ theorem ne_implies_neq (a b: nat): $ a ≠ b $ > $ ¬ a = b $;
 -- ---------------------------------------------------------------
 -- Peano5 (induction) + addition.  Addition is axiomatised by its
 -- defining equations, substitution is pushed through +, and induction
--- is stated with sb_f explicit so that @normalize hyp0 hyp1 lets the
+-- is stated with sb_f explicit so that hypothesis normalization lets the
 -- proof consumer supply the already-reduced base and step forms.
 -- ---------------------------------------------------------------
 
@@ -320,14 +319,13 @@ axiom add_0 (a: nat): $ a + 0 = a $;
 axiom add_suc (a b: nat): $ a + suc b = suc (a + b) $;
 
 -- Induction: base + step give a universally quantified conclusion.
--- @normalize on the hypotheses unfolds sb_f at the user's supplied
+-- automatic normalization on the hypotheses unfolds sb_f at the user's supplied
 -- shape down to the explicitly-substituted terms in the base and
 -- step arguments.  The @view exposes the user-facing shape so `p` is
 -- recoverable directly from the line and references; phantom binders
 -- `base` and `step` absorb the post-normalization hypothesis shapes
 -- without constraining anything else.
 --| @view {x: nat} (p: wff x) (base step: wff): $ base $ > $ ∀ x (p → step) $ > $ ∀ x p $
---| @normalize hyp0 hyp1
 axiom peano5 {x: nat} (p: wff x):
   $ sb_f x 0 p $ >
   $ ∀ x (p → sb_f x (suc x) p) $ >
@@ -348,7 +346,7 @@ theorem add_suc_left (a: nat) {x: nat}:
   $ ∀ x (suc a + x = suc (a + x)) $;
 
 -- Specialise add_0_left at x := suc 0 to rederive 1 + 0 = 1 modulo
--- the canonical form; exercises @normalize conc on ax_inst at a
+-- the canonical form; exercises conclusion normalization on ax_inst at a
 -- compound term.
 theorem one_zero_eq {x: nat}: $ ∀ x (0 + x = x) $ > $ 0 + suc 0 = suc 0 $;
 

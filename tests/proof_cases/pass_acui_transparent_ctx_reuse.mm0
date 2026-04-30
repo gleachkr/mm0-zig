@@ -47,7 +47,6 @@ axiom mark_congr (g h: ctx):
 
 def wrap (a: wff): ctx = $ emp , a $;
 
---| @normalize hyp0 conc
 axiom mark_intro (g: ctx) (a: wff): $ g ⇒ a $ > $ mark g ⇒ a $;
 
 theorem acui_transparent_ctx_reuse (a: wff):

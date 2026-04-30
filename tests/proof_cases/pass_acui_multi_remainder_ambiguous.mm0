@@ -41,7 +41,6 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom seq_congr (g1 g2 d1 d2: ctx):
   $ ctx_eq g1 g2 $ > $ ctx_eq d1 d2 $ > $ (g1 ==> d1) ↔ (g2 ==> d2) $;
 
---| @normalize conc
 axiom frame (g h d: ctx): $ g , h ==> d $;
 
 theorem acui_multi_remainder_ambiguous (x u: wff):

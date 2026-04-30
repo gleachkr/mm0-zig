@@ -49,11 +49,9 @@ axiom comp_congr (f1 f2 g1 g2: mor):
 axiom mor_eq_congr (f1 f2 g1 g2: mor):
   $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) <-> (f2 ~ g2) $;
 
--- Proof-step rules with @normalize conc (trigger AU normalization)
---| @normalize conc
+-- Proof-step rules whose conclusions normalize (trigger AU normalization)
 axiom comp_right (f g h: mor): $ f ~ g $ > $ f o h ~ g o h $;
 
---| @normalize conc
 axiom comp_left (f g h: mor): $ f ~ g $ > $ h o f ~ h o g $;
 
 -- Pullback constants

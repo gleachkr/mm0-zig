@@ -34,7 +34,6 @@ axiom im_congr (a b c d: wff): $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> 
 
 -- A rule whose conclusion needs normalization
 -- all_elim produces sb(t,B) in its raw form, but the user wants the normalized result
---| @normalize conc
 axiom all_elim (a b: wff): $ sb a b $;
 
 -- Use all_elim with normalization:

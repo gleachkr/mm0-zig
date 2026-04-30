@@ -471,6 +471,19 @@ pub const RuleMatchSession = struct {
         self.state.deinit(self.shared.allocator);
     }
 
+    pub fn restoreFromSeedState(
+        self: *RuleMatchSession,
+        seed_state: *const MatchSeedState,
+    ) anyerror!void {
+        const restored = try RuleMatchSession.initFromSeedState(
+            self.shared,
+            self.rule_args,
+            seed_state,
+        );
+        self.state.deinit(self.shared.allocator);
+        self.state = restored.state;
+    }
+
     pub fn matchTransparent(
         self: *RuleMatchSession,
         template: TemplateExpr,

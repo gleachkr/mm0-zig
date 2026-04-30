@@ -51,7 +51,6 @@ axiom nd_congr (g h: ctx) (a b: wff):
 axiom all_congr {x: obj} (p q: wff x):
   $ p <-> q $ > $ A. x p <-> A. x q $;
 
---| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a |- a $;
 
 -- A hidden-dummy def whose exposed body needs ACUI normalization on the
@@ -61,7 +60,6 @@ axiom ax (g: ctx) (a: wff): $ g , a |- a $;
 def pre_ctx (u: obj) {.x: obj}: wff =
   $ A. x ((hyp (u = x) , emp) |- (u = x)) $;
 
---| @normalize conc
 axiom pre_ctx_ax (u: obj): $ pre_ctx u $;
 
 theorem unsupported_def_unfold_then_acui_concl {u v: obj}:

@@ -51,7 +51,6 @@ axiom comp_congr (f1 f2 g1 g2: mor):
 --| @rewrite
 axiom comp_assoc (f g h: mor): $ (f ∘ g) ∘ h ~ f ∘ (g ∘ h) $;
 
---| @normalize hyp0 conc
 axiom comp_right (g: ctx) (f h i: mor):
   $ g ⊢ f ~ h $ > $ g ⊢ f ∘ i ~ h ∘ i $;
 

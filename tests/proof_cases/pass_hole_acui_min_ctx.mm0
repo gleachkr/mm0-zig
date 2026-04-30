@@ -47,7 +47,6 @@ axiom nd_congr (g h: ctx) (a b: wff):
 axiom imp_congr (a b c d: wff):
   $ a <-> c $ > $ b <-> d $ > $ imp a b <-> imp c d $;
 
---| @normalize hyp1
 axiom imp_intro (g: ctx) (a b: wff):
   $ nd (join g (hyp a)) b $ > $ nd g (imp a b) $;
 

@@ -52,7 +52,6 @@ axiom sb_alt (t: set) {x: set}: $ sb t x (Q x) <-> Q t $;
 
 --| @view (g: ctx) {x: set} (t: set) (p: wff x) (q: wff) (c: wff): $ seq (join g (hyp q)) c $ > $ seq (join g (hyp (A. x p))) c $
 --| @recover t q p x
---| @normalize hyp0 conc
 axiom all_left (g: ctx) {x: set} (t: set) (p: wff x) (c: wff):
   $ seq (join g (hyp (sb t x p))) c $ > $ seq (join g (hyp (A. x p))) c $;
 

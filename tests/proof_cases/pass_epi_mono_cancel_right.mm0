@@ -147,46 +147,34 @@ axiom sb_f_and {x: mor} (t: mor x) (p q: wff x):
 axiom sb_f_all {x y: mor} (t: mor x) (p: wff x y):
   $ [x/t] (∀ y p) ↔ ∀ y ([x/t] p) $;
 
---| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 
---| @normalize hyp0 conc
 axiom imp_intro (g: ctx) (a b: wff): $ g , a ⊢ b $ > $ g ⊢ a → b $;
 
---| @normalize hyp0 hyp1 conc
 axiom imp_elim (g h: ctx) (a b: wff):
   $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
---| @normalize hyp0 conc
 axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
 
---| @normalize hyp0 conc
 axiom and_elim_r (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ b $;
 
---| @normalize hyp0 conc
 axiom all_intro (g: ctx) {x: mor} (p: wff x): $ g ⊢ p $ > $ g ⊢ ∀ x p $;
 
 --| @view {x: mor} (g: ctx x) (t: mor x) (p: wff x) (q: wff): $ g ⊢ ∀ x p $ > $ g ⊢ q $
 --| @recover t q p x
---| @normalize conc
 axiom all_elim {x: mor} (g: ctx) (t: mor x) (p: wff x):
   $ g ⊢ ∀ x p $ > $ g ⊢ [x/t] p $;
 
---| @normalize conc
 axiom mor_refl (g: ctx) (f: mor): $ g ⊢ f ~ f $;
 
---| @normalize hyp0 conc
 axiom mor_sym (g: ctx) (f h: mor): $ g ⊢ f ~ h $ > $ g ⊢ h ~ f $;
 
---| @normalize hyp0 hyp1 conc
 axiom mor_trans (g: ctx) (f h i: mor):
   $ g ⊢ f ~ h $ > $ g ⊢ h ~ i $ > $ g ⊢ f ~ i $;
 
---| @normalize hyp0 conc
 axiom comp_right (g: ctx) (f h i: mor):
   $ g ⊢ f ~ h $ > $ g ⊢ f ∘ i ~ h ∘ i $;
 
---| @normalize hyp0 conc
 axiom comp_left (g: ctx) (f h i: mor):
   $ g ⊢ f ~ h $ > $ g ⊢ i ∘ f ~ i ∘ h $;
 

@@ -40,7 +40,6 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom seq_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⇒ a) ↔ (h ⇒ b) $;
 
---| @normalize conc
 axiom acui_mix (g: ctx) (a b: wff): $ g , a , b , a ⇒ b $;
 
 theorem acui_fragment_baseline (x a b: wff): $ b , (x , a) ⇒ b $;

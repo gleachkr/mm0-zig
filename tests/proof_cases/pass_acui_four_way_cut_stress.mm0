@@ -41,7 +41,6 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom seq_congr (g1 g2 d1 d2: ctx):
   $ ctx_eq g1 g2 $ > $ ctx_eq d1 d2 $ > $ (g1 ==> d1) ↔ (g2 ==> d2) $;
 
---| @normalize hyp0 hyp1 hyp2 hyp3 conc
 axiom quad_cut (g h i j d e f k: ctx) (a b c p: wff):
   $ g , a ==> d $
   > $ h , b ==> e $

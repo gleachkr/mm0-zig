@@ -108,7 +108,6 @@ axiom sb_f_all {x y: mor} (t: mor x) (p: wff x y):
 
 --| @view (g: ctx) {x: mor} (t: mor x) (p: wff x) (q c: wff): $ g , q |- c $ > $ g , A. x p |- c $
 --| @recover t q p x
---| @normalize hyp0 conc
 axiom all_left (g: ctx) {x: mor} (t: mor x) (p: wff x) (c: wff):
   $ g , [x/t] p |- c $ > $ g , A. x p |- c $;
 

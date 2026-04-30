@@ -33,7 +33,6 @@ axiom comp_congr (f1 f2 g1 g2: mor):
 --| @rewrite
 axiom comp_assoc (f g h: mor): $ (f o g) o h ~ f o (g o h) $;
 
---| @normalize conc
 axiom assoc_refl (f g h: mor): $ ((f o g) o h) ~ ((f o g) o h) $;
 
 def assoc_norm (f g h: mor): wff = $ f o (g o h) ~ f o (g o h) $;

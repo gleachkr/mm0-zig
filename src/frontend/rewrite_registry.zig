@@ -3,12 +3,6 @@ const GlobalEnv = @import("./env.zig").GlobalEnv;
 const RuleDecl = @import("./env.zig").RuleDecl;
 const TemplateExpr = @import("./rules.zig").TemplateExpr;
 
-/// Which positions of a rule should be normalized after instantiation.
-pub const NormalizeSpec = struct {
-    concl: bool = false,
-    hyp_indices: []const usize = &.{},
-};
-
 /// A relation bundle defines an equivalence relation on a sort, with the
 /// theorem names needed to compose conversion proofs.
 pub const RelationBundle = struct {
@@ -120,8 +114,6 @@ pub const RewriteRegistry = struct {
     ),
     /// Congruence rules by head term_id.
     congr_by_head: std.AutoHashMap(u32, CongruenceRule),
-    /// Normalize specs by rule_id.
-    normalize_specs: std.AutoHashMap(u32, NormalizeSpec),
     /// Fallback rules by rule_id.
     fallbacks: std.AutoHashMap(u32, u32),
     /// ACUI structural metadata by combiner head term_id.
@@ -140,9 +132,6 @@ pub const RewriteRegistry = struct {
                 std.ArrayListUnmanaged(AlphaRule),
             ).init(allocator),
             .congr_by_head = std.AutoHashMap(u32, CongruenceRule).init(
-                allocator,
-            ),
-            .normalize_specs = std.AutoHashMap(u32, NormalizeSpec).init(
                 allocator,
             ),
             .fallbacks = std.AutoHashMap(u32, u32).init(allocator),
@@ -180,8 +169,6 @@ pub const RewriteRegistry = struct {
             try self.processAlpha(env, stmt_name, &iter);
         } else if (std.mem.eql(u8, directive, "@congr")) {
             try self.processCongr(env, stmt_name);
-        } else if (std.mem.eql(u8, directive, "@normalize")) {
-            try self.processNormalize(env, stmt_name, &iter);
         } else if (std.mem.eql(u8, directive, "@fallback")) {
             try self.processFallback(env, stmt_name, &iter);
         } else if (std.mem.eql(u8, directive, "@acui")) {
@@ -330,32 +317,6 @@ pub const RewriteRegistry = struct {
         }
     }
 
-    fn processNormalize(
-        self: *RewriteRegistry,
-        env: *const GlobalEnv,
-        stmt_name: []const u8,
-        iter: *std.mem.TokenIterator(u8, .scalar),
-    ) !void {
-        const rule_id = env.getRuleId(stmt_name) orelse return;
-
-        var concl = false;
-        var hyp_indices = std.ArrayListUnmanaged(usize){};
-
-        while (iter.next()) |tok| {
-            if (std.mem.eql(u8, tok, "conc")) {
-                concl = true;
-            } else if (std.mem.startsWith(u8, tok, "hyp")) {
-                const idx = std.fmt.parseInt(usize, tok[3..], 10) catch continue;
-                try hyp_indices.append(self.allocator, idx);
-            }
-        }
-
-        try self.normalize_specs.put(rule_id, .{
-            .concl = concl,
-            .hyp_indices = try hyp_indices.toOwnedSlice(self.allocator),
-        });
-    }
-
     fn processFallback(
         self: *RewriteRegistry,
         env: *const GlobalEnv,
@@ -406,13 +367,6 @@ pub const RewriteRegistry = struct {
             .comm_name = comm_name,
             .idem_name = idem_name,
         });
-    }
-
-    pub fn getNormalizeSpec(
-        self: *const RewriteRegistry,
-        rule_id: u32,
-    ) ?NormalizeSpec {
-        return self.normalize_specs.get(rule_id);
     }
 
     pub fn getRelationForSort(

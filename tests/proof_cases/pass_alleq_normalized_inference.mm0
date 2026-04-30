@@ -40,7 +40,6 @@ term imp: term;
 def impc (p q: term): term = $ imp · p · q $;
 infixr impc: $⇒$ prec 30;
 
---| @normalize conc
 axiom alleq (G: wff) (A: type) {x: term} (t u: term x):
   $ G ∧ x: A ⊢ t ⇔ u $ >
   $ G ⊢ all A · (λ x: A. t) ⇔ (all A · (λ x: A. u)) $;

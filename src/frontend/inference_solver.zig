@@ -8,6 +8,7 @@ const TemplateExpr = @import("./rules.zig").TemplateExpr;
 const ExprId = @import("./expr.zig").ExprId;
 const TheoremContext = @import("./expr.zig").TheoremContext;
 const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
+const CompilerDiag = @import("./compiler/diag.zig");
 const ViewDecl = @import("./compiler/views.zig").ViewDecl;
 const DerivedBinding = @import("./compiler/views.zig").DerivedBinding;
 const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
@@ -44,9 +45,11 @@ pub const Solver = struct {
     env: *const GlobalEnv,
     theorem: *TheoremContext,
     registry: *RewriteRegistry,
+    rule_id: u32,
     rule: *const RuleDecl,
     view: ?*const ViewDecl,
     canonicalizer: Canonicalizer,
+    scratch: ?*CompilerDiag.Scratch,
     debug: DebugConfig,
     ambiguity_warning: bool = false,
     ambiguity_report: AmbiguityReport = .{},
@@ -56,8 +59,10 @@ pub const Solver = struct {
         env: *const GlobalEnv,
         theorem: *TheoremContext,
         registry: *RewriteRegistry,
+        rule_id: u32,
         rule: *const RuleDecl,
         view: ?*const ViewDecl,
+        scratch: ?*CompilerDiag.Scratch,
         debug: DebugConfig,
     ) Solver {
         return .{
@@ -65,6 +70,7 @@ pub const Solver = struct {
             .env = env,
             .theorem = theorem,
             .registry = registry,
+            .rule_id = rule_id,
             .rule = rule,
             .view = view,
             .canonicalizer = Canonicalizer.init(
@@ -73,8 +79,18 @@ pub const Solver = struct {
                 registry,
                 env,
             ),
+            .scratch = scratch,
             .debug = debug,
         };
+    }
+
+    pub fn canUseNormalizedStructuralItemMatch(self: *const Solver) bool {
+        // Final validation can now produce normalized transport. Structural
+        // search may use normalized item matching as a branch-local inference aid
+        // whenever diagnostic scratch is available. The expensive path is
+        // still gated by structural competition and by exact/transparent
+        // item matching failing first.
+        return self.scratch != null;
     }
 
     pub fn deinit(self: *Solver) void {

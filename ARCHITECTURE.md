@@ -332,7 +332,7 @@ common shape used by:
 - rule hypotheses and conclusions
 - def bodies
 - view signatures
-- rewrite and normalization metadata
+- rewrite metadata and normalization machinery
 
 This keeps explicit instantiation, inference, view recovery, and rewrite
 machinery tied to the same source of truth.
@@ -499,7 +499,7 @@ pipeline concrete:
 - if no hole is present, the existing concrete fast path runs
   unchanged, including strict unify replay where it already applies;
 - if a hole is present, the line is routed through the hole-aware
-  candidate path (`@view`, `@recover`, `@abstract`, `@normalize`,
+  candidate path (`@view`, `@recover`, `@abstract`, automatic normalization,
   `@fallback`, and structural solving where needed); strict replay is
   not extended to solve holes;
 - visible (non-hole) structure participates in matching as usual,
@@ -510,7 +510,7 @@ pipeline concrete:
 - hole filling is candidate-local and late: each candidate is
   instantiated, the filled line is compared against the surface
   assertion, and the first candidate whose elaboration succeeds
-  end-to-end (refs match, view / recover / abstract / normalize
+  end-to-end (refs match, view / recover / abstract / normalization
   succeed, and hole sorts agree) wins;
 - whole-line holes can act as structural inference surfaces even when the
   hole sort is not itself structural, so an outer `_wff` can still let an
@@ -564,10 +564,10 @@ ordinary rules that do not request the heavier machinery. If exact replay
 fails without producing a hard diagnostic, the checker may try a local
 transparent rule-match fallback seeded by replay's partial result.
 
-### Advanced rule matching for views and `@normalize`
+### Advanced rule matching for views and normalization
 
-When a rule has view or normalization metadata, omitted binder inference
-uses `def_ops.zig` before it falls back to search.
+When exact replay is insufficient, omitted binder inference can use
+`def_ops.zig` before it falls back to search.
 
 `def_ops.zig` is mostly a façade. The main internal pieces are:
 
@@ -589,9 +589,8 @@ A rule-match session can:
   dummy defs through witness-driven symbolic state rather than eager
   theorem-dummy creation
 - keep hidden-dummy witnesses symbolic until the whole match succeeds
-- compare normalized forms for conclusions explicitly marked by
-  `@normalize`, and for hypothesis comparisons when the same normalized
-  conversion is available to final reference validation
+- compare normalized forms for conclusions and hypothesis references when
+  the same normalized conversion is available to final validation
 
 This is the current semantic center for binder-aware, def-aware
 matching. It is intentionally stronger than exact unify replay, but it
@@ -665,8 +664,8 @@ Nothing symbolic escapes into proof emission or into the trusted kernel.
 
 ### Normalized comparison inside a rule match
 
-For `@normalize`-marked hypotheses or conclusions, a rule-match session
-can create a mirrored theorem context using
+For normalized hypothesis or conclusion comparison, a rule-match session can
+create a mirrored theorem context using
 `def_ops/normalized_match.zig` together with
 `def_ops/mirror_support.zig`.
 

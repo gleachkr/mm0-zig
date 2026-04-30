@@ -620,7 +620,7 @@ fn tryApplyRuleApplicationWithCandidate(
             partial_bindings,
         );
     const rule_has_advanced_inference =
-        Inference.shouldUseAdvancedInference(rule_id, maybe_view, registry) or
+        Inference.shouldUseAdvancedInference(maybe_view) or
         has_omitted_structural;
     const use_advanced_inference = had_omitted and
         rule_has_advanced_inference;
@@ -689,8 +689,6 @@ fn tryApplyRuleApplicationWithCandidate(
         context.rule_unify_cache,
     );
 
-    const norm_spec = registry.getNormalizeSpec(rule_id);
-
     var resolved_bindings = bindings;
     var freshened_bindings: ?CompilerFreshen.FreshenResult = null;
     Inference.validateResolvedBindingsWithDebug(
@@ -733,7 +731,6 @@ fn tryApplyRuleApplicationWithCandidate(
                 diag_scratch,
                 assertion,
                 diag_line,
-                norm_spec,
                 rule,
                 line_assertion,
                 resolved_bindings,
@@ -816,7 +813,6 @@ fn tryApplyRuleApplicationWithCandidate(
                     diag_scratch,
                     assertion,
                     diag_line,
-                    norm_spec,
                     rule,
                     line_assertion,
                     bindings,
@@ -834,7 +830,6 @@ fn tryApplyRuleApplicationWithCandidate(
             env,
             checked,
             diag_scratch,
-            norm_spec,
             try resolveLineAssertionForBindings(
                 self,
                 allocator,
@@ -845,7 +840,6 @@ fn tryApplyRuleApplicationWithCandidate(
                 diag_scratch,
                 assertion,
                 diag_line,
-                norm_spec,
                 rule,
                 line_assertion,
                 bindings,
@@ -888,7 +882,6 @@ fn tryApplyRuleApplicationWithCandidate(
             env,
             checked,
             diag_scratch,
-            norm_spec,
             self.debug,
             idx,
             refs[idx],
@@ -965,10 +958,7 @@ fn tryApplyRuleApplicationWithCandidate(
             diag_scratch,
             expected,
             actual,
-            if (norm_spec) |spec|
-                Normalize.isHypMarkedForNormalize(spec, idx)
-            else
-                false,
+            true,
         );
         CompilerDiag.setProof(self, diag);
         return error.HypothesisMismatch;
@@ -984,7 +974,6 @@ fn tryApplyRuleApplicationWithCandidate(
         diag_scratch,
         assertion,
         diag_line,
-        norm_spec,
         rule,
         line_assertion,
         resolved_bindings,
@@ -1015,7 +1004,6 @@ fn tryApplyRuleApplicationWithCandidate(
         env,
         checked,
         diag_scratch,
-        norm_spec,
         self.debug,
         candidate.displayed_conclusion,
         candidate.raw_conclusion,
@@ -1059,7 +1047,7 @@ fn tryApplyRuleApplicationWithCandidate(
             diag_scratch,
             candidate.raw_conclusion,
             candidate.displayed_conclusion,
-            if (norm_spec) |spec| spec.concl else false,
+            true,
         );
         CompilerDiag.setProof(self, diag);
         return error.ConclusionMismatch;
@@ -1083,7 +1071,6 @@ fn resolveLineAssertionForBindings(
     diag_scratch: *CompilerDiag.Scratch,
     assertion: AssertionStmt,
     line: ApplicationLine,
-    norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
     rule: *const RuleDecl,
     line_assertion: LineAssertion,
     bindings: []const ExprId,
@@ -1109,7 +1096,6 @@ fn resolveLineAssertionForBindings(
                 diag_scratch,
                 assertion,
                 line,
-                norm_spec,
                 holey,
                 expected_line,
             );
@@ -1478,7 +1464,6 @@ fn elaborateCandidateLine(
     diag_scratch: *CompilerDiag.Scratch,
     assertion: AssertionStmt,
     line: ApplicationLine,
-    norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
     rule: *const RuleDecl,
     line_assertion: LineAssertion,
     resolved_bindings: []const ExprId,
@@ -1500,7 +1485,6 @@ fn elaborateCandidateLine(
             diag_scratch,
             assertion,
             line,
-            norm_spec,
             holey,
             raw_conclusion,
         ),
@@ -1522,7 +1506,6 @@ fn validateHoleyAssertionAgainstCandidate(
     diag_scratch: *CompilerDiag.Scratch,
     assertion: AssertionStmt,
     line: ApplicationLine,
-    norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
     holey: *const Expr,
     expected_line: ExprId,
 ) !ExprId {
@@ -1531,7 +1514,7 @@ fn validateHoleyAssertionAgainstCandidate(
     // normalized form there hides the rule's raw constructor from later
     // omitted-binder inference that uses this line as a ref. If the raw shape
     // does not match the visible surface, normalized and materialized checks
-    // below still handle @normalize conclusions.
+    // below still handle normalized conclusions.
     var hole_report = Holes.ConcreteMatchReport{};
     if (try holeyAssertionMatchesCandidate(
         allocator,
@@ -1545,46 +1528,48 @@ fn validateHoleyAssertionAgainstCandidate(
         return expected_line;
     }
 
-    if (norm_spec) |spec| {
-        if (spec.concl) {
-            var scratch_checked = std.ArrayListUnmanaged(CheckedLine){};
-            defer scratch_checked.deinit(allocator);
-            const normalized_line = try Normalize.normalizeExprForSnapshot(
-                allocator,
-                theorem,
-                registry,
-                env,
-                &scratch_checked,
-                diag_scratch,
-                expected_line,
-            );
-            var normalized_report = Holes.ConcreteMatchReport{};
-            if (try holeyAssertionMatchesCandidate(
-                allocator,
-                parser,
-                theorem,
-                env,
-                holey,
-                normalized_line,
-                &normalized_report,
-            )) {
-                return normalized_line;
-            }
+    var scratch_checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer scratch_checked.deinit(allocator);
+    const normalized_line = try Normalize.normalizeExprForSnapshot(
+        allocator,
+        theorem,
+        registry,
+        env,
+        &scratch_checked,
+        diag_scratch,
+        expected_line,
+    );
+    if (normalized_line != expected_line) {
+        var normalized_report = Holes.ConcreteMatchReport{};
+        if (try holeyAssertionMatchesCandidate(
+            allocator,
+            parser,
+            theorem,
+            env,
+            holey,
+            normalized_line,
+            &normalized_report,
+        )) {
+            return normalized_line;
+        }
+        hole_report = normalized_report;
+    }
 
-            var materialized_report = Holes.ConcreteMatchReport{};
-            if (try Holes.materializeSurfaceWithCandidate(
-                parser,
-                theorem,
-                env,
-                holey,
-                expected_line,
-                &materialized_report,
-            )) |materialized_line| {
-                return materialized_line;
-            } else if (materialized_report.failure != null) {
-                normalized_report = materialized_report;
-            }
-            hole_report = normalized_report;
+    const can_materialize = normalized_line != expected_line or
+        try Holes.containsStructuralHole(env, registry, holey);
+    if (can_materialize) {
+        var materialized_report = Holes.ConcreteMatchReport{};
+        if (try Holes.materializeSurfaceWithCandidate(
+            parser,
+            theorem,
+            env,
+            holey,
+            expected_line,
+            &materialized_report,
+        )) |materialized_line| {
+            return materialized_line;
+        } else if (materialized_report.failure != null) {
+            hole_report = materialized_report;
         }
     }
 
@@ -1647,7 +1632,6 @@ fn applyFreshenedRuleLine(
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
     diag_scratch: *CompilerDiag.Scratch,
-    norm_spec: ?@import("../rewrite_registry.zig").NormalizeSpec,
     line_expr: ExprId,
     rule: *const RuleDecl,
     rule_id: u32,
@@ -1671,7 +1655,6 @@ fn applyFreshenedRuleLine(
             env,
             checked,
             diag_scratch,
-            norm_spec,
             .none,
             idx,
             refs[idx],
@@ -1771,7 +1754,6 @@ fn applyFreshenedRuleLine(
             env,
             checked,
             diag_scratch,
-            norm_spec,
             .none,
             0,
             result_ref,
@@ -2628,7 +2610,6 @@ fn addComparisonSnapshotNotes(
 
     if (!attempted_normalized) return;
 
-    addStaticProofNote(diag, "attempted normalized comparison");
     const snapshot = Normalize.maybeBuildComparisonSnapshotWithDebug(
         allocator,
         @constCast(theorem),
@@ -2639,6 +2620,13 @@ fn addComparisonSnapshotNotes(
         actual,
         .none,
     );
+    if (snapshot.normalized_expected == null and
+        snapshot.normalized_actual == null)
+    {
+        return;
+    }
+
+    addStaticProofNote(diag, "attempted normalized comparison");
     if (snapshot.normalized_expected) |normalized_expected| {
         const normalized_expected_text = try ViewTrace.formatExpr(
             allocator,

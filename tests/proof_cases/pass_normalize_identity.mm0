@@ -31,7 +31,6 @@ axiom sb_P (a: wff): $ sb a P <-> a $;
 --| @congr
 axiom im_congr (a b c d: wff): $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
 
---| @normalize conc
 axiom all_elim (a b: wff): $ sb a b $;
 
 -- Simple single-step normalization: sb(Q, P) -> Q via sb_P

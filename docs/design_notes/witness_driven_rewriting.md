@@ -50,7 +50,7 @@ its own:
 - continue matching against the target without forcing global
   normalization
 
-This is broader than a checker-side special case for one `@normalize`
+This is broader than a checker-side special case for one normalized
 conclusion. A realistic design would have to work during witness-driven
 comparison itself, not only after the comparison has already committed to a
 concrete witness.

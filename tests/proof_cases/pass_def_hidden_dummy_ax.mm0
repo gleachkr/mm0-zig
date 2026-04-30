@@ -57,7 +57,6 @@ axiom and_congr (a b c d: wff):
 axiom all_congr {x: obj} (p q: wff):
   $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
 
---| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 
 def packed {.x: obj} (a q: wff): wff =

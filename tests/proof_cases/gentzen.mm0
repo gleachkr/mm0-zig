@@ -142,48 +142,36 @@ axiom all_alpha {x y: obj} (p: wff x y):
 axiom ex_alpha {x y: obj} (p: wff x y):
   $ ∃ x p ↔ ∃ y (sb y x p) $;
 
---| @normalize conc
 axiom ax (a: wff): $ a ==> a $;
 
---| @normalize hyp0 conc
 axiom weak_left (g d: ctx) (a: wff): $ g ==> d $ > $ g , a ==> d $;
 
---| @normalize hyp0 conc
 axiom weak_right (g d: ctx) (a: wff): $ g ==> d $ > $ g ==> d , a $;
 
---| @normalize hyp0 hyp1 conc
 axiom cut (g h d e: ctx) (a: wff):
   $ g ==> d , a $ > $ h , a ==> e $ > $ g , h ==> d , e $;
 
---| @normalize hyp0 hyp1 conc
 axiom imp_left (g h d e: ctx) (a b: wff):
   $ g ==> d , a $ > $ h , b ==> e $ > $ g , h , (a → b) ==> d , e $;
 
---| @normalize hyp0 conc
 axiom imp_right (g d: ctx) (a b: wff):
   $ g , a ==> d , b $ > $ g ==> d , (a → b) $;
 
---| @normalize hyp0 conc
 axiom and_left (g d: ctx) (a b: wff):
   $ g , a , b ==> d $ > $ g , (a ∧ b) ==> d $;
 
---| @normalize hyp0 hyp1 conc
 axiom and_right (g d: ctx) (a b: wff):
   $ g ==> d , a $ > $ g ==> d , b $ > $ g ==> d , (a ∧ b) $;
 
---| @normalize hyp0 hyp1 conc
 axiom or_left (g h d e: ctx) (a b: wff):
   $ g , a ==> d $ > $ h , b ==> e $ > $ g , h , (a ∨ b) ==> d , e $;
 
---| @normalize hyp0 conc
 axiom or_right (g d: ctx) (a b: wff):
   $ g ==> d , a , b $ > $ g ==> d , (a ∨ b) $;
 
---| @normalize hyp0 conc
 axiom not_left (g d: ctx) (a: wff):
   $ g ==> d , a $ > $ g , ¬ a ==> d $;
 
---| @normalize hyp0 conc
 axiom not_right (g d: ctx) (a: wff):
   $ g , a ==> d $ > $ g ==> d , ¬ a $;
 
@@ -193,19 +181,16 @@ axiom not_right (g d: ctx) (a: wff):
 --| @recover t q p x
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom all_left (g d: ctx) {x: obj} (t: obj x) (p: wff x):
   $ g , sb t x p ==> d $ > $ g , ∀ x p ==> d $;
 
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom all_right (g d: ctx) {x: obj} (p: wff x):
   $ g ==> d , p $ > $ g ==> d , ∀ x p $;
 
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom ex_left (g d: ctx) {x: obj} (p: wff x):
   $ g , p ==> d $ > $ g , ∃ x p ==> d $;
 
@@ -213,7 +198,6 @@ axiom ex_left (g d: ctx) {x: obj} (p: wff x):
 --| @recover t q p x
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom ex_right (g d: ctx) {x: obj} (t: obj x) (p: wff x):
   $ g ==> d , sb t x p $ > $ g ==> d , ∃ x p $;
 

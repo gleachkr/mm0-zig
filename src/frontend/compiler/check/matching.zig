@@ -3,7 +3,6 @@ const ExprId = @import("../../expr.zig").ExprId;
 const TheoremContext = @import("../../expr.zig").TheoremContext;
 const GlobalEnv = @import("../../env.zig").GlobalEnv;
 const RewriteRegistry = @import("../../rewrite_registry.zig").RewriteRegistry;
-const NormalizeSpec = @import("../../rewrite_registry.zig").NormalizeSpec;
 const Inference = @import("../inference.zig");
 const Normalize = @import("../normalize.zig");
 const DebugConfig = @import("../../debug.zig").DebugConfig;
@@ -21,7 +20,6 @@ pub fn tryMatchHypothesis(
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
     scratch: *CompilerDiag.Scratch,
-    norm_spec: ?NormalizeSpec,
     debug: DebugConfig,
     hyp_idx: usize,
     actual_ref: CheckedRef,
@@ -46,13 +44,12 @@ pub fn tryMatchHypothesis(
         ) };
     }
 
-    // Hypothesis normalization is not limited to the consuming rule's
-    // `@normalize hypN` markers. A referenced line may be in a raw producer
-    // form, and this final validation path can insert a transport to the
-    // expected hypothesis when the normalizer proves equivalence.
-    _ = norm_spec;
+    // A referenced line may be in a raw producer form.  Final validation can
+    // insert a transport to the expected hypothesis when the normalizer proves
+    // equivalence.
     _ = hyp_idx;
 
+    const normalized_mark = checked.items.len;
     if (try Normalize.buildNormalizedConversionWithDebug(
         allocator,
         theorem,
@@ -76,8 +73,10 @@ pub fn tryMatchHypothesis(
         }
         return actual_ref;
     }
+    CheckedIr.rollbackToMark(allocator, checked, normalized_mark);
 
-    return try Normalize.buildTransparentNormalizedHypRefWithDebug(
+    const transparent_normalized_mark = checked.items.len;
+    const converted = try Normalize.buildTransparentNormalizedHypRefWithDebug(
         allocator,
         theorem,
         registry,
@@ -89,6 +88,14 @@ pub fn tryMatchHypothesis(
         expected,
         debug,
     );
+    if (converted == null) {
+        CheckedIr.rollbackToMark(
+            allocator,
+            checked,
+            transparent_normalized_mark,
+        );
+    }
+    return converted;
 }
 
 pub fn tryBuildConclusionLine(
@@ -98,7 +105,6 @@ pub fn tryBuildConclusionLine(
     env: *const GlobalEnv,
     checked: *std.ArrayListUnmanaged(CheckedLine),
     scratch: *CompilerDiag.Scratch,
-    norm_spec: ?NormalizeSpec,
     debug: DebugConfig,
     line_expr: ExprId,
     expected_line: ExprId,
@@ -141,56 +147,65 @@ pub fn tryBuildConclusionLine(
         );
     }
 
-    if (norm_spec) |spec| {
-        if (spec.concl) {
-            if (try Normalize.buildNormalizedConversionWithDebug(
-                allocator,
-                theorem,
-                registry,
-                env,
-                checked,
-                scratch,
-                expected_line,
-                line_expr,
-                debug,
-            )) |conversion| {
-                var conversion_mut = conversion;
-                const raw_idx = try appendRuleLine(
-                    checked,
-                    allocator,
-                    expected_line,
-                    rule_id,
-                    bindings,
-                    refs,
-                );
+    // Conclusion normalization is a validation fallback.  If the normalizer
+    // proves the user's assertion equivalent to the raw conclusion, emit the
+    // required proof-producing transport.
+    const normalized_mark = checked.items.len;
+    if (try Normalize.buildNormalizedConversionWithDebug(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        scratch,
+        expected_line,
+        line_expr,
+        debug,
+    )) |conversion| {
+        var conversion_mut = conversion;
+        const raw_idx = try appendRuleLine(
+            checked,
+            allocator,
+            expected_line,
+            rule_id,
+            bindings,
+            refs,
+        );
 
-                return if (conversion_mut.conv_line_idx) |conv_idx|
-                    try conversion_mut.normalizer.emitTransport(
-                        conversion_mut.relation,
-                        line_expr,
-                        expected_line,
-                        conv_idx,
-                        .{ .line = raw_idx },
-                    )
-                else
-                    raw_idx;
-            }
-            return try Normalize.buildTransparentNormalizedConclusionLineWithDebug(
-                allocator,
-                theorem,
-                registry,
-                env,
-                checked,
-                scratch,
+        return if (conversion_mut.conv_line_idx) |conv_idx|
+            try conversion_mut.normalizer.emitTransport(
+                conversion_mut.relation,
                 line_expr,
                 expected_line,
-                rule_id,
-                bindings,
-                refs,
-                debug,
-            );
-        }
+                conv_idx,
+                .{ .line = raw_idx },
+            )
+        else
+            raw_idx;
     }
+    CheckedIr.rollbackToMark(allocator, checked, normalized_mark);
 
-    return null;
+    const transparent_normalized_mark = checked.items.len;
+    const converted = try Normalize.buildTransparentNormalizedConclusionLineWithDebug(
+        allocator,
+        theorem,
+        registry,
+        env,
+        checked,
+        scratch,
+        line_expr,
+        expected_line,
+        rule_id,
+        bindings,
+        refs,
+        debug,
+    );
+    if (converted == null) {
+        CheckedIr.rollbackToMark(
+            allocator,
+            checked,
+            transparent_normalized_mark,
+        );
+    }
+    return converted;
 }

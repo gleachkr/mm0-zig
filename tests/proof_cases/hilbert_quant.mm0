@@ -81,7 +81,6 @@ axiom not_congr (a b: wff):
 -- Axiom with normalization (simulates universal specialization)
 -- =============================================================
 
---| @normalize conc
 axiom spec (a b: wff): $ sb a b $;
 
 -- =============================================================
@@ -206,7 +205,6 @@ axiom suc_congr (a b: nat):
   $ nat_eq a b $ > $ nat_eq (S a) (S b) $;
 
 -- Universal instantiation with normalization
---| @normalize conc
 axiom ax_inst {x: nat} (t: nat) (p: wff x): $ A. x p $ > $ sb_f t x p $;
 
 -- =============================================================

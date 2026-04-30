@@ -144,8 +144,8 @@ For a holey line, every candidate (the named rule plus any
 1. match the candidate's hypotheses against the cited refs;
 2. match the visible (non-hole) structure of the user's assertion
    against the candidate's conclusion template, using `@view`,
-   `@recover`, `@abstract`, and `@normalize` exactly as for an
-   ordinary line;
+   `@recover`, `@abstract`, and automatic normalized comparison where
+   needed;
 3. instantiate the candidate's concrete conclusion;
 4. compare that concrete conclusion against the holey surface
    assertion: every visible position must match (exactly or via
@@ -221,14 +221,14 @@ from the resulting concrete conclusion `rel u`.
 
 ---
 
-## Interaction with `@normalize`
+## Interaction with automatic normalization
 
 Holey surface expressions are **not** normalized directly. The compiler
-still normalizes the candidate's instantiated conclusion when the rule
-marks the conclusion with `@normalize`. Hypothesis references may also be
-transported by normalized conversion when the checker can prove the
-expected and actual forms equivalent. The holey assertion is then
-compared against the concrete result chosen for the line.
+can normalize the candidate's instantiated conclusion during final
+validation. Hypothesis references may also be transported by normalized
+conversion when the checker can prove the expected and actual forms
+equivalent. The holey assertion is then compared against the concrete
+result chosen for the line.
 
 If the visible, non-hole part of the assertion is already in the form the
 user wants to write, but a hole covers a normalized position such as an

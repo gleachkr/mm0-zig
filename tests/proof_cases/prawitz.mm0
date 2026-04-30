@@ -209,98 +209,77 @@ axiom ex_alpha {x y: obj} (p: wff x y):
 -- ===== Natural deduction rules =====
 
 -- Axiom (hypothesis)
---| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 
 -- Implication
---| @normalize hyp0 hyp1 conc
 axiom imp_intro (g: ctx) (a b: wff):
   $ g , a ⊢ b $ > $ g ⊢ a → b $;
 
---| @normalize hyp0 hyp1 conc
 axiom imp_elim (g h: ctx) (a b: wff):
   $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
 -- Conjunction
---| @normalize hyp0 hyp1 conc
 axiom and_intro (g: ctx) (a b: wff):
   $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
 
---| @normalize hyp0 conc
 axiom and_elim_l (g: ctx) (a b: wff):
   $ g ⊢ a ∧ b $ > $ g ⊢ a $;
 
---| @normalize hyp0 conc
 axiom and_elim_r (g: ctx) (a b: wff):
   $ g ⊢ a ∧ b $ > $ g ⊢ b $;
 
 -- Disjunction
---| @normalize hyp0 conc
 axiom or_intro_l (g: ctx) (a b: wff):
   $ g ⊢ a $ > $ g ⊢ a ∨ b $;
 
---| @normalize hyp0 conc
 axiom or_intro_r (g: ctx) (a b: wff):
   $ g ⊢ b $ > $ g ⊢ a ∨ b $;
 
---| @normalize hyp0 hyp1 hyp2 conc
 axiom or_elim (g h i: ctx) (a b c: wff):
   $ g ⊢ a ∨ b $ > $ h , a ⊢ c $ > $ i , b ⊢ c $ > $ g , h , i ⊢ c $;
 
 -- Biconditional introduction
---| @normalize hyp0 hyp1 conc
 axiom iff_intro (g h: ctx) (a b: wff):
   $ g ⊢ a → b $ > $ h ⊢ b → a $ > $ g , h ⊢ a ↔ b $;
 
 --| @view (g h _k : ctx) (a b: wff): $ g ⊢ a ↔ b $ > $ h ⊢ a $ > $ _k ⊢ b $
---| @normalize hyp0 hyp1 conc
 axiom iff_elim_l (g h : ctx) (a b: wff):
   $ g ⊢ a ↔ b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
 --| @view (g h _k : ctx) (a b: wff): $ g ⊢ a ↔ b $ > $ h ⊢ b $ > $ _k ⊢ a $
---| @normalize hyp0 hyp1 conc
 axiom iff_elim_r (g h : ctx) (a b: wff):
   $ g ⊢ a ↔ b $ > $ h ⊢ b $ > $ g , h ⊢ a $;
 
 -- Negation
---| @normalize hyp0 conc
 axiom not_intro (g: ctx) (a: wff):
   $ g , a ⊢ ⊥ $ > $ g ⊢ ¬ a $;
 
---| @normalize hyp0 hyp1 conc
 axiom not_elim (g h: ctx) (a: wff):
   $ g ⊢ ¬ a $ > $ h ⊢ a $ > $ g , h ⊢ ⊥ $;
 
 -- Absurdity
---| @normalize hyp0 conc
 axiom bot_elim (g: ctx) (a: wff):
   $ g ⊢ ⊥ $ > $ g ⊢ a $;
 
 -- Truth
---| @normalize conc
 axiom top_intro (g: ctx): $ g ⊢ ⊤ $;
 
 -- Equality
---| @normalize conc
 axiom eq_intro (g: ctx) (a: obj): $ g ⊢ a = a $;
 
---| @normalize hyp0 conc
 axiom eq_symm (g: ctx) (a b: obj):
   $ g ⊢ a = b $ > $ g ⊢ b = a $;
 
---| @normalize hyp0 hyp1 conc
 axiom eq_transitivity (g: ctx) (a b c: obj):
   $ g ⊢ a = b $ > $ g ⊢ b = c $ > $ g ⊢ a = c $;
 
 -- Universal quantification
 --| @freshen g x
---| @normalize hyp0 conc
 axiom all_intro (g: ctx) {x: obj} (p: wff x):
   $ g ⊢ p $ > $ g ⊢ ∀ x p $;
 
 --| @view  {x: obj} (g: ctx x) (t: obj x) (p: wff x) (q: wff): $ g ⊢ ∀ x p $ > $ g ⊢ q $
 --| @recover t q p x
---| @normalize conc
 axiom all_elim {x: obj} (g: ctx x) (t: obj x) (p: wff x):
   $ g ⊢ ∀ x p $ > $ g ⊢ [x/t] p $;
 
@@ -308,12 +287,10 @@ axiom all_elim {x: obj} (g: ctx x) (t: obj x) (p: wff x):
 --| @view {x: obj} (g: ctx) (t: obj x) (p: wff x) (q: wff): $ g ⊢ q $ > $ g ⊢ ∃ x p $
 --| @recover t q p x
 --| @freshen g x
---| @normalize hyp0 conc
 axiom ex_intro {x: obj} (g: ctx) (t: obj x) (p: wff x):
   $ g ⊢ [x/t] p $ > $ g ⊢ ∃ x p $;
 
 --| @freshen c x
---| @normalize hyp0 hyp1 conc
 axiom ex_elim {x: obj} (g: ctx x) (h: ctx x) (p: wff x) (c: wff):
   $ g ⊢ ∃ x p $ > $ h , p ⊢ c $ > $ g , h ⊢ c $;
 

@@ -52,7 +52,6 @@ axiom sb_pred (t: set) {x: set}: $ sb t x (P x) <-> P t $;
 
 --| @view (g h d: ctx) {x: set} (t: set) (p: wff x) (q: wff): $ seq (join g (join (hyp q) h)) (join (boxg g) (join (boxh h) d)) $ > $ seq (join g (join (hyp (A. x p)) h)) (join (boxg g) (join (boxh h) d)) $
 --| @recover t q p x
---| @normalize hyp0 conc
 axiom all_left_split (g h d: ctx) {x: set} (t: set) (p: wff x):
   $ seq (join g (join (hyp (sb t x p)) h))
       (join (boxg g) (join (boxh h) d)) $

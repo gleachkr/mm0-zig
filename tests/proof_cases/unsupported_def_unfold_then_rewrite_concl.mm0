@@ -26,7 +26,6 @@ axiom mark_any (a: wff): $ mark a <-> top $;
 def pre_wrap (f y: obj) {.x: obj}: wff
   = $ mark (A. x (((g f x) = y) -> (x = x))) $;
 
---| @normalize conc
 axiom pre_ax (f y: obj): $ pre_wrap f y $;
 
 theorem unsupported_def_unfold_then_rewrite_concl (f y: obj):

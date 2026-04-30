@@ -73,7 +73,6 @@ axiom sb_f_all {x y: obj} (t: obj x) (p: wff x y):
 
 --| @view {x: obj} (t: obj x) (p: wff x) (q: wff): $ ∀ x p $ > $ q $
 --| @recover t q p x
---| @normalize conc
 axiom all_elim {x: obj} (t: obj x) (p: wff x):
   $ ∀ x p $ > $ [x/t] p $;
 

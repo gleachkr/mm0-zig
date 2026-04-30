@@ -44,13 +44,11 @@ axiom seq_congr (g1 g2 d1 d2: ctx):
   $ ctx_eq g1 g2 $ > $ ctx_eq d1 d2 $ >
   $ (g1 ==> d1) ↔ (g2 ==> d2) $;
 
---| @normalize hyp0 hyp1 conc
 axiom pair_cut (g h d e: ctx) (a b: wff):
   $ g , a ==> d $
   > $ h , b ==> e $
   > $ g , h ==> d , e $;
 
---| @normalize hyp0 conc
 axiom discharge (g: ctx) (a b: wff):
   $ g , a ==> b $ > $ g ==> a , b $;
 

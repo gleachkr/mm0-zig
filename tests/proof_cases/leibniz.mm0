@@ -125,7 +125,6 @@ axiom lim_const {h: real} (c: real):
 --| @view {x: real} (a b: real) (r: real x) (p q: real): $ a = b $ > $ p = q $
 --| @abstract r p q x a b
 --| @fresh x
---| @normalize conc
 axiom eq_subst {x: real} (a b: real) (r: real x):
   $ a = b $ > $ [x | a] r = [x | b] r $;
 

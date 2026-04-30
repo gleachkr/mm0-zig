@@ -29,7 +29,6 @@ axiom sb_congr (a b c d: wff):
 
 def pp: wff = $ P -> P $;
 
---| @normalize conc
 axiom all_elim (a b: wff): $ sb a b $;
 
 theorem fail_def_unfold_then_rewrite: $ Q -> Q $;

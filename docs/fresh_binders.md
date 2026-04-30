@@ -416,7 +416,6 @@ term sb (t: wff) {x: wff} (r: wff x): wff;
 --|   $ a ↔ b $ > $ p ↔ q $
 --| @abstract r p q x a b
 --| @fresh x
---| @normalize conc
 axiom iff_subst {x: wff} (a b: wff) (r: wff x):
   $ a ↔ b $ > $ [x/a] r ↔ [x/b] r $;
 ```
@@ -463,7 +462,6 @@ sort real;
 --|   $ a = b $ > $ p = q $
 --| @abstract r p q x a b
 --| @fresh x
---| @normalize conc
 axiom eq_subst {x: real} (a b: real) (r: real x):
   $ a = b $ > $ [x | a] r = [x | b] r $;
 ```

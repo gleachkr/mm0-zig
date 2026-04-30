@@ -100,7 +100,6 @@ axiom nd_congr (g h: ctx) (a b: wff):
 axiom at_congr (w1 w2: world) (a b: mform):
   $ w1 ≈ w2 $ > $ a ≃ b $ > $ w1 : a ↔ w2 : b $;
 
---| @normalize hyp1 conc
 axiom at_nd_mp (g: ctx) (w: world) (a b: mform):
   $ a ≃ b $ > $ g ⊢ w : a $ > $ g ⊢ w : b $;
 
@@ -149,45 +148,36 @@ axiom all_alpha {x y: obj} (p: mform x y):
   $ ∀ x p ≃ ∀ y ([x/y] p) $;
 
 -- Axiom
---| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 
 -- Implication
---| @normalize hyp0 conc
 axiom imp_intro (g: ctx) (w: world) (a b: mform):
   $ g , w : a ⊢ w : b $ > $ g ⊢ w : (a → b) $;
 
---| @normalize hyp0 hyp1 conc
 axiom imp_elim (g: ctx) (w: world) (a b: mform):
   $ g ⊢ w : (a → b) $ > $ g ⊢ w : a $ > $ g ⊢ w : b $;
 
 -- Labelled equality and quantifier rules
---| @normalize conc
 axiom eq_refl_nd (g: ctx) (w: world) (a: obj): $ g ⊢ w : a = a $;
 
 --| @freshen g x
---| @normalize hyp0 conc
 axiom all_intro (g: ctx) (w: world) {x: obj} (p: mform x):
   $ g ⊢ w : p $ > $ g ⊢ w : ∀ x p $;
 
 --| @view {x: obj} (g: ctx x) (w: world) (t: obj x) (p: mform x) (q: mform): $ g ⊢ w : ∀ x p $ > $ g ⊢ w : q $
 --| @recover t q p x
---| @normalize conc
 axiom all_elim {x: obj} (g: ctx x) (w: world) (t: obj x) (p: mform x):
   $ g ⊢ w : ∀ x p $ > $ g ⊢ w : [x/t] p $;
 
 -- Modal rules
---| @normalize hyp0 conc
 axiom box_intro (g: ctx) (w: world) {v: world} (a: mform):
   $ g , (w R v) ⊢ v : a $ > $ g ⊢ w : □ a $;
 
---| @normalize hyp0 hyp1 conc
 axiom box_elim (g h: ctx) (w v: world) (a: mform):
   $ g ⊢ w : □ a $ > $ h ⊢ w R v $ > $ g , h ⊢ v : a $;
 
 --| @view (g: ctx) (w: world) {z: obj} (a b: obj) (p: mform z) (q r: mform): $ g ⊢ w : a = b $ > $ g ⊢ w : q $ > $ g ⊢ w : r $
 --| @abstract p q r z a b
---| @normalize hyp0 hyp1 conc
 --| @fresh z
 axiom eq_replace (g: ctx) (w: world) {z: obj} (a b: obj) (p: mform z):
   $ g ⊢ w : a = b $ >

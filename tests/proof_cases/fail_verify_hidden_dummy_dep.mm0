@@ -137,7 +137,6 @@ axiom weaken (g: ctx) (J K: jdg): $ g ⊢ J $ > $ g , K ⊢ J $;
 
 --| @view (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm) (q: ty): $ g ⊢ f : (Π x : A. B) $ > $ g ⊢ u : A $ > $ g ⊢ f · u : q $
 --| @freshen f x
---| @normalize conc
 axiom app_elim (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm):
   $ g ⊢ f : (Π x : A. B) $
   > $ g ⊢ u : A $
@@ -174,7 +173,6 @@ axiom cast_step (g: ctx) (A: ty) {y z: tm} (t: tm z):
   $ g , y : Nat , z : A ⊢ t : A $
   > $ g , y : Nat , z : A ⊢ t : [y/suc y] (const_ty y A) $;
 
---| @normalize hyp0 hyp1 hyp2 conc
 axiom nat_ind_ty (g: ctx) {y z: tm} (C: ty y) (z0: tm) (s: tm y z)
   (n: tm):
   $ g , y : Nat ⊢ Ty C $

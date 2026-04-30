@@ -10,7 +10,6 @@ term pred (t: set): wff; prefix pred: $Q$ prec 50;
 term all {x: set} (p: wff x): wff; prefix all: $A.$ prec 41;
 term sbw (t: wff) {x: wff} (r: wff x): wff;
 axiom keep (a: wff): $ a $ > $ a $;
---| @normalize hyp0
 axiom keep_norm (a: wff): $ a $ > $ a $;
 --| @relation wff iff iff_refl iff_trans iff_sym iff_mp
 axiom iff_refl (a: wff): $ a <-> a $;
@@ -36,13 +35,11 @@ axiom ax_2 (a b c: wff):
   $ (a -> (b -> c)) -> ((a -> b) -> (a -> c)) $;
 --| @view {x: set} (t: set) (p: wff x) (q: wff): $ q $ > $ A. x p -> q $
 --| @recover t q p x
---| @normalize conc
 axiom ax_inst_hyp {x: set} (t: set) (p: wff x):
   $ sbs t x p $ > $ A. x p -> sbs t x p $;
 axiom pred_i (u: set): $ Q u $;
 --| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
 --| @abstract r p q x a b
---| @normalize hyp1 conc
 axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ sbw a x r $ > $ sbw b x r $;
 --| @fresh y

@@ -2293,6 +2293,76 @@ test "transparent ctx defs satisfy structural intervals" {
     );
 }
 
+test "structural solver matches branch items by normalization" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_structural_normalized_item",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_structural_normalized_item",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
+    const mmb = try compiler.compileMmb(allocator);
+    defer allocator.free(mmb);
+    try mm0.verifyPair(allocator, mm0_src, mmb);
+    try std.testing.expectEqual(
+        @as(usize, 0),
+        compiler.warningDiagnostics().len,
+    );
+}
+
+test "freshen repairs strict replay dep violation without normalize" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @vars z w
+        \\sort obj;
+        \\provable sort wff;
+        \\term iff (a b: wff): wff;
+        \\term all {x: obj} (p: wff x): wff;
+        \\term P (t: obj): wff;
+        \\term sb (t: obj) {x: obj} (p: wff x): wff;
+        \\term marker {x: obj}: wff;
+        \\--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+        \\axiom iff_refl (a: wff): $ iff a a $;
+        \\axiom iff_trans (a b c: wff):
+        \\  $ iff a b $ > $ iff b c $ > $ iff a c $;
+        \\axiom iff_sym (a b: wff): $ iff a b $ > $ iff b a $;
+        \\axiom iff_mp (a b: wff): $ iff a b $ > $ a $ > $ b $;
+        \\--| @congr
+        \\axiom all_congr {x: obj} (p q: wff x):
+        \\  $ iff p q $ > $ iff (all x p) (all x q) $;
+        \\--| @rewrite
+        \\axiom sb_P (t: obj) {x: obj}: $ iff (sb t x (P x)) (P t) $;
+        \\--| @alpha x y
+        \\axiom all_alpha {x y: obj} (p: wff x y):
+        \\  $ iff (all x p) (all y (sb y x p)) $;
+        \\--| @freshen A x
+        \\axiom use {x: obj} (A: wff): $ A $ > $ marker x $;
+        \\theorem target {x: obj}: $ all x (P x) $ > $ marker x $;
+    ;
+    const proof_src =
+        \\target
+        \\------
+        \\l1: $ marker x $ by use [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
 test "prawitz alpha freshen proof compiles and verifies" {
     const allocator = std.testing.allocator;
     const mm0_src = try readProofCaseFile(
@@ -3168,6 +3238,46 @@ test "compiler points binding validation errors at explicit assignments" {
     );
 }
 
+test "compiler normalizes conclusions with automatic normalization" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term bi (a b: wff): wff; infixr bi: $<->$ prec 20;
+        \\term sb (a b: wff): wff;
+        \\term pair (a b: wff): wff;
+        \\term P: wff;
+        \\term Q: wff;
+        \\--| @relation wff bi biid bitr bisym mpbi
+        \\axiom biid (a: wff): $ a <-> a $;
+        \\axiom bitr (a b c: wff):
+        \\  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+        \\axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
+        \\axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+        \\--| @rewrite
+        \\axiom sb_P (a: wff): $ sb a P <-> a $;
+        \\--| @congr
+        \\axiom pair_congr (a b c d: wff):
+        \\  $ a <-> b $ > $ c <-> d $ >
+        \\  $ pair a c <-> pair b d $;
+        \\axiom all_elim (b: wff): $ pair (sb P P) b $;
+        \\theorem test_normalize: $ pair P Q $;
+    ;
+    const proof_src =
+        \\test_normalize
+        \\--------------
+        \\l1: $ pair P Q $ by all_elim
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
 test "compiler reports normalized comparison snapshots on mismatch" {
     const mm0_src =
         \\delimiter $ ( ) $;
@@ -3180,17 +3290,18 @@ test "compiler reports normalized comparison snapshots on mismatch" {
         \\term R: wff;
         \\--| @relation wff bi biid bitr bisym mpbi
         \\axiom biid (a: wff): $ a <-> a $;
-        \\axiom bitr (a b c: wff): $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+        \\axiom bitr (a b c: wff):
+        \\  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
         \\axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
         \\axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
         \\--| @rewrite
-        \\axiom sb_im (a b c: wff): $ sb a (b -> c) <-> (sb a b -> sb a c) $;
+        \\axiom sb_im (a b c: wff):
+        \\  $ sb a (b -> c) <-> (sb a b -> sb a c) $;
         \\--| @rewrite
         \\axiom sb_P (a: wff): $ sb a P <-> a $;
         \\--| @congr
         \\axiom im_congr (a b c d: wff):
         \\  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
-        \\--| @normalize conc
         \\axiom all_elim (a b: wff): $ sb a b $;
         \\theorem test_normalize_bad: $ R -> R $;
     ;
@@ -3260,7 +3371,6 @@ test "compiler reports missing congruence rules for normalization" {
         \\axiom sb_P (a: wff): $ sb a P <-> a $;
         \\axiom im_congr (a b c d: wff):
         \\  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
-        \\--| @normalize conc
         \\axiom all_elim (a b: wff): $ sb a b $;
         \\theorem test_normalize: $ Q -> Q $;
     ;

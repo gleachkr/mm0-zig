@@ -49,7 +49,6 @@ axiom sb_m_comp {x: mor} (t: mor x) (a b: mor x):
 
 --| @view {x: mor} (a b: mor) (r: mor x) (p q: mor): $ a ~ b $ > $ p ~ q $
 --| @abstract r p q x a b
---| @normalize conc
 axiom ctx_congr {x: mor} (a b: mor) (r: mor x):
   $ a ~ b $ > $ subst x / a r ~ subst x / b r $;
 

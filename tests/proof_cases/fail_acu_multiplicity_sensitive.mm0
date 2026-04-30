@@ -39,7 +39,6 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom seq_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⇒ a) ↔ (h ⇒ b) $;
 
---| @normalize conc
 axiom two_as (g: ctx) (a: wff): $ g , a , a ⇒ a $;
 
 theorem acu_multiplicity_sensitive_fail (x a: wff): $ x , a ⇒ a $;

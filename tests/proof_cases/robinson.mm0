@@ -85,7 +85,6 @@ axiom cl_congr (a b: clause):
 axiom derives_congr (a b: cnf):
   $ cnf_eq a b $ > $ (⊢ a) ↔ (⊢ b) $;
 
---| @normalize hyp0 conc
 axiom resolve (g d: cnf) (a b: clause) (x: lit):
   $ ⊢ (g ∧ ((a ∨ x) ∧ ((b ∨ ¬ x) ∧ d))) $
   > $ ⊢ (g ∧ ((a ∨ b) ∧ d)) $;

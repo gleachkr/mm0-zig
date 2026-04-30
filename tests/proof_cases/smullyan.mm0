@@ -96,37 +96,25 @@ axiom nd_congr (g h: ctx) (a b: wff):
 -- weakening. Discharging rules (imp_intro, neg_intro) still use the
 -- premise pattern `g , a ⊢ ...` and rely on ACUI matching to locate
 -- the assumption inside the assembled context.
---| @normalize conc
 axiom ax (a: wff): $ a ⊢ a $;
 
---| @normalize hyp0 hyp1 conc
 axiom and_intro (g h: ctx) (a b: wff):
   $ g ⊢ a $ > $ h ⊢ b $ > $ g , h ⊢ a ∧ b $;
---| @normalize hyp0 conc
 axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
---| @normalize hyp0 conc
 axiom and_elim_r (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ b $;
 
---| @normalize hyp0 conc
 axiom or_intro_l (g: ctx) (a b: wff): $ g ⊢ a $ > $ g ⊢ a ∨ b $;
---| @normalize hyp0 conc
 axiom or_intro_r (g: ctx) (a b: wff): $ g ⊢ b $ > $ g ⊢ a ∨ b $;
---| @normalize hyp0 hyp1 hyp2 conc
 axiom or_elim (g h1 h2: ctx) (a b c: wff):
   $ g ⊢ a ∨ b $ > $ h1 , a ⊢ c $ > $ h2 , b ⊢ c $ > $ g , h1 , h2 ⊢ c $;
 
---| @normalize hyp0 conc
 axiom imp_intro (g: ctx) (a b: wff): $ g , a ⊢ b $ > $ g ⊢ a → b $;
---| @normalize hyp0 hyp1 conc
 axiom imp_elim (g h: ctx) (a b: wff):
   $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
---| @normalize hyp0 hyp1 conc
 axiom bot_intro (g h: ctx) (a: wff):
   $ g ⊢ a $ > $ h ⊢ ¬ a $ > $ g , h ⊢ bot $;
---| @normalize hyp0 conc
 axiom neg_intro (g: ctx) (a: wff): $ g , a ⊢ bot $ > $ g ⊢ ¬ a $;
---| @normalize hyp0 conc
 axiom dne (g: ctx) (a: wff): $ g ⊢ ¬ ¬ a $ > $ g ⊢ a $;
 
 -- "x says s": the truthful biconditional, presented as the conjunction

@@ -22,7 +22,6 @@ axiom imp_congr (a b c d: wff):
 --| @view {x: wff} (a b t: wff) (r: wff x) (p s q: wff): $ a <-> b $ > $ p $ > $ s $ > $ q $
 --| @abstract r p q x a b
 --| @recover t s r x
---| @normalize hyp1 hyp2 conc
 axiom ax_chain {x: wff} (a b t: wff) (r: wff x):
   $ a <-> b $ > $ sb a x r $ > $ sb t x r $ > $ sb b x r $;
 theorem abs_chain {x: wff} (a b u: wff):

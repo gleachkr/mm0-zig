@@ -253,10 +253,10 @@ nesting level.
 
 Inline applications use the same rule-application pipeline as top-level
 proof lines. Rule metadata such as `@view`, `@recover`, `@abstract`,
-`@normalize`, `@fresh`, `@alpha`, and `@fallback` therefore applies in
-the usual way. The only difference is the assertion mode: a top-level
-line has a user-written assertion, while an inline application infers its
-whole conclusion from the selected candidate rule.
+`@fresh`, `@alpha`, and `@fallback` applies in the usual way. Automatic
+normalized validation is also available. The only difference is the assertion
+mode: a top-level line has a user-written assertion, while an inline
+application infers its whole conclusion from the selected candidate rule.
 
 ## Named argument bindings
 

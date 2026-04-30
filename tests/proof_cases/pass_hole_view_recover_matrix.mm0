@@ -52,7 +52,6 @@ axiom sb_pred (t: set) {x: set}: $ sb t x (P x) <-> P t $;
 
 --| @view (g: ctx) {x: set} (t: set) (p: wff x) (q: wff): $ nd g (A. x p) $ > $ nd g q $
 --| @recover t q p x
---| @normalize conc
 axiom all_elim (g: ctx) {x: set} (t: set) (p: wff x):
   $ nd g (A. x p) $ > $ nd g (sb t x p) $;
 

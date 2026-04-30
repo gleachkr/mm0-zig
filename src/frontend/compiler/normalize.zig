@@ -4,7 +4,6 @@ const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const ResolvedRelation = @import("../rewrite_registry.zig").ResolvedRelation;
-const NormalizeSpec = @import("../rewrite_registry.zig").NormalizeSpec;
 const Normalizer = @import("../normalizer.zig").Normalizer;
 const CommonTargetResult = @import("../normalizer.zig").CommonTargetResult;
 const CheckedIr = @import("./checked_ir.zig");
@@ -587,14 +586,4 @@ fn tryTraceComparison(
         "{s}: actual={s}",
         .{ label, actual_text },
     );
-}
-
-pub fn isHypMarkedForNormalize(
-    spec: NormalizeSpec,
-    hyp_idx: usize,
-) bool {
-    for (spec.hyp_indices) |marked| {
-        if (marked == hyp_idx) return true;
-    }
-    return false;
 }

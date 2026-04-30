@@ -19,6 +19,5 @@ axiom sb_P (a: wff): $ sb a P <-> a $;
 axiom im_congr (a b c d: wff):
   $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
 axiom ax_id (a: wff): $ id a $;
---| @normalize hyp0
 axiom use_sub (a b: wff): $ sb a b $ > $ a $;
 theorem def_rewrite_hyp (a: wff): $ Q $;

@@ -48,7 +48,6 @@ axiom sb_P_other {x y: obj} (t: obj x): $ sb t x (P y) ↔ P y $;
 axiom all_alpha {x y: obj} (p: wff x y): $ ∀ x p ↔ ∀ y (sb y x p) $;
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom all_right (g d: ctx) {x: obj} (p: wff x):
   $ g ==> d , p $ > $ g ==> d , ∀ x p $;
 theorem chained_alpha {a b: obj}:

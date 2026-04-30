@@ -32,17 +32,15 @@ axiom sb_P (a: wff): $ sb a P <-> a $;
 axiom im_congr (a b c d: wff): $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
 
 -- A rule whose conclusion needs normalization
---| @normalize conc
 axiom all_elim (a b: wff): $ sb a b $;
 
 -- A rule with hypothesis normalization:
 -- hyp0 expects sb(a, b) but user provides an already-normalized form
---| @normalize hyp0
 axiom use_sub (a b: wff): $ sb a b $ > $ a $;
 
 -- The proof:
 -- 1. all_elim [Q, P -> P] produces sb(Q, P->P), normalized to Q -> Q
 -- 2. use_sub [Q, P -> P] expects hyp0 = sb(Q, P->P). We provide Q -> Q from step 1.
---    With @normalize hyp0, both sb(Q, P->P) and Q -> Q normalize to Q -> Q, so they match.
+--    With automatic hypothesis normalization, both sb(Q, P->P) and Q -> Q normalize to Q -> Q, so they match.
 -- 3. Conclusion of use_sub is Q.
 theorem test_hyp_norm (a: wff): $ Q $;

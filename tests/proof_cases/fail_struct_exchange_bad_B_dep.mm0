@@ -40,7 +40,6 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom nd_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a ↔ b $ > $ nd g a ↔ nd h b $;
 
---| @normalize hyp0 conc
 axiom exchange (g: ctx) {x y: obj} (A: ty) (B: ty y) (d: ctx x y) (p: wff):
   $ nd (g , (decl x A , (decl y B , d))) p $
   > $ nd (g , (decl y B , (decl x A , d))) p $;

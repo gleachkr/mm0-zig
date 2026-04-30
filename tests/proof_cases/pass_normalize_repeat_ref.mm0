@@ -32,12 +32,10 @@ axiom sb_P (a: wff): $ sb a P <-> a $;
 axiom im_congr (a b c d: wff): $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
 
 -- A rule whose conclusion needs normalization
---| @normalize conc
 axiom all_elim (a b: wff): $ sb a b $;
 
 -- Reuse one normalized proof line twice as a normalized hypothesis.
 -- This exercises transported line reuse in the proof emitter.
---| @normalize hyp0 hyp1
 axiom use_sub_twice (a b: wff): $ sb a b $ > $ sb a b $ > $ a $;
 
 theorem test_repeat_ref: $ Q $;

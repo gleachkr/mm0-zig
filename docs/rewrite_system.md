@@ -48,8 +48,9 @@ Several mechanisms can supply these arguments, and they compose:
 
 Once all arguments are known, the compiler *instantiates* the rule: it
 substitutes the concrete expressions for each binder throughout the rule's
-conclusion and hypotheses, producing fully concrete expressions. That
-instantiated conclusion is then subject to normalization.
+conclusion and hypotheses, producing fully concrete expressions. If raw and
+transparent comparison do not already match the user's proof line, the
+instantiated conclusion and hypotheses can be reconciled by normalization.
 
 If the application still fails, the compiler may retry with a fallback rule.
 An axiom or theorem annotated with `@fallback other_rule` says: "if applying
@@ -59,17 +60,16 @@ checking have been attempted for the original rule.
 
 ### How normalization fits in
 
-When a rule is marked `@normalize conc`, the instantiated conclusion may be
-in a "raw" form that differs from what the user wrote. Both the raw
-instantiated conclusion and the user's assertion are normalized using the
-registered rewrite and congruence rules, and the two *normalized* forms must
+An instantiated conclusion may be in a "raw" form that differs from what the
+user wrote. After exact and transparent comparison fail, the compiler can
+normalize both the raw instantiated conclusion and the user's assertion using
+the registered rewrite and congruence rules. The two *normalized* forms must
 match. The compiler then emits the full chain of proof steps — the raw rule
 application, every intermediate rewrite and congruence step, and a final
 transport step — so the verifier can confirm the whole thing.
 
 To make this concrete, consider `ax_inst`:
 ```
---| @normalize conc
 axiom ax_inst {x: nat} (t: nat) (p: wff x):
   $ A. x p $ > $ sb_f t x p $;
 ```
@@ -103,7 +103,6 @@ form. The two normalized forms agree, so the line is accepted.
 | `@rewrite`      | `axiom`             | Marks an axiom as an oriented rewrite rule |
 | `@congr`        | `axiom`             | Marks an axiom as a congruence rule for a term constructor |
 | `@acui`         | `term`              | Marks a binary combiner for structural AU / ACU / AUI / ACUI normalization |
-| `@normalize`    | `axiom` / `theorem` | Specifies which positions should be auto-normalized |
 | `@fallback`     | `axiom` / `theorem` | Retries theorem application through another named rule |
 | `@alpha`        | `axiom`             | Registers an alpha-renaming lemma for freshening |
 
@@ -469,35 +468,16 @@ A term annotated with `@acui` must also have:
 
 ---
 
-## `@normalize`
+## Automatic normalized validation
 
-### Purpose
-
-`@normalize` marks an axiom or theorem so that its conclusion and/or specified
-hypotheses are automatically normalized after instantiation. Without
-`@normalize conc`, the rule's conclusion is not normalized as part of
-conclusion checking, although transparent-def conversion and ordinary
-hypothesis transports may still apply at theorem-application boundaries.
-With `@normalize conc`, the raw instantiated conclusion and the user's
-assertion are normalized and compared.
-
-### Syntax
-```
---| @normalize conc
---| @normalize hyp0
---| @normalize conc hyp0 hyp1
-```
-
-- `conc`: normalize the conclusion after instantiation
-- `hyp0`, `hyp1`, ...: normalize the hypothesis at the given 0-based index
-
-Multiple positions can appear on a single annotation line.
-
-### What happens at a normalized proof line
+After raw and transparent comparison fail, the checker may normalize the
+instantiated conclusion, the user assertion, and referenced hypotheses.  If
+the normalized forms are equivalent, the compiler emits the raw rule
+application, every rewrite step needed for the conversion proof, and a final
+transport step.
 
 Given:
 ```
---| @normalize conc
 axiom ax_inst {x: nat} (t: nat) (p: wff x):
   $ A. x p $ > $ sb_f t x p $;
 ```
@@ -510,33 +490,19 @@ l1: $ S zer = zer $ by ax_inst (x := $ x $, t := $ S zer $, p := $ x = zer $) [#
 the compiler performs these steps:
 
 1. **Instantiate** `ax_inst`'s conclusion with the given bindings:
-   `sb_f (S zer) x (x = zer)`
+   `sb_f (S zer) x (x = zer)`.
 2. **Normalize** the instantiated expression using the registered rewrite and
-   congruence rules:
-   - `sb_f_eq` rewrites to `sb_t (S zer) x x = sb_t (S zer) x zer`
-   - `sb_t_var` rewrites `sb_t (S zer) x x` to `S zer`
-   - `sb_t_zer` rewrites `sb_t (S zer) x zer` to `zer`
-   - `eq_congr` and `suc_congr` provide congruence proofs for each step
+   congruence rules.
 3. **Compare** the normalized result to what you wrote (`S zer = zer`).
 4. **Emit** the full proof chain: the raw `ax_inst` application, each
    intermediate rewrite step as a theorem application, and a final transport
    step that converts the raw conclusion to the normalized form.
 
-If the normalized result does not match your assertion, the compiler reports
-a `ConclusionMismatch` error.
-
-### Hypothesis normalization
-
-When `hyp0` (or another hypothesis index) is listed, the annotation records
-that the expected hypothesis is intended to be used in normalized form. The
-checker can also use normalized conversion as a final validation step for any
-hypothesis reference: if the cited line and the expected hypothesis normalize
-to equivalent forms, a transport step is emitted before the reference is fed
-into the theorem application.
-
-That broader validation rule matters for chained and holey proofs, where a
-referenced line may be stored in a raw producer form while the consuming rule
-expects the normalized form.
+The same fallback is available for hypothesis references.  If the cited line
+and the expected hypothesis normalize to equivalent forms, a transport step is
+emitted before the reference is fed into the theorem application.  This matters
+for chained and holey proofs, where a referenced line may be stored in a raw
+producer form while the consuming rule expects the normalized form.
 
 ---
 
@@ -570,7 +536,7 @@ normally, including:
 - omitted-binder inference
 - `@view`, `@recover`, and `@abstract`
 - `@fresh`
-- `@normalize`
+- automatic normalization
 - inline reference elaboration, including nested chained applications
 
 If that whole attempt fails, and `R` has `@fallback S`, the compiler throws
@@ -706,7 +672,7 @@ from "normalization completed but result doesn't match". If you suspect a step
 limit issue, check for cycles or unbounded expansion in your rule set.
 
 The step limit is shared across all recursive normalization within a single
-`@normalize` invocation: descending into children and assembling
+validation attempt: descending into children and assembling
 reflexivity/transitivity proofs do not consume steps, but every head rewrite
 rule application does.
 
@@ -716,7 +682,6 @@ rule application does.
 
 ### The axiom
 ```
---| @normalize conc
 axiom ax_inst {x: nat} (t: nat) (p: wff x):
   $ A. x p $ > $ sb_f t x p $;
 ```

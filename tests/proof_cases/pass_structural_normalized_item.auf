@@ -1,0 +1,5 @@
+pass_structural_normalized_item
+-------------------------------
+
+l1: $ Q , R |- R $ by ax (g := $ hyp Q $, a := $ R $) []
+l2: $ R $ by drop (a := $ Q $, b := $ R $) [l1]

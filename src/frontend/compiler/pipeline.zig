@@ -1724,12 +1724,6 @@ fn cloneRewriteRegistry(
             allocator,
             &src.congr_by_head,
         ),
-        .normalize_specs = try cloneAutoHashMapKV(
-            u32,
-            @import("../rewrite_registry.zig").NormalizeSpec,
-            allocator,
-            &src.normalize_specs,
-        ),
         .fallbacks = try cloneAutoHashMapKV(
             u32,
             u32,

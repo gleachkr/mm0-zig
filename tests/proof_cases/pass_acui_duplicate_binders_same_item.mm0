@@ -41,7 +41,6 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom seq_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⇒ a) ↔ (h ⇒ b) $;
 
---| @normalize conc
 axiom pair_bot (g: ctx) (a b: wff): $ g , a , b ⇒ bot $;
 
 theorem acui_duplicate_binders_same_item (a: wff): $ emp , a ⇒ bot $;

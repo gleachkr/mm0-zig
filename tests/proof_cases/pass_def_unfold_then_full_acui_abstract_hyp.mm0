@@ -64,7 +64,6 @@ axiom sb_c_join {x: ctx} (t: ctx x) (g h: ctx x):
 
 --| @view {x: ctx} (a b: ctx) (r: ctx x) (p q: ctx): $ ctx_eq p q $ > $ ctx_eq a b $
 --| @abstract r p q x a b
---| @normalize hyp0
 axiom use_ctx_subst {x: ctx} (a b: ctx x) (r: ctx x):
   $ ctx_eq (subst x / a r) (subst x / b r) $ > $ ctx_eq a b $;
 

@@ -51,7 +51,6 @@ axiom nd_congr (g h: ctx) (a b: wff):
 axiom all_congr {x: obj} (p q: wff x):
   $ p <-> q $ > $ A. x p <-> A. x q $;
 
---| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a |- a $;
 
 -- As above, but here the exposed body has to be fully ACUI-normalized
@@ -62,7 +61,6 @@ def pre_ctx (u: obj) (r: wff) {.x: obj}: wff =
 axiom ax_all (u: obj) {v: obj} (r: wff):
   $ A. v (r , (u = v) |- u = v) $;
 
---| @normalize hyp0
 axiom use_pre_ctx (u: obj) (r: wff): $ pre_ctx u r $ > $ r $ > $ u = u $;
 
 theorem unsupported_def_unfold_then_full_acui_hyp {u v: obj} (r: wff):

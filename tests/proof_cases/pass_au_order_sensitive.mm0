@@ -38,7 +38,6 @@ axiom join_congr (g1 g2 h1 h2: ctx):
 axiom seq_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⇒ a) ↔ (h ⇒ b) $;
 
---| @normalize conc
 axiom suffix_dup (g: ctx) (a b: wff): $ ((g , a) , a) , b ⇒ b $;
 
 theorem au_order_sensitive (x a b: wff): $ x , (a , (a , b)) ⇒ b $;

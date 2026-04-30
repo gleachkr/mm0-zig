@@ -18,7 +18,6 @@ axiom sb_neg (t: wff) {x: wff} (a: wff x):
 axiom neg_congr (a b: wff): $ a <-> b $ > $ ~ a <-> ~ b $;
 --| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
 --| @abstract r p q x a b
---| @normalize hyp1 conc
 axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
 theorem abs_phantoms {x: wff} (a b: wff):

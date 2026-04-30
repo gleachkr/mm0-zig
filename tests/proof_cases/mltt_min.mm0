@@ -191,13 +191,11 @@ axiom weaken (g: ctx) (J K: jdg):
 
 --| @view (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm) (q: ty): $ g ⊢ f : (Π x : A. B) $ > $ g ⊢ u : A $ > $ g ⊢ f · u : q $
 --| @freshen f x
---| @normalize conc
 axiom app_elim (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm):
   $ g ⊢ f : (Π x : A. B) $
   > $ g ⊢ u : A $
   > $ g ⊢ f · u : [x/u] B $;
 
---| @normalize hyp0 conc
 axiom exchange (g: ctx) {x y: tm} (A: ty) (B: ty y) (d: ctx x y)
   (J: jdg x y):
   $ g , x : A , y : B , d ⊢ J $

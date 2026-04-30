@@ -86,29 +86,24 @@ axiom all_alpha {x y: obj} (p: wff x y):
 axiom ex_alpha {x y: obj} (p: wff x y):
   $ ∃ x p ↔ ∃ y (sb y x p) $;
 
---| @normalize conc
 axiom ax (a: wff): $ a ==> a $;
 
---| @normalize hyp0 conc
 axiom weak_left (g d: ctx) (a: wff): $ g ==> d $ > $ g , a ==> d $;
 
 --| @view (g d: ctx) {x: obj} (t: obj x) (p: wff x) (q: wff): $ g , q ==> d $ > $ g , ∀ x p ==> d $
 --| @recover t q p x
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom all_left (g d: ctx) {x: obj} (t: obj x) (p: wff x):
   $ g , sb t x p ==> d $ > $ g , ∀ x p ==> d $;
 
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom all_right (g d: ctx) {x: obj} (p: wff x):
   $ g ==> d , p $ > $ g ==> d , ∀ x p $;
 
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom ex_left (g d: ctx) {x: obj} (p: wff x):
   $ g , p ==> d $ > $ g , ∃ x p ==> d $;
 
@@ -116,7 +111,6 @@ axiom ex_left (g d: ctx) {x: obj} (p: wff x):
 --| @recover t q p x
 --| @freshen g x
 --| @freshen d x
---| @normalize hyp0 conc
 axiom ex_right (g d: ctx) {x: obj} (t: obj x) (p: wff x):
   $ g ==> d , sb t x p $ > $ g ==> d , ∃ x p $;
 

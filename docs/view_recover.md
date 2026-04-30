@@ -13,12 +13,10 @@ Every rule has a *raw form* — the conclusion as literally stated in the
 `.mm0` file — and a *user-facing form* — the expression a proof author
 actually wants to write. For simple rules these are the same thing, and
 ordinary unification suffices to recover any omitted arguments. For more
-complex rules, especially rules whose conclusions are subject to
-`@normalize`, the two can diverge significantly.
+complex rules, especially rules whose conclusions normalize, the two can diverge significantly.
 
 Consider a universal instantiation rule:
 ```
---| @normalize conc
 axiom ax_inst {x: set} (t: set) (p: wff x):
   $ A. x p -> sb t x p $;
 ```
@@ -80,8 +78,8 @@ arguments in the following order:
    by replaying the rule's unify stream against the user's line and refs.
 6. **Validation** checks all resolved bindings against the rule's sort and
    boundness constraints.
-7. **Normalization** (if `@normalize` is present) normalizes the instantiated
-   conclusion and/or hypotheses and checks against the user's expressions.
+7. **Normalization** normalizes instantiated conclusions and hypotheses when
+   needed, then checks against the user's expressions.
 
 If any real rule binder is still unresolved after all of these steps, the
 compiler reports an inference failure.
@@ -267,7 +265,6 @@ axiom sb_pred (t: set) {x: set}: $ sb t x (P x) <-> P t $;
 
 --| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
 --| @recover t q p x
---| @normalize conc
 axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> sb t x p $;
 ```
 
@@ -285,7 +282,7 @@ is elaborated as follows:
   to `u`.
 - The compiler instantiates `ax_inst` with `t = u`, `p = P x`, producing the
   raw conclusion `sb u x (P x)`.
-- `@normalize conc` reduces `sb u x (P x)` via `sb_pred` to `P u`, which
+- Conclusion normalization reduces `sb u x (P x)` via `sb_pred` to `P u`, which
   matches the user's assertion.
 
 ---
@@ -313,7 +310,6 @@ the hole variable `x`.
 ```
 --| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
 --| @abstract r p q x a b
---| @normalize hyp1 conc
 axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
 ```
@@ -380,7 +376,6 @@ axiom sb_imp (t: wff) {x: wff} (a b: wff x):
 
 --| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
 --| @abstract r p q x a b
---| @normalize hyp1 conc
 axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
 ```
@@ -399,7 +394,7 @@ where `#1 : a <-> b` and `#2 : a -> top`.
   `r = x -> top`.
 - The compiler instantiates `ax_ctx` with `r = x -> top`, producing
   hypotheses `sb a x (x -> top)` and conclusion `sb b x (x -> top)`.
-- `@normalize hyp1 conc` reduces these via `sb_var`, `sb_top`, and `sb_imp`
+- Hypothesis and conclusion normalization reduce these via `sb_var`, `sb_top`, and `sb_imp`
   to `a -> top` and `b -> top` respectively, matching `#2` and the user's
   assertion.
 
@@ -442,8 +437,8 @@ annotations is:
 
 7. **Instantiate the rule** with the final concrete bindings.
 
-8. **Normalize** marked hypotheses and/or the conclusion (if `@normalize` is
-   present), check against the user's expressions, and emit transport steps.
+8. **Normalize** hypotheses and/or the conclusion when needed, check against
+   the user's expressions, and emit transport steps.
 
 At any step, a conflict or failure produces a diagnostic identifying the
 annotation responsible.

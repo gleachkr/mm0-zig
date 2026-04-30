@@ -40,7 +40,6 @@ axiom comp_assoc (f g h: mor): $ (f o g) o h ~ f o (g o h) $;
 
 axiom ax_expanded (a: wff): $ a -> a $;
 
---| @normalize conc
 axiom assoc_refl (f g h: mor): $ ((f o g) o h) ~ ((f o g) o h) $;
 
 theorem hole_final_transparent (a: wff): $ id a $;

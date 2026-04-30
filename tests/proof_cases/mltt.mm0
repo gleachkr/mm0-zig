@@ -313,7 +313,6 @@ axiom sb_tm_app {x: tm} (u: tm x) (f t: tm x):
 -- β-reduction is a judgemental equality rule. The conclusion normalizes
 -- the explicit substitution syntax away using the raw substitution rules.
 --| @view (g: ctx) (A: ty) {x: tm} (B: ty x) (a b t u v: tm) (q: ty): $ g ⊢ (λ x : A. t) : (Π x : A. B) $ > $ g ⊢ u : A $ > $ g ⊢ ≡[q] a = b $
---| @normalize conc
 axiom app_beta (g: ctx) (A: ty) {x: tm} (B: ty x) (t: tm x) (u: tm):
   $ g ⊢ (λ x : A. t) : (Π x : A. B) $
   > $ g ⊢ u : A $
@@ -416,7 +415,6 @@ axiom weaken (g: ctx) (J K: jdg):
 
 --| @view (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm) (q: ty): $ g ⊢ f : (Π x : A. B) $ > $ g ⊢ u : A $ > $ g ⊢ f · u : q $
 --| @freshen f x
---| @normalize conc
 axiom app_elim (g: ctx) (A: ty) {x: tm} (B: ty x) (f u: tm):
   $ g ⊢ f : (Π x : A. B) $
   > $ g ⊢ u : A $
@@ -435,7 +433,6 @@ axiom bool_rec_congr (A B: ty) (t1 t2 f1 f2 b1 b2: tm):
   > $ tm_raw_eq b1 b2 $
   > $ tm_raw_eq (bool_rec A t1 f1 b1) (bool_rec B t2 f2 b2) $;
 
---| @normalize conc
 axiom bool_rec_ty (g: ctx) (A: ty) (t f b: tm):
   $ g ⊢ Ty A $
   > $ g ⊢ t : A $
@@ -443,7 +440,6 @@ axiom bool_rec_ty (g: ctx) (A: ty) (t f b: tm):
   > $ g ⊢ b : Bool $
   > $ g ⊢ bool_rec A t f b : A $;
 
---| @normalize hyp0 hyp1 hyp2 conc
 axiom nat_ind_ty (g: ctx) {k ih: tm} (C: ty k) (z: tm) (s: tm k ih)
   (n: tm):
   $ g , k : Nat ⊢ Ty C $
@@ -452,7 +448,6 @@ axiom nat_ind_ty (g: ctx) {k ih: tm} (C: ty k) (z: tm) (s: tm k ih)
   > $ g ⊢ n : Nat $
   > $ g ⊢ nat_ind k ih C z s n : [k/n] C $;
 
---| @normalize conc
 axiom nat_rec_ty (g: ctx) (A: ty) (z s n: tm):
   $ g ⊢ Ty A $
   > $ g ⊢ z : A $
@@ -460,28 +455,24 @@ axiom nat_rec_ty (g: ctx) (A: ty) (z s n: tm):
   > $ g ⊢ n : Nat $
   > $ g ⊢ nat_rec A z s n : A $;
 
---| @normalize conc
 axiom bool_rec_true (g: ctx) (A: ty) (t f: tm):
   $ g ⊢ Ty A $
   > $ g ⊢ t : A $
   > $ g ⊢ f : A $
   > $ g ⊢ ≡[A] (bool_rec A t f true) = t $;
 
---| @normalize conc
 axiom bool_rec_false (g: ctx) (A: ty) (t f: tm):
   $ g ⊢ Ty A $
   > $ g ⊢ t : A $
   > $ g ⊢ f : A $
   > $ g ⊢ ≡[A] (bool_rec A t f false) = f $;
 
---| @normalize conc
 axiom nat_rec_zero (g: ctx) (A: ty) (z s: tm):
   $ g ⊢ Ty A $
   > $ g ⊢ z : A $
   > $ g ⊢ s : (A → A) $
   > $ g ⊢ ≡[A] (nat_rec A z s zero) = z $;
 
---| @normalize conc
 axiom nat_rec_suc (g: ctx) (A: ty) (z s n: tm):
   $ g ⊢ Ty A $
   > $ g ⊢ z : A $
@@ -489,14 +480,12 @@ axiom nat_rec_suc (g: ctx) (A: ty) (z s n: tm):
   > $ g ⊢ n : Nat $
   > $ g ⊢ ≡[A] (nat_rec A z s (suc n)) = (s · (nat_rec A z s n)) $;
 
---| @normalize hyp0 hyp1 hyp2 conc
 axiom nat_ind_zero (g: ctx) {k ih: tm} (C: ty k) (z: tm) (s: tm k ih):
   $ g , k : Nat ⊢ Ty C $
   > $ g ⊢ z : [k/zero] C $
   > $ g , k : Nat , ih : C ⊢ s : [k/suc k] C $
   > $ g ⊢ ≡[[k/zero] C] (nat_ind k ih C z s zero) = z $;
 
---| @normalize hyp0 hyp1 hyp2 conc
 axiom nat_ind_suc (g: ctx) {k ih: tm} (C: ty k) (z: tm) (s: tm k ih)
   (n: tm):
   $ g , k : Nat ⊢ Ty C $
@@ -512,7 +501,6 @@ axiom app_bool_not_true (g: ctx):
 axiom app_bool_not_false (g: ctx):
   $ g ⊢ ≡[Bool] (bool_not_fn · false) = true $;
 
---| @normalize hyp0 conc
 axiom exchange (g: ctx) {x y: tm} (A: ty) (B: ty y) (d: ctx x y)
   (J: jdg x y):
   $ g , x : A , y : B , d ⊢ J $

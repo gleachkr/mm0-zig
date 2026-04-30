@@ -27,10 +27,8 @@ A rule application has two different layers:
 - the **user-facing expression**, which is what the proof author wrote on the
   line or in a cited reference
 
-Before this feature, those two layers had to agree syntactically, unless
-`@normalize` explicitly allowed the compiler to rewrite one side.
-
-Now there is an extra bridge:
+The raw and user-facing layers often differ because one side uses a def.
+Transparent conversion provides an extra bridge:
 
 - if the two expressions differ only by unfolding defs, the compiler accepts
   the line
@@ -62,7 +60,7 @@ way. Different subsystems ask for different strengths of comparison:
   solver explicitly asks for a def-aware comparison.
 - **Strict omitted-binder replay:** no. Replay stays exact and does not open
   defs.
-- **Plain `@normalize`:** no eager def exposure. Normalization still does not
+- **Normalization:** no eager def exposure. Normalization still does not
   unfold defs merely to create new rewrite redexes.
 
 This still applies to **all** defs at theorem-application boundaries, but the
@@ -166,7 +164,7 @@ important:
 - **Transparent fallback after replay.** If strict replay fails without a
   hard diagnostic, ordinary rules may get a def-aware rule-match fallback
   seeded by whatever replay had already learned.
-- **Advanced inference paths.** Rules with `@view` or `@normalize`, and some
+- **Advanced inference paths.** Rules using `@view`, normalization, or some
   harder solver-driven cases, go through the frontend's def-aware matching
   machinery and structural solver instead of relying only on raw replay.
 
@@ -229,7 +227,7 @@ normalization-aware inference, and structural inference under an `@acui`
 combiner may still use separate def-aware logic when they are solving a
 different kind of comparison problem. This structural path now respects the
 declared fragment semantics: AU, ACU, AUI, or ACUI. In particular, a rule
-with `@view` or `@normalize` does not have to live or die by raw unify
+using `@view` or normalization does not have to live or die by raw unify
 replay: the compiler may switch to a `RuleMatchSession`-based path that can
 compare through defs when that is part of the intended rule behavior.
 
@@ -286,12 +284,12 @@ it is still not a general "rewrite through defs everywhere" mechanism. See
 
 ---
 
-## Interaction with `@normalize`
+## Interaction with automatic normalization
 
-Transparent def unfolding and `@normalize` solve different problems.
+Transparent def unfolding and automatic normalization solve different problems.
 
 - transparent def unfolding bridges **defined** and **expanded** forms
-- `@normalize` bridges expressions related by registered rewrite,
+- automatic normalization bridges expressions related by registered rewrite,
   congruence, and ACUI rules
 
 They compose in a limited way. The checker can compare normalized expressions
@@ -301,17 +299,15 @@ to discover more rewrites. Rewriting still works on the visible instantiated
 expression.
 
 If you need witness recovery only after an unfold / rewrite alignment, that is
-usually a job for `@view` plus `@recover` or `@abstract`, not for plain
-`@normalize` alone.
+usually a job for `@view` plus `@recover` or `@abstract`, not for normalization alone.
 
 ### Def-aware normalized conclusion
 
-Suppose a rule is normalized on the conclusion, but the user writes a def in
-that normalized position:
+Suppose a rule conclusion normalizes to one expression, but the user
+writes a def in that normalized position:
 
 ```
 def id (a: wff): wff = $ a -> a $;
---| @normalize conc
 axiom all_elim (a b: wff): $ sb a b $;
 
 theorem def_rewrite_concl (a: wff): $ id Q $;
@@ -336,7 +332,6 @@ The same applies to normalized hypotheses:
 
 ```
 axiom ax_id (a: wff): $ id a $;
---| @normalize hyp0
 axiom use_sub (a b: wff): $ sb a b $ > $ a $;
 ```
 
@@ -350,8 +345,7 @@ The checker can build the same normalized conversion for hypothesis
 references that final theorem-application validation uses. In practice,
 the cited reference may be normalized and then bridged by transparent
 unfolding before it is fed into the theorem application. This can happen
-when the conversion is provable even if the consuming rule did not mark
-that specific hypothesis with `@normalize`.
+whenever the conversion is provable.
 
 ---
 
@@ -391,5 +385,5 @@ In short:
 
 - use **transparent def unfolding** when you want proof authors to move freely
   between defined and expanded forms at theorem-application boundaries
-- do **not** assume that `@normalize` will unfold defs first in order to
+- do **not** assume that normalization will unfold defs first in order to
   discover more rewrites

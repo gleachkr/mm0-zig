@@ -317,7 +317,7 @@ l2: $ ∀ x ¬ suc x = 0 $ by ax_gen [l1]
 inst_refl
 ---------
 -- sb_f (suc 0) x (x = x)  normalises via sb_f_eq + sb_t_var to
--- (suc 0 = suc 0), so @normalize conc accepts the plain claim.
+-- (suc 0 = suc 0), so conclusion normalization accepts the plain claim.
 l1: $ suc 0 = suc 0 $ by ax_inst [#1]
 
 inst_suc_suc
@@ -349,7 +349,7 @@ l2: $ suc x = suc (suc x) → x = suc x $ by peano2
 l3: $ (suc x = suc (suc x) → x = suc x) → ¬ x = suc x → ¬ suc x = suc (suc x) $ by con3
 l4: $ ¬ x = suc x → ¬ suc x = suc (suc x) $ by ax_mp [l3, l2]
 l5: $ ∀ x (¬ x = suc x → ¬ suc x = suc (suc x)) $ by ax_gen [l4]
--- peano5 closes induction; sb_f_ne lets @normalize hyp0/hyp1 cross the ≠ def.
+-- peano5 closes induction; sb_f_ne lets hypothesis normalization cross the ≠ def.
 l6: $ ∀ x ¬ x = suc x $ by peano5 [l1, l5]
 
 add_0_left
@@ -368,7 +368,7 @@ l5: $ 0 + x = x → suc (0 + x) = suc x $ by peano2r
 l6: $ 0 + x = x → 0 + suc x = suc x $ by syl [l4, l5]
 -- Generalise the step over x.
 l7: $ ∀ x (0 + x = x → 0 + suc x = suc x) $ by ax_gen [l6]
--- peano5 closes the induction; @normalize hyp0 hyp1 matches l1/l7
+-- peano5 closes the induction; hypothesis normalization matches l1/l7
 -- against sb_f 0 x (0 + x = x) and ∀ x ((0 + x = x) → sb_f (suc x) x (0 + x = x)).
 l8: $ ∀ x (0 + x = x) $ by peano5 [l1, l7]
 
@@ -417,7 +417,7 @@ l1: $ 0 + suc 0 = suc 0 $ by ax_inst [#1]
 
 add_0_left_inst
 ---------------
--- Specialise add_0_left at t := a.  @normalize conc on ax_inst pushes
+-- Specialise add_0_left at t := a.  conclusion normalization on ax_inst pushes
 -- sb_f through = and sb_t via sb_t_zer / sb_t_var / sb_t_irrel to
 -- land on (0 + a = a).
 l1: $ ∀ x (0 + x = x) $ by add_0_left

@@ -60,13 +60,11 @@ axiom nd_congr (g h: ctx) (a b: wff):
 
 --| @view {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ p $ > $ q $
 --| @abstract r p q x a b
---| @normalize hyp1 conc
 axiom ax_ctx {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ sb a x r $ > $ sb b x r $;
 
 --| @view (g: ctx) {x: wff} (a b: wff) (r: wff x) (p q: wff): $ a <-> b $ > $ nd g p $ > $ nd g q $
 --| @abstract r p q x a b
---| @normalize hyp1 conc
 axiom ax_ctx_nd (g: ctx) {x: wff} (a b: wff) (r: wff x):
   $ a <-> b $ > $ nd g (sb a x r) $ > $ nd g (sb b x r) $;
 

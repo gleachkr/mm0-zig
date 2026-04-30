@@ -42,7 +42,6 @@ axiom seq_congr (g h: ctx) (a b: wff):
 
 def dbl (a: wff): ctx = $ a , a $;
 
---| @normalize conc
 axiom dup_ax (g: ctx) (a: wff): $ g , a , a ⇒ a $;
 
 theorem acui_cross_side_cancel (a b: wff): $ dbl a , b ⇒ a $;

@@ -61,6 +61,7 @@ pub const DepViolationDiagnosticDetail = struct {
 pub const InferencePath = enum {
     strict_replay,
     transparent_fallback,
+    normalized_session_fallback,
     structural_solver,
     holey_surface_match,
 };
@@ -235,6 +236,7 @@ pub fn inferencePathName(path: InferencePath) []const u8 {
     return switch (path) {
         .strict_replay => "strict replay",
         .transparent_fallback => "transparent fallback",
+        .normalized_session_fallback => "normalized session fallback",
         .structural_solver => "structural or def-aware solver",
         .holey_surface_match => "holey assertion match",
     };

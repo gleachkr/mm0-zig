@@ -3,8 +3,10 @@ provable sort wff;
 sort ctx;
 
 term iff (a b: wff): wff;
-infixr iff: $↔$ prec 20;
 infixr iff: $<->$ prec 20;
+term Q: wff;
+term R: wff;
+term sb (a b: wff): wff;
 term ctx_eq (g h: ctx): wff;
 term emp: ctx;
 --| @acui ctx_assoc ctx_comm emp ctx_idem
@@ -12,15 +14,15 @@ term join (g h: ctx): ctx;
 infixl join: $,$ prec 5;
 term hyp (a: wff): ctx;
 coercion hyp: wff > ctx;
-term seq (g d: ctx): wff;
-infixl seq: $==>$ prec 0;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $|-$ prec 0;
 
 --| @relation wff iff iff_refl iff_trans iff_sym iff_mp
-axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_refl (a: wff): $ a <-> a $;
 axiom iff_trans (a b c: wff):
-  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
-axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
-axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
 
 --| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
 axiom ctx_refl (g: ctx): $ ctx_eq g g $;
@@ -33,15 +35,28 @@ axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
 axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
 axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
 
+--| @rewrite
+axiom sb_Q (a: wff): $ sb a Q <-> a $;
+
+--| @congr
+axiom sb_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ sb a c <-> sb b d $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a <-> b $ > $ ctx_eq (hyp a) (hyp b) $;
+
 --| @congr
 axiom join_congr (g1 g2 h1 h2: ctx):
-  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ > $ ctx_eq (g1 , h1) (g2 , h2) $;
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
 
 --| @congr
-axiom seq_congr (g1 g2 d1 d2: ctx):
-  $ ctx_eq g1 g2 $ > $ ctx_eq d1 d2 $ > $ (g1 ==> d1) ↔ (g2 ==> d2) $;
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a <-> b $ > $ (g |- a) <-> (h |- b) $;
 
-axiom balance (g h: ctx): $ g , h ==> g , h $;
+axiom ax (g: ctx) (a: wff): $ g , a |- a $;
 
-theorem acui_joint_cover_conflict (x: wff):
-  $ x ==> emp $;
+axiom drop (g: ctx) (a b: wff): $ g , (sb a Q) |- b $ > $ b $;
+
+theorem pass_structural_normalized_item:
+  $ R $;

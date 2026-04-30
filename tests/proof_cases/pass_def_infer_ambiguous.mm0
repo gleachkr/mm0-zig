@@ -52,7 +52,6 @@ axiom seq_congr (g h: ctx) (a b: wff):
 axiom imp_congr (a b c d: wff):
   $ a ↔ b $ > $ c ↔ d $ > $ (a -> c) ↔ (b -> d) $;
 
---| @normalize conc
 axiom pair_bot_id (g: ctx) (p q: wff): $ g , id p , id q ⇒ bot $;
 
 theorem def_infer_ambiguous (a b: wff):

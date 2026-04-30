@@ -59,31 +59,22 @@ axiom nd_congr (g h: ctx) (a b: wff):
 axiom and_congr (a b c d: wff):
   $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
 
---| @normalize conc
 axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
 
---| @normalize hyp0 conc
 axiom or_intro_l (g: ctx) (a b: wff): $ g ⊢ a $ > $ g ⊢ a ∨ b $;
 
---| @normalize hyp0 conc
 axiom or_intro_r (g: ctx) (a b: wff): $ g ⊢ b $ > $ g ⊢ a ∨ b $;
 
---| @normalize hyp0 hyp1 conc
 axiom and_intro (g: ctx) (a b: wff): $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
 
---| @normalize hyp0 conc
 axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
 
---| @normalize hyp0 conc
 axiom and_elim_r (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ b $;
 
---| @normalize hyp0 hyp1 conc
 axiom bot_intro (g: ctx) (a: wff): $ g ⊢ a $ > $ g ⊢ ¬ a $ > $ g ⊢ bot $;
 
---| @normalize hyp0 conc
 axiom neg_intro (g: ctx) (a: wff): $ g , a ⊢ bot $ > $ g ⊢ ¬ a $;
 
---| @normalize hyp0 conc
 axiom dne (g: ctx) (a: wff): $ g ⊢ ¬ ¬ a $ > $ g ⊢ a $;
 
 theorem excluded_middle (a: wff): $ emp ⊢ a ∨ ¬ a $;

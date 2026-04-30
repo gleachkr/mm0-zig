@@ -133,7 +133,6 @@ axiom lam_alpha (A: type) {x y: term} (t: term x):
 --| @view {x: term} (a b: term) (r: term x) (p q: term): $ a ≈ b $ > $ p ≈ q $
 --| @abstract r p q x a b
 --| @fresh x
---| @normalize conc
 axiom subst_teq {x: term} (a b: term) (r: term x):
   $ a ≈ b $ >
   $ ([x / a] r) ≈ ([x / b] r) $;
@@ -215,67 +214,52 @@ axiom nd_congr (g h: ctx) (P Q: wff):
 
 -- Context-based natural-deduction layer for the Church fragment.
 -- Context normalization is handled by the ACUI `ctx` carrier together with
--- `@normalize`, so proofs avoid the old conjunction-shuffling bookkeeping.
+-- automatic normalization, so proofs avoid the old conjunction-shuffling bookkeeping.
 
---| @normalize conc
 axiom ax (G: ctx) (P: wff):
   $ G , P ⊩ P $;
 
---| @normalize hyp0 conc
 axiom weaken (G H: ctx) (P: wff):
   $ G ⊩ P $ > $ G , H ⊩ P $;
 
---| @normalize hyp0 conc
 axiom thmR (G: ctx) (A: term):
   $ G ⊩ A $ > $ G ⊩ A: 𝔹 $;
 
---| @normalize conc
 axiom eqT (G: ctx) (A: type):
   $ G ⊩ eq A: A → A → 𝔹 $;
 
---| @normalize hyp0 hyp1 conc
 axiom eqmp (G: ctx) (P Q: term):
   $ G ⊩ P ⇔ Q $ > $ G ⊩ P $ > $ G ⊩ Q $;
 
---| @normalize hyp0 hyp1 conc
 axiom ded (G: ctx) (P Q: term):
   $ G , P ⊩ Q $ > $ G , Q ⊩ P $ > $ G ⊩ P ⇔ Q $;
 
---| @normalize hyp0 conc
 axiom eqTR1 (G: ctx) (A: type) (a b: term):
   $ G ⊩ ≃[A] a = b $ > $ G ⊩ a: A $;
 
---| @normalize hyp0 conc
 axiom reflt (G: ctx) (A: type) (t: term):
   $ G ⊩ t: A $ > $ G ⊩ ≃[A] t = t $;
 
---| @normalize hyp0 hyp1 conc
 axiom appT (G: ctx) (A B: type) (f x: term):
   $ G ⊩ f: A → B $ > $ G ⊩ x: A $ > $ G ⊩ f · x: B $;
 
---| @normalize hyp0 hyp1 conc
 axiom appTR2 (G: ctx) (A B: type) (f x: term):
   $ G ⊩ f · x: B $ > $ G ⊩ f: A → B $ > $ G ⊩ x: A $;
 
---| @normalize hyp0 hyp1 conc
 axiom appTR21 (G: ctx) (A B C: type) (f x y: term):
   $ G ⊩ f · x · y: C $ > $ G ⊩ f: A → B → C $ > $ G ⊩ x: A $;
 
---| @normalize hyp0 hyp1 conc
 axiom appTR22 (G: ctx) (A B C: type) (f x y: term):
   $ G ⊩ f · x · y: C $ > $ G ⊩ f: A → B → C $ > $ G ⊩ y: B $;
 
---| @normalize hyp0 conc
 axiom lamT (G: ctx) (A B: type) {x: term} (t: term x):
   $ G , x: A ⊩ t: B $ > $ G ⊩ λ x: A. t: A → B $;
 
 -- β in an arbitrary x-dependent context.
---| @normalize hyp0 conc
 axiom betat (A B: type) {x: term} (G: ctx x) (t: term x):
   $ G ⊩ (λ x: A. t) · x: B $ >
   $ G ⊩ ≃[B] (λ x: A. t) · x = t $;
 
---| @normalize hyp0 hyp1 conc
 axiom aeqt (G: ctx) (A B: type) (f g a b: term):
   $ G ⊩ ≃[A → B] f = g $ > $ G ⊩ ≃[A] a = b $ >
   $ G ⊩ ≃[B] f · a = g · b $;
@@ -300,21 +284,17 @@ theorem bineq2 (G: ctx) (A B C: type) (f a b1 b2: term):
  $ G ⊩ f: A → B → C $ > $ G ⊩ a: A $ > $ G ⊩ ≃[B] b1 = b2 $ >
  $ G ⊩ ≃[C] f · a · b1 = f · a · b2 $;
 
---| @normalize hyp0 hyp2 conc
 axiom inst (G: ctx) (A: type) {x: term} (t a: term x):
   $ G ⊩ a: 𝔹 $ > $ G ⊩ t: A $ >
   $ G , ≃[A] x = t ⊩ a $ > $ G ⊩ a $;
 
---| @normalize hyp0 conc
 theorem sym (G: ctx) (A: type) (a b: term):
   $ G ⊩ ≃[A] a = b $ > $ G ⊩ ≃[A] b = a $;
 
---| @normalize hyp0 hyp1 conc
 theorem trans (G: ctx) (A: type) (a b c: term):
   $ G ⊩ ≃[A] a = b $ > $ G ⊩ ≃[A] b = c $ >
   $ G ⊩ ≃[A] a = c $;
 
---| @normalize hyp0 hyp1 hyp2 hyp3 conc
 theorem betacv (G: ctx) (A B: type) {x: term} (t u v: term x):
   $ G , x: A ⊩ u: B $ >
   $ G ⊩ t: A $ >
@@ -322,11 +302,9 @@ theorem betacv (G: ctx) (A B: type) {x: term} (t u v: term x):
   $ G , ≃[A] x = t ⊩ ≃[B] u = v $ >
   $ G ⊩ ≃[B] (λ x: A. u) · t = v $;
 
---| @normalize hyp0 conc
 axiom etat (G: ctx) (A B: type) {x: term} (e: term x):
   $ G ⊩ e: A → B $ > $ G ⊩ ≃[A → B] (λ x: A. e · x) = e $;
 
---| @normalize hyp0 conc
 axiom leqt (G: ctx) (A B: type) {x: term} (a b: term x):
   $ G , x: A ⊩ ≃[B] a = b $ >
   $ G ⊩ ≃[A → B] (λ x: A. a) = (λ x: A. b) $;
@@ -417,11 +395,9 @@ axiom leqt (G: ctx) (A B: type) {x: term} (a b: term x):
  theorem impR2 (G: ctx) (p q: term):
   $ G ⊩ p ⇒ q $ > $ G ⊩ q: 𝔹 $;
 
---| @normalize hyp0 hyp1 conc
  theorem MP (G: ctx) (p q: term):
   $ G ⊩ p ⇒ q $ > $ G ⊩ p $ > $ G ⊩ q $;
 
---| @normalize hyp0 hyp1 conc
  theorem DISCH (G: ctx) (p q: term):
   $ G ⊩ p: 𝔹 $ > $ G ⊩ q: 𝔹 $ > $ G , p ⊩ q $ >
   $ G ⊩ p ⇒ q $;
@@ -505,7 +481,6 @@ axiom leqt (G: ctx) (A B: type) {x: term} (a b: term x):
   $ G , x: A ⊩ t ⇔ u $ >
   $ G ⊩ ex A · (λ x: A. t) ⇔ (ex A · (λ x: A. u)) $;
 
---| @normalize hyp0 conc
 theorem exc_def (G: ctx) (A: type) {x q: term} (p: term x):
   $ G , x: A ⊩ p: 𝔹 $ >
   $ G ⊩ ex A · (λ x: A. p) ⇔ (!q: 𝔹. (!x: A. p ⇒ q) ⇒ q) $;
