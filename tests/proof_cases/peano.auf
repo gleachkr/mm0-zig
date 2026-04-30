@@ -1216,3 +1216,55 @@ l12: $ x = a → b + x = a + b $ by syl [l11, l7]
 l13: $ (b + x = a + b) ↔ (x = a) $ by ibii [l6, l12]
 l14: $ {x | b + x = a + b} == {x | x = a} $ by ab_congr [l13]
 l15: $ (the {x | b + x = a + b}) = a $ by theid [l14]
+
+the_singleton
+-------------
+-- the {x | x = a} = a:  identity case of theid via eqsid.
+l1: $ {x | x = a} == {x | x = a} $ by eqsid
+l2: $ (the {x | x = a}) = a $ by theid [l1]
+
+sub_zero
+--------
+-- a - 0 unfolds to the {x | 0 + x = a}.  The biconditional
+-- (0 + x = a) ↔ (x = a) is just add_0_left_inst lifted through
+-- equality; ab_congr + theid finish.
+
+-- Forward:  0 + x = a → x = a, via x = 0 + x.
+l1: $ 0 + x = x $ by add_0_left_inst
+l2: $ 0 + x = x → x = 0 + x $ by eq_sym
+l3: $ x = 0 + x $ by ax_mp [l2, l1]
+l4: $ x = 0 + x → 0 + x = a → x = a $ by eq_trans
+l5: $ 0 + x = a → x = a $ by ax_mp [l4, l3]
+
+-- Backward:  x = a → 0 + x = a, by transitivity through 0 + x = x.
+l6: $ 0 + x = x → x = a → 0 + x = a $ by eq_trans
+l7: $ x = a → 0 + x = a $ by ax_mp [l6, l1]
+
+l8: $ (0 + x = a) ↔ (x = a) $ by ibii [l5, l7]
+l9: $ {x | 0 + x = a} == {x | x = a} $ by ab_congr [l8]
+l10: $ (the {x | 0 + x = a}) = a $ by theid [l9]
+
+sub_self
+--------
+-- a - a unfolds to the {x | a + x = a}.  Cancellation against
+-- a + 0 = a collapses the witness set to {x | x = 0}.
+
+-- Forward:  a + x = a → x = 0.  Bridge via a = a + 0.
+l1: $ a + 0 = a $ by add_0
+l2: $ a + 0 = a → a = a + 0 $ by eq_sym
+l3: $ a = a + 0 $ by ax_mp [l2, l1]
+l4: $ a + x = a → a = a + 0 → a + x = a + 0 $ by eq_trans
+l5: $ a + x = a → a + x = a + 0 $ by mpi [l3, l4]
+l6: $ a + x = a + 0 → x = 0 $ by add_cancel_left
+l7: $ a + x = a → x = 0 $ by syl [l6, l5]
+
+-- Backward:  x = 0 → a + x = a, reverse bridge through a + 0 = a.
+l8: $ x = 0 → a + x = a + 0 $ by add_eq_left
+l9: $ a + x = a + 0 → a + 0 = a → a + x = a $ by eq_trans
+l10: $ a + 0 = a → a + x = a + 0 → a + x = a $ by com12 [l9]
+l11: $ a + x = a + 0 → a + x = a $ by ax_mp [l10, l1]
+l12: $ x = 0 → a + x = a $ by syl [l11, l8]
+
+l13: $ (a + x = a) ↔ (x = 0) $ by ibii [l7, l12]
+l14: $ {x | a + x = a} == {x | x = 0} $ by ab_congr [l13]
+l15: $ (the {x | a + x = a}) = 0 $ by theid [l14]

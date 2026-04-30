@@ -17,8 +17,8 @@
 -- Annotations (@relation, @congr, @rewrite, @view, automatic normalization) drive
 -- the compiler's rewriting automation where helpful.
 --
--- The math notation is unicode (→ ¬ ↔ ∀); ASCII aliases (->, ~, <->,
--- A.) are also registered so either form parses.
+-- The math notation is unicode (→ ¬ ↔ ∀ ∈); ASCII aliases (->, ~, <->,
+-- A., e.) are also registered so either form parses.
 
 delimiter $ ( { ~ $  $ } ) , $;
 
@@ -471,7 +471,7 @@ theorem mul_rass (a b c: nat): $ (a * b) * c = (a * c) * b $;
 -- Sets of natural numbers and definite description.
 --
 -- This is the first small slice of peano.mm1's set layer.  Sets are
--- represented by abstraction `{x | p}`, membership `a e. A`, and
+-- represented by abstraction `{x | p}`, membership `a ∈ A`, and
 -- extensional equality `A == B`.  Subtraction is then the definite
 -- description of the set of witnesses to `b + x = a`.
 -- ---------------------------------------------------------------
@@ -483,15 +483,16 @@ notation ab {x: nat} (p: wff x): set =
   (${$:max) x ($|$:0) p ($}$:0);
 
 term el (a: nat) (A: set): wff;
+infixl el: $∈$ prec 50;
 infixl el: $e.$ prec 50;
 
 -- Membership in an abstraction computes by substitution.
 axiom elab (a: nat) {x: nat} (p: wff x):
-  $ a e. {x | p} ↔ sb_f x a p $;
+  $ a ∈ {x | p} ↔ sb_f x a p $;
 
 -- Set equality is extensional equality of membership predicates.
 def eqs (A B: set) {.x: nat}: wff =
-  $ ∀ x (x e. A ↔ x e. B) $;
+  $ ∀ x (x ∈ A ↔ x ∈ B) $;
 infixl eqs: $==$ prec 50;
 
 --| @relation set eqs eqsid eqstr eqscom _
@@ -505,13 +506,13 @@ axiom ab_congr {x: nat} (p q: wff x):
 
 --| @congr
 axiom el_congr (a b: nat) (A B: set):
-  $ nat_eq a b $ > $ A == B $ > $ (a e. A) ↔ (b e. B) $;
+  $ nat_eq a b $ > $ A == B $ > $ (a ∈ A) ↔ (b ∈ B) $;
 
 term sb_s {x: nat} (t: nat x) (A: set x): set;
 
 --| @rewrite
 axiom sb_f_el {x: nat} (t a: nat x) (A: set x):
-  $ sb_f x t (a e. A) ↔ (sb_t x t a e. sb_s x t A) $;
+  $ sb_f x t (a ∈ A) ↔ (sb_t x t a ∈ sb_s x t A) $;
 
 --| @rewrite
 axiom sb_s_irrel {x: nat} (t: nat x) (A: set):
@@ -547,3 +548,15 @@ theorem pncan2 (a b: nat): $ a + b - a = b $;
 
 -- a + b - b = a.  Mirror of pncan2 through add_comm_inst.
 theorem pncan (a b: nat): $ a + b - b = a $;
+
+-- the {x | x = a} = a:  trivial corollary of theid + eqsid.  Useful
+-- as a base case for descriptions over already-singleton sets.
+theorem the_singleton (a: nat) {x: nat}: $ (the {x | x = a}) = a $;
+
+-- a - 0 = a (peano.mm1's sub02).  Witness set `{x | 0 + x = a}`
+-- collapses to the singleton `{x | x = a}` via add_0_left_inst.
+theorem sub_zero (a: nat): $ a - 0 = a $;
+
+-- a - a = 0 (peano.mm1's subid).  Witness set `{x | a + x = a}`
+-- collapses to the singleton `{x | x = 0}` via add_0 + cancellation.
+theorem sub_self (a: nat): $ a - a = 0 $;
