@@ -433,12 +433,15 @@ For each proof line it does roughly this:
 8. infer omitted binders if needed
 9. instantiate the rule's expected hypotheses and conclusion
 10. insert transport or normalization lines when metadata permits a
-    non-exact comparison
+    non-exact comparison; conclusion matching may first build a folded
+    intermediate so normalization runs outside selected transparent defs
 11. store a `CheckedLine` representation that later emission can lower to
     MMB
 
 `compiler/check/matching.zig` holds the comparison helpers used once a
-candidate binding list exists.
+candidate binding list exists. It also owns the narrow fold-before-normalize
+fallback for conclusions, using existing def conversion, ACUI support, and
+normalizer transport rather than a separate equality subsystem.
 
 The checker does not adopt a general alpha-equivalence policy. Any extra
 flexibility is consumed earlier by symbolic matching or is turned into
@@ -716,6 +719,8 @@ The central design principles here are:
 - hidden-dummy defs are only exposed toward a concrete witness problem
 - plain normalization does not unfold defs merely to create new rewrite
   redexes
+- theorem-conclusion checking may fold selected raw def bodies before
+  normalization, but the fold is still ordinary transparent conversion
 
 In practice, the def-ops subsystem provides three related services:
 
@@ -820,6 +825,11 @@ It packages the common checker operations:
   to it
 - normalize a rule conclusion and then transport the emitted theorem line
   back to the user-written line
+
+`compiler/check/matching.zig` can compose these helpers with transparent
+conversion by constructing a folded intermediate first. That intermediate is
+then handed back to the normalizer, so proof construction still uses the
+existing conversion and normalization emitters.
 
 This keeps `compiler/check.zig` smaller and avoids mixing proof
 construction details directly into the line checker.

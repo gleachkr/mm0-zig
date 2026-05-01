@@ -1,0 +1,31 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort obj;
+
+term iff (a b: wff): wff;
+infixr iff: $<->$ prec 20;
+term top: wff;
+term atom (x: obj): wff;
+term mark (a: wff): wff;
+term pair (a b: wff): wff;
+
+def named_atom (x: obj): wff = $ atom x $;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @congr
+axiom pair_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ pair a c <-> pair b d $;
+
+--| @rewrite
+axiom mark_top (a: wff): $ mark a <-> a $;
+
+axiom raw_pair (x: obj): $ pair (atom x) (mark top) $;
+
+theorem fold_intermediate_normalize_child (x: obj):
+  $ pair (named_atom x) top $;

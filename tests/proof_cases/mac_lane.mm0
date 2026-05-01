@@ -161,6 +161,9 @@ axiom imp_intro (g: ctx) (a b: wff): $ g , a ⊢ b $ > $ g ⊢ a → b $;
 axiom imp_elim (g h: ctx) (a b: wff):
   $ g ⊢ a → b $ > $ h ⊢ a $ > $ g , h ⊢ b $;
 
+axiom and_intro (g h: ctx) (a b: wff):
+  $ g ⊢ a $ > $ h ⊢ b $ > $ g , h ⊢ a ∧ b $;
+
 axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
 
 axiom and_elim_r (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ b $;
@@ -240,4 +243,7 @@ theorem comp_epi (f g: mor):
 
 theorem epi_cancel_right (f g: mor):
   $ epi (g ∘ f) ⊢ epi g $;
+
+theorem pullback_paste (f g h k m p q: mor):
+  $ pullback f g h k , pullback k m p q ⊢ pullback f (g ∘ m) (h ∘ p) q $;
 

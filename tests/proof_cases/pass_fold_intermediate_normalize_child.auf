@@ -1,0 +1,4 @@
+fold_intermediate_normalize_child
+---------------------------------
+
+l1: $ pair (named_atom x) top $ by raw_pair (x := $ x $) []

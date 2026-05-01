@@ -294,12 +294,18 @@ Transparent def unfolding and automatic normalization solve different problems.
 
 They compose in a limited way. The checker can compare normalized expressions
 and can still bridge a def gap afterwards when ordinary transparent conversion
-is enough. But the normalizer does **not** generally unfold defs first in order
-to discover more rewrites. Rewriting still works on the visible instantiated
-expression.
+is enough. For conclusions, it can also build a folded intermediate first:
+selected raw subterms are folded toward the user assertion, then ordinary
+normalization / ACUI cleanup proves the remaining difference.
 
-If you need witness recovery only after an unfold / rewrite alignment, that is
-usually a job for `@view` plus `@recover` or `@abstract`, not for normalization alone.
+The normalizer itself still does **not** generally unfold defs first in order
+to discover more rewrites. Rewriting works on the visible instantiated
+expression, or on an explicitly folded intermediate chosen by theorem-line
+matching.
+
+If you need witness recovery only after a broader unfold / rewrite alignment,
+that is usually a job for `@view` plus `@recover` or `@abstract`, not for
+normalization alone.
 
 ### Def-aware normalized conclusion
 
@@ -323,8 +329,33 @@ its normalized expected form, and finally uses transparent def conversion if
 needed to bridge between that normalized form and what the user wrote.
 
 What it does **not** do is generally unfold a def first just to expose a new
-rewrite redex. If the required rewrite only becomes visible after def
-exposure, that case is currently outside the ordinary normalization path.
+rewrite redex. The fold-before-normalize conclusion fallback goes the other
+way: it hides a raw def body behind the user's def-headed expression before
+normalization runs outside that folded subtree.
+
+### Folded intermediate before normalization
+
+A rule may produce an expanded definition body while the user writes the
+folded definition, and other parts of the conclusion may still need ACUI or
+rewrite normalization. In that case the checker can construct an intermediate
+line:
+
+```text
+raw rule conclusion
+  -- transparent fold at selected subterms -->
+folded intermediate
+  -- normalizer / ACUI cleanup -->
+user assertion
+```
+
+This is proof-producing, not an extra trusted equality rule. The fold is
+checked by the same transparent conversion machinery used elsewhere. The
+remaining difference is handled by the existing normalizer.
+
+The search is deliberately narrow. It is guided by corresponding child
+positions, or by corresponding ACUI leaves found with existing ACUI support.
+It does not search arbitrary unrelated subterms, and it does not normalize a
+definition body before using it as an unfold witness.
 
 ### Def-aware normalized hypothesis
 

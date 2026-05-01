@@ -155,6 +155,11 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_unfold_then_acui_concl", .outcome = .pass },
     .{ .stem = "pass_def_unfold_then_acui_hyp", .outcome = .pass },
     .{
+        .stem = "pass_fold_intermediate_normalize_child",
+        .outcome = .pass,
+    },
+    .{ .stem = "pass_fold_intermediate_acui_leaf", .outcome = .pass },
+    .{
         .stem = "pass_def_unfold_then_rewrite_abstract",
         .outcome = .pass,
     },

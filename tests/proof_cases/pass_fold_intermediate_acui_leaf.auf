@@ -1,0 +1,4 @@
+fold_intermediate_acui_leaf
+---------------------------
+
+l1: $ k , boxed a |- top $ by raw_nd (a := $ a $) []

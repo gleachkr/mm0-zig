@@ -100,3 +100,30 @@ l6: $ epi (g ∘ f), alpha ∘ g ~ beta ∘ g ⊢ alpha ~ beta $ by imp_elim [l3
 l7: $ epi (g ∘ f) ⊢ (alpha ∘ g ~ beta ∘ g) → (alpha ~ beta) $ by imp_intro [l6]
 l8: $ epi (g ∘ f) ⊢ ∀ beta ((alpha ∘ g ~ beta ∘ g) → (alpha ~ beta)) $ by all_intro [l7]
 l9: $ epi (g ∘ f) ⊢ ∀ alpha ∀ beta ((alpha ∘ g ~ beta ∘ g) → (alpha ~ beta)) $ by all_intro [l8]
+
+pullback_paste
+--------------
+
+l1: $ pullback f g h k , pullback k m p q ⊢ pullback f g h k $ by ax
+l2: $ pullback f g h k , pullback k m p q ⊢ pullback k m p q $ by ax
+l3: $ pullback f g h k , pullback k m p q ⊢ f ∘ h ~ g ∘ k $ by pullback_eq [l1]
+l4: $ pullback f g h k , pullback k m p q ⊢ k ∘ p ~ m ∘ q $ by pullback_eq [l2]
+
+l5: $ pullback f g h k , pullback k m p q ⊢ f ∘ (h ∘ p) ~ g ∘ (k ∘ p) $ by comp_right [l3]
+l6: $ pullback f g h k , pullback k m p q ⊢ g ∘ (k ∘ p) ~ (g ∘ m) ∘ q $ by comp_left [l4]
+l7: $ pullback f g h k , pullback k m p q ⊢ f ∘ (h ∘ p) ~ (g ∘ m) ∘ q $ by mor_trans [l5, l6]
+
+l8: $ pullback f g h k , pullback k m p q , (f ∘ x ~ (g ∘ m) ∘ y) , ((h ∘ p) ∘ z ~ x) , (q ∘ z ~ y) ⊢ f ∘ x ~ (g ∘ m) ∘ y $ by ax
+l9: $ pullback f g h k , pullback k m p q , (f ∘ x ~ (g ∘ m) ∘ y) , ((h ∘ p) ∘ z ~ x) , (q ∘ z ~ y) ⊢ (h ∘ p) ∘ z ~ x $ by ax
+l10: $ pullback f g h k , pullback k m p q , (f ∘ x ~ (g ∘ m) ∘ y) , ((h ∘ p) ∘ z ~ x) , (q ∘ z ~ y) ⊢ q ∘ z ~ y $ by ax
+l11: $ pullback f g h k , pullback k m p q , (f ∘ x ~ (g ∘ m) ∘ y) , ((h ∘ p) ∘ z ~ x) , (q ∘ z ~ y) ⊢ z ~ pb_med f (g ∘ m) (h ∘ p) q x y $ by pb_med_unique [l8, l9, l10]
+
+l12: $ pullback f g h k , pullback k m p q , (f ∘ x ~ (g ∘ m) ∘ y) , ((h ∘ p) ∘ z ~ x) ⊢ (q ∘ z ~ y) → (z ~ pb_med f (g ∘ m) (h ∘ p) q x y) $ by imp_intro [l11]
+l13: $ pullback f g h k , pullback k m p q , (f ∘ x ~ (g ∘ m) ∘ y) ⊢ ((h ∘ p) ∘ z ~ x) → ((q ∘ z ~ y) → (z ~ pb_med f (g ∘ m) (h ∘ p) q x y)) $ by imp_intro [l12]
+l14: $ pullback f g h k , pullback k m p q ⊢ (f ∘ x ~ (g ∘ m) ∘ y) → (((h ∘ p) ∘ z ~ x) → ((q ∘ z ~ y) → (z ~ pb_med f (g ∘ m) (h ∘ p) q x y))) $ by imp_intro [l13]
+
+l15: $ pullback f g h k , pullback k m p q ⊢ ∀ z ((f ∘ x ~ (g ∘ m) ∘ y) → (((h ∘ p) ∘ z ~ x) → ((q ∘ z ~ y) → (z ~ pb_med f (g ∘ m) (h ∘ p) q x y)))) $ by all_intro [l14]
+l16: $ pullback f g h k , pullback k m p q ⊢ ∀ y ∀ z ((f ∘ x ~ (g ∘ m) ∘ y) → (((h ∘ p) ∘ z ~ x) → ((q ∘ z ~ y) → (z ~ pb_med f (g ∘ m) (h ∘ p) q x y)))) $ by all_intro [l15]
+l17: $ pullback f g h k , pullback k m p q ⊢ ∀ x ∀ y ∀ z ((f ∘ x ~ (g ∘ m) ∘ y) → (((h ∘ p) ∘ z ~ x) → ((q ∘ z ~ y) → (z ~ pb_med f (g ∘ m) (h ∘ p) q x y)))) $ by all_intro [l16]
+
+l18: $ pullback f g h k , pullback k m p q ⊢ pullback f (g ∘ m) (h ∘ p) q $ by and_intro [l7, l17]
