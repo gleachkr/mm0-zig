@@ -12,6 +12,7 @@ pub const MathString = struct {
 
 pub const ArgBinding = struct {
     name: []const u8,
+    name_span: Span,
     formula: MathString,
     span: Span,
 };
@@ -90,6 +91,7 @@ pub const ProofBlock = struct {
     name_span: Span,
     header_span: Span,
     header_tail: []const u8 = "",
+    header_tail_span: Span = .{ .start = 0, .end = 0 },
     underline_span: ?Span,
     lines: []const ProofLine,
     span: Span,
@@ -104,6 +106,7 @@ pub const Parser = struct {
     current_block_name: ?[]const u8 = null,
     current_block_name_span: ?Span = null,
     last_error_span: ?Span = null,
+    last_header_tail_span: ?Span = null,
 
     pub fn init(allocator: std.mem.Allocator, src: []const u8) Parser {
         return .{
@@ -116,6 +119,7 @@ pub const Parser = struct {
         self.current_block_name = null;
         self.current_block_name_span = null;
         self.last_error_span = null;
+        self.last_header_tail_span = null;
         self.skipBlankLines();
         if (self.pos >= self.src.len) return null;
 
@@ -198,10 +202,15 @@ pub const Parser = struct {
         self: *Parser,
         block_start: usize,
     ) !ProofBlock {
+        self.skipHorizontalSpace();
         const name_start = self.pos;
         const name = try self.parseIdentifier();
         self.setCurrentBlockContext(name, name_start);
         const tail = try self.parseLemmaHeaderTail();
+        const tail_span = self.last_header_tail_span orelse Span{
+            .start = self.pos,
+            .end = self.pos,
+        };
         try self.expectLineEnd();
         const header_span = Span{
             .start = block_start,
@@ -218,6 +227,7 @@ pub const Parser = struct {
             },
             .header_span = header_span,
             .header_tail = tail,
+            .header_tail_span = tail_span,
             .underline_span = underline_span,
             .lines = lines,
             .span = .{
@@ -333,12 +343,17 @@ pub const Parser = struct {
         while (true) {
             const start = self.pos;
             const name = try self.parseIdentifier();
+            const name_span = Span{
+                .start = start,
+                .end = start + name.len,
+            };
             self.skipHorizontalSpace();
             try self.expect(':');
             try self.expect('=');
             const formula = try self.parseMathString();
             try bindings.append(self.allocator, .{
                 .name = name,
+                .name_span = name_span,
                 .formula = formula,
                 .span = .{
                     .start = start,
@@ -471,6 +486,7 @@ pub const Parser = struct {
         while (end > start and isHorizontalSpace(self.src[end - 1])) {
             end -= 1;
         }
+        self.last_header_tail_span = .{ .start = start, .end = end };
         return self.src[start..end];
     }
 

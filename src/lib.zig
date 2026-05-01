@@ -34,6 +34,7 @@ pub const compilerInferencePathName =
 pub const Frontend = struct {
     pub const Env = @import("./frontend/env.zig");
     pub const Expr = @import("./frontend/expr.zig");
+    pub const LspIndex = @import("./frontend/lsp/index.zig");
     pub const Rules = @import("./frontend/rules.zig");
 };
 

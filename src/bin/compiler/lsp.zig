@@ -4,6 +4,7 @@ const lsp = @import("lsp");
 const mm0 = @import("mm0");
 
 const types = lsp.types;
+const LspIndex = mm0.Frontend.LspIndex;
 
 const UnsupportedUriScheme = error{UnsupportedUriScheme};
 const UnsupportedUriHost = error{UnsupportedUriHost};
@@ -18,6 +19,7 @@ const LoadedText = struct {
     uri: []const u8,
     text: []const u8,
     version: ?i32,
+    mtime: ?i128,
 };
 
 const DiagnosticDocument = struct {
@@ -41,10 +43,102 @@ const DiagnosticContext = struct {
     }
 };
 
+const NavigationDocumentState = struct {
+    uri: []const u8,
+    version: ?i32,
+    mtime: ?i128,
+
+    fn eql(
+        self: NavigationDocumentState,
+        other: NavigationDocumentState,
+    ) bool {
+        return std.mem.eql(u8, self.uri, other.uri) and
+            self.version == other.version and
+            self.mtime == other.mtime;
+    }
+};
+
+const NavigationCacheKey = struct {
+    mm0: NavigationDocumentState,
+    proof: ?NavigationDocumentState,
+
+    fn init(
+        allocator: std.mem.Allocator,
+        request: NavigationCacheRequest,
+    ) !NavigationCacheKey {
+        const mm0_uri = try allocator.dupe(u8, request.mm0.uri);
+        errdefer allocator.free(mm0_uri);
+
+        const proof = if (request.proof) |proof_state| blk: {
+            const proof_uri = try allocator.dupe(u8, proof_state.uri);
+            break :blk NavigationDocumentState{
+                .uri = proof_uri,
+                .version = proof_state.version,
+                .mtime = proof_state.mtime,
+            };
+        } else null;
+        errdefer if (proof) |proof_state| {
+            allocator.free(proof_state.uri);
+        };
+
+        return .{
+            .mm0 = .{
+                .uri = mm0_uri,
+                .version = request.mm0.version,
+                .mtime = request.mm0.mtime,
+            },
+            .proof = proof,
+        };
+    }
+
+    fn deinit(self: *NavigationCacheKey, allocator: std.mem.Allocator) void {
+        allocator.free(self.mm0.uri);
+        if (self.proof) |proof| {
+            allocator.free(proof.uri);
+        }
+        self.* = undefined;
+    }
+
+    fn eql(
+        self: NavigationCacheKey,
+        request: NavigationCacheRequest,
+    ) bool {
+        if (!self.mm0.eql(request.mm0)) return false;
+        if (self.proof == null and request.proof == null) return true;
+        if (self.proof == null or request.proof == null) return false;
+        return self.proof.?.eql(request.proof.?);
+    }
+};
+
+const NavigationCacheRequest = struct {
+    mm0: NavigationDocumentState,
+    proof: ?NavigationDocumentState,
+};
+
+const NavigationCacheEntry = struct {
+    key: NavigationCacheKey,
+    snapshot: LspIndex.Snapshot,
+
+    fn deinit(
+        self: *NavigationCacheEntry,
+        allocator: std.mem.Allocator,
+    ) void {
+        self.snapshot.deinit();
+        self.key.deinit(allocator);
+        self.* = undefined;
+    }
+};
+
+const NavigationSnapshot = struct {
+    snapshot: *const LspIndex.Snapshot,
+    document: LspIndex.DocumentId,
+};
+
 const Handler = struct {
     allocator: std.mem.Allocator,
     transport: *lsp.Transport,
     docs: std.StringHashMapUnmanaged(OpenDocument),
+    nav_cache: std.StringHashMapUnmanaged(NavigationCacheEntry),
     offset_encoding: lsp.offsets.Encoding,
 
     fn init(
@@ -55,6 +149,7 @@ const Handler = struct {
             .allocator = allocator,
             .transport = transport,
             .docs = .empty,
+            .nav_cache = .empty,
             .offset_encoding = .@"utf-16",
         };
     }
@@ -66,6 +161,12 @@ const Handler = struct {
             self.allocator.free(entry.value_ptr.text);
         }
         self.docs.deinit(self.allocator);
+
+        var cache_it = self.nav_cache.iterator();
+        while (cache_it.next()) |entry| {
+            entry.value_ptr.deinit(self.allocator);
+        }
+        self.nav_cache.deinit(self.allocator);
         self.* = undefined;
     }
 
@@ -98,6 +199,8 @@ const Handler = struct {
                     .change = .Full,
                 },
             },
+            .hoverProvider = .{ .bool = true },
+            .definitionProvider = .{ .bool = true },
         };
 
         if (builtin.mode == .Debug) {
@@ -143,6 +246,7 @@ const Handler = struct {
             params.textDocument.text,
             params.textDocument.version,
         );
+        self.invalidateNavigationForUri(arena, params.textDocument.uri);
         try self.analyzeUri(arena, params.textDocument.uri);
     }
 
@@ -183,6 +287,7 @@ const Handler = struct {
         doc.text = new_text;
         doc.version = params.textDocument.version;
 
+        self.invalidateNavigationForUri(arena, params.textDocument.uri);
         try self.analyzeUri(arena, params.textDocument.uri);
     }
 
@@ -199,6 +304,7 @@ const Handler = struct {
         };
         const kind = documentKind(path);
 
+        self.invalidateNavigationForUri(arena, uri);
         try self.removeDocument(uri);
         try self.clearDiagnostics(arena, uri, null);
 
@@ -221,6 +327,70 @@ const Handler = struct {
             },
             .other => {},
         }
+    }
+
+    pub fn @"textDocument/hover"(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        params: types.HoverParams,
+    ) !lsp.ResultType("textDocument/hover") {
+        const nav = try self.navigationSnapshotForUri(
+            arena,
+            params.textDocument.uri,
+        ) orelse return null;
+        const text = nav.snapshot.textForDocument(nav.document) orelse return null;
+        const offset = lsp.offsets.positionToIndex(
+            text,
+            params.position,
+            self.offset_encoding,
+        );
+        const hover = nav.snapshot.hoverAt(nav.document, offset) orelse return null;
+        return .{
+            .contents = .{
+                .MarkupContent = .{
+                    .kind = .markdown,
+                    .value = hover.markdown,
+                },
+            },
+            .range = sourceRangeToLsp(
+                nav.snapshot,
+                hover.range,
+                self.offset_encoding,
+            ),
+        };
+    }
+
+    pub fn @"textDocument/definition"(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        params: types.DefinitionParams,
+    ) !lsp.ResultType("textDocument/definition") {
+        const nav = try self.navigationSnapshotForUri(
+            arena,
+            params.textDocument.uri,
+        ) orelse return null;
+        const text = nav.snapshot.textForDocument(nav.document) orelse return null;
+        const offset = lsp.offsets.positionToIndex(
+            text,
+            params.position,
+            self.offset_encoding,
+        );
+        const definition = nav.snapshot.definitionAt(
+            nav.document,
+            offset,
+        ) orelse return null;
+        return .{
+            .Definition = .{
+                .Location = .{
+                    .uri = definition.uri,
+                    .range = sourceRangeToLsp(
+                        nav.snapshot,
+                        definition.selection_range,
+                        self.offset_encoding,
+                    ),
+                },
+            },
+        };
     }
 
     pub fn onResponse(
@@ -489,19 +659,221 @@ const Handler = struct {
         path: []const u8,
     ) !LoadedText {
         const uri = try pathToUri(arena, path);
+        return try self.loadTextForUriPath(arena, uri, path);
+    }
+
+    fn loadTextForUriPath(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        uri: []const u8,
+        path: []const u8,
+    ) !LoadedText {
         if (self.docs.get(uri)) |doc| {
             return .{
                 .uri = uri,
                 .text = doc.text,
                 .version = doc.version,
+                .mtime = null,
             };
         }
 
+        const disk = try readFileWithMtimeAlloc(arena, path);
         return .{
             .uri = uri,
-            .text = try readFileAlloc(arena, path),
+            .text = disk.text,
             .version = null,
+            .mtime = disk.mtime,
         };
+    }
+
+    fn navigationState(loaded: LoadedText) NavigationDocumentState {
+        return .{
+            .uri = loaded.uri,
+            .version = loaded.version,
+            .mtime = loaded.mtime,
+        };
+    }
+
+    fn navigationSnapshotForUri(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        uri: []const u8,
+    ) !?NavigationSnapshot {
+        const path = uriToPath(arena, uri) catch return null;
+        return switch (documentKind(path)) {
+            .mm0 => try self.navigationSnapshotForMm0(arena, uri, path),
+            .proof => try self.navigationSnapshotForProof(arena, uri, path),
+            .other => null,
+        };
+    }
+
+    fn navigationSnapshotForMm0(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        uri: []const u8,
+        path: []const u8,
+    ) !?NavigationSnapshot {
+        const mm0_loaded = self.loadTextForUriPath(arena, uri, path) catch {
+            return null;
+        };
+        var proof_state: ?NavigationDocumentState = null;
+        var proof_uri: ?[]const u8 = null;
+        var proof_text: ?[]const u8 = null;
+
+        if (siblingPathForMm0(arena, path)) |proof_path| {
+            const expected_uri = try pathToUri(arena, proof_path);
+            proof_state = .{
+                .uri = expected_uri,
+                .version = null,
+                .mtime = null,
+            };
+            if (self.loadTextForUriPath(
+                arena,
+                expected_uri,
+                proof_path,
+            )) |proof| {
+                proof_state = navigationState(proof);
+                proof_uri = proof.uri;
+                proof_text = proof.text;
+            } else |_| {}
+        } else |_| {}
+
+        return try self.navigationSnapshotForRequest(
+            .{
+                .mm0 = navigationState(mm0_loaded),
+                .proof = proof_state,
+            },
+            .{
+                .mm0_uri = mm0_loaded.uri,
+                .mm0_text = mm0_loaded.text,
+                .proof_uri = proof_uri,
+                .proof_text = proof_text,
+            },
+            .mm0,
+        );
+    }
+
+    fn navigationSnapshotForProof(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        uri: []const u8,
+        path: []const u8,
+    ) !?NavigationSnapshot {
+        const proof_loaded = self.loadTextForUriPath(arena, uri, path) catch {
+            return null;
+        };
+        const mm0_path = siblingPathForProof(arena, path) catch return null;
+        const mm0_loaded = self.loadTextPreferOpenDocument(arena, mm0_path) catch {
+            return null;
+        };
+
+        return try self.navigationSnapshotForRequest(
+            .{
+                .mm0 = navigationState(mm0_loaded),
+                .proof = navigationState(proof_loaded),
+            },
+            .{
+                .mm0_uri = mm0_loaded.uri,
+                .mm0_text = mm0_loaded.text,
+                .proof_uri = proof_loaded.uri,
+                .proof_text = proof_loaded.text,
+            },
+            .proof,
+        );
+    }
+
+    fn navigationSnapshotForRequest(
+        self: *Handler,
+        request: NavigationCacheRequest,
+        input: LspIndex.SnapshotInput,
+        document: LspIndex.DocumentId,
+    ) !NavigationSnapshot {
+        if (self.nav_cache.getPtr(request.mm0.uri)) |entry| {
+            if (entry.key.eql(request)) {
+                return .{
+                    .snapshot = &entry.snapshot,
+                    .document = document,
+                };
+            }
+        }
+
+        self.removeNavigationCacheByMm0Uri(request.mm0.uri);
+
+        var snapshot = try LspIndex.Snapshot.build(self.allocator, input);
+        errdefer snapshot.deinit();
+
+        var key = try NavigationCacheKey.init(self.allocator, request);
+        errdefer key.deinit(self.allocator);
+
+        const cache_key = key.mm0.uri;
+        try self.nav_cache.put(self.allocator, cache_key, .{
+            .key = key,
+            .snapshot = snapshot,
+        });
+
+        const entry = self.nav_cache.getPtr(cache_key).?;
+        return .{
+            .snapshot = &entry.snapshot,
+            .document = document,
+        };
+    }
+
+    fn removeNavigationCacheByMm0Uri(
+        self: *Handler,
+        mm0_uri: []const u8,
+    ) void {
+        if (self.nav_cache.fetchRemove(mm0_uri)) |removed| {
+            var entry = removed.value;
+            entry.deinit(self.allocator);
+        }
+    }
+
+    fn invalidateNavigationForUri(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        uri: []const u8,
+    ) void {
+        const path = uriToPath(arena, uri) catch {
+            self.invalidateNavigationContainingUri(uri);
+            return;
+        };
+
+        switch (documentKind(path)) {
+            .mm0 => self.removeNavigationCacheByMm0Uri(uri),
+            .proof => {
+                if (siblingPathForProof(arena, path)) |mm0_path| {
+                    if (pathToUri(arena, mm0_path)) |mm0_uri| {
+                        self.removeNavigationCacheByMm0Uri(mm0_uri);
+                    } else |_| {}
+                } else |_| {}
+            },
+            .other => {},
+        }
+        self.invalidateNavigationContainingUri(uri);
+    }
+
+    fn invalidateNavigationContainingUri(
+        self: *Handler,
+        uri: []const u8,
+    ) void {
+        while (true) {
+            var it = self.nav_cache.iterator();
+            var found: ?[]const u8 = null;
+            while (it.next()) |entry| {
+                if (std.mem.eql(u8, entry.value_ptr.key.mm0.uri, uri)) {
+                    found = entry.key_ptr.*;
+                    break;
+                }
+                if (entry.value_ptr.key.proof) |proof| {
+                    if (std.mem.eql(u8, proof.uri, uri)) {
+                        found = entry.key_ptr.*;
+                        break;
+                    }
+                }
+            }
+            const key = found orelse break;
+            self.removeNavigationCacheByMm0Uri(key);
+        }
     }
 
     fn publishCompilerDiagnostic(
@@ -724,21 +1096,33 @@ fn documentKind(path: []const u8) DocumentKind {
     return .other;
 }
 
+const ReadFileWithMtime = struct {
+    text: []u8,
+    mtime: i128,
+};
+
+fn readFileWithMtimeAlloc(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+) !ReadFileWithMtime {
+    const file = if (std.fs.path.isAbsolute(path))
+        try std.fs.openFileAbsolute(path, .{})
+    else
+        try std.fs.cwd().openFile(path, .{});
+    defer file.close();
+
+    const stat = try file.stat();
+    return .{
+        .text = try file.readToEndAlloc(allocator, std.math.maxInt(usize)),
+        .mtime = stat.mtime,
+    };
+}
+
 fn readFileAlloc(
     allocator: std.mem.Allocator,
     path: []const u8,
 ) ![]u8 {
-    if (std.fs.path.isAbsolute(path)) {
-        const file = try std.fs.openFileAbsolute(path, .{});
-        defer file.close();
-        return try file.readToEndAlloc(allocator, std.math.maxInt(usize));
-    }
-
-    return try std.fs.cwd().readFileAlloc(
-        allocator,
-        path,
-        std.math.maxInt(usize),
-    );
+    return (try readFileWithMtimeAlloc(allocator, path)).text;
 }
 
 fn compilerDiagnosticsToLsp(
@@ -894,6 +1278,381 @@ fn zeroRange(
         .{ .start = 0, .end = 0 },
         encoding,
     );
+}
+
+fn sourceRangeToLsp(
+    snapshot: *const LspIndex.Snapshot,
+    range: LspIndex.SourceRange,
+    encoding: lsp.offsets.Encoding,
+) types.Range {
+    const text = snapshot.textForDocument(range.document) orelse "";
+    const start = @min(range.start, text.len);
+    const end = @max(start, @min(range.end, text.len));
+    return lsp.offsets.locToRange(
+        text,
+        .{ .start = start, .end = end },
+        encoding,
+    );
+}
+
+const TestTransport = struct {
+    transport: lsp.Transport = .{ .vtable = &vtable },
+
+    const vtable: lsp.Transport.VTable = .{
+        .readJsonMessage = readJsonMessage,
+        .writeJsonMessage = writeJsonMessage,
+    };
+
+    fn readJsonMessage(
+        _: *lsp.Transport,
+        _: std.mem.Allocator,
+    ) lsp.Transport.ReadError![]u8 {
+        return error.EndOfStream;
+    }
+
+    fn writeJsonMessage(
+        _: *lsp.Transport,
+        _: []const u8,
+    ) lsp.Transport.WriteError!void {}
+};
+
+fn testPosition(text: []const u8, needle: []const u8) !types.Position {
+    const offset = std.mem.indexOf(u8, text, needle) orelse {
+        return error.MissingNeedle;
+    };
+    return lsp.offsets.indexToPosition(text, offset, .@"utf-16");
+}
+
+fn testLastPosition(text: []const u8, needle: []const u8) !types.Position {
+    const offset = std.mem.lastIndexOf(u8, text, needle) orelse {
+        return error.MissingNeedle;
+    };
+    return lsp.offsets.indexToPosition(text, offset, .@"utf-16");
+}
+
+fn expectRangeText(
+    text: []const u8,
+    range: types.Range,
+    expected: []const u8,
+) !void {
+    const loc = lsp.offsets.rangeToLoc(text, range, .@"utf-16");
+    try std.testing.expectEqualStrings(expected, text[loc.start..loc.end]);
+}
+
+fn expectDefinitionLocation(
+    result: lsp.ResultType("textDocument/definition"),
+) !types.Location {
+    const value = result orelse return error.ExpectedDefinition;
+    return switch (value) {
+        .Definition => |definition| switch (definition) {
+            .Location => |location| location,
+            else => error.ExpectedDefinitionLocation,
+        },
+        else => error.ExpectedDefinitionLocation,
+    };
+}
+
+const lsp_navigation_mm0_text =
+    \\provable sort wff;
+    \\term top: wff;
+    \\axiom top_i: $ top $;
+    \\axiom keep: $ top $ > $ top $;
+    \\theorem main: $ top $ > $ top $;
+;
+
+const lsp_navigation_proof_text =
+    \\main
+    \\----
+    \\l1: $ top $ by top_i []
+    \\l2: $ top $ by keep [l1]
+;
+
+fn putLspNavigationDocuments(
+    handler: *Handler,
+    mm0_uri: []const u8,
+    proof_uri: []const u8,
+) !void {
+    try handler.putDocument(mm0_uri, lsp_navigation_mm0_text, 1);
+    try handler.putDocument(proof_uri, lsp_navigation_proof_text, 1);
+}
+
+test "LSP initialize advertises navigation capabilities" {
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+
+    const result = handler.initialize(std.testing.allocator, .{
+        .capabilities = .{},
+    });
+
+    const hover = result.capabilities.hoverProvider orelse {
+        return error.ExpectedHoverProvider;
+    };
+    switch (hover) {
+        .bool => |enabled| try std.testing.expect(enabled),
+        else => return error.ExpectedBooleanHoverProvider,
+    }
+
+    const definition = result.capabilities.definitionProvider orelse {
+        return error.ExpectedDefinitionProvider;
+    };
+    switch (definition) {
+        .bool => |enabled| try std.testing.expect(enabled),
+        else => return error.ExpectedBooleanDefinitionProvider,
+    }
+}
+
+test "LSP proof hover accepts UTF-16 positions after non-ASCII text" {
+    const mm0_uri = "file:///tmp/lsp-utf16.mm0";
+    const proof_uri = "file:///tmp/lsp-utf16.auf";
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ 💡 top $ by top_i []
+        \\l2: $ top $ by keep [l1]
+    ;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try handler.putDocument(mm0_uri, lsp_navigation_mm0_text, 1);
+    try handler.putDocument(proof_uri, proof_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const hover_result = try handler.@"textDocument/hover"(
+        arena_state.allocator(),
+        .{
+            .textDocument = .{ .uri = proof_uri },
+            .position = try testPosition(proof_text, "top_i"),
+        },
+    );
+    const hover = hover_result orelse return error.ExpectedHover;
+    const range = hover.range orelse return error.ExpectedHoverRange;
+    try expectRangeText(proof_text, range, "top_i");
+
+    const markdown = switch (hover.contents) {
+        .MarkupContent => |content| content.value,
+        else => return error.ExpectedMarkdownHover,
+    };
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        markdown,
+        1,
+        "axiom top_i",
+    ));
+}
+
+test "LSP proof hover resolves rule applications" {
+    const mm0_uri = "file:///tmp/lsp-stage2.mm0";
+    const proof_uri = "file:///tmp/lsp-stage2.auf";
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try putLspNavigationDocuments(&handler, mm0_uri, proof_uri);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const hover_result = try handler.@"textDocument/hover"(
+        arena_state.allocator(),
+        .{
+            .textDocument = .{ .uri = proof_uri },
+            .position = try testLastPosition(lsp_navigation_proof_text, "keep"),
+        },
+    );
+    const hover = hover_result orelse return error.ExpectedHover;
+    const range = hover.range orelse return error.ExpectedHoverRange;
+    try expectRangeText(lsp_navigation_proof_text, range, "keep");
+
+    const markdown = switch (hover.contents) {
+        .MarkupContent => |content| content.value,
+        else => return error.ExpectedMarkdownHover,
+    };
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        markdown,
+        1,
+        "axiom keep",
+    ));
+}
+
+test "LSP proof definition resolves rules and line references" {
+    const mm0_uri = "file:///tmp/lsp-stage2.mm0";
+    const proof_uri = "file:///tmp/lsp-stage2.auf";
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try putLspNavigationDocuments(&handler, mm0_uri, proof_uri);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const rule_location = try expectDefinitionLocation(
+        try handler.@"textDocument/definition"(arena, .{
+            .textDocument = .{ .uri = proof_uri },
+            .position = try testLastPosition(lsp_navigation_proof_text, "keep"),
+        }),
+    );
+    try std.testing.expectEqualStrings(mm0_uri, rule_location.uri);
+    try expectRangeText(lsp_navigation_mm0_text, rule_location.range, "keep");
+
+    const line_location = try expectDefinitionLocation(
+        try handler.@"textDocument/definition"(arena, .{
+            .textDocument = .{ .uri = proof_uri },
+            .position = try testLastPosition(lsp_navigation_proof_text, "l1"),
+        }),
+    );
+    try std.testing.expectEqualStrings(proof_uri, line_location.uri);
+    try expectRangeText(lsp_navigation_proof_text, line_location.range, "l1");
+}
+
+test "LSP navigation cache invalidates changed mm0 sibling" {
+    const mm0_uri = "file:///tmp/lsp-stage5.mm0";
+    const proof_uri = "file:///tmp/lsp-stage5.auf";
+    const changed_mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep2: $ top $ > $ top $;
+        \\theorem main: $ top $ > $ top $;
+    ;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try putLspNavigationDocuments(&handler, mm0_uri, proof_uri);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const first_hover = try handler.@"textDocument/hover"(arena, .{
+        .textDocument = .{ .uri = proof_uri },
+        .position = try testLastPosition(lsp_navigation_proof_text, "keep"),
+    });
+    try std.testing.expect(first_hover != null);
+    try std.testing.expectEqual(@as(usize, 1), handler.nav_cache.count());
+
+    try handler.@"textDocument/didChange"(arena, .{
+        .textDocument = .{ .uri = mm0_uri, .version = 2 },
+        .contentChanges = &.{
+            .{ .literal_1 = .{ .text = changed_mm0_text } },
+        },
+    });
+    try std.testing.expectEqual(@as(usize, 0), handler.nav_cache.count());
+
+    const hover_result = try handler.@"textDocument/hover"(arena, .{
+        .textDocument = .{ .uri = proof_uri },
+        .position = try testLastPosition(lsp_navigation_proof_text, "keep"),
+    });
+    const hover = hover_result orelse return error.ExpectedHover;
+    const markdown = switch (hover.contents) {
+        .MarkupContent => |content| content.value,
+        else => return error.ExpectedMarkdownHover,
+    };
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        markdown,
+        1,
+        "unknown rule `keep`",
+    ));
+}
+
+test "LSP navigation cache invalidates closed proof sibling" {
+    const mm0_uri = "file:///tmp/lsp-stage5-close.mm0";
+    const proof_uri = "file:///tmp/lsp-stage5-close.auf";
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try putLspNavigationDocuments(&handler, mm0_uri, proof_uri);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const hover_result = try handler.@"textDocument/hover"(arena, .{
+        .textDocument = .{ .uri = proof_uri },
+        .position = try testLastPosition(lsp_navigation_proof_text, "keep"),
+    });
+    try std.testing.expect(hover_result != null);
+    try std.testing.expectEqual(@as(usize, 1), handler.nav_cache.count());
+
+    try handler.@"textDocument/didClose"(arena, .{
+        .textDocument = .{ .uri = proof_uri },
+    });
+    try std.testing.expectEqual(@as(usize, 0), handler.nav_cache.count());
+}
+
+test "LSP proof unknown rule has hover but no definition" {
+    const mm0_uri = "file:///tmp/lsp-stage2-unknown.mm0";
+    const proof_uri = "file:///tmp/lsp-stage2-unknown.auf";
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem main: $ top $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ top $ by missing []
+    ;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try handler.putDocument(mm0_uri, mm0_text, 1);
+    try handler.putDocument(proof_uri, proof_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const hover_result = try handler.@"textDocument/hover"(arena, .{
+        .textDocument = .{ .uri = proof_uri },
+        .position = try testPosition(proof_text, "missing"),
+    });
+    const hover = hover_result orelse return error.ExpectedHover;
+    const markdown = switch (hover.contents) {
+        .MarkupContent => |content| content.value,
+        else => return error.ExpectedMarkdownHover,
+    };
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        markdown,
+        1,
+        "unknown rule `missing`",
+    ));
+
+    const definition = try handler.@"textDocument/definition"(arena, .{
+        .textDocument = .{ .uri = proof_uri },
+        .position = try testPosition(proof_text, "missing"),
+    });
+    try std.testing.expect(definition == null);
 }
 
 fn compilerDiagnosticRelatedInformation(

@@ -307,6 +307,17 @@ pub fn build(b: *std.Build) void {
     });
     const run_frontend_tests = b.addRunArtifact(frontend_tests);
 
+    const lsp_index_test_module = b.createModule(.{
+        .root_source_file = b.path("src/lsp_index_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const lsp_index_tests = b.addTest(.{
+        .root_module = lsp_index_test_module,
+    });
+    const run_lsp_index_tests = b.addRunArtifact(lsp_index_tests);
+
     const compiler_test_module = b.createModule(.{
         .root_source_file = b.path("src/frontend/compiler/tests.zig"),
         .target = target,
@@ -348,6 +359,7 @@ pub fn build(b: *std.Build) void {
     unit_step.dependOn(&run_trusted_tests.step);
     unit_step.dependOn(&run_root_tests.step);
     unit_step.dependOn(&run_frontend_tests.step);
+    unit_step.dependOn(&run_lsp_index_tests.step);
     unit_step.dependOn(&run_compiler_tests.step);
     unit_step.dependOn(&run_compiler_bin_tests.step);
 

@@ -3198,6 +3198,7 @@ test "compiler points binding validation errors at explicit assignments" {
             .binding_list_span = binding_span,
             .arg_bindings = &.{.{
                 .name = "x",
+                .name_span = .{ .start = binding_start + 1, .end = binding_start + 2 },
                 .formula = .{
                     .text = " top ",
                     .span = .{ .start = 0, .end = 0 },
