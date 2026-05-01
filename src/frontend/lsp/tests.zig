@@ -69,6 +69,66 @@ test "snapshot indexes global mm0 declarations" {
     try std.testing.expect(snapshot.decl_by_name.contains("imp_refl"));
 }
 
+test "snapshot outlines mm0 declarations" {
+    const text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem main: $ top $;
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const outline = snapshot.outline(.mm0);
+    try std.testing.expectEqual(@as(usize, 4), outline.len);
+    try std.testing.expectEqualStrings("wff", outline[0].name);
+    try std.testing.expectEqual(Index.DeclarationKind.sort, outline[0].kind);
+    try std.testing.expectEqualStrings("top", outline[1].name);
+    try std.testing.expectEqual(Index.DeclarationKind.term, outline[1].kind);
+    try std.testing.expectEqualStrings("top_i", outline[2].name);
+    try std.testing.expectEqual(Index.DeclarationKind.axiom, outline[2].kind);
+    try std.testing.expectEqualStrings("main", outline[3].name);
+    try std.testing.expectEqual(
+        Index.DeclarationKind.theorem,
+        outline[3].kind,
+    );
+    try std.testing.expectEqualStrings(
+        "theorem main: $ top $;",
+        snapshot.mm0_text[outline[3].range.start..outline[3].range.end],
+    );
+}
+
+test "snapshot outlines proof blocks without line children" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem main: $ top $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ top $ by top_i []
+        \\l2: $ top $ by top_i []
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const outline = snapshot.outline(.proof);
+    try std.testing.expectEqual(@as(usize, 1), outline.len);
+    try std.testing.expectEqualStrings("main", outline[0].name);
+    try std.testing.expectEqual(Index.DeclarationKind.theorem, outline[0].kind);
+    try std.testing.expectEqual(@as(usize, 0), outline[0].children.len);
+}
+
 test "definition lookup resolves declaration and simple global use" {
     const text =
         \\provable sort wff;

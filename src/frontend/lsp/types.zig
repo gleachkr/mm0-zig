@@ -27,6 +27,14 @@ pub const HoverResult = struct {
     markdown: []const u8,
 };
 
+pub const OutlineSymbol = struct {
+    name: []const u8,
+    kind: DeclarationKind,
+    range: SourceRange,
+    selection_range: SourceRange,
+    children: []const OutlineSymbol = &.{},
+};
+
 pub const DeclarationKind = enum {
     sort,
     term,

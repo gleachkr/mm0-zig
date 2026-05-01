@@ -11,6 +11,7 @@ pub const SnapshotInput = Types.SnapshotInput;
 pub const SourceRange = Types.SourceRange;
 pub const DefinitionResult = Types.DefinitionResult;
 pub const HoverResult = Types.HoverResult;
+pub const OutlineSymbol = Types.OutlineSymbol;
 pub const DeclarationKind = Types.DeclarationKind;
 pub const BinderDecl = Types.BinderDecl;
 pub const Declaration = Types.Declaration;
@@ -53,6 +54,8 @@ pub const Snapshot = struct {
     declarations: []const Declaration,
     decl_by_name: std.StringHashMapUnmanaged(usize),
     symbols: []const NavigationSymbol,
+    mm0_outline: []const OutlineSymbol,
+    proof_outline: []const OutlineSymbol,
 
     pub fn build(
         allocator: std.mem.Allocator,
@@ -89,6 +92,8 @@ pub const Snapshot = struct {
             .declarations = try builder.declarations.toOwnedSlice(arena),
             .decl_by_name = builder.decl_by_name,
             .symbols = try builder.symbols.toOwnedSlice(arena),
+            .mm0_outline = try builder.mm0_outline.toOwnedSlice(arena),
+            .proof_outline = try builder.proof_outline.toOwnedSlice(arena),
         };
     }
 
@@ -161,6 +166,16 @@ pub const Snapshot = struct {
             .proof => self.proof_text,
         };
     }
+
+    pub fn outline(
+        self: *const Snapshot,
+        document: DocumentId,
+    ) []const OutlineSymbol {
+        return switch (document) {
+            .mm0 => self.mm0_outline,
+            .proof => self.proof_outline,
+        };
+    }
 };
 
 const LookupHit = struct {
@@ -209,6 +224,8 @@ const Builder = struct {
     declarations: std.ArrayListUnmanaged(Declaration) = .{},
     decl_by_name: std.StringHashMapUnmanaged(usize) = .empty,
     symbols: std.ArrayListUnmanaged(NavigationSymbol) = .{},
+    mm0_outline: std.ArrayListUnmanaged(OutlineSymbol) = .{},
+    proof_outline: std.ArrayListUnmanaged(OutlineSymbol) = .{},
     proof_blocks: std.ArrayListUnmanaged(ProofBlockInfo) = .{},
     proof_rules: std.ArrayListUnmanaged(ProofRuleDecl) = .{},
     proof_lines: std.ArrayListUnmanaged(ProofLineDecl) = .{},
@@ -225,6 +242,7 @@ const Builder = struct {
 
     fn indexMm0(self: *Builder, text: []const u8) !void {
         var parser = parse.MM0Parser.init(text, self.allocator);
+        var statements = StatementIterator.init(text);
         while (true) {
             const stmt = parser.next() catch |err| {
                 if (isFatalIndexError(err)) return err;
@@ -234,6 +252,7 @@ const Builder = struct {
             try self.addStatement(
                 concrete,
                 text,
+                nextStatementRangeForMm0Stmt(&statements, concrete),
                 parser.last_annotations,
                 parser.last_annotation_spans,
             );
@@ -294,6 +313,7 @@ const Builder = struct {
         self: *Builder,
         stmt: parse.MM0Stmt,
         text: []const u8,
+        statement_range: SourceRange,
         annotations: []const []const u8,
         annotation_spans: []const parse.MathSpan,
     ) !void {
@@ -310,6 +330,12 @@ const Builder = struct {
                         annotations,
                     ),
                 });
+                try self.addMm0Outline(.{
+                    .name = sort.name,
+                    .kind = .sort,
+                    .range = statement_range,
+                    .selection_range = mathSpanRange(sort.name_span),
+                });
                 try self.addSortVarAnnotations(
                     sort,
                     annotations,
@@ -317,9 +343,10 @@ const Builder = struct {
                 );
             },
             .term => |term| {
+                const kind: DeclarationKind = if (term.is_def) .def else .term;
                 _ = try self.addGlobalDeclaration(.{
                     .name = term.name,
-                    .kind = if (term.is_def) .def else .term,
+                    .kind = kind,
                     .name_range = mathSpanRange(term.name_span),
                     .markdown = try termMarkdown(
                         self.allocator,
@@ -335,16 +362,23 @@ const Builder = struct {
                         term.args,
                     ),
                 });
+                try self.addMm0Outline(.{
+                    .name = term.name,
+                    .kind = kind,
+                    .range = statement_range,
+                    .selection_range = mathSpanRange(term.name_span),
+                });
                 try self.addArgSortUses(.mm0, text, term.args);
                 try self.addSortUse(.mm0, text, term.ret_sort_name);
             },
             .assertion => |assertion| {
+                const kind: DeclarationKind = switch (assertion.kind) {
+                    .axiom => .axiom,
+                    .theorem => .theorem,
+                };
                 _ = try self.addGlobalDeclaration(.{
                     .name = assertion.name,
-                    .kind = switch (assertion.kind) {
-                        .axiom => .axiom,
-                        .theorem => .theorem,
-                    },
+                    .kind = kind,
                     .name_range = mathSpanRange(assertion.name_span),
                     .markdown = try assertionMarkdown(
                         self.allocator,
@@ -361,6 +395,12 @@ const Builder = struct {
                         assertion.args,
                     ),
                     .hyp_count = assertion.hyps.len,
+                });
+                try self.addMm0Outline(.{
+                    .name = assertion.name,
+                    .kind = kind,
+                    .range = statement_range,
+                    .selection_range = mathSpanRange(assertion.name_span),
                 });
                 try self.addArgSortUses(.mm0, text, assertion.args);
             },
@@ -498,6 +538,14 @@ const Builder = struct {
         try self.symbols.append(self.allocator, symbol);
     }
 
+    fn addMm0Outline(self: *Builder, symbol: OutlineSymbol) !void {
+        try self.mm0_outline.append(self.allocator, symbol);
+    }
+
+    fn addProofOutline(self: *Builder, symbol: OutlineSymbol) !void {
+        try self.proof_outline.append(self.allocator, symbol);
+    }
+
     fn addProofBlock(
         self: *Builder,
         block: proof_script.ProofBlock,
@@ -510,6 +558,12 @@ const Builder = struct {
             .name_range = proofSpanRange(block.name_span),
             .span = proofSpanRange(block.span),
             .global_available_before = global_available_before,
+        });
+        try self.addProofOutline(.{
+            .name = block.name,
+            .kind = proofBlockDeclarationKind(block.kind),
+            .range = proofSpanRange(block.span),
+            .selection_range = proofSpanRange(block.name_span),
         });
 
         switch (block.kind) {
@@ -1115,6 +1169,38 @@ const Builder = struct {
         return null;
     }
 };
+
+fn nextStatementRangeForMm0Stmt(
+    iter: *StatementIterator,
+    parsed: parse.MM0Stmt,
+) SourceRange {
+    const name_range = mm0StmtNameRange(parsed);
+    while (iter.next()) |stmt| {
+        if (stmt.start <= name_range.start and stmt.end >= name_range.end) {
+            return .{
+                .document = .mm0,
+                .start = stmt.start,
+                .end = stmt.end,
+            };
+        }
+    }
+    return name_range;
+}
+
+fn mm0StmtNameRange(stmt: parse.MM0Stmt) SourceRange {
+    return switch (stmt) {
+        .sort => |sort| mathSpanRange(sort.name_span),
+        .term => |term| mathSpanRange(term.name_span),
+        .assertion => |assertion| mathSpanRange(assertion.name_span),
+    };
+}
+
+fn proofBlockDeclarationKind(kind: proof_script.BlockKind) DeclarationKind {
+    return switch (kind) {
+        .theorem => .theorem,
+        .lemma => .lemma,
+    };
+}
 
 fn mathSpanRange(span: parse.MathSpan) SourceRange {
     return .{

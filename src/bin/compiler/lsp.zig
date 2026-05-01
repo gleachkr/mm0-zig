@@ -187,6 +187,9 @@ const Handler = struct {
             }
         }
 
+        const supports_hierarchical_document_symbols =
+            clientSupportsHierarchicalDocumentSymbols(request.capabilities);
+
         const capabilities: types.ServerCapabilities = .{
             .positionEncoding = switch (self.offset_encoding) {
                 .@"utf-8" => .@"utf-8",
@@ -201,10 +204,22 @@ const Handler = struct {
             },
             .hoverProvider = .{ .bool = true },
             .definitionProvider = .{ .bool = true },
+            .documentSymbolProvider = if (supports_hierarchical_document_symbols)
+                .{ .bool = true }
+            else
+                null,
         };
 
         if (builtin.mode == .Debug) {
-            lsp.basic_server.validateServerCapabilities(Handler, capabilities);
+            // The validator only understands static capabilities. Validate
+            // against the superset of implemented handlers while returning
+            // the client-specific capabilities above.
+            var validation_capabilities = capabilities;
+            validation_capabilities.documentSymbolProvider = .{ .bool = true };
+            lsp.basic_server.validateServerCapabilities(
+                Handler,
+                validation_capabilities,
+            );
         }
 
         return .{
@@ -358,6 +373,24 @@ const Handler = struct {
                 self.offset_encoding,
             ),
         };
+    }
+
+    pub fn @"textDocument/documentSymbol"(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        params: types.DocumentSymbolParams,
+    ) !lsp.ResultType("textDocument/documentSymbol") {
+        const nav = try self.navigationSnapshotForUri(
+            arena,
+            params.textDocument.uri,
+        ) orelse return null;
+        const symbols = try outlineSymbolsToLsp(
+            arena,
+            nav.snapshot,
+            nav.snapshot.outline(nav.document),
+            self.offset_encoding,
+        );
+        return .{ .array_of_DocumentSymbol = symbols };
     }
 
     pub fn @"textDocument/definition"(
@@ -1125,6 +1158,14 @@ fn readFileAlloc(
     return (try readFileWithMtimeAlloc(allocator, path)).text;
 }
 
+fn clientSupportsHierarchicalDocumentSymbols(
+    capabilities: types.ClientCapabilities,
+) bool {
+    const text_document = capabilities.textDocument orelse return false;
+    const document_symbol = text_document.documentSymbol orelse return false;
+    return document_symbol.hierarchicalDocumentSymbolSupport orelse false;
+}
+
 fn compilerDiagnosticsToLsp(
     arena: std.mem.Allocator,
     diag_context: DiagnosticContext,
@@ -1295,6 +1336,47 @@ fn sourceRangeToLsp(
     );
 }
 
+fn outlineSymbolsToLsp(
+    arena: std.mem.Allocator,
+    snapshot: *const LspIndex.Snapshot,
+    symbols: []const LspIndex.OutlineSymbol,
+    encoding: lsp.offsets.Encoding,
+) ![]const types.DocumentSymbol {
+    const result = try arena.alloc(types.DocumentSymbol, symbols.len);
+    for (symbols, 0..) |symbol, i| {
+        result[i] = .{
+            .name = symbol.name,
+            .detail = symbol.kind.label(),
+            .kind = declarationSymbolKind(symbol.kind),
+            .range = sourceRangeToLsp(snapshot, symbol.range, encoding),
+            .selectionRange = sourceRangeToLsp(
+                snapshot,
+                symbol.selection_range,
+                encoding,
+            ),
+            .children = if (symbol.children.len == 0)
+                null
+            else
+                try outlineSymbolsToLsp(
+                    arena,
+                    snapshot,
+                    symbol.children,
+                    encoding,
+                ),
+        };
+    }
+    return result;
+}
+
+fn declarationSymbolKind(kind: LspIndex.DeclarationKind) types.SymbolKind {
+    return switch (kind) {
+        .sort => .Class,
+        .term, .def => .Function,
+        .axiom, .theorem, .lemma => .Method,
+        .proof_line, .sort_var => .Variable,
+    };
+}
+
 const TestTransport = struct {
     transport: lsp.Transport = .{ .vtable = &vtable },
 
@@ -1352,6 +1434,16 @@ fn expectDefinitionLocation(
     };
 }
 
+fn expectDocumentSymbols(
+    result: lsp.ResultType("textDocument/documentSymbol"),
+) ![]const types.DocumentSymbol {
+    const value = result orelse return error.ExpectedDocumentSymbols;
+    return switch (value) {
+        .array_of_DocumentSymbol => |symbols| symbols,
+        else => error.ExpectedDocumentSymbols,
+    };
+}
+
 const lsp_navigation_mm0_text =
     \\provable sort wff;
     \\term top: wff;
@@ -1385,7 +1477,13 @@ test "LSP initialize advertises navigation capabilities" {
     defer handler.deinit();
 
     const result = handler.initialize(std.testing.allocator, .{
-        .capabilities = .{},
+        .capabilities = .{
+            .textDocument = .{
+                .documentSymbol = .{
+                    .hierarchicalDocumentSymbolSupport = true,
+                },
+            },
+        },
     });
 
     const hover = result.capabilities.hoverProvider orelse {
@@ -1403,6 +1501,29 @@ test "LSP initialize advertises navigation capabilities" {
         .bool => |enabled| try std.testing.expect(enabled),
         else => return error.ExpectedBooleanDefinitionProvider,
     }
+
+    const document_symbol = result.capabilities.documentSymbolProvider orelse {
+        return error.ExpectedDocumentSymbolProvider;
+    };
+    switch (document_symbol) {
+        .bool => |enabled| try std.testing.expect(enabled),
+        else => return error.ExpectedBooleanDocumentSymbolProvider,
+    }
+}
+
+test "LSP initialize omits document symbols for non-hierarchical clients" {
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+
+    const result = handler.initialize(std.testing.allocator, .{
+        .capabilities = .{},
+    });
+
+    try std.testing.expect(result.capabilities.documentSymbolProvider == null);
 }
 
 test "LSP proof hover accepts UTF-16 positions after non-ASCII text" {
@@ -1519,6 +1640,33 @@ test "LSP proof definition resolves rules and line references" {
     );
     try std.testing.expectEqualStrings(proof_uri, line_location.uri);
     try expectRangeText(lsp_navigation_proof_text, line_location.range, "l1");
+}
+
+test "LSP document symbols returns quiet proof outline" {
+    const mm0_uri = "file:///tmp/lsp-stage2.mm0";
+    const proof_uri = "file:///tmp/lsp-stage2.auf";
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try putLspNavigationDocuments(&handler, mm0_uri, proof_uri);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const symbols = try expectDocumentSymbols(
+        try handler.@"textDocument/documentSymbol"(arena, .{
+            .textDocument = .{ .uri = proof_uri },
+        }),
+    );
+    try std.testing.expectEqual(@as(usize, 1), symbols.len);
+    try std.testing.expectEqualStrings("main", symbols[0].name);
+    try std.testing.expectEqual(types.SymbolKind.Method, symbols[0].kind);
+    try std.testing.expect(symbols[0].children == null);
 }
 
 test "LSP navigation cache invalidates changed mm0 sibling" {
