@@ -188,7 +188,7 @@ fn skipLineComment(text: []const u8, pos: *usize, end: usize) void {
     while (pos.* < end and text[pos.*] != '\n') pos.* += 1;
 }
 
-fn startsLineComment(text: []const u8, pos: usize) bool {
+pub fn startsLineComment(text: []const u8, pos: usize) bool {
     return pos + 1 < text.len and text[pos] == '-' and text[pos + 1] == '-';
 }
 
@@ -322,10 +322,10 @@ fn tokenAt(text: []const u8, offset: usize) ?Token {
     };
 }
 
-fn isIdentStart(ch: u8) bool {
+pub fn isIdentStart(ch: u8) bool {
     return std.ascii.isAlphabetic(ch) or ch == '_';
 }
 
-fn isIdentChar(ch: u8) bool {
+pub fn isIdentChar(ch: u8) bool {
     return std.ascii.isAlphanumeric(ch) or ch == '_';
 }

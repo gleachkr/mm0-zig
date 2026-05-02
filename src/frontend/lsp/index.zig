@@ -11,6 +11,9 @@ pub const SnapshotInput = Types.SnapshotInput;
 pub const SourceRange = Types.SourceRange;
 pub const DefinitionResult = Types.DefinitionResult;
 pub const HoverResult = Types.HoverResult;
+pub const CompletionOptions = Types.CompletionOptions;
+pub const CompletionKind = Types.CompletionKind;
+pub const CompletionItem = Types.CompletionItem;
 pub const OutlineSymbol = Types.OutlineSymbol;
 pub const DeclarationKind = Types.DeclarationKind;
 pub const BinderDecl = Types.BinderDecl;
@@ -30,6 +33,8 @@ const containsMathWhitespace = source.containsMathWhitespace;
 const isMathWhitespace = source.isMathWhitespace;
 const sourceRangeFromSlice = source.sourceRangeFromSlice;
 const findIdentIn = source.findIdentIn;
+const startsLineComment = source.startsLineComment;
+const isIdentChar = source.isIdentChar;
 
 const sortMarkdown = markdown.sortMarkdown;
 const termMarkdown = markdown.termMarkdown;
@@ -56,6 +61,13 @@ pub const Snapshot = struct {
     symbols: []const NavigationSymbol,
     mm0_outline: []const OutlineSymbol,
     proof_outline: []const OutlineSymbol,
+    proof_blocks: []const ProofBlockInfo,
+    proof_rules: []const ProofRuleDecl,
+    proof_lines: []const ProofLineDecl,
+    proof_applications: []const ProofApplicationInfo,
+    notations: []const NotationCompletionDecl,
+    left_delims: [256]bool,
+    right_delims: [256]bool,
 
     pub fn build(
         allocator: std.mem.Allocator,
@@ -94,6 +106,13 @@ pub const Snapshot = struct {
             .symbols = try builder.symbols.toOwnedSlice(arena),
             .mm0_outline = try builder.mm0_outline.toOwnedSlice(arena),
             .proof_outline = try builder.proof_outline.toOwnedSlice(arena),
+            .proof_blocks = try builder.proof_blocks.toOwnedSlice(arena),
+            .proof_rules = try builder.proof_rules.toOwnedSlice(arena),
+            .proof_lines = try builder.proof_lines.toOwnedSlice(arena),
+            .proof_applications = try builder.proof_applications.toOwnedSlice(arena),
+            .notations = try builder.notations.toOwnedSlice(arena),
+            .left_delims = builder.left_delims,
+            .right_delims = builder.right_delims,
         };
     }
 
@@ -176,7 +195,1449 @@ pub const Snapshot = struct {
             .proof => self.proof_outline,
         };
     }
+
+    pub fn completionsAt(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        document: DocumentId,
+        offset: usize,
+        options: CompletionOptions,
+    ) ![]const CompletionItem {
+        const text = self.textForDocument(document) orelse return &.{};
+        const safe_offset = @min(offset, text.len);
+        var list = std.ArrayListUnmanaged(CompletionItem){};
+        const replacement = self.completionReplacementRange(
+            document,
+            text,
+            safe_offset,
+        );
+
+        switch (document) {
+            .mm0 => try self.mm0CompletionsAt(
+                allocator,
+                &list,
+                text,
+                safe_offset,
+                replacement,
+                options,
+            ),
+            .proof => try self.proofCompletionsAt(
+                allocator,
+                &list,
+                text,
+                safe_offset,
+                replacement,
+                options,
+            ),
+        }
+        return try list.toOwnedSlice(allocator);
+    }
+
+    fn completionReplacementRange(
+        self: *const Snapshot,
+        document: DocumentId,
+        text: []const u8,
+        offset: usize,
+    ) SourceRange {
+        if (mathStringAt(text, offset)) |math| {
+            return mathCompletionReplacementRange(
+                document,
+                text,
+                math,
+                offset,
+                self.left_delims,
+                self.right_delims,
+            );
+        }
+        return identifierCompletionReplacementRange(document, text, offset);
+    }
+
+    fn mm0CompletionsAt(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        text: []const u8,
+        offset: usize,
+        replacement: SourceRange,
+        options: CompletionOptions,
+    ) !void {
+        if (annotationContextAt(text, offset)) {
+            try appendAnnotationCompletions(list, allocator, replacement);
+            return;
+        }
+        if (lineCommentContextAt(text, offset)) return;
+        if (mathStringAt(text, offset) != null) {
+            try self.appendCurrentDeclarationBinders(
+                list,
+                allocator,
+                text,
+                offset,
+                replacement,
+            );
+            try self.appendTermCompletions(
+                list,
+                allocator,
+                replacement,
+                .mm0,
+                offset,
+                null,
+                options,
+            );
+            return;
+        }
+        if (mm0SortContextAt(text, offset)) {
+            try self.appendSortCompletions(list, allocator, replacement);
+            return;
+        }
+        if (mm0ReferenceContextAt(text, offset)) {
+            try self.appendGlobalDeclarationCompletions(
+                list,
+                allocator,
+                replacement,
+                &.{ .term, .def, .axiom, .theorem },
+                .mm0,
+                offset,
+                null,
+            );
+            return;
+        }
+        if (mm0TopLevelContextAt(text, offset)) {
+            try appendKeywordCompletions(list, allocator, replacement);
+        }
+    }
+
+    fn proofCompletionsAt(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        text: []const u8,
+        offset: usize,
+        replacement: SourceRange,
+        options: CompletionOptions,
+    ) !void {
+        const block = self.proofBlockNear(offset);
+        if (lineCommentContextAt(text, offset)) return;
+        if (mathStringAt(text, offset) != null) {
+            if (block) |block_index| {
+                try self.appendBlockBinders(
+                    list,
+                    allocator,
+                    block_index,
+                    replacement,
+                );
+                if (proofLineMathContextAt(text, offset)) {
+                    try self.appendSortVarCompletions(
+                        list,
+                        allocator,
+                        replacement,
+                        self.proof_blocks[block_index].global_available_before,
+                    );
+                }
+            }
+            try self.appendTermCompletions(
+                list,
+                allocator,
+                replacement,
+                .proof,
+                offset,
+                if (block) |i| self.proof_blocks[i].global_available_before else null,
+                options,
+            );
+            return;
+        }
+        if (proofHeaderContextAt(text, offset)) {
+            try self.appendGlobalDeclarationCompletions(
+                list,
+                allocator,
+                replacement,
+                &.{.theorem},
+                .proof,
+                offset,
+                null,
+            );
+            return;
+        }
+        if (self.proofRuleApplicationAt(offset)) |app| {
+            try self.appendProofRuleCompletions(
+                list,
+                allocator,
+                app.block_index,
+                offset,
+                replacement,
+            );
+            return;
+        }
+        if (self.proofBindingApplicationAt(offset)) |app| {
+            try self.appendRuleBinderCompletions(
+                list,
+                allocator,
+                app,
+                replacement,
+            );
+            return;
+        }
+        if (self.proofReferenceApplicationAt(offset)) |app| {
+            try self.appendProofReferenceCompletions(
+                list,
+                allocator,
+                app.block_index,
+                app.line_start,
+                replacement,
+            );
+            return;
+        }
+        if (proofRuleContextAt(text, offset)) {
+            if (block) |block_index| {
+                try self.appendProofRuleCompletions(
+                    list,
+                    allocator,
+                    block_index,
+                    offset,
+                    replacement,
+                );
+            }
+        }
+    }
+
+    fn appendCurrentDeclarationBinders(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        text: []const u8,
+        offset: usize,
+        replacement: SourceRange,
+    ) !void {
+        const decl_index = self.mm0DeclarationIndexAt(text, offset) orelse return;
+        try self.appendDeclarationBinders(list, allocator, decl_index, replacement);
+    }
+
+    fn appendBlockBinders(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        block_index: usize,
+        replacement: SourceRange,
+    ) !void {
+        const decl_index = self.proof_blocks[block_index].decl_index orelse return;
+        try self.appendDeclarationBinders(list, allocator, decl_index, replacement);
+    }
+
+    fn appendSortVarCompletions(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        replacement: SourceRange,
+        available_before: ?usize,
+    ) !void {
+        for (self.declarations) |decl| {
+            if (decl.kind != .sort_var) continue;
+            if (!globalDeclarationAvailable(
+                decl,
+                .proof,
+                replacement.start,
+                available_before,
+            )) continue;
+            if (completionAlreadyInserts(
+                list.items,
+                replacement,
+                decl.name,
+            )) continue;
+            try list.append(allocator, .{
+                .label = decl.name,
+                .kind = .binder,
+                .detail = declarationKindName(decl.kind),
+                .documentation_markdown = decl.markdown,
+                .replacement = replacement,
+                .replacement_text = decl.name,
+                .sort_text = globalDeclarationSortText(decl),
+            });
+        }
+    }
+
+    fn appendRuleBinderCompletions(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        app: ProofApplicationInfo,
+        replacement: SourceRange,
+    ) !void {
+        const rule = self.ruleResolutionAt(
+            app.block_index,
+            app.rule_name,
+            app.use_start,
+        ) orelse return;
+        try self.appendDeclarationBinders(
+            list,
+            allocator,
+            rule.decl_index,
+            replacement,
+        );
+    }
+
+    fn appendDeclarationBinders(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        decl_index: usize,
+        replacement: SourceRange,
+    ) !void {
+        const decl = self.declarations[decl_index];
+        for (decl.binders) |binder| {
+            try list.append(allocator, .{
+                .label = binder.name,
+                .kind = .binder,
+                .detail = binder.sort_name,
+                .replacement = replacement,
+                .replacement_text = binder.name,
+                .sort_text = binder.sort_text,
+            });
+        }
+    }
+
+    fn appendSortCompletions(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        replacement: SourceRange,
+    ) !void {
+        try self.appendGlobalDeclarationCompletions(
+            list,
+            allocator,
+            replacement,
+            &.{.sort},
+            .mm0,
+            replacement.start,
+            null,
+        );
+    }
+
+    fn appendTermCompletions(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        replacement: SourceRange,
+        document: DocumentId,
+        use_start: usize,
+        available_before: ?usize,
+        options: CompletionOptions,
+    ) !void {
+        try self.appendGlobalDeclarationCompletions(
+            list,
+            allocator,
+            replacement,
+            &.{ .term, .def },
+            document,
+            use_start,
+            available_before,
+        );
+        try self.appendNotationCompletions(
+            list,
+            allocator,
+            replacement,
+            document,
+            use_start,
+            available_before,
+            options,
+        );
+    }
+
+    fn appendNotationCompletions(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        replacement: SourceRange,
+        document: DocumentId,
+        use_start: usize,
+        available_before: ?usize,
+        options: CompletionOptions,
+    ) !void {
+        const replacement_fragment = replacementFragment(self, replacement);
+        for (self.notations) |notation| {
+            const decl = self.declarations[notation.decl_index];
+            if (!globalDeclarationAvailable(
+                decl,
+                document,
+                use_start,
+                available_before,
+            )) continue;
+            if (!completionAlreadyInserts(
+                list.items,
+                replacement,
+                notation.token,
+            )) {
+                try list.append(allocator, .{
+                    .label = notation.token,
+                    .kind = .notation,
+                    .detail = notation.detail,
+                    .documentation_markdown = decl.markdown,
+                    .replacement = replacement,
+                    .replacement_text = notation.token,
+                    .filter_text = notationFilterText(
+                        notation,
+                        decl,
+                        replacement_fragment,
+                    ),
+                    .sort_text = notationCompletionSortText(
+                        notation,
+                        decl,
+                        replacement_fragment,
+                    ),
+                });
+            }
+            if (options.snippet_support) {
+                try appendNotationSnippetCompletion(
+                    list,
+                    allocator,
+                    replacement,
+                    notation,
+                    decl,
+                    replacement_fragment,
+                );
+            }
+        }
+    }
+
+    fn appendGlobalDeclarationCompletions(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        replacement: SourceRange,
+        kinds: []const DeclarationKind,
+        document: DocumentId,
+        use_start: usize,
+        available_before: ?usize,
+    ) !void {
+        for (self.declarations) |decl| {
+            if (!declarationKindIn(decl.kind, kinds)) continue;
+            if (!globalDeclarationAvailable(
+                decl,
+                document,
+                use_start,
+                available_before,
+            )) continue;
+            try list.append(allocator, .{
+                .label = decl.name,
+                .kind = completionKindForDeclaration(decl.kind),
+                .detail = declarationKindName(decl.kind),
+                .documentation_markdown = decl.markdown,
+                .replacement = replacement,
+                .replacement_text = decl.name,
+                .sort_text = globalDeclarationSortText(decl),
+            });
+        }
+    }
+
+    fn appendProofRuleCompletions(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        block_index: usize,
+        use_start: usize,
+        replacement: SourceRange,
+    ) !void {
+        var seen = std.StringHashMapUnmanaged(void){};
+        for (self.proof_rules) |rule| {
+            if (rule.available_start > use_start) continue;
+            if (seen.contains(rule.name)) continue;
+            try seen.put(allocator, rule.name, {});
+            const decl = self.declarations[rule.decl_index];
+            try list.append(allocator, .{
+                .label = rule.name,
+                .kind = .lemma,
+                .detail = "lemma",
+                .documentation_markdown = decl.markdown,
+                .replacement = replacement,
+                .replacement_text = rule.name,
+                .sort_text = rule.sort_text,
+            });
+        }
+        for (self.declarations) |decl| {
+            switch (decl.kind) {
+                .axiom, .theorem => {},
+                else => continue,
+            }
+            if (seen.contains(decl.name)) continue;
+            if (!self.globalRuleAvailable(block_index, decl)) continue;
+            try list.append(allocator, .{
+                .label = decl.name,
+                .kind = completionKindForDeclaration(decl.kind),
+                .detail = declarationKindName(decl.kind),
+                .documentation_markdown = decl.markdown,
+                .replacement = replacement,
+                .replacement_text = decl.name,
+                .sort_text = globalDeclarationSortText(decl),
+            });
+        }
+    }
+
+    fn appendProofReferenceCompletions(
+        self: *const Snapshot,
+        list: *std.ArrayListUnmanaged(CompletionItem),
+        allocator: std.mem.Allocator,
+        block_index: usize,
+        line_start: usize,
+        replacement: SourceRange,
+    ) !void {
+        const block = self.proof_blocks[block_index];
+        if (block.hyp_count_known) {
+            var i: usize = 1;
+            while (i <= block.hyp_count) : (i += 1) {
+                const label = try std.fmt.allocPrint(allocator, "#{d}", .{i});
+                try list.append(allocator, .{
+                    .label = label,
+                    .kind = .hypothesis,
+                    .detail = "hypothesis",
+                    .replacement = replacement,
+                    .replacement_text = label,
+                    .sort_text = try completionSortText(
+                        allocator,
+                        sort_group_proof_reference,
+                        i,
+                        label,
+                    ),
+                });
+            }
+        }
+        for (self.proof_lines) |line| {
+            if (line.block_index != block_index) continue;
+            if (line.line_start >= line_start) continue;
+            const decl = self.declarations[line.decl_index];
+            try list.append(allocator, .{
+                .label = line.name,
+                .kind = .proof_line,
+                .detail = "proof line",
+                .documentation_markdown = decl.markdown,
+                .replacement = replacement,
+                .replacement_text = line.name,
+                .sort_text = line.sort_text,
+            });
+        }
+    }
+
+    fn mm0DeclarationIndexAt(
+        self: *const Snapshot,
+        text: []const u8,
+        offset: usize,
+    ) ?usize {
+        var iter = StatementIterator.init(text);
+        while (iter.next()) |stmt| {
+            if (offset < stmt.start or offset > stmt.end) continue;
+            const header = statementHeader(text, stmt) orelse return null;
+            const name = header.name orelse return null;
+            return self.decl_by_name.get(name);
+        }
+        return null;
+    }
+
+    fn proofBlockNear(self: *const Snapshot, offset: usize) ?usize {
+        var best: ?usize = null;
+        for (self.proof_blocks, 0..) |block, i| {
+            if (block.span.start > offset) continue;
+            if (best == null or
+                block.span.start > self.proof_blocks[best.?].span.start)
+            {
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    fn proofRuleApplicationAt(
+        self: *const Snapshot,
+        offset: usize,
+    ) ?ProofApplicationInfo {
+        for (self.proof_applications) |app| {
+            if (offset >= app.rule_span.start and offset <= app.rule_span.end) {
+                return app;
+            }
+        }
+        return null;
+    }
+
+    fn proofBindingApplicationAt(
+        self: *const Snapshot,
+        offset: usize,
+    ) ?ProofApplicationInfo {
+        for (self.proof_applications) |app| {
+            const range = app.binding_list_span orelse continue;
+            if (offset >= range.start and offset <= range.end) return app;
+        }
+        return null;
+    }
+
+    fn proofReferenceApplicationAt(
+        self: *const Snapshot,
+        offset: usize,
+    ) ?ProofApplicationInfo {
+        for (self.proof_applications) |app| {
+            const range = app.refs_span orelse continue;
+            if (offset >= range.start and offset <= range.end) return app;
+        }
+        return null;
+    }
+
+    fn ruleResolutionAt(
+        self: *const Snapshot,
+        block_index: usize,
+        name: []const u8,
+        use_start: usize,
+    ) ?RuleResolution {
+        var best: ?ProofRuleDecl = null;
+        for (self.proof_rules) |rule| {
+            if (!std.mem.eql(u8, rule.name, name)) continue;
+            if (rule.available_start > use_start) continue;
+            if (best == null or rule.available_start > best.?.available_start) {
+                best = rule;
+            }
+        }
+        if (best) |rule| {
+            return .{ .decl_index = rule.decl_index, .available = true };
+        }
+        const decl_index = self.decl_by_name.get(name) orelse return null;
+        const decl = self.declarations[decl_index];
+        switch (decl.kind) {
+            .axiom, .theorem => {},
+            else => return null,
+        }
+        return .{
+            .decl_index = decl_index,
+            .available = self.globalRuleAvailable(block_index, decl),
+        };
+    }
+
+    fn globalRuleAvailable(
+        self: *const Snapshot,
+        block_index: usize,
+        decl: Declaration,
+    ) bool {
+        const bound = self.proof_blocks[block_index].global_available_before;
+        if (bound) |before| return decl.name_range.start < before;
+        return true;
+    }
 };
+
+const AnnotationDirective = struct {
+    label: []const u8,
+    detail: []const u8,
+    sort_text: []const u8,
+};
+
+const annotation_directives = [_]AnnotationDirective{
+    .{ .label = "@vars", .detail = "sort variable pool", .sort_text = "09 00" },
+    .{ .label = "@relation", .detail = "rewrite relation", .sort_text = "09 01" },
+    .{ .label = "@rewrite", .detail = "rewrite rule", .sort_text = "09 02" },
+    .{ .label = "@congr", .detail = "congruence rule", .sort_text = "09 03" },
+    .{ .label = "@acui", .detail = "ACUI metadata", .sort_text = "09 04" },
+    .{ .label = "@view", .detail = "view theorem", .sort_text = "09 05" },
+    .{ .label = "@recover", .detail = "recovery theorem", .sort_text = "09 06" },
+    .{ .label = "@abstract", .detail = "abstract theorem", .sort_text = "09 07" },
+    .{ .label = "@fresh", .detail = "freshness theorem", .sort_text = "09 08" },
+    .{ .label = "@hole", .detail = "proof hole", .sort_text = "09 09" },
+};
+
+const CompletionItemSeed = struct {
+    label: []const u8,
+    kind: CompletionKind,
+    detail: []const u8,
+    sort_text: []const u8,
+};
+
+const top_level_keywords = [_]CompletionItemSeed{
+    .{ .label = "sort", .kind = .keyword, .detail = "sort declaration", .sort_text = "09 00" },
+    .{ .label = "term", .kind = .keyword, .detail = "term declaration", .sort_text = "09 01" },
+    .{ .label = "def", .kind = .keyword, .detail = "definition", .sort_text = "09 02" },
+    .{ .label = "axiom", .kind = .keyword, .detail = "axiom", .sort_text = "09 03" },
+    .{ .label = "theorem", .kind = .keyword, .detail = "theorem", .sort_text = "09 04" },
+    .{ .label = "notation", .kind = .keyword, .detail = "notation", .sort_text = "09 05" },
+    .{ .label = "prefix", .kind = .keyword, .detail = "prefix notation", .sort_text = "09 06" },
+    .{ .label = "infixl", .kind = .keyword, .detail = "left infix", .sort_text = "09 07" },
+    .{ .label = "infixr", .kind = .keyword, .detail = "right infix", .sort_text = "09 08" },
+    .{ .label = "delimiter", .kind = .keyword, .detail = "delimiter", .sort_text = "09 09" },
+    .{ .label = "pub", .kind = .modifier, .detail = "public", .sort_text = "09 10" },
+    .{ .label = "pure", .kind = .modifier, .detail = "pure", .sort_text = "09 11" },
+    .{ .label = "strict", .kind = .modifier, .detail = "strict", .sort_text = "09 12" },
+    .{ .label = "provable", .kind = .modifier, .detail = "provable", .sort_text = "09 13" },
+    .{ .label = "free", .kind = .modifier, .detail = "free", .sort_text = "09 14" },
+};
+
+fn appendAnnotationCompletions(
+    list: *std.ArrayListUnmanaged(CompletionItem),
+    allocator: std.mem.Allocator,
+    replacement: SourceRange,
+) !void {
+    for (annotation_directives) |directive| {
+        try list.append(allocator, .{
+            .label = directive.label,
+            .kind = .annotation,
+            .detail = directive.detail,
+            .replacement = replacement,
+            .replacement_text = directive.label,
+            .sort_text = directive.sort_text,
+        });
+    }
+}
+
+fn appendKeywordCompletions(
+    list: *std.ArrayListUnmanaged(CompletionItem),
+    allocator: std.mem.Allocator,
+    replacement: SourceRange,
+) !void {
+    for (top_level_keywords) |keyword| {
+        try list.append(allocator, .{
+            .label = keyword.label,
+            .kind = keyword.kind,
+            .detail = keyword.detail,
+            .replacement = replacement,
+            .replacement_text = keyword.label,
+            .sort_text = keyword.sort_text,
+        });
+    }
+}
+
+const sort_group_local_binder = "00";
+const sort_group_proof_reference = "01";
+const sort_group_proof_lemma = "02";
+const sort_group_global_rule = "03";
+const sort_group_notation_alias = "04";
+const sort_group_notation_token = "05";
+const sort_group_notation_snippet = "06";
+const sort_group_term = "07";
+const sort_group_sort = "08";
+const sort_group_keyword = "09";
+
+fn completionSortText(
+    allocator: std.mem.Allocator,
+    group: []const u8,
+    ordinal: usize,
+    label: []const u8,
+) ![]const u8 {
+    return try std.fmt.allocPrint(
+        allocator,
+        "{s} {d:0>10} {s}",
+        .{ group, ordinal, label },
+    );
+}
+
+fn globalDeclarationSortText(decl: Declaration) []const u8 {
+    return decl.sort_text;
+}
+
+fn notationCompletionSortText(
+    notation: NotationCompletionDecl,
+    decl: Declaration,
+    replacement_fragment: []const u8,
+) []const u8 {
+    if (completionFragmentMatchesAlias(
+        replacement_fragment,
+        decl.name,
+        notation.token,
+    )) {
+        return notation.alias_sort_text;
+    }
+    return notation.token_sort_text;
+}
+
+fn notationSnippetSortText(
+    notation: NotationCompletionDecl,
+    _: Declaration,
+) []const u8 {
+    return notation.snippet_sort_text orelse notation.token_sort_text;
+}
+
+fn notationFilterText(
+    notation: NotationCompletionDecl,
+    decl: Declaration,
+    replacement_fragment: []const u8,
+) []const u8 {
+    if (completionFragmentMatchesAlias(
+        replacement_fragment,
+        decl.name,
+        notation.token,
+    )) {
+        return notation.alias_filter_text;
+    }
+    return notation.filter_text;
+}
+
+fn notationSnippetFilterText(
+    notation: NotationCompletionDecl,
+    decl: Declaration,
+    replacement_fragment: []const u8,
+) []const u8 {
+    if (completionFragmentMatchesAlias(
+        replacement_fragment,
+        decl.name,
+        notation.token,
+    )) {
+        return notation.snippet_alias_filter_text orelse
+            notation.alias_filter_text;
+    }
+    return notation.snippet_filter_text orelse notation.filter_text;
+}
+
+fn aliasFirstFilterText(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    alias: []const u8,
+) ![]const u8 {
+    if (std.mem.endsWith(u8, text, alias)) {
+        const prefix_end = text.len - alias.len;
+        const prefix = std.mem.trimRight(u8, text[0..prefix_end], " ");
+        if (prefix.len == 0) return alias;
+        return try std.fmt.allocPrint(
+            allocator,
+            "{s} {s}",
+            .{ alias, prefix },
+        );
+    }
+    return try std.fmt.allocPrint(
+        allocator,
+        "{s} {s}",
+        .{ alias, text },
+    );
+}
+
+fn replacementFragment(
+    self: *const Snapshot,
+    replacement: SourceRange,
+) []const u8 {
+    const text = self.textForDocument(replacement.document) orelse return "";
+    if (replacement.start > replacement.end or replacement.end > text.len) {
+        return "";
+    }
+    return text[replacement.start..replacement.end];
+}
+
+fn completionFragmentMatchesAlias(
+    fragment: []const u8,
+    decl_name: []const u8,
+    token: []const u8,
+) bool {
+    if (fragment.len == 0) return false;
+    if (fragment.len > decl_name.len) return false;
+    if (std.mem.eql(u8, fragment, token)) return false;
+    return std.mem.startsWith(u8, decl_name, fragment);
+}
+
+fn sortGroupForDeclaration(kind: DeclarationKind) []const u8 {
+    return switch (kind) {
+        .sort => sort_group_sort,
+        .term, .def => sort_group_term,
+        .axiom, .theorem => sort_group_global_rule,
+        .lemma => sort_group_proof_lemma,
+        .proof_line => sort_group_proof_reference,
+        .sort_var => sort_group_local_binder,
+    };
+}
+
+fn identifierCompletionReplacementRange(
+    document: DocumentId,
+    text: []const u8,
+    offset: usize,
+) SourceRange {
+    var start = offset;
+    while (start > 0 and completionTokenChar(text[start - 1])) start -= 1;
+    var end = offset;
+    while (end < text.len and completionTokenChar(text[end])) end += 1;
+    return .{ .document = document, .start = start, .end = end };
+}
+
+fn mathCompletionReplacementRange(
+    document: DocumentId,
+    text: []const u8,
+    math: SourceSpan,
+    offset: usize,
+    left_delims: [256]bool,
+    right_delims: [256]bool,
+) SourceRange {
+    const inner_start = @min(math.start + 1, text.len);
+    const raw_inner_end = if (math.end > math.start and
+        math.end <= text.len and text[math.end - 1] == '$')
+        math.end - 1
+    else
+        math.end;
+    const inner_end = @max(inner_start, @min(raw_inner_end, text.len));
+    const safe_offset = @min(@max(offset, inner_start), inner_end);
+    const inner = text[inner_start..inner_end];
+    const rel_offset = safe_offset - inner_start;
+    var cursor = MathTokenCursor{
+        .src = inner,
+        .left_delims = left_delims,
+        .right_delims = right_delims,
+    };
+    while (cursor.next()) |token| {
+        if (rel_offset >= token.start and rel_offset <= token.end) {
+            return .{
+                .document = document,
+                .start = inner_start + token.start,
+                .end = inner_start + token.end,
+            };
+        }
+    }
+    return .{
+        .document = document,
+        .start = safe_offset,
+        .end = safe_offset,
+    };
+}
+
+fn completionTokenChar(ch: u8) bool {
+    return isIdentChar(ch) or ch == '@' or ch == '#';
+}
+
+fn annotationContextAt(text: []const u8, offset: usize) bool {
+    const start = lineStart(text, offset);
+    if (!startsLineComment(text, start)) return false;
+    var pos = start + 2;
+    while (pos < offset and pos < text.len and text[pos] == ' ') pos += 1;
+    return pos < text.len and text[pos] == '|';
+}
+
+fn lineCommentContextAt(text: []const u8, offset: usize) bool {
+    const start = lineStart(text, offset);
+    const safe_offset = @min(offset, text.len);
+    var pos = start;
+    while (pos < safe_offset and pos + 1 < text.len) : (pos += 1) {
+        if (text[pos] == '\n') return false;
+        if (startsLineComment(text, pos)) return true;
+    }
+    return false;
+}
+
+fn mathStringAt(text: []const u8, offset: usize) ?SourceSpan {
+    var pos: usize = 0;
+    while (pos < text.len) {
+        if (startsLineComment(text, pos)) {
+            pos = lineEnd(text, pos);
+            continue;
+        }
+        if (text[pos] != '$') {
+            pos += 1;
+            continue;
+        }
+        const start = pos;
+        pos += 1;
+        const inner_start = pos;
+        while (pos < text.len and text[pos] != '$') pos += 1;
+        const inner_end = pos;
+        if (offset >= inner_start and offset <= inner_end) {
+            return .{
+                .start = start,
+                .end = if (pos < text.len) pos + 1 else pos,
+            };
+        }
+        if (pos < text.len) pos += 1;
+    }
+    return null;
+}
+
+fn mm0SortContextAt(text: []const u8, offset: usize) bool {
+    const start = statementStartBefore(text, offset);
+    var token_start = @min(offset, text.len);
+    while (token_start > start and completionTokenChar(text[token_start - 1])) {
+        token_start -= 1;
+    }
+    const before = previousNonSpace(text, start, token_start) orelse return false;
+    if (text[before] == ':') return true;
+    return before > start and text[before] == ',' and
+        hasColonSince(text, start, before);
+}
+
+fn mm0ReferenceContextAt(text: []const u8, offset: usize) bool {
+    const start = statementStartBefore(text, offset);
+    const prefix = text[start..offset];
+    return std.mem.indexOf(u8, prefix, "notation") != null or
+        std.mem.indexOf(u8, prefix, "prefix") != null or
+        std.mem.indexOf(u8, prefix, "infixl") != null or
+        std.mem.indexOf(u8, prefix, "infixr") != null;
+}
+
+fn mm0TopLevelContextAt(text: []const u8, offset: usize) bool {
+    const start = statementStartBefore(text, offset);
+    var pos = start;
+    while (pos < offset) {
+        if (isMathWhitespace(text[pos])) {
+            pos += 1;
+            continue;
+        }
+        if (startsLineComment(text, pos)) {
+            pos = lineEnd(text, pos);
+            continue;
+        }
+        if (isIdentChar(text[pos])) {
+            var end = pos + 1;
+            while (end < offset and isIdentChar(text[end])) end += 1;
+            if (isTopLevelModifier(text[pos..end])) {
+                pos = end;
+                continue;
+            }
+        }
+        return rangeTouchesCurrentToken(text, pos, offset);
+    }
+    return true;
+}
+
+fn proofLineMathContextAt(text: []const u8, offset: usize) bool {
+    const start = lineStart(text, offset);
+    const end = lineEnd(text, offset);
+    const line = text[start..end];
+    const colon = std.mem.indexOfScalar(u8, line, ':') orelse return false;
+    const by = std.mem.indexOf(u8, line, " by") orelse return false;
+    return colon < by;
+}
+
+fn proofHeaderContextAt(text: []const u8, offset: usize) bool {
+    const start = lineStart(text, offset);
+    const end = lineEnd(text, offset);
+    const line = text[start..end];
+    if (std.mem.indexOfScalar(u8, line, ':') != null) return false;
+    if (std.mem.indexOf(u8, line, "by") != null) return false;
+    if (lineLooksUnderline(line)) return false;
+    const prev_end = if (start == 0) 0 else start - 1;
+    const prev_start = lineStart(text, prev_end);
+    if (prev_start < prev_end and lineLooksUnderline(text[prev_start..prev_end])) {
+        return false;
+    }
+    return true;
+}
+
+fn proofRuleContextAt(text: []const u8, offset: usize) bool {
+    const start = lineStart(text, offset);
+    const prefix = text[start..offset];
+    const by_pos = std.mem.lastIndexOf(u8, prefix, "by") orelse return false;
+    if (by_pos > 0 and isIdentChar(prefix[by_pos - 1])) return false;
+    const after = by_pos + 2;
+    if (after < prefix.len and isIdentChar(prefix[after])) return false;
+    const suffix = prefix[after..];
+    if (std.mem.lastIndexOfScalar(u8, suffix, '[')) |open| {
+        if (std.mem.lastIndexOfScalar(u8, suffix, ']')) |close| {
+            if (close > open) return false;
+        }
+        return false;
+    }
+    if (std.mem.lastIndexOfScalar(u8, suffix, '(')) |open| {
+        if (std.mem.lastIndexOfScalar(u8, suffix, ')')) |close| {
+            if (close > open) return true;
+        }
+        return false;
+    }
+    return true;
+}
+
+fn appendNotationSnippetCompletion(
+    list: *std.ArrayListUnmanaged(CompletionItem),
+    allocator: std.mem.Allocator,
+    replacement: SourceRange,
+    notation: NotationCompletionDecl,
+    decl: Declaration,
+    replacement_fragment: []const u8,
+) !void {
+    const snippet = notation.snippet_text orelse return;
+    if (completionAlreadyHasSnippet(list.items, replacement, snippet)) return;
+    try list.append(allocator, .{
+        .label = notation.snippet_label orelse notation.token,
+        .kind = .snippet,
+        .detail = notation.detail,
+        .documentation_markdown = decl.markdown,
+        .replacement = replacement,
+        .replacement_text = notation.token,
+        .snippet_replacement_text = snippet,
+        .filter_text = notationSnippetFilterText(
+            notation,
+            decl,
+            replacement_fragment,
+        ),
+        .sort_text = notationSnippetSortText(notation, decl),
+    });
+}
+
+fn completionAlreadyInserts(
+    items: []const CompletionItem,
+    replacement: SourceRange,
+    replacement_text: []const u8,
+) bool {
+    for (items) |item| {
+        if (item.replacement.document != replacement.document or
+            item.replacement.start != replacement.start or
+            item.replacement.end != replacement.end)
+        {
+            continue;
+        }
+        if (std.mem.eql(u8, item.replacement_text, replacement_text)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn completionAlreadyHasSnippet(
+    items: []const CompletionItem,
+    replacement: SourceRange,
+    snippet_text: []const u8,
+) bool {
+    for (items) |item| {
+        if (item.replacement.document != replacement.document or
+            item.replacement.start != replacement.start or
+            item.replacement.end != replacement.end)
+        {
+            continue;
+        }
+        const other = item.snippet_replacement_text orelse continue;
+        if (std.mem.eql(u8, other, snippet_text)) return true;
+    }
+    return false;
+}
+
+pub fn escapeSnippetText(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+) ![]const u8 {
+    var out = std.ArrayListUnmanaged(u8){};
+    try appendEscapedSnippetText(allocator, &out, text);
+    return try out.toOwnedSlice(allocator);
+}
+
+fn appendEscapedSnippetText(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayListUnmanaged(u8),
+    text: []const u8,
+) !void {
+    for (text) |ch| {
+        if (ch == '$' or ch == '}' or ch == '\\') {
+            try out.append(allocator, '\\');
+        }
+        try out.append(allocator, ch);
+    }
+}
+
+fn appendSnippetPlaceholder(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayListUnmanaged(u8),
+    index: usize,
+    label: []const u8,
+) !void {
+    try out.writer(allocator).print("${{{d}:", .{index});
+    try appendEscapedSnippetText(allocator, out, label);
+    try out.append(allocator, '}');
+}
+
+fn buildPrefixSnippet(
+    allocator: std.mem.Allocator,
+    token: []const u8,
+    args: []const BinderDecl,
+    decl_name: []const u8,
+) !?NotationSnippet {
+    if (args.len == 0) return null;
+
+    var label = std.ArrayListUnmanaged(u8){};
+    try label.appendSlice(allocator, token);
+    try label.appendSlice(allocator, " …");
+
+    var text = std.ArrayListUnmanaged(u8){};
+    try appendEscapedSnippetText(allocator, &text, token);
+    for (args, 0..) |arg, i| {
+        try text.append(allocator, ' ');
+        try appendSnippetPlaceholder(allocator, &text, i + 1, arg.name);
+    }
+    try text.appendSlice(allocator, "$0");
+
+    return .{
+        .label = try label.toOwnedSlice(allocator),
+        .text = try text.toOwnedSlice(allocator),
+        .filter_text = try std.fmt.allocPrint(
+            allocator,
+            "{s} {s}",
+            .{ token, decl_name },
+        ),
+    };
+}
+
+fn buildGeneralNotationSnippet(
+    allocator: std.mem.Allocator,
+    pieces: []const NotationPiece,
+    decl_name: []const u8,
+) !?NotationSnippet {
+    if (pieces.len == 0) return null;
+
+    var label = std.ArrayListUnmanaged(u8){};
+    var text = std.ArrayListUnmanaged(u8){};
+    var filter = std.ArrayListUnmanaged(u8){};
+    var has_variable = false;
+
+    for (pieces, 0..) |piece, i| {
+        if (i != 0 and notationSnippetNeedsSpace(pieces[i - 1], piece)) {
+            try text.append(allocator, ' ');
+            if (label.items.len != 0) try label.append(allocator, ' ');
+            if (filter.items.len != 0) try filter.append(allocator, ' ');
+        }
+        switch (piece) {
+            .constant => |constant| {
+                try appendEscapedSnippetText(allocator, &text, constant);
+                try label.appendSlice(allocator, constant);
+                try filter.appendSlice(allocator, constant);
+            },
+            .variable => |variable| {
+                has_variable = true;
+                try appendSnippetPlaceholder(
+                    allocator,
+                    &text,
+                    variable.arg_index + 1,
+                    variable.name,
+                );
+                try label.appendSlice(allocator, "…");
+            },
+        }
+    }
+    if (!has_variable) return null;
+    try text.appendSlice(allocator, "$0");
+    if (filter.items.len != 0) try filter.append(allocator, ' ');
+    try filter.appendSlice(allocator, decl_name);
+
+    return .{
+        .label = try label.toOwnedSlice(allocator),
+        .text = try text.toOwnedSlice(allocator),
+        .filter_text = try filter.toOwnedSlice(allocator),
+    };
+}
+
+fn notationSnippetNeedsSpace(prev: NotationPiece, next: NotationPiece) bool {
+    if (std.meta.activeTag(prev) == .variable or
+        std.meta.activeTag(next) == .variable)
+        return true;
+    return !isSnippetDelimiter(prev.constant) and
+        !isSnippetDelimiter(next.constant);
+}
+
+fn isSnippetDelimiter(token: []const u8) bool {
+    return std.mem.eql(u8, token, "(") or
+        std.mem.eql(u8, token, ")") or
+        std.mem.eql(u8, token, "[") or
+        std.mem.eql(u8, token, "]") or
+        std.mem.eql(u8, token, "{") or
+        std.mem.eql(u8, token, "}");
+}
+
+fn collectNotationBinderVariables(
+    allocator: std.mem.Allocator,
+    variables: *std.StringHashMapUnmanaged(NotationVariable),
+    text: []const u8,
+    stmt: SourceSpan,
+    end: usize,
+    args: []const BinderDecl,
+) !void {
+    var pos = stmt.start;
+    var arg_index: usize = 0;
+    while (pos < end and pos < stmt.end) {
+        const open = text[pos];
+        if (open != '(' and open != '{') {
+            pos += 1;
+            continue;
+        }
+        const close: u8 = if (open == '(') ')' else '}';
+        pos += 1;
+        while (pos < end and pos < stmt.end) {
+            skipNotationWhitespace(text, &pos, end);
+            if (pos >= end or pos >= stmt.end or text[pos] == ':') break;
+            if (text[pos] == '.') pos += 1;
+            const name = readNotationIdent(text, &pos, end) orelse {
+                pos += 1;
+                continue;
+            };
+            const label = if (std.mem.eql(u8, name, "_"))
+                try placeholderNameForArg(allocator, args, arg_index)
+            else
+                name;
+            try variables.put(allocator, name, .{
+                .arg_index = arg_index,
+                .name = label,
+            });
+            arg_index += 1;
+        }
+        while (pos < end and pos < stmt.end and text[pos] != close) {
+            pos += 1;
+        }
+        if (pos < end and pos < stmt.end) pos += 1;
+    }
+}
+
+fn collectNotationPieces(
+    allocator: std.mem.Allocator,
+    pieces: *std.ArrayListUnmanaged(NotationPiece),
+    constants: *std.ArrayListUnmanaged([]const u8),
+    variables: std.StringHashMapUnmanaged(NotationVariable),
+    text: []const u8,
+    start: usize,
+    end: usize,
+) !void {
+    var pos = start;
+    while (pos < end) {
+        skipNotationWhitespace(text, &pos, end);
+        if (pos >= end or text[pos] == ';') break;
+        if (text[pos] == '$') {
+            const math_start = pos + 1;
+            pos = math_start;
+            while (pos < end and text[pos] != '$') pos += 1;
+            const math_end = pos;
+            if (pos < end) pos += 1;
+            const token = trimMathWhitespace(text[math_start..math_end]);
+            if (token.len != 0 and !containsMathWhitespace(token)) {
+                try pieces.append(allocator, .{ .constant = token });
+                try constants.append(allocator, token);
+            }
+            continue;
+        }
+        if (readNotationIdent(text, &pos, end)) |ident| {
+            if (variables.get(ident)) |variable| {
+                try pieces.append(allocator, .{ .variable = variable });
+            }
+            continue;
+        }
+        pos += 1;
+    }
+}
+
+fn skipNotationWhitespace(text: []const u8, pos: *usize, end: usize) void {
+    while (pos.* < end and isMathWhitespace(text[pos.*])) pos.* += 1;
+}
+
+fn readNotationIdent(
+    text: []const u8,
+    pos: *usize,
+    end: usize,
+) ?[]const u8 {
+    if (pos.* >= end or !isIdentChar(text[pos.*])) return null;
+    const start = pos.*;
+    pos.* += 1;
+    while (pos.* < end and isIdentChar(text[pos.*])) pos.* += 1;
+    return text[start..pos.*];
+}
+
+fn placeholderNameForArg(
+    allocator: std.mem.Allocator,
+    args: []const BinderDecl,
+    index: usize,
+) ![]const u8 {
+    if (index < args.len and args[index].name.len != 0) {
+        return args[index].name;
+    }
+    return try std.fmt.allocPrint(allocator, "arg{d}", .{index + 1});
+}
+
+fn declarationKindIn(kind: DeclarationKind, kinds: []const DeclarationKind) bool {
+    for (kinds) |allowed| {
+        if (kind == allowed) return true;
+    }
+    return false;
+}
+
+fn globalDeclarationAvailable(
+    decl: Declaration,
+    document: DocumentId,
+    use_start: usize,
+    available_before: ?usize,
+) bool {
+    return switch (document) {
+        .mm0 => decl.name_range.start <= use_start,
+        .proof => if (available_before) |before|
+            decl.name_range.start < before
+        else
+            true,
+    };
+}
+
+fn completionKindForDeclaration(kind: DeclarationKind) CompletionKind {
+    return switch (kind) {
+        .sort => .sort,
+        .term => .term,
+        .def => .def,
+        .axiom => .axiom,
+        .theorem => .theorem,
+        .lemma => .lemma,
+        .proof_line => .proof_line,
+        .sort_var => .binder,
+    };
+}
+
+fn simpleNotationKind(keyword: []const u8) NotationKind {
+    if (std.mem.eql(u8, keyword, "prefix")) return .prefix;
+    if (std.mem.eql(u8, keyword, "infixl")) return .infixl;
+    return .infixr;
+}
+
+fn declarationKindName(kind: DeclarationKind) []const u8 {
+    return switch (kind) {
+        .sort => "sort",
+        .term => "term",
+        .def => "def",
+        .axiom => "axiom",
+        .theorem => "theorem",
+        .lemma => "lemma",
+        .proof_line => "proof line",
+        .sort_var => "sort variable",
+    };
+}
+
+fn isTopLevelModifier(word: []const u8) bool {
+    return std.mem.eql(u8, word, "pub") or
+        std.mem.eql(u8, word, "pure") or
+        std.mem.eql(u8, word, "strict") or
+        std.mem.eql(u8, word, "provable") or
+        std.mem.eql(u8, word, "free");
+}
+
+fn rangeTouchesCurrentToken(text: []const u8, pos: usize, offset: usize) bool {
+    if (pos >= text.len or offset > text.len) return false;
+    const repl = identifierCompletionReplacementRange(.mm0, text, offset);
+    return pos >= repl.start and pos <= repl.end;
+}
+
+fn hasColonSince(text: []const u8, start: usize, end: usize) bool {
+    var pos = start;
+    while (pos < end) : (pos += 1) {
+        if (text[pos] == ':') return true;
+        if (text[pos] == ';') return false;
+    }
+    return false;
+}
+
+fn previousNonSpace(text: []const u8, start: usize, offset: usize) ?usize {
+    var pos = @min(offset, text.len);
+    while (pos > start) {
+        pos -= 1;
+        if (!isMathWhitespace(text[pos])) return pos;
+    }
+    return null;
+}
+
+fn statementStartBefore(text: []const u8, offset: usize) usize {
+    var pos = @min(offset, text.len);
+    while (pos > 0) {
+        pos -= 1;
+        if (text[pos] == ';') return pos + 1;
+    }
+    return 0;
+}
+
+fn lineStart(text: []const u8, offset: usize) usize {
+    var pos = @min(offset, text.len);
+    while (pos > 0 and text[pos - 1] != '\n') pos -= 1;
+    return pos;
+}
+
+fn lineEnd(text: []const u8, offset: usize) usize {
+    var pos = @min(offset, text.len);
+    while (pos < text.len and text[pos] != '\n') pos += 1;
+    return pos;
+}
+
+fn lineLooksUnderline(line: []const u8) bool {
+    const trimmed = std.mem.trim(u8, line, " \t\r\n");
+    if (trimmed.len == 0) return false;
+    for (trimmed) |ch| {
+        if (ch != '-') return false;
+    }
+    return true;
+}
 
 const LookupHit = struct {
     source_range: SourceRange,
@@ -205,6 +1666,7 @@ const ProofRuleDecl = struct {
     name: []const u8,
     decl_index: usize,
     available_start: usize,
+    sort_text: []const u8,
 };
 
 const ProofLineDecl = struct {
@@ -212,11 +1674,71 @@ const ProofLineDecl = struct {
     name: []const u8,
     decl_index: usize,
     line_start: usize,
+    sort_text: []const u8,
+};
+
+const ProofApplicationInfo = struct {
+    block_index: usize,
+    rule_name: []const u8,
+    rule_span: SourceRange,
+    binding_list_span: ?SourceRange = null,
+    refs_span: ?SourceRange = null,
+    span: SourceRange,
+    use_start: usize,
+    line_start: usize,
 };
 
 const RuleResolution = struct {
     decl_index: usize,
     available: bool,
+};
+
+const NotationKind = enum {
+    prefix,
+    infixl,
+    infixr,
+    general,
+
+    fn detailPrefix(self: NotationKind) []const u8 {
+        return switch (self) {
+            .prefix => "prefix",
+            .infixl => "infixl",
+            .infixr => "infixr",
+            .general => "notation",
+        };
+    }
+};
+
+const NotationCompletionDecl = struct {
+    decl_index: usize,
+    kind: NotationKind,
+    token: []const u8,
+    detail: []const u8,
+    filter_text: []const u8,
+    alias_filter_text: []const u8,
+    alias_sort_text: []const u8,
+    token_sort_text: []const u8,
+    snippet_label: ?[]const u8 = null,
+    snippet_text: ?[]const u8 = null,
+    snippet_filter_text: ?[]const u8 = null,
+    snippet_alias_filter_text: ?[]const u8 = null,
+    snippet_sort_text: ?[]const u8 = null,
+};
+
+const NotationVariable = struct {
+    arg_index: usize,
+    name: []const u8,
+};
+
+const NotationPiece = union(enum) {
+    constant: []const u8,
+    variable: NotationVariable,
+};
+
+const NotationSnippet = struct {
+    label: []const u8,
+    text: []const u8,
+    filter_text: []const u8,
 };
 
 const Builder = struct {
@@ -229,6 +1751,8 @@ const Builder = struct {
     proof_blocks: std.ArrayListUnmanaged(ProofBlockInfo) = .{},
     proof_rules: std.ArrayListUnmanaged(ProofRuleDecl) = .{},
     proof_lines: std.ArrayListUnmanaged(ProofLineDecl) = .{},
+    proof_applications: std.ArrayListUnmanaged(ProofApplicationInfo) = .{},
+    notations: std.ArrayListUnmanaged(NotationCompletionDecl) = .{},
     notation_by_token: std.StringHashMapUnmanaged(usize) = .empty,
     sort_var_by_token: std.StringHashMapUnmanaged(usize) = .empty,
     sort_names: std.ArrayListUnmanaged([]const u8) = .{},
@@ -361,6 +1885,13 @@ const Builder = struct {
                         term.arg_names,
                         term.args,
                     ),
+                    .completion_args = try completionArgsFromArgs(
+                        self.allocator,
+                        .mm0,
+                        text,
+                        term.arg_names,
+                        term.args,
+                    ),
                 });
                 try self.addMm0Outline(.{
                     .name = term.name,
@@ -388,6 +1919,13 @@ const Builder = struct {
                         annotations,
                     ),
                     .binders = try bindersFromArgs(
+                        self.allocator,
+                        .mm0,
+                        text,
+                        assertion.arg_names,
+                        assertion.args,
+                    ),
+                    .completion_args = try completionArgsFromArgs(
                         self.allocator,
                         .mm0,
                         text,
@@ -467,7 +2005,16 @@ const Builder = struct {
         return index;
     }
 
-    fn addDeclaration(self: *Builder, decl: Declaration) !usize {
+    fn addDeclaration(self: *Builder, decl_arg: Declaration) !usize {
+        var decl = decl_arg;
+        if (decl.sort_text.len == 0) {
+            decl.sort_text = try completionSortText(
+                self.allocator,
+                sortGroupForDeclaration(decl.kind),
+                decl.name_range.start,
+                decl.name,
+            );
+        }
         const index = self.declarations.items.len;
         try self.declarations.append(self.allocator, decl);
         try self.addSymbol(.{
@@ -582,6 +2129,12 @@ const Builder = struct {
                     .name = block.name,
                     .decl_index = decl_index,
                     .available_start = block.span.end,
+                    .sort_text = try completionSortText(
+                        self.allocator,
+                        sort_group_proof_lemma,
+                        block.span.end,
+                        block.name,
+                    ),
                 });
             }
         }
@@ -683,6 +2236,12 @@ const Builder = struct {
             .name = line.label,
             .decl_index = decl_index,
             .line_start = line.span.start,
+            .sort_text = try completionSortText(
+                self.allocator,
+                sort_group_proof_reference,
+                line.span.start,
+                line.label,
+            ),
         });
     }
 
@@ -692,6 +2251,19 @@ const Builder = struct {
         app: proof_script.RuleApplication,
         line_start: usize,
     ) !void {
+        try self.proof_applications.append(self.allocator, .{
+            .block_index = block_index,
+            .rule_name = app.rule_name,
+            .rule_span = proofSpanRange(app.rule_span),
+            .binding_list_span = if (app.binding_list_span) |span|
+                proofSpanRange(span)
+            else
+                null,
+            .refs_span = if (app.refs_span) |span| proofSpanRange(span) else null,
+            .span = proofSpanRange(app.span),
+            .use_start = app.rule_span.start,
+            .line_start = line_start,
+        });
         const maybe_rule = self.resolveRule(
             block_index,
             app.rule_name,
@@ -864,9 +2436,25 @@ const Builder = struct {
             {
                 const name = header.name orelse continue;
                 const decl_index = self.decl_by_name.get(name) orelse continue;
+                const decl = self.declarations.items[decl_index];
+                const kind = simpleNotationKind(header.keyword);
                 try self.addDeclarationNameUse(text, name, decl_index);
                 if (firstMathStringIn(text, stmt)) |math| {
-                    try self.addNotationMathToken(decl_index, math);
+                    const snippet = if (kind == .prefix)
+                        try buildPrefixSnippet(
+                            self.allocator,
+                            trimMathWhitespace(math.text),
+                            decl.completion_args,
+                            decl.name,
+                        )
+                    else
+                        null;
+                    try self.addNotationMathToken(
+                        decl_index,
+                        kind,
+                        math,
+                        snippet,
+                    );
                 }
                 continue;
             }
@@ -875,10 +2463,7 @@ const Builder = struct {
             const decl_index = self.decl_by_name.get(name) orelse continue;
             try self.addDeclarationNameUse(text, name, decl_index);
             const eq = findStatementByte(text, stmt, '=') orelse continue;
-            var pos = eq + 1;
-            while (nextMathStringIn(text, stmt.end, &pos)) |math| {
-                try self.addNotationMathToken(decl_index, math);
-            }
+            try self.collectGeneralNotation(text, stmt, decl_index, eq);
         }
     }
 
@@ -907,17 +2492,129 @@ const Builder = struct {
         }
     }
 
+    fn collectGeneralNotation(
+        self: *Builder,
+        text: []const u8,
+        stmt: SourceSpan,
+        decl_index: usize,
+        eq: usize,
+    ) !void {
+        const decl = self.declarations.items[decl_index];
+        var variables = std.StringHashMapUnmanaged(NotationVariable){};
+        try collectNotationBinderVariables(
+            self.allocator,
+            &variables,
+            text,
+            stmt,
+            eq,
+            decl.completion_args,
+        );
+
+        var pieces = std.ArrayListUnmanaged(NotationPiece){};
+        var constants = std.ArrayListUnmanaged([]const u8){};
+        try collectNotationPieces(
+            self.allocator,
+            &pieces,
+            &constants,
+            variables,
+            text,
+            eq + 1,
+            stmt.end,
+        );
+        const snippet = try buildGeneralNotationSnippet(
+            self.allocator,
+            pieces.items,
+            decl.name,
+        );
+        for (constants.items) |constant| {
+            try self.addNotationToken(
+                decl_index,
+                .general,
+                constant,
+                snippet,
+            );
+        }
+    }
+
     fn addNotationMathToken(
         self: *Builder,
         decl_index: usize,
+        kind: NotationKind,
         math: MathStringSpan,
+        snippet: ?NotationSnippet,
     ) !void {
         const trimmed = trimMathWhitespace(math.text);
         if (trimmed.len == 0) return;
         if (containsMathWhitespace(trimmed)) return;
+        try self.addNotationToken(decl_index, kind, trimmed, snippet);
+    }
+
+    fn addNotationToken(
+        self: *Builder,
+        decl_index: usize,
+        kind: NotationKind,
+        token: []const u8,
+        snippet: ?NotationSnippet,
+    ) !void {
+        const decl = self.declarations.items[decl_index];
+        try self.notations.append(self.allocator, .{
+            .decl_index = decl_index,
+            .kind = kind,
+            .token = token,
+            .detail = try std.fmt.allocPrint(
+                self.allocator,
+                "{s} {s}",
+                .{ kind.detailPrefix(), decl.name },
+            ),
+            .filter_text = try std.fmt.allocPrint(
+                self.allocator,
+                "{s} {s}",
+                .{ token, decl.name },
+            ),
+            .alias_filter_text = try std.fmt.allocPrint(
+                self.allocator,
+                "{s} {s}",
+                .{ decl.name, token },
+            ),
+            .alias_sort_text = try completionSortText(
+                self.allocator,
+                sort_group_notation_alias,
+                decl.name_range.start,
+                token,
+            ),
+            .token_sort_text = try completionSortText(
+                self.allocator,
+                sort_group_notation_token,
+                decl.name_range.start,
+                token,
+            ),
+            .snippet_label = if (snippet) |snp| snp.label else null,
+            .snippet_text = if (snippet) |snp| snp.text else null,
+            .snippet_filter_text = if (snippet) |snp|
+                snp.filter_text
+            else
+                null,
+            .snippet_alias_filter_text = if (snippet) |snp|
+                try aliasFirstFilterText(
+                    self.allocator,
+                    snp.filter_text,
+                    decl.name,
+                )
+            else
+                null,
+            .snippet_sort_text = if (snippet) |snp|
+                try completionSortText(
+                    self.allocator,
+                    sort_group_notation_snippet,
+                    decl.name_range.start,
+                    snp.label,
+                )
+            else
+                null,
+        });
         try self.notation_by_token.put(
             self.allocator,
-            trimmed,
+            token,
             decl_index,
         );
     }
@@ -1274,6 +2971,45 @@ fn bindersFromArgs(
             .sort_name = arg.sort_name,
             .bound = arg.bound,
             .range = sourceRangeFromSlice(document, text, name),
+            .sort_text = try completionSortText(
+                allocator,
+                sort_group_local_binder,
+                i,
+                name,
+            ),
+        });
+    }
+    return try binders.toOwnedSlice(allocator);
+}
+
+fn completionArgsFromArgs(
+    allocator: std.mem.Allocator,
+    document: DocumentId,
+    text: []const u8,
+    names: []const ?[]const u8,
+    args: []const parse.ArgInfo,
+) ![]const BinderDecl {
+    var binders = std.ArrayListUnmanaged(BinderDecl){};
+    for (args, 0..) |arg, i| {
+        const name = if (i < names.len) names[i] else null;
+        const label = if (name) |actual|
+            actual
+        else
+            try std.fmt.allocPrint(allocator, "arg{d}", .{i + 1});
+        try binders.append(allocator, .{
+            .name = label,
+            .sort_name = arg.sort_name,
+            .bound = arg.bound,
+            .range = if (name) |actual|
+                sourceRangeFromSlice(document, text, actual)
+            else
+                null,
+            .sort_text = try completionSortText(
+                allocator,
+                sort_group_local_binder,
+                i,
+                label,
+            ),
         });
     }
     return try binders.toOwnedSlice(allocator);
@@ -1304,6 +3040,12 @@ fn bindersFromLemma(
             .sort_name = arg.sort_name,
             .bound = arg.bound,
             .range = range,
+            .sort_text = try completionSortText(
+                allocator,
+                sort_group_local_binder,
+                i,
+                name,
+            ),
         });
     }
     return try binders.toOwnedSlice(allocator);

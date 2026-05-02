@@ -27,6 +27,39 @@ pub const HoverResult = struct {
     markdown: []const u8,
 };
 
+pub const CompletionOptions = struct {
+    snippet_support: bool = false,
+};
+
+pub const CompletionKind = enum {
+    keyword,
+    modifier,
+    sort,
+    term,
+    def,
+    axiom,
+    theorem,
+    lemma,
+    proof_line,
+    hypothesis,
+    binder,
+    annotation,
+    notation,
+    snippet,
+};
+
+pub const CompletionItem = struct {
+    label: []const u8,
+    kind: CompletionKind,
+    detail: []const u8,
+    documentation_markdown: ?[]const u8 = null,
+    replacement: SourceRange,
+    replacement_text: []const u8,
+    snippet_replacement_text: ?[]const u8 = null,
+    filter_text: ?[]const u8 = null,
+    sort_text: []const u8,
+};
+
 pub const OutlineSymbol = struct {
     name: []const u8,
     kind: DeclarationKind,
@@ -64,6 +97,7 @@ pub const BinderDecl = struct {
     sort_name: []const u8,
     bound: bool,
     range: ?SourceRange = null,
+    sort_text: []const u8 = "",
 };
 
 pub const Declaration = struct {
@@ -72,5 +106,7 @@ pub const Declaration = struct {
     name_range: SourceRange,
     markdown: []const u8,
     binders: []const BinderDecl = &.{},
+    completion_args: []const BinderDecl = &.{},
+    sort_text: []const u8 = "",
     hyp_count: usize = 0,
 };

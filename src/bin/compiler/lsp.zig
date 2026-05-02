@@ -140,6 +140,7 @@ const Handler = struct {
     docs: std.StringHashMapUnmanaged(OpenDocument),
     nav_cache: std.StringHashMapUnmanaged(NavigationCacheEntry),
     offset_encoding: lsp.offsets.Encoding,
+    snippet_support: bool,
 
     fn init(
         allocator: std.mem.Allocator,
@@ -151,6 +152,7 @@ const Handler = struct {
             .docs = .empty,
             .nav_cache = .empty,
             .offset_encoding = .@"utf-16",
+            .snippet_support = false,
         };
     }
 
@@ -187,6 +189,8 @@ const Handler = struct {
             }
         }
 
+        self.snippet_support = clientSupportsSnippets(request.capabilities);
+
         const supports_hierarchical_document_symbols =
             clientSupportsHierarchicalDocumentSymbols(request.capabilities);
 
@@ -204,6 +208,9 @@ const Handler = struct {
             },
             .hoverProvider = .{ .bool = true },
             .definitionProvider = .{ .bool = true },
+            .completionProvider = .{
+                .resolveProvider = false,
+            },
             .documentSymbolProvider = if (supports_hierarchical_document_symbols)
                 .{ .bool = true }
             else
@@ -373,6 +380,36 @@ const Handler = struct {
                 self.offset_encoding,
             ),
         };
+    }
+
+    pub fn @"textDocument/completion"(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        params: types.CompletionParams,
+    ) !lsp.ResultType("textDocument/completion") {
+        const nav = try self.navigationSnapshotForUri(
+            arena,
+            params.textDocument.uri,
+        ) orelse return null;
+        const text = nav.snapshot.textForDocument(nav.document) orelse return null;
+        const offset = lsp.offsets.positionToIndex(
+            text,
+            params.position,
+            self.offset_encoding,
+        );
+        const completions = try nav.snapshot.completionsAt(
+            arena,
+            nav.document,
+            offset,
+            .{ .snippet_support = self.snippet_support },
+        );
+        const items = try completionsToLsp(
+            arena,
+            nav.snapshot,
+            completions,
+            self.offset_encoding,
+        );
+        return .{ .array_of_CompletionItem = items };
     }
 
     pub fn @"textDocument/documentSymbol"(
@@ -1158,6 +1195,13 @@ fn readFileAlloc(
     return (try readFileWithMtimeAlloc(allocator, path)).text;
 }
 
+fn clientSupportsSnippets(capabilities: types.ClientCapabilities) bool {
+    const text_document = capabilities.textDocument orelse return false;
+    const completion = text_document.completion orelse return false;
+    const item = completion.completionItem orelse return false;
+    return item.snippetSupport orelse false;
+}
+
 fn clientSupportsHierarchicalDocumentSymbols(
     capabilities: types.ClientCapabilities,
 ) bool {
@@ -1336,6 +1380,58 @@ fn sourceRangeToLsp(
     );
 }
 
+fn completionsToLsp(
+    arena: std.mem.Allocator,
+    snapshot: *const LspIndex.Snapshot,
+    completions: []const LspIndex.CompletionItem,
+    encoding: lsp.offsets.Encoding,
+) ![]const types.CompletionItem {
+    const result = try arena.alloc(types.CompletionItem, completions.len);
+    for (completions, 0..) |item, i| {
+        result[i] = .{
+            .label = item.label,
+            .kind = completionKindToLsp(item.kind),
+            .detail = item.detail,
+            .documentation = if (item.documentation_markdown) |doc|
+                .{ .MarkupContent = .{ .kind = .markdown, .value = doc } }
+            else
+                null,
+            .sortText = item.sort_text,
+            .filterText = item.filter_text,
+            .insertTextFormat = if (item.snippet_replacement_text != null)
+                .Snippet
+            else
+                .PlainText,
+            .textEdit = .{ .TextEdit = .{
+                .range = sourceRangeToLsp(
+                    snapshot,
+                    item.replacement,
+                    encoding,
+                ),
+                .newText = item.snippet_replacement_text orelse
+                    item.replacement_text,
+            } },
+        };
+    }
+    return result;
+}
+
+fn completionKindToLsp(
+    kind: LspIndex.CompletionKind,
+) types.CompletionItemKind {
+    return switch (kind) {
+        .keyword, .modifier, .annotation => .Keyword,
+        .sort => .Class,
+        .term, .def => .Function,
+        .notation => .Operator,
+        .snippet => .Snippet,
+        .axiom, .theorem, .lemma => .Method,
+        .proof_line => .Reference,
+        .hypothesis => .Value,
+        .binder => .Variable,
+    };
+}
+
 fn outlineSymbolsToLsp(
     arena: std.mem.Allocator,
     snapshot: *const LspIndex.Snapshot,
@@ -1444,6 +1540,41 @@ fn expectDocumentSymbols(
     };
 }
 
+fn expectCompletionItems(
+    result: lsp.ResultType("textDocument/completion"),
+) ![]const types.CompletionItem {
+    const value = result orelse return error.ExpectedCompletions;
+    return switch (value) {
+        .array_of_CompletionItem => |items| items,
+        else => error.ExpectedCompletions,
+    };
+}
+
+fn completionItemNamed(
+    items: []const types.CompletionItem,
+    label: []const u8,
+) ?types.CompletionItem {
+    for (items) |item| {
+        if (std.mem.eql(u8, item.label, label)) return item;
+    }
+    return null;
+}
+
+fn expectCompletionEditText(
+    text: []const u8,
+    item: types.CompletionItem,
+    expected_old: []const u8,
+    expected_new: []const u8,
+) !void {
+    const edit = item.textEdit orelse return error.ExpectedTextEdit;
+    const text_edit = switch (edit) {
+        .TextEdit => |value| value,
+        else => return error.ExpectedTextEdit,
+    };
+    try expectRangeText(text, text_edit.range, expected_old);
+    try std.testing.expectEqualStrings(expected_new, text_edit.newText);
+}
+
 const lsp_navigation_mm0_text =
     \\provable sort wff;
     \\term top: wff;
@@ -1501,6 +1632,11 @@ test "LSP initialize advertises navigation capabilities" {
         .bool => |enabled| try std.testing.expect(enabled),
         else => return error.ExpectedBooleanDefinitionProvider,
     }
+
+    const completion = result.capabilities.completionProvider orelse {
+        return error.ExpectedCompletionProvider;
+    };
+    try std.testing.expectEqual(false, completion.resolveProvider.?);
 
     const document_symbol = result.capabilities.documentSymbolProvider orelse {
         return error.ExpectedDocumentSymbolProvider;
@@ -1605,6 +1741,193 @@ test "LSP proof hover resolves rule applications" {
         1,
         "axiom keep",
     ));
+}
+
+test "LSP completion returns explicit edits" {
+    const mm0_uri = "file:///tmp/lsp-completion.mm0";
+    const proof_uri = "file:///tmp/lsp-completion.auf";
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ top $ by top_i []
+        \\l2: $ top $ by ke
+    ;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try handler.putDocument(mm0_uri, lsp_navigation_mm0_text, 1);
+    try handler.putDocument(proof_uri, proof_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const result = try handler.@"textDocument/completion"(
+        arena_state.allocator(),
+        .{
+            .textDocument = .{ .uri = proof_uri },
+            .position = lsp.offsets.indexToPosition(
+                proof_text,
+                proof_text.len,
+                .@"utf-16",
+            ),
+        },
+    );
+    const items = try expectCompletionItems(result);
+    const keep = completionItemNamed(items, "keep") orelse {
+        return error.MissingKeepCompletion;
+    };
+    try std.testing.expectEqual(types.CompletionItemKind.Method, keep.kind.?);
+    try expectCompletionEditText(proof_text, keep, "ke", "keep");
+}
+
+test "LSP completion uses UTF-16 ranges after non-ASCII text" {
+    const mm0_uri = "file:///tmp/lsp-completion-utf16.mm0";
+    const proof_uri = "file:///tmp/lsp-completion-utf16.auf";
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ top $ by top_i []
+        \\l2: $ 💡 top $ by ke
+    ;
+    const offset = (std.mem.indexOf(u8, proof_text, "ke") orelse {
+        return error.MissingUtf16CompletionContext;
+    }) + "ke".len;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try handler.putDocument(mm0_uri, lsp_navigation_mm0_text, 1);
+    try handler.putDocument(proof_uri, proof_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const result = try handler.@"textDocument/completion"(
+        arena_state.allocator(),
+        .{
+            .textDocument = .{ .uri = proof_uri },
+            .position = lsp.offsets.indexToPosition(
+                proof_text,
+                offset,
+                .@"utf-16",
+            ),
+        },
+    );
+    const items = try expectCompletionItems(result);
+    const keep = completionItemNamed(items, "keep") orelse {
+        return error.MissingKeepUtf16Completion;
+    };
+    try expectCompletionEditText(proof_text, keep, "ke", "keep");
+}
+
+test "LSP completion returns notation snippets for snippet clients" {
+    const mm0_uri = "file:///tmp/lsp-snippet.mm0";
+    const mm0_text =
+        \\provable sort wff;
+        \\term forall (p: wff): wff;
+        \\theorem main (p: wff): $ fo $;
+        \\prefix forall: $∀$ prec 40;
+    ;
+    const offset = (std.mem.indexOf(u8, mm0_text, "fo $") orelse {
+        return error.MissingSnippetContext;
+    }) + "fo".len;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    _ = handler.initialize(std.testing.allocator, .{
+        .capabilities = .{
+            .textDocument = .{
+                .completion = .{
+                    .completionItem = .{
+                        .snippetSupport = true,
+                    },
+                },
+            },
+        },
+    });
+    try handler.putDocument(mm0_uri, mm0_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const result = try handler.@"textDocument/completion"(
+        arena_state.allocator(),
+        .{
+            .textDocument = .{ .uri = mm0_uri },
+            .position = lsp.offsets.indexToPosition(
+                mm0_text,
+                offset,
+                .@"utf-16",
+            ),
+        },
+    );
+    const items = try expectCompletionItems(result);
+    const snippet = completionItemNamed(items, "∀ …") orelse {
+        return error.MissingSnippetCompletion;
+    };
+    try std.testing.expectEqual(types.CompletionItemKind.Snippet, snippet.kind.?);
+    try std.testing.expectEqual(
+        types.InsertTextFormat.Snippet,
+        snippet.insertTextFormat.?,
+    );
+    try expectCompletionEditText(mm0_text, snippet, "fo", "∀ ${1:p}$0");
+    try std.testing.expectEqualStrings(
+        "forall ∀",
+        snippet.filterText orelse "",
+    );
+}
+
+test "LSP completion avoids snippets for plain completion clients" {
+    const mm0_uri = "file:///tmp/lsp-no-snippet.mm0";
+    const mm0_text =
+        \\provable sort wff;
+        \\term forall (p: wff): wff;
+        \\theorem main (p: wff): $ fo $;
+        \\prefix forall: $∀$ prec 40;
+    ;
+    const offset = (std.mem.indexOf(u8, mm0_text, "fo $") orelse {
+        return error.MissingSnippetContext;
+    }) + "fo".len;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    _ = handler.initialize(std.testing.allocator, .{
+        .capabilities = .{},
+    });
+    try handler.putDocument(mm0_uri, mm0_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const result = try handler.@"textDocument/completion"(
+        arena_state.allocator(),
+        .{
+            .textDocument = .{ .uri = mm0_uri },
+            .position = lsp.offsets.indexToPosition(
+                mm0_text,
+                offset,
+                .@"utf-16",
+            ),
+        },
+    );
+    const items = try expectCompletionItems(result);
+    try std.testing.expect(completionItemNamed(items, "∀ …") == null);
+    for (items) |item| {
+        if (item.insertTextFormat) |format| {
+            try std.testing.expect(format != .Snippet);
+        }
+    }
 }
 
 test "LSP proof definition resolves rules and line references" {

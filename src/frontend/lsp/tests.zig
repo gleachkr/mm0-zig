@@ -3,6 +3,23 @@ const Index = @import("index.zig");
 
 const Snapshot = Index.Snapshot;
 
+fn completionNamed(
+    items: []const Index.CompletionItem,
+    label: []const u8,
+) ?Index.CompletionItem {
+    for (items) |item| {
+        if (std.mem.eql(u8, item.label, label)) return item;
+    }
+    return null;
+}
+
+fn expectSortPrefix(
+    item: Index.CompletionItem,
+    prefix: []const u8,
+) !void {
+    try std.testing.expect(std.mem.startsWith(u8, item.sort_text, prefix));
+}
+
 test "snapshot build propagates allocation failure" {
     var buffer: [1]u8 = undefined;
     var fixed = std.heap.FixedBufferAllocator.init(&buffer);
@@ -48,6 +65,831 @@ test "malformed sources still index parsed prefixes" {
         "top_i",
         snapshot.mm0_text[def.range.start..def.range.end],
     );
+}
+
+test "completion uses parsed prefixes before malformed suffixes" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem main: $ to $;
+        \\not a valid statement
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ top $ by top_i []
+        \\l2: $ top $ by ke
+        \\
+        \\bad_block
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const math_offset = std.mem.indexOf(u8, mm0_text, "to $") orelse {
+        return error.MissingMalformedMathContext;
+    };
+    const math_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        math_offset + "to".len,
+        .{},
+    );
+    defer std.testing.allocator.free(math_items);
+    try std.testing.expect(completionNamed(math_items, "top") != null);
+
+    const rule_offset = std.mem.indexOf(u8, proof_text, "ke") orelse {
+        return error.MissingMalformedRuleContext;
+    };
+    const rule_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        rule_offset + "ke".len,
+        .{},
+    );
+    defer std.testing.allocator.free(rule_items);
+    try std.testing.expect(completionNamed(rule_items, "top_i") != null);
+}
+
+test "completion returns top-level mm0 keywords" {
+    const text = "the";
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const completions = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        text.len,
+        .{},
+    );
+    defer std.testing.allocator.free(completions);
+    const item = completionNamed(completions, "theorem") orelse {
+        return error.MissingTheoremCompletion;
+    };
+    try std.testing.expectEqual(Index.CompletionKind.keyword, item.kind);
+    try std.testing.expectEqual(@as(usize, 0), item.replacement.start);
+    try std.testing.expectEqual(@as(usize, 3), item.replacement.end);
+}
+
+test "completion completes partially typed mm0 sorts" {
+    const text =
+        \\provable sort wff;
+        \\term other: wf
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const completions = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        text.len,
+        .{},
+    );
+    defer std.testing.allocator.free(completions);
+    const wff = completionNamed(completions, "wff") orelse {
+        return error.MissingPrefixedSortCompletion;
+    };
+    try std.testing.expectEqual(Index.CompletionKind.sort, wff.kind);
+    try std.testing.expectEqualStrings(
+        "wf",
+        text[wff.replacement.start..wff.replacement.end],
+    );
+}
+
+test "completion omits ordinary mm0 comments" {
+    const text =
+        \\provable sort wff;
+        \\-- theorem:
+        \\term top: wff;
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const keyword_offset = std.mem.indexOf(u8, text, "theorem") orelse {
+        return error.MissingCommentKeywordContext;
+    };
+    const keyword_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        keyword_offset + "theorem".len,
+        .{},
+    );
+    defer std.testing.allocator.free(keyword_items);
+    try std.testing.expectEqual(@as(usize, 0), keyword_items.len);
+
+    const sort_offset = std.mem.indexOf(u8, text, "theorem:") orelse {
+        return error.MissingCommentSortContext;
+    };
+    const sort_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        sort_offset + "theorem:".len,
+        .{},
+    );
+    defer std.testing.allocator.free(sort_items);
+    try std.testing.expectEqual(@as(usize, 0), sort_items.len);
+}
+
+test "completion omits proof comments" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom ax: $ top $;
+        \\theorem main: $ top $;
+    ;
+    const proof_text =
+        \\-- ma
+        \\main
+        \\----
+        \\l1: $ top $ by ax [] -- ma
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const standalone_offset = std.mem.indexOf(u8, proof_text, "ma") orelse {
+        return error.MissingStandaloneProofComment;
+    };
+    const standalone_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        standalone_offset + "ma".len,
+        .{},
+    );
+    defer std.testing.allocator.free(standalone_items);
+    try std.testing.expectEqual(@as(usize, 0), standalone_items.len);
+
+    const trailing_offset = std.mem.lastIndexOf(u8, proof_text, "ma") orelse {
+        return error.MissingTrailingProofComment;
+    };
+    const trailing_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        trailing_offset + "ma".len,
+        .{},
+    );
+    defer std.testing.allocator.free(trailing_items);
+    try std.testing.expectEqual(@as(usize, 0), trailing_items.len);
+}
+
+test "completion returns sorts and math symbols in mm0 contexts" {
+    const text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem main (p: wff): $ p  $;
+        \\term other:
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const sort_offset = std.mem.indexOf(u8, text, "term other:") orelse {
+        return error.MissingSortContext;
+    };
+    const sort_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        sort_offset + "term other:".len,
+        .{},
+    );
+    defer std.testing.allocator.free(sort_items);
+    try std.testing.expect(completionNamed(sort_items, "wff") != null);
+
+    const math_offset = std.mem.indexOf(u8, text, "  $") orelse {
+        return error.MissingMathContext;
+    };
+    const math_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        math_offset,
+        .{},
+    );
+    defer std.testing.allocator.free(math_items);
+    const top = completionNamed(math_items, "top") orelse {
+        return error.MissingTopCompletion;
+    };
+    const p = completionNamed(math_items, "p") orelse {
+        return error.MissingBinderCompletion;
+    };
+    try expectSortPrefix(p, "00");
+    try expectSortPrefix(top, "07");
+}
+
+test "completion returns notation tokens and aliases in mm0 math" {
+    const text =
+        \\delimiter $ ( [ $ $ ) ] $;
+        \\provable sort wff;
+        \\term forall (p: wff): wff;
+        \\term imp (p q: wff): wff;
+        \\term box (p: wff): wff;
+        \\theorem main (p q: wff): $ forall p $;
+        \\prefix forall: $∀$ prec 40;
+        \\infixr imp: $->$ prec 25;
+        \\notation box (p: wff): wff = ($[$:20) p ($]$:20);
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const alias_offset = std.mem.indexOf(u8, text, "$ forall p") orelse {
+        return error.MissingAliasContext;
+    };
+    const alias_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        alias_offset + "$ forall".len,
+        .{},
+    );
+    defer std.testing.allocator.free(alias_items);
+    const forall = completionNamed(alias_items, "∀") orelse {
+        return error.MissingForallNotationCompletion;
+    };
+    try std.testing.expectEqualStrings("∀", forall.replacement_text);
+    try std.testing.expectEqualStrings(
+        "forall",
+        text[forall.replacement.start..forall.replacement.end],
+    );
+    try std.testing.expect(forall.filter_text != null);
+    try std.testing.expectEqualStrings(
+        "forall ∀",
+        forall.filter_text.?,
+    );
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        forall.detail,
+        1,
+        "forall",
+    ));
+    try std.testing.expect(forall.documentation_markdown != null);
+
+    const raw_forall = completionNamed(alias_items, "forall") orelse {
+        return error.MissingRawTermCompletion;
+    };
+    try expectSortPrefix(forall, "04");
+    try expectSortPrefix(raw_forall, "07");
+    try std.testing.expect(std.mem.order(
+        u8,
+        forall.sort_text,
+        raw_forall.sort_text,
+    ) == .lt);
+
+    try std.testing.expect(completionNamed(alias_items, "->") != null);
+    const open_bracket = completionNamed(alias_items, "[") orelse {
+        return error.MissingBracketNotationCompletion;
+    };
+    try expectSortPrefix(open_bracket, "05");
+}
+
+test "snippet escaping protects snippet metacharacters" {
+    const escaped = try Index.escapeSnippetText(
+        std.testing.allocator,
+        "a$b}c\\d",
+    );
+    defer std.testing.allocator.free(escaped);
+    try std.testing.expectEqualSlices(
+        u8,
+        &[_]u8{ 'a', '\\', '$', 'b', '\\', '}', 'c', '\\', '\\', 'd' },
+        escaped,
+    );
+}
+
+test "completion returns prefix notation snippets when supported" {
+    const text =
+        \\provable sort wff;
+        \\term forall (p: wff): wff;
+        \\theorem main (p: wff): $ fo $;
+        \\prefix forall: $∀$ prec 40;
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const offset = std.mem.indexOf(u8, text, "fo $") orelse {
+        return error.MissingSnippetContext;
+    };
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        offset + "fo".len,
+        .{ .snippet_support = true },
+    );
+    defer std.testing.allocator.free(items);
+    const snippet = completionNamed(items, "∀ …") orelse {
+        return error.MissingPrefixSnippetCompletion;
+    };
+    try std.testing.expectEqual(Index.CompletionKind.snippet, snippet.kind);
+    try std.testing.expectEqualStrings("∀", snippet.replacement_text);
+    try std.testing.expectEqualStrings(
+        "∀ ${1:p}$0",
+        snippet.snippet_replacement_text orelse "",
+    );
+    try expectSortPrefix(snippet, "06");
+    try std.testing.expect(snippet.filter_text != null);
+    try std.testing.expectEqualStrings(
+        "forall ∀",
+        snippet.filter_text.?,
+    );
+}
+
+test "completion omits notation snippets without client support" {
+    const text =
+        \\provable sort wff;
+        \\term forall (p: wff): wff;
+        \\theorem main (p: wff): $ fo $;
+        \\prefix forall: $∀$ prec 40;
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const offset = std.mem.indexOf(u8, text, "fo $") orelse {
+        return error.MissingSnippetContext;
+    };
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        offset + "fo".len,
+        .{},
+    );
+    defer std.testing.allocator.free(items);
+    try std.testing.expect(completionNamed(items, "∀ …") == null);
+    for (items) |item| {
+        try std.testing.expect(item.snippet_replacement_text == null);
+    }
+}
+
+test "completion returns general notation snippets" {
+    const text =
+        \\delimiter $ ( [ ] ) $;
+        \\provable sort wff;
+        \\term box (p: wff): wff;
+        \\theorem main (p: wff): $ bo $;
+        \\notation box (p: wff): wff = ($[$:20) p ($]$:20);
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const offset = std.mem.indexOf(u8, text, "bo $") orelse {
+        return error.MissingSnippetContext;
+    };
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        offset + "bo".len,
+        .{ .snippet_support = true },
+    );
+    defer std.testing.allocator.free(items);
+    const snippet = completionNamed(items, "[ … ]") orelse {
+        return error.MissingGeneralSnippetCompletion;
+    };
+    try std.testing.expectEqualStrings(
+        "[ ${1:p} ]$0",
+        snippet.snippet_replacement_text orelse "",
+    );
+    try std.testing.expect(snippet.filter_text != null);
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        snippet.filter_text.?,
+        1,
+        "box",
+    ));
+}
+
+test "snippet placeholders follow binder order" {
+    const text =
+        \\provable sort wff;
+        \\term pair (z a: wff): wff;
+        \\theorem main (z a: wff): $ pa $;
+        \\notation pair (z a: wff): wff = ($pair$:10) a z;
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const offset = std.mem.indexOf(u8, text, "pa $") orelse {
+        return error.MissingSnippetContext;
+    };
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        offset + "pa".len,
+        .{ .snippet_support = true },
+    );
+    defer std.testing.allocator.free(items);
+    const snippet = completionNamed(items, "pair … …") orelse {
+        return error.MissingOrderSnippetCompletion;
+    };
+    try std.testing.expectEqualStrings(
+        "pair ${2:a} ${1:z}$0",
+        snippet.snippet_replacement_text orelse "",
+    );
+}
+
+test "anonymous term arguments get readable snippet placeholders" {
+    const text =
+        \\provable sort wff;
+        \\term anon (_: wff): wff;
+        \\theorem main (p: wff): $ an $;
+        \\prefix anon: $anon$ prec 40;
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const offset = std.mem.indexOf(u8, text, "an $") orelse {
+        return error.MissingSnippetContext;
+    };
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        offset + "an".len,
+        .{ .snippet_support = true },
+    );
+    defer std.testing.allocator.free(items);
+    const snippet = completionNamed(items, "anon …") orelse {
+        return error.MissingAnonymousSnippetCompletion;
+    };
+    try std.testing.expectEqualStrings(
+        "anon ${1:arg1}$0",
+        snippet.snippet_replacement_text orelse "",
+    );
+}
+
+test "completion returns notation tokens in proof math" {
+    const mm0_text =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (p q: wff): wff;
+        \\infixr imp: $->$ prec 25;
+        \\axiom ax (p q: wff): $ p -> q $;
+        \\theorem main (p q: wff): $ p -> q $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ p im q $ by ax []
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const offset = std.mem.indexOf(u8, proof_text, "im q") orelse {
+        return error.MissingProofAliasContext;
+    };
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        offset + "im".len,
+        .{},
+    );
+    defer std.testing.allocator.free(items);
+    const imp = completionNamed(items, "->") orelse {
+        return error.MissingProofNotationCompletion;
+    };
+    try std.testing.expectEqualStrings("->", imp.replacement_text);
+    try std.testing.expectEqualStrings(
+        "im",
+        proof_text[imp.replacement.start..imp.replacement.end],
+    );
+}
+
+test "completion returns @vars dummies in proof math" {
+    const mm0_text =
+        \\--| @vars x y
+        \\provable sort obj;
+        \\term eq (a b: obj): obj;
+        \\axiom eq_refl (a: obj): $ eq a a $;
+        \\theorem main (z: obj): $ eq z z $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ eq z x $ by eq_refl []
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const offset = std.mem.indexOf(u8, proof_text, "x $") orelse {
+        return error.MissingVarsCompletionContext;
+    };
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        offset + "x".len,
+        .{},
+    );
+    defer std.testing.allocator.free(items);
+
+    const x = completionNamed(items, "x") orelse {
+        return error.MissingVarsCompletion;
+    };
+    const z = completionNamed(items, "z") orelse {
+        return error.MissingProofBinderCompletion;
+    };
+    try std.testing.expectEqual(Index.CompletionKind.binder, x.kind);
+    try std.testing.expectEqual(Index.CompletionKind.binder, z.kind);
+    try std.testing.expectEqualStrings(
+        "sort variable",
+        x.detail,
+    );
+    try std.testing.expectEqualStrings(
+        "x",
+        proof_text[x.replacement.start..x.replacement.end],
+    );
+    try expectSortPrefix(x, "00");
+}
+
+test "completion uses math replacement ranges for operator prefixes" {
+    const text =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term imp (p q: wff): wff;
+        \\infixr imp: $->$ prec 25;
+        \\theorem main (p q: wff): $ p - q $;
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const offset = (std.mem.indexOf(u8, text, "- q") orelse {
+        return error.MissingOperatorContext;
+    }) + 1;
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        offset,
+        .{},
+    );
+    defer std.testing.allocator.free(items);
+    const imp = completionNamed(items, "->") orelse {
+        return error.MissingOperatorNotationCompletion;
+    };
+    try std.testing.expectEqualStrings(
+        "-",
+        text[imp.replacement.start..imp.replacement.end],
+    );
+}
+
+test "completion returns annotation directives" {
+    const text =
+        \\--| @re
+        \\provable sort wff;
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = text,
+    });
+    defer snapshot.deinit();
+
+    const offset = std.mem.indexOf(u8, text, "@re") orelse unreachable;
+    const completions = try snapshot.completionsAt(
+        std.testing.allocator,
+        .mm0,
+        offset + 3,
+        .{},
+    );
+    defer std.testing.allocator.free(completions);
+    try std.testing.expect(completionNamed(completions, "@rewrite") != null);
+    try std.testing.expect(completionNamed(completions, "@relation") != null);
+}
+
+test "completion returns proof rules, references, and binders" {
+    const mm0_text =
+        \\provable sort wff;
+        \\axiom use (p: wff): $ p $;
+        \\theorem main (p: wff): $ p $ > $ p $;
+        \\axiom later (p: wff): $ p $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ p $ by use (p := $ p $) []
+        \\l2: $ p $ by ke []
+        \\l3: $ p $ by use [l]
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const rule_offset = std.mem.indexOf(u8, proof_text, "ke []") orelse {
+        return error.MissingRuleContext;
+    };
+    const rule_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        rule_offset + "ke".len,
+        .{},
+    );
+    defer std.testing.allocator.free(rule_items);
+    try std.testing.expect(completionNamed(rule_items, "use") != null);
+    try std.testing.expect(completionNamed(rule_items, "later") == null);
+
+    const l2_refs = std.mem.indexOf(u8, proof_text, "ke []") orelse {
+        return error.MissingEmptyRefContext;
+    };
+    var early_ref_arena_state = std.heap.ArenaAllocator.init(
+        std.testing.allocator,
+    );
+    defer early_ref_arena_state.deinit();
+    const early_ref_items = try snapshot.completionsAt(
+        early_ref_arena_state.allocator(),
+        .proof,
+        l2_refs + "ke [".len,
+        .{},
+    );
+    try std.testing.expect(completionNamed(early_ref_items, "l1") != null);
+    try std.testing.expect(completionNamed(early_ref_items, "l2") == null);
+    try std.testing.expect(completionNamed(early_ref_items, "l3") == null);
+
+    const ref_offset = std.mem.lastIndexOf(u8, proof_text, "l]") orelse {
+        return error.MissingRefContext;
+    };
+    var ref_arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer ref_arena_state.deinit();
+    const ref_items = try snapshot.completionsAt(
+        ref_arena_state.allocator(),
+        .proof,
+        ref_offset + 1,
+        .{},
+    );
+    try std.testing.expect(completionNamed(ref_items, "l1") != null);
+    try std.testing.expect(completionNamed(ref_items, "l2") != null);
+    try std.testing.expect(completionNamed(ref_items, "l3") == null);
+    try std.testing.expect(completionNamed(ref_items, "#1") != null);
+
+    const bind_offset = std.mem.indexOf(u8, proof_text, "p :=") orelse {
+        return error.MissingBindingContext;
+    };
+    const bind_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        bind_offset + 1,
+        .{},
+    );
+    defer std.testing.allocator.free(bind_items);
+    try std.testing.expect(completionNamed(bind_items, "p") != null);
+}
+
+test "completion returns proof rules inside nested applications" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\axiom keep: $ top $ > $ top $;
+        \\theorem main: $ top $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ top $ by top_i []
+        \\l2: $ top $ by keep [to []]
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const nested_offset = std.mem.indexOf(u8, proof_text, "to []") orelse {
+        return error.MissingNestedRuleContext;
+    };
+    const items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        nested_offset + "to".len,
+        .{},
+    );
+    defer std.testing.allocator.free(items);
+    const top_i = completionNamed(items, "top_i") orelse {
+        return error.MissingNestedRuleCompletion;
+    };
+    try std.testing.expectEqual(Index.CompletionKind.axiom, top_i.kind);
+    try std.testing.expectEqualStrings(
+        "to",
+        proof_text[top_i.replacement.start..top_i.replacement.end],
+    );
+    try std.testing.expect(completionNamed(items, "l1") == null);
+}
+
+test "completion returns theorem names at proof headers" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\theorem main: $ top $;
+        \\axiom ax: $ top $;
+    ;
+    const proof_text = "ma";
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const completions = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        proof_text.len,
+        .{},
+    );
+    defer std.testing.allocator.free(completions);
+    try std.testing.expect(completionNamed(completions, "main") != null);
+    try std.testing.expect(completionNamed(completions, "ax") == null);
+}
+
+test "completion returns binders for unavailable forward rules" {
+    const mm0_text =
+        \\provable sort wff;
+        \\theorem main (p: wff): $ p $;
+        \\axiom later (p: wff): $ p $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ p $ by later (p := $ p $) []
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const rule_offset = std.mem.indexOf(u8, proof_text, "later") orelse {
+        return error.MissingForwardRuleContext;
+    };
+    const rule_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        rule_offset + "later".len,
+        .{},
+    );
+    defer std.testing.allocator.free(rule_items);
+    try std.testing.expect(completionNamed(rule_items, "later") == null);
+
+    const bind_offset = std.mem.indexOf(u8, proof_text, "p :=") orelse {
+        return error.MissingForwardBindingContext;
+    };
+    const bind_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        bind_offset + 1,
+        .{},
+    );
+    defer std.testing.allocator.free(bind_items);
+    try std.testing.expect(completionNamed(bind_items, "p") != null);
 }
 
 test "snapshot indexes global mm0 declarations" {
