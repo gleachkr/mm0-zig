@@ -3,10 +3,17 @@ import { EditorView, keymap, highlightActiveLine, drawSelection }
 import { EditorState } from "@codemirror/state";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { linter, setDiagnostics } from "@codemirror/lint";
+import {
+  LSPClient,
+  jumpToDefinition,
+  languageServerExtensions,
+} from "@codemirror/lsp-client";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const themeKey = "aufbau-theme";
+const mm0Uri = "file:///demo/current.mm0";
+const proofUri = "file:///demo/current.auf";
 
 const examples = {
   hilbert: {
@@ -198,6 +205,7 @@ let diagnosticIndex = -1;
 let runToken = 0;
 let mm0View = null;
 let proofView = null;
+let lspClient = null;
 
 initTheme();
 initTabs();
@@ -206,12 +214,20 @@ main().catch((error) => {
   renderFatal(error);
 });
 
-function makeExtensions(ariaLabel, withLint) {
+function makeExtensions(ariaLabel, withLint, lspExtension) {
   const exts = [
     highlightActiveLine(),
     drawSelection(),
     history(),
-    keymap.of([...defaultKeymap, ...historyKeymap]),
+    keymap.of([
+      {
+        key: "Ctrl-]",
+        run: jumpToDefinition,
+        preventDefault: true,
+      },
+      ...defaultKeymap,
+      ...historyKeymap,
+    ]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) scheduleRun();
     }),
@@ -222,6 +238,9 @@ function makeExtensions(ariaLabel, withLint) {
     editorTheme,
     EditorState.tabSize.of(2),
   ];
+  if (lspExtension) {
+    exts.push(lspExtension);
+  }
   if (withLint) {
     exts.push(linter(() => [], { delay: 86400000 }));
   }
@@ -244,12 +263,20 @@ async function main() {
 
   compilerModule = compiler;
   verifierModule = verifier;
+  lspClient = new LSPClient({
+    rootUri: "file:///demo",
+    extensions: languageServerExtensions(),
+  }).connect(new WasmLspTransport(compiler));
 
   mm0View = new EditorView({
     parent: ui.mm0Editor,
     state: EditorState.create({
       doc: mm0Text,
-      extensions: makeExtensions("MM0 source", true),
+      extensions: makeExtensions(
+        "MM0 source",
+        true,
+        lspClient.plugin(mm0Uri, "mm0"),
+      ),
     }),
   });
 
@@ -257,7 +284,11 @@ async function main() {
     parent: ui.proofEditor,
     state: EditorState.create({
       doc: proofText,
-      extensions: makeExtensions("Aufbau script", true),
+      extensions: makeExtensions(
+        "Aufbau script",
+        true,
+        lspClient.plugin(proofUri, "aufbau"),
+      ),
     }),
   });
 
@@ -307,6 +338,7 @@ async function loadExample(name) {
 
   setEditorContent(mm0View, mm0Text);
   setEditorContent(proofView, proofText);
+  lspClient?.sync();
   updateSourceMeta();
   clearDiagnosticStatus();
   clearDiagnostics();
@@ -429,13 +461,14 @@ async function runAnalysis() {
   }
 
   const token = ++runToken;
+  lspClient?.sync();
   clearDiagnosticStatus();
   setStatus(ui.compileStatus, "running…", "warn");
   setStatus(ui.verifyStatus, "waiting…", "muted");
   ui.compileTime.textContent = "";
   ui.verifyTime.textContent = "";
   ui.mmbSize.textContent = "";
-  clearDiagnostics();
+  clearDiagnosticNavigation();
 
   const mm0Text = mm0View.state.doc.toString();
   const proofText = proofView.state.doc.toString();
@@ -445,7 +478,6 @@ async function runAnalysis() {
   }
 
   const compileMeta = compileResult.meta;
-  const compileDiagnostics = collectCompileDiagnostics(compileMeta);
   const compileOkay = Boolean(compileMeta?.ok);
   setStatus(
     ui.compileStatus,
@@ -457,10 +489,8 @@ async function runAnalysis() {
     ? formatBytes(compileResult.mmbBytes.length)
     : "";
 
-  const renderedDiagnostics = pushCompileDiagnostics(compileDiagnostics);
-
   if (!compileOkay) {
-    setDiagnosticStatus(renderedDiagnostics);
+    setStatus(ui.verifyStatus, "compile failed", "err");
     return;
   }
 
@@ -772,12 +802,16 @@ function humanizeDiagnosticValue(value) {
   return String(value).replaceAll("_", " ");
 }
 
-function clearDiagnostics() {
+function clearDiagnosticNavigation() {
   diagnosticTargets = [];
   diagnosticIndex = -1;
   ui.diagnosticNav.hidden = true;
   ui.diagnosticPrev.disabled = true;
   ui.diagnosticNext.disabled = true;
+}
+
+function clearDiagnostics() {
+  clearDiagnosticNavigation();
   if (mm0View) {
     mm0View.dispatch(setDiagnostics(mm0View.state, []));
   }
@@ -839,6 +873,46 @@ function callVerifier(mm0Text, mmbBytes) {
   }
 }
 
+class WasmLspTransport {
+  constructor(module) {
+    this.module = module;
+    this.subscribers = new Set();
+  }
+
+  subscribe(handler) {
+    this.subscribers.add(handler);
+  }
+
+  unsubscribe(handler) {
+    this.subscribers.delete(handler);
+  }
+
+  send(message) {
+    const input = writeBytes(this.module, encoder.encode(message));
+    try {
+      const ok = this.module.exports.process_lsp_message(
+        input.ptr,
+        input.len,
+      );
+      const output = readLspResult(this.module);
+      if (!ok) {
+        console.warn("LSP message failed", output);
+      }
+      for (const line of output.split("\n")) {
+        if (line) this.emit(line);
+      }
+    } finally {
+      freeBytes(this.module, input);
+    }
+  }
+
+  emit(message) {
+    for (const handler of this.subscribers) {
+      handler(message);
+    }
+  }
+}
+
 function writeBytes(module, bytes) {
   const len = bytes.length;
   const ptr = module.exports.alloc(len);
@@ -871,6 +945,16 @@ function readJsonResult(module) {
   }
   const jsonBytes = new Uint8Array(module.exports.memory.buffer, ptr, len);
   return JSON.parse(decoder.decode(jsonBytes));
+}
+
+function readLspResult(module) {
+  const ptr = module.exports.result_lsp_ptr();
+  const len = module.exports.result_lsp_len();
+  if (!ptr || !len) {
+    return "";
+  }
+  const bytes = new Uint8Array(module.exports.memory.buffer, ptr, len);
+  return decoder.decode(bytes);
 }
 
 async function loadWasm(url) {

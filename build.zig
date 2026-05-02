@@ -5,6 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const lsp_dep = b.dependency("lsp_kit", .{});
     const lsp_module = lsp_dep.module("lsp");
+    const lsp_types_module = lsp_dep.module("lsp-types");
 
     const mm0_lib = b.createModule(.{
         .root_source_file = b.path("src/lib.zig"),
@@ -16,6 +17,19 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
     });
+    const lsp_offsets_wasm_module = b.createModule(.{
+        .root_source_file = lsp_dep.path("src/offsets.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+    lsp_offsets_wasm_module.addImport("types", lsp_types_module);
+    const lsp_wasm_module = b.createModule(.{
+        .root_source_file = b.path("src/bin/compiler/lsp_wasm_compat.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+    lsp_wasm_module.addImport("types", lsp_types_module);
+    lsp_wasm_module.addImport("offsets", lsp_offsets_wasm_module);
     const mm0_wasm_lib = b.createModule(.{
         .root_source_file = b.path("src/lib.zig"),
         .target = wasm_target,
@@ -55,6 +69,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     compiler_wasm_module.addImport("mm0", mm0_wasm_lib);
+    compiler_wasm_module.addImport("lsp", lsp_wasm_module);
 
     const compiler_wasm = b.addExecutable(.{
         .name = "abc-web",

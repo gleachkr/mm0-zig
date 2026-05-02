@@ -134,7 +134,7 @@ const NavigationSnapshot = struct {
     document: LspIndex.DocumentId,
 };
 
-const Handler = struct {
+pub const Handler = struct {
     allocator: std.mem.Allocator,
     transport: *lsp.Transport,
     docs: std.StringHashMapUnmanaged(OpenDocument),
@@ -142,7 +142,7 @@ const Handler = struct {
     offset_encoding: lsp.offsets.Encoding,
     snippet_support: bool,
 
-    fn init(
+    pub fn init(
         allocator: std.mem.Allocator,
         transport: *lsp.Transport,
     ) Handler {
@@ -156,7 +156,7 @@ const Handler = struct {
         };
     }
 
-    fn deinit(self: *Handler) void {
+    pub fn deinit(self: *Handler) void {
         var it = self.docs.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
@@ -1175,17 +1175,24 @@ fn readFileWithMtimeAlloc(
     allocator: std.mem.Allocator,
     path: []const u8,
 ) !ReadFileWithMtime {
-    const file = if (std.fs.path.isAbsolute(path))
-        try std.fs.openFileAbsolute(path, .{})
-    else
-        try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+    if (builtin.os.tag == .freestanding) {
+        return error.FileNotFound;
+    } else {
+        const file = if (std.fs.path.isAbsolute(path))
+            try std.fs.openFileAbsolute(path, .{})
+        else
+            try std.fs.cwd().openFile(path, .{});
+        defer file.close();
 
-    const stat = try file.stat();
-    return .{
-        .text = try file.readToEndAlloc(allocator, std.math.maxInt(usize)),
-        .mtime = stat.mtime,
-    };
+        const stat = try file.stat();
+        return .{
+            .text = try file.readToEndAlloc(
+                allocator,
+                std.math.maxInt(usize),
+            ),
+            .mtime = stat.mtime,
+        };
+    }
 }
 
 fn readFileAlloc(
