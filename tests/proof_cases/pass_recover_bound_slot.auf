@@ -1,0 +1,3 @@
+bound_slot_recover
+------------------
+l1: $ A. x (A. y (sb x x p)) -> A. y (sb u x p) $ by ax_inst []

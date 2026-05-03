@@ -231,10 +231,29 @@ The compiler walks the current resolved expressions for `source` and
 1. Whenever the pattern expression reaches the current resolved value of
    `hole`, record the corresponding subtree of the source as a candidate for
    `target`.
-2. If `hole` occurs more than once, all candidates must agree.
-3. If the structures diverge (different head terms, different arities), the
-   recovery fails.
-4. If no occurrence of `hole` is found, the recovery fails.
+2. If `hole` occurs more than once in ordinary expression structure, all
+   candidates must agree.
+3. When walking a term application, an unchanged occurrence of `hole` in a
+   *bound argument slot* is skipped. This prevents the binder parameter of a
+   substitution-shaped term from being mistaken for the substitution witness.
+   Only slots marked as bound in the term declaration get this treatment, and
+   only when both source and pattern contain exactly `hole` in that slot.
+4. If no ordinary candidate is found, but the walk otherwise matched and saw
+   an unchanged bound-slot occurrence from step 3, recovery binds `target` to
+   `hole`. This is the identity-instantiation case, such as `[x/x] p`.
+5. If `source` and `pattern` are already the same resolved expression,
+   recovery also binds `target` to `hole`. This handles no-op cases where
+   the dependency on `hole` is present in binder metadata rather than visible
+   as a syntactic occurrence.
+6. If the source is a wrapper application around a leaf pattern, recovery may
+   guess the target from the wrapper's direct arguments. It picks the unique
+   argument whose sort matches `target` and whose expression is distinct from
+   both `hole` and `pattern`. This guess is order-independent over the direct
+   argument list, and it does not require the wrapper to contain either
+   `hole` or `pattern`.
+7. If the structures diverge in any other way, recovery fails.
+8. If no occurrence of `hole`, skipped bound-slot occurrence, identical
+   source/pattern evidence, or wrapper candidate is found, recovery fails.
 
 If `target` already has an explicit binding, recovery is skipped for that
 binder.
@@ -250,6 +269,19 @@ A few behavioral details are worth keeping in mind:
 - It first tries direct structural comparison. If that fails, it retries after
   narrowly preprocessing the compared expressions by unfolding concrete defs
   without hidden dummy args and canonicalizing the result.
+- Bound argument slots are only skipped when the slot itself is unchanged and
+  equal to `hole`. Changed bound slots are still structural mismatches or
+  ordinary candidate sites, depending on where `hole` appears.
+- The source-wrapper fallback is intentionally heuristic. It is meant for
+  normalized introduction/instantiation forms where the witness is an argument
+  of a wrapper term, but it does not require the wrapper to be a declared
+  substitution operator.
+- Wrapper recovery is ambiguous if more than one direct argument has the
+  target sort after ignoring expressions exactly equal to `hole` or
+  `pattern`.
+- The identical source/pattern fallback is syntactic. `@recover` does not scan
+  dependency metadata looking for hidden occurrences of `hole`; it merely uses
+  equality of the resolved expressions as evidence for the identity witness.
 - It does not invent fresh theorem-local dummies just to make a hidden witness
   concrete. Hidden-dummy witnesses stay match-local until the final
   rule-instantiation path decides they really need to escape.
@@ -284,6 +316,55 @@ is elaborated as follows:
   raw conclusion `sb u x (P x)`.
 - Conclusion normalization reduces `sb u x (P x)` via `sb_pred` to `P u`, which
   matches the user's assertion.
+
+### Identity and bound-slot recovery
+
+Sometimes the dependency on the quantified variable is hidden in binder
+metadata rather than visible as a syntax tree occurrence. One way to expose it
+is to put an identity substitution in the recover pattern:
+
+```
+--| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
+--| @recover t q p x
+axiom ax_inst {x: set} (t: set) (p: wff x): $ A. x p -> [x/t] p $;
+```
+
+A view match may compare a source such as `[x/u] p` against a pattern such as
+`[x/x] p`. The application for `[x/x] p` contains two visible `x` values: the
+substitution term and the bound parameter of the substitution operator.
+`@recover` treats only the non-bound occurrence as the candidate site for
+`t`. The unchanged bound-parameter occurrence is skipped, so it does not
+conflict with the recovered candidate `u`.
+
+If the source and pattern are already identical, `@recover t q p x` binds
+`t` to `x`. This is useful for identity eliminations where the raw rule will
+instantiate to `[x/x] p` and registered rewrites later normalize that back to
+`p`. The recovery step only chooses the identity witness; the proof still
+needs the usual rewrite and congruence metadata to prove `[x/x] p` equivalent
+to the expression the user wrote.
+
+### Source-wrapper recovery
+
+For introduction-style views, the source may have a wrapper that the pattern
+lacks:
+
+```
+source  = [x/z] p
+pattern = p
+hole    = x
+```
+
+There is no common outer head to walk in parallel. In this situation,
+`@recover` scans the direct arguments of the source wrapper. It ignores
+arguments exactly equal to `hole` or `pattern`, then chooses the unique
+remaining argument whose sort matches the target binder. In this example, the
+only compatible remaining argument is `z`, so `@recover u q p x` binds
+`u := z`.
+
+This is deliberately not tied to the declared substitution shape. The wrapper
+need not expose `x` or `p` as direct arguments; those expressions are merely
+ignored if they are present. If two compatible candidates remain, recovery
+fails rather than guessing between them.
 
 ---
 

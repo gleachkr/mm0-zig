@@ -1,0 +1,39 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort set;
+
+term imp (a b: wff): wff; infixr imp: $->$ prec 25;
+term iff (a b: wff): wff; infixr iff: $<->$ prec 20;
+term all {x: set} (p: wff x): wff; prefix all: $A.$ prec 41;
+term sb (t: set) {x: set} (p: wff x): wff;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a <-> a $;
+axiom iff_trans (a b c: wff):
+  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+
+--| @rewrite
+axiom sb_all {x y: set} (t: set) (p: wff x y):
+  $ sb t x (A. y p) <-> A. y (sb t x p) $;
+
+--| @rewrite
+axiom sb_identity_under_all {x y: set} (t: set) (p: wff x y):
+  $ A. y (sb t x (sb x x p)) <-> A. y (sb t x p) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a <-> b $ > $ c <-> d $ > $ (a -> c) <-> (b -> d) $;
+
+--| @congr
+axiom all_congr {x: set} (p q: wff x):
+  $ p <-> q $ > $ A. x p <-> A. x q $;
+
+--| @view {x: set} (t: set) (p: wff x) (q: wff): $ A. x p -> q $
+--| @recover t q p x
+axiom ax_inst {x: set} (t: set) (p: wff x):
+  $ A. x p -> sb t x p $;
+
+theorem bound_slot_recover {x y: set} (u: set) (p: wff x y):
+  $ A. x (A. y (sb x x p)) -> A. y (sb u x p) $;

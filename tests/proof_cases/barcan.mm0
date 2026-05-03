@@ -161,8 +161,10 @@ axiom imp_elim (g: ctx) (w: world) (a b: mform):
 axiom eq_refl_nd (g: ctx) (w: world) (a: obj): $ g ⊢ w : a = a $;
 
 --| @freshen g x
-axiom all_intro (g: ctx) (w: world) {x: obj} (p: mform x):
-  $ g ⊢ w : p $ > $ g ⊢ w : ∀ x p $;
+--| @view (g: ctx) (w: world) {x u: obj} (p q: mform x): $ g ⊢ w : q $ > $ g ⊢ w : ∀ x p $;
+--| @recover u q p x
+axiom all_intro {x u: obj} (g: ctx x) (w: world)  (p: mform x):
+  $ g ⊢ w : [x/u] p $ > $ g ⊢ w : ∀ x p $;
 
 --| @view {x: obj} (g: ctx x) (w: world) (t: obj x) (p: mform x) (q: mform): $ g ⊢ w : ∀ x p $ > $ g ⊢ w : q $
 --| @recover t q p x

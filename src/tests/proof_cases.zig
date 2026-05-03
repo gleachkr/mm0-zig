@@ -196,6 +196,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_view_basic", .outcome = .pass },
     .{ .stem = "pass_view_explicit", .outcome = .pass },
     .{ .stem = "pass_recover_basic", .outcome = .pass },
+    .{ .stem = "pass_recover_bound_slot", .outcome = .pass },
     .{ .stem = "pass_abstract_basic", .outcome = .pass },
     .{ .stem = "pass_abstract_repeated", .outcome = .pass },
     .{ .stem = "pass_abstract_view_phantoms", .outcome = .pass },

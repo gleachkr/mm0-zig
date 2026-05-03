@@ -9,11 +9,18 @@ term bi (a b: wff): wff; infixl bi: $↔$ prec 20; infixl bi: $<->$ prec 20;
 term all {x: set} (p: wff x): wff; prefix all: $∀$ prec 41; prefix all: $A.$ prec 41;
 
 term R (a b: set): wff;
+term set_eq (a b: set): wff;
 term sb_f (t: set) {x: set} (p: wff x): wff;
 notation sb_f (t: set) {x: set} (p: wff x): wff =
   ($[$:41) x ($/$:0) t ($]$:0) p;
 
 --| @relation wff bi biid bitr bisym mpbi
+--| @relation set set_eq setid settr setsym _
+
+axiom setid (a: set): $ set_eq a a $;
+axiom settr (a b c: set):
+  $ set_eq a b $ > $ set_eq b c $ > $ set_eq a c $;
+axiom setsym (a b: set): $ set_eq a b $ > $ set_eq b a $;
 
 axiom biid (a: wff): $ a ↔ a $;
 axiom bitr (a b c: wff): $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
@@ -50,6 +57,18 @@ axiom sb_f_rel_diag {x: set} (t: set):
 axiom sb_f_rel_left {x: set} (t: set) (a: set):
   $ [x/t] (R x a) ↔ R t a $;
 
+--| @rewrite
+axiom sb_f_rel_right {x: set} (t a: set):
+  $ [x/t] (R a x) ↔ R a t $;
+
+--| @rewrite
+axiom sb_f_forall {x y: set} (t: set) (p : wff x y):
+  $ [x/t] ∀ y p ↔ ∀ y [x/t] p $;
+
+--| @rewrite
+axiom sb_f_id {x: set} (p: wff x):
+  $ [x/x] p ↔ p $;
+
 --| @congr
 axiom im_congr (a b c d: wff):
   $ a ↔ b $ > $ c ↔ d $ > $ (a -> c) ↔ (b -> d) $;
@@ -59,6 +78,14 @@ axiom not_congr (a b: wff):
   $ a ↔ b $ > $ ¬ a ↔ ¬ b $;
 
 --| @congr
+axiom all_congr {x: set} (p q: wff x):
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @congr
+axiom sb_f_congr (t u: set) {x: set} (p q: wff x):
+  $ set_eq t u $ > $ p ↔ q $ > $ [x/t] p ↔ [x/u] q $;
+
+--| @congr
 axiom bi_congr (a b c d: wff):
   $ a ↔ b $ > $ c ↔ d $ > $ (a ↔ c) ↔ (b ↔ d) $;
 
@@ -66,5 +93,10 @@ axiom bi_congr (a b c d: wff):
 --| @recover t q p x
 axiom ax_inst {x: set} (t: set) (p: wff x):
   $ ∀ x p -> [x/t] p $;
+
+--| @view {x y: set} (t u: set) (p q: wff x y) : $ ∀ x (∀ y p) $ > $ q $;
+--| @recover u q p x
+--| @recover t q p y
+axiom ax_inst2 {x y: set} (t u: set) (p: wff x y): $ ∀ x (∀ y p) $ > $ [y/t] [x/u] p $;
 
 theorem russell {x y: set}: $ ∀ x ¬ ∀ y (R y x ↔ ¬ R y y) $;

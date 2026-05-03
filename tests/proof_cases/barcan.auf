@@ -5,9 +5,9 @@ l1: $ w : ∀ x (□ p) , w R v ⊢ w : ∀ x (□ p) $ by ax
 l2: $ w : ∀ x (□ p) , w R v ⊢ w : □ [x/z] p $ by all_elim [l1]
 l3: $ w : ∀ x (□ p) , w R v ⊢ w R v $ by ax
 l4: $ w : ∀ x (□ p) , w R v ⊢ v : [x/z] p $ by box_elim [l2, l3]
-l5: $ w : ∀ x (□ p) , w R v ⊢ v : ∀ z ([x/z] p) $ by all_intro [l4]
-l6: $ w : ∀ x (□ p) ⊢ w : □ ∀ z ([x/z] p) $ by box_intro [l5]
-l7: $ _ ⊢ w : ∀ x (□ p) → □ ∀ z ([x/z] p) $ by imp_intro [l6]
+l5: $ w : ∀ x (□ p) , w R v ⊢ v : ∀ x p $ by all_intro [l4]
+l6: $ w : ∀ x (□ p) ⊢ w : □ ∀ x p $ by box_intro [l5]
+l7: $ _ ⊢ w : ∀ x (□ p) → □ ∀ x p $ by imp_intro [l6]
 
 converse_barcan
 ----------------
@@ -17,8 +17,8 @@ l2: $ w : □ ∀ x p , w R v ⊢ w R v $ by ax
 l3: $ w : □ ∀ x p , w R v ⊢ v : ∀ x p $ by box_elim [l1, l2]
 l4: $ w : □ ∀ x p , w R v ⊢ v : [x/z] p $ by all_elim [l3]
 l5: $ w : □ ∀ x p ⊢ w : □ [x/z] p $ by box_intro [l4]
-l6: $ w : □ ∀ x p ⊢ w : ∀ z (□ [x/z] p) $ by all_intro [l5]
-l7: $ _ ⊢ w : ((□ (∀ x p)) → ∀ z (□ ([x/z] p))) $ by imp_intro [l6]
+l6: $ w : □ ∀ x p ⊢ w : ∀ x (□ p) $ by all_intro [l5]
+l7: $ _ ⊢ w : □ (∀ x p) → ∀ x (□ p) $ by imp_intro [l6]
 
 box_all_elim
 ------------
