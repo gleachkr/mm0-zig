@@ -148,6 +148,7 @@ Theorem checking and emission:
 
 - `compiler/check.zig`
 - `compiler/check/matching.zig`
+- `compiler/theorem_boundary.zig`
 - `compiler/inference.zig`
 - `compiler/normalize.zig`
 - `compiler/emit.zig`
@@ -443,9 +444,16 @@ candidate binding list exists. It also owns the narrow fold-before-normalize
 fallback for conclusions, using existing def conversion, ACUI support, and
 normalizer transport rather than a separate equality subsystem.
 
+After the last line of a public theorem block has been checked,
+`compiler/theorem_boundary.zig` compares it with the theorem declaration.
+That boundary reconciliation is deliberately limited to transparent def
+conversion and registered normalization. It is proof-producing, just like
+ordinary line reconciliation.
+
 The checker does not adopt a general alpha-equivalence policy. Any extra
-flexibility is consumed earlier by symbolic matching or is turned into
-explicit transport proof lines.
+flexibility is consumed earlier by symbolic matching, by targeted
+`@freshen` during rule application, or is turned into explicit transport
+proof lines.
 
 ### Chained rule applications
 

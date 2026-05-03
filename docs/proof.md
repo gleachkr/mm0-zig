@@ -323,19 +323,18 @@ details.
 ## Final-line condition
 
 A public theorem block is accepted if and only if its final proof line
-proves the theorem conclusion from the corresponding `.mm0`
-declaration, either directly or after theorem-boundary reconciliation.
+proves the theorem conclusion from the corresponding `.mm0` declaration,
+directly or through the limited final-boundary reconciliation
+implemented by the frontend.
 
-That reconciliation is proof-producing. The compiler may emit ordinary
-rule applications that convert the proved final line into the declared
-theorem conclusion using the same frontend machinery available
-elsewhere, including transparent defs, normalization, and
-alpha-renaming cleanup driven by relation, rewrite, and congruence
-metadata.
+That reconciliation is proof-producing. If the final proof line differs
+from the declared theorem conclusion only by transparent def conversion or
+by registered normalization, the compiler may emit ordinary transport and
+conversion proof lines that bridge the gap.
 
-This flexibility applies only at the outer theorem boundary. Interior
-proof lines are still checked in the ordinary way against the cited
-rule application, and a lemma block is accepted if and only if its
+This flexibility applies only at the outer public theorem boundary.
+Interior proof lines are still checked in the ordinary way against the
+cited rule application, and a lemma block is accepted if and only if its
 final proof line proves the lemma conclusion from the lemma header.
 
 ## Internal representation note

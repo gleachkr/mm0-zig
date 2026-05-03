@@ -2724,9 +2724,6 @@ fn addBoundaryAttemptNotes(
     if (report.attempted_normalized) {
         addStaticProofNote(diag, "attempted normalized final reconciliation");
     }
-    if (report.attempted_alpha_cleanup) {
-        addStaticProofNote(diag, "attempted alpha-cleanup final reconciliation");
-    }
 }
 
 fn addStaticProofNote(diag: *Diagnostic, message: []const u8) void {

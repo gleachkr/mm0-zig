@@ -1524,7 +1524,7 @@ test "final mismatch reports reconciliation attempts" {
         mm0.CompilerDiagnosticPhase.final_reconciliation,
         diag.phase.?,
     );
-    try std.testing.expectEqual(@as(usize, 3), diag.noteSlice().len);
+    try std.testing.expectEqual(@as(usize, 2), diag.noteSlice().len);
     try std.testing.expectEqualStrings(
         "attempted transparent final reconciliation",
         diag.noteSlice()[0].message,
@@ -1532,10 +1532,6 @@ test "final mismatch reports reconciliation attempts" {
     try std.testing.expectEqualStrings(
         "attempted normalized final reconciliation",
         diag.noteSlice()[1].message,
-    );
-    try std.testing.expectEqualStrings(
-        "attempted alpha-cleanup final reconciliation",
-        diag.noteSlice()[2].message,
     );
 }
 

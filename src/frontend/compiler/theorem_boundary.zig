@@ -3,24 +3,18 @@ const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
-const ResolvedRelation =
-    @import("../rewrite_registry.zig").ResolvedRelation;
-const Normalizer = @import("../normalizer.zig").Normalizer;
 const Inference = @import("./inference.zig");
 const Normalize = @import("./normalize.zig");
-const BoundaryCleanup = @import("./theorem_boundary/cleanup.zig");
 const CompilerDiag = @import("./diag.zig");
 const DebugConfig = @import("../debug.zig").DebugConfig;
 const DebugTrace = @import("../debug.zig");
 const CheckedIr = @import("./checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
-const CheckedRef = CheckedIr.CheckedRef;
 const appendTransportLine = CheckedIr.appendTransportLine;
 
 pub const ReconciliationReport = struct {
     attempted_transparent: bool = false,
     attempted_normalized: bool = false,
-    attempted_alpha_cleanup: bool = false,
 };
 
 pub fn tryReconcileFinalConclusion(
@@ -38,8 +32,8 @@ pub fn tryReconcileFinalConclusion(
 ) !bool {
     DebugTrace.traceBoundary(
         debug,
-        "reconciling final theorem line via transparent, normalized, then " ++
-            "alpha cleanup paths",
+        "reconciling final theorem line via transparent then normalized " ++
+            "paths",
         .{},
     );
     report.attempted_transparent = true;
@@ -89,33 +83,7 @@ pub fn tryReconcileFinalConclusion(
 
     DebugTrace.traceBoundary(
         debug,
-        "normalized reconciliation failed; trying alpha cleanup",
-        .{},
-    );
-    report.attempted_alpha_cleanup = true;
-    if (try buildAlphaCleanupReconciliation(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        scratch,
-        theorem_concl,
-        final_line,
-        line_idx,
-        debug,
-    )) {
-        DebugTrace.traceBoundary(
-            debug,
-            "alpha cleanup reconciliation succeeded",
-            .{},
-        );
-        return true;
-    }
-
-    DebugTrace.traceBoundary(
-        debug,
-        "final reconciliation failed on all paths",
+        "final reconciliation failed on transparent and normalized paths",
         .{},
     );
     return false;
@@ -190,84 +158,4 @@ fn buildNormalizedReconciliation(
         .{ .line = line_idx },
     );
     return true;
-}
-
-fn buildAlphaCleanupReconciliation(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    scratch: *CompilerDiag.Scratch,
-    theorem_concl: ExprId,
-    final_line: ExprId,
-    line_idx: usize,
-    debug: DebugConfig,
-) !bool {
-    const cleanup = (try BoundaryCleanup.tryBuildFinalCleanupConversion(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        scratch,
-        theorem_concl,
-        final_line,
-        debug,
-    )) orelse return false;
-
-    const conversion = try buildBoundaryTransport(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        scratch,
-        cleanup.relation,
-        theorem_concl,
-        final_line,
-        cleanup.declared_to_cleaned_line_idx,
-        .{ .line = line_idx },
-        debug,
-    );
-    _ = conversion;
-    return true;
-}
-
-fn buildBoundaryTransport(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    scratch: *CompilerDiag.Scratch,
-    relation: ResolvedRelation,
-    theorem_concl: ExprId,
-    final_line: ExprId,
-    theorem_to_final_idx: usize,
-    final_ref: CheckedRef,
-    debug: DebugConfig,
-) !usize {
-    var normalizer = Normalizer.initWithDebugAndScratch(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        scratch,
-        debug,
-    );
-    const final_to_theorem_idx = try normalizer.emitSymm(
-        relation,
-        theorem_concl,
-        final_line,
-        theorem_to_final_idx,
-    );
-    return try normalizer.emitTransport(
-        relation,
-        theorem_concl,
-        final_line,
-        final_to_theorem_idx,
-        final_ref,
-    );
 }
