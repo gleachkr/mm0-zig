@@ -8,6 +8,9 @@ import {
   jumpToDefinition,
   languageServerExtensions,
 } from "@codemirror/lsp-client";
+import { loadCompiler } from "@aufbau/compiler";
+import { loadVerifier } from "@aufbau/verifier";
+import { loadLspServer } from "@aufbau/lsp";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -196,8 +199,8 @@ const ui = {
   theme: document.querySelector("#theme-toggle"),
 };
 
-let compilerModule = null;
-let verifierModule = null;
+let compilerRuntime = null;
+let verifierRuntime = null;
 let pendingTimer = null;
 let diagnosticStatus = null;
 let diagnosticTargets = [];
@@ -206,6 +209,7 @@ let runToken = 0;
 let mm0View = null;
 let proofView = null;
 let lspClient = null;
+let lspServer = null;
 
 initTheme();
 initTabs();
@@ -254,19 +258,21 @@ function exampleFromHash() {
 
 async function main() {
   const initial = exampleFromHash();
-  const [compiler, verifier, mm0Text, proofText] = await Promise.all([
-    loadWasm("./compiler.wasm"),
-    loadWasm("./verifier.wasm"),
+  const [compiler, verifier, server, mm0Text, proofText] = await Promise.all([
+    loadCompiler(),
+    loadVerifier(),
+    loadLspServer(),
     fetchText(examples[initial].mm0),
     fetchText(examples[initial].proof),
   ]);
 
-  compilerModule = compiler;
-  verifierModule = verifier;
+  compilerRuntime = compiler;
+  verifierRuntime = verifier;
+  lspServer = server;
   lspClient = new LSPClient({
     rootUri: "file:///demo",
     extensions: languageServerExtensions(),
-  }).connect(new WasmLspTransport(compiler));
+  }).connect(lspServer);
 
   mm0View = new EditorView({
     parent: ui.mm0Editor,
@@ -323,7 +329,7 @@ function markActiveExample(name) {
 
 async function loadExample(name) {
   const example = examples[name];
-  if (!example || !compilerModule || !verifierModule || !mm0View || !proofView) {
+  if (!example || !compilerRuntime || !verifierRuntime || !mm0View || !proofView) {
     return;
   }
 
@@ -456,7 +462,7 @@ function warmUpAnalysis(mm0Text, proofText) {
 }
 
 async function runAnalysis() {
-  if (!compilerModule || !verifierModule || !mm0View || !proofView) {
+  if (!compilerRuntime || !verifierRuntime || !mm0View || !proofView) {
     return;
   }
 
@@ -821,150 +827,13 @@ function clearDiagnostics() {
 }
 
 function callCompiler(mm0Text, proofText) {
-  const module = compilerModule;
-  const mm0Bytes = encoder.encode(mm0Text);
-  const proofBytes = encoder.encode(proofText);
-  const mm0Input = writeBytes(module, mm0Bytes);
-  const proofInput = writeBytes(module, proofBytes);
-
-  try {
-    const started = performance.now();
-    module.exports.compile_sources(
-      mm0Input.ptr,
-      mm0Input.len,
-      proofInput.ptr,
-      proofInput.len,
-    );
-    const durationMs = performance.now() - started;
-    const meta = readJsonResult(module);
-    const mmbBytes = meta?.ok
-      ? readBytes(
-          module,
-          module.exports.result_mmb_ptr(),
-          module.exports.result_mmb_len(),
-        )
-      : new Uint8Array();
-    return { meta, durationMs, mmbBytes };
-  } finally {
-    freeBytes(module, mm0Input);
-    freeBytes(module, proofInput);
-  }
+  if (!compilerRuntime) throw new Error("compiler is not loaded");
+  return compilerRuntime.compile(mm0Text, proofText);
 }
 
 function callVerifier(mm0Text, mmbBytes) {
-  const module = verifierModule;
-  const mm0Bytes = encoder.encode(mm0Text);
-  const mm0Input = writeBytes(module, mm0Bytes);
-  const mmbInput = writeBytes(module, mmbBytes);
-
-  try {
-    const started = performance.now();
-    module.exports.verify_pair(
-      mm0Input.ptr,
-      mm0Input.len,
-      mmbInput.ptr,
-      mmbInput.len,
-    );
-    const durationMs = performance.now() - started;
-    return { meta: readJsonResult(module), durationMs };
-  } finally {
-    freeBytes(module, mm0Input);
-    freeBytes(module, mmbInput);
-  }
-}
-
-class WasmLspTransport {
-  constructor(module) {
-    this.module = module;
-    this.subscribers = new Set();
-  }
-
-  subscribe(handler) {
-    this.subscribers.add(handler);
-  }
-
-  unsubscribe(handler) {
-    this.subscribers.delete(handler);
-  }
-
-  send(message) {
-    const input = writeBytes(this.module, encoder.encode(message));
-    try {
-      const ok = this.module.exports.process_lsp_message(
-        input.ptr,
-        input.len,
-      );
-      const output = readLspResult(this.module);
-      if (!ok) {
-        console.warn("LSP message failed", output);
-      }
-      for (const line of output.split("\n")) {
-        if (line) this.emit(line);
-      }
-    } finally {
-      freeBytes(this.module, input);
-    }
-  }
-
-  emit(message) {
-    for (const handler of this.subscribers) {
-      handler(message);
-    }
-  }
-}
-
-function writeBytes(module, bytes) {
-  const len = bytes.length;
-  const ptr = module.exports.alloc(len);
-  if (len !== 0 && ptr === 0) {
-    throw new Error("WebAssembly allocation failed");
-  }
-  if (len !== 0) {
-    new Uint8Array(module.exports.memory.buffer, ptr, len).set(bytes);
-  }
-  return { ptr, len };
-}
-
-function freeBytes(module, { ptr, len }) {
-  module.exports.free(ptr, len);
-}
-
-function readBytes(module, ptr, len) {
-  if (!ptr || !len) {
-    return new Uint8Array();
-  }
-  const view = new Uint8Array(module.exports.memory.buffer, ptr, len);
-  return view.slice();
-}
-
-function readJsonResult(module) {
-  const ptr = module.exports.result_json_ptr();
-  const len = module.exports.result_json_len();
-  if (!ptr || !len) {
-    return null;
-  }
-  const jsonBytes = new Uint8Array(module.exports.memory.buffer, ptr, len);
-  return JSON.parse(decoder.decode(jsonBytes));
-}
-
-function readLspResult(module) {
-  const ptr = module.exports.result_lsp_ptr();
-  const len = module.exports.result_lsp_len();
-  if (!ptr || !len) {
-    return "";
-  }
-  const bytes = new Uint8Array(module.exports.memory.buffer, ptr, len);
-  return decoder.decode(bytes);
-}
-
-async function loadWasm(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load ${url}`);
-  }
-  const bytes = await response.arrayBuffer();
-  const { instance } = await WebAssembly.instantiate(bytes, {});
-  return instance;
+  if (!verifierRuntime) throw new Error("verifier is not loaded");
+  return verifierRuntime.verifyPair(mm0Text, mmbBytes);
 }
 
 async function fetchText(url) {

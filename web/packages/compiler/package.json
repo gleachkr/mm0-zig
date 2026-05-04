@@ -1,0 +1,11 @@
+{
+  "name": "@aufbau/compiler",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./index.js",
+  "files": [
+    "index.js",
+    "compiler.wasm"
+  ],
+  "sideEffects": false
+}

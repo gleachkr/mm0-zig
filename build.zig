@@ -69,7 +69,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     compiler_wasm_module.addImport("mm0", mm0_wasm_lib);
-    compiler_wasm_module.addImport("lsp", lsp_wasm_module);
 
     const compiler_wasm = b.addExecutable(.{
         .name = "abc-web",
@@ -94,14 +93,82 @@ pub fn build(b: *std.Build) void {
     verifier_wasm.rdynamic = true;
     verifier_wasm.export_memory = true;
 
-    const web_demo_step = b.step("web-demo", "Build the browser demo");
-    const install_compiler_wasm = b.addInstallArtifact(compiler_wasm, .{
-        .dest_dir = .{ .override = .prefix },
-        .dest_sub_path = "web-demo/compiler.wasm",
+    const lsp_server_wasm_module = b.createModule(.{
+        .root_source_file = b.path("src/bin/compiler/lsp_wasm.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
     });
-    const install_verifier_wasm = b.addInstallArtifact(verifier_wasm, .{
+    lsp_server_wasm_module.addImport("mm0", mm0_wasm_lib);
+    lsp_server_wasm_module.addImport("lsp", lsp_wasm_module);
+
+    const lsp_server_wasm = b.addExecutable(.{
+        .name = "abc-lsp-web",
+        .root_module = lsp_server_wasm_module,
+    });
+    lsp_server_wasm.entry = .disabled;
+    lsp_server_wasm.rdynamic = true;
+    lsp_server_wasm.export_memory = true;
+
+    const web_demo_step = b.step("web-demo", "Build the browser demo");
+    const web_packages_step = b.step(
+        "web-packages",
+        "Build the redistributable JS/wasm packages",
+    );
+
+    const install_demo_compiler_pkg = b.addInstallDirectory(.{
+        .source_dir = b.path("web/packages/compiler"),
+        .install_dir = .prefix,
+        .install_subdir = "web-demo/@aufbau/compiler",
+    });
+    const install_demo_verifier_pkg = b.addInstallDirectory(.{
+        .source_dir = b.path("web/packages/verifier"),
+        .install_dir = .prefix,
+        .install_subdir = "web-demo/@aufbau/verifier",
+    });
+    const install_demo_lsp_pkg = b.addInstallDirectory(.{
+        .source_dir = b.path("web/packages/lsp"),
+        .install_dir = .prefix,
+        .install_subdir = "web-demo/@aufbau/lsp",
+    });
+    const install_demo_compiler_wasm = b.addInstallArtifact(compiler_wasm, .{
         .dest_dir = .{ .override = .prefix },
-        .dest_sub_path = "web-demo/verifier.wasm",
+        .dest_sub_path = "web-demo/@aufbau/compiler/compiler.wasm",
+    });
+    const install_demo_verifier_wasm = b.addInstallArtifact(verifier_wasm, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = "web-demo/@aufbau/verifier/verifier.wasm",
+    });
+    const install_demo_lsp_wasm = b.addInstallArtifact(lsp_server_wasm, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = "web-demo/@aufbau/lsp/lsp.wasm",
+    });
+
+    const install_npm_compiler_pkg = b.addInstallDirectory(.{
+        .source_dir = b.path("web/packages/compiler"),
+        .install_dir = .prefix,
+        .install_subdir = "npm/@aufbau/compiler",
+    });
+    const install_npm_verifier_pkg = b.addInstallDirectory(.{
+        .source_dir = b.path("web/packages/verifier"),
+        .install_dir = .prefix,
+        .install_subdir = "npm/@aufbau/verifier",
+    });
+    const install_npm_lsp_pkg = b.addInstallDirectory(.{
+        .source_dir = b.path("web/packages/lsp"),
+        .install_dir = .prefix,
+        .install_subdir = "npm/@aufbau/lsp",
+    });
+    const install_npm_compiler_wasm = b.addInstallArtifact(compiler_wasm, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = "npm/@aufbau/compiler/compiler.wasm",
+    });
+    const install_npm_verifier_wasm = b.addInstallArtifact(verifier_wasm, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = "npm/@aufbau/verifier/verifier.wasm",
+    });
+    const install_npm_lsp_wasm = b.addInstallArtifact(lsp_server_wasm, .{
+        .dest_dir = .{ .override = .prefix },
+        .dest_sub_path = "npm/@aufbau/lsp/lsp.wasm",
     });
     const install_web_assets = b.addInstallDirectory(.{
         .source_dir = b.path("web"),
@@ -233,9 +300,19 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/smullyan.auf"),
         "web-demo/fixtures/smullyan.auf",
     );
-    web_demo_step.dependOn(&install_compiler_wasm.step);
-    web_demo_step.dependOn(&install_verifier_wasm.step);
+    web_demo_step.dependOn(&install_demo_compiler_pkg.step);
+    web_demo_step.dependOn(&install_demo_verifier_pkg.step);
+    web_demo_step.dependOn(&install_demo_lsp_pkg.step);
+    web_demo_step.dependOn(&install_demo_compiler_wasm.step);
+    web_demo_step.dependOn(&install_demo_verifier_wasm.step);
+    web_demo_step.dependOn(&install_demo_lsp_wasm.step);
     web_demo_step.dependOn(&install_web_assets.step);
+    web_packages_step.dependOn(&install_npm_compiler_pkg.step);
+    web_packages_step.dependOn(&install_npm_verifier_pkg.step);
+    web_packages_step.dependOn(&install_npm_lsp_pkg.step);
+    web_packages_step.dependOn(&install_npm_compiler_wasm.step);
+    web_packages_step.dependOn(&install_npm_verifier_wasm.step);
+    web_packages_step.dependOn(&install_npm_lsp_wasm.step);
     web_demo_step.dependOn(&install_web_fonts.step);
     web_demo_step.dependOn(&install_hilbert_mm0.step);
     web_demo_step.dependOn(&install_hilbert_proof.step);

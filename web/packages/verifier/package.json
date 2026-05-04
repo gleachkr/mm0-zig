@@ -1,0 +1,11 @@
+{
+  "name": "@aufbau/verifier",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": "./index.js",
+  "files": [
+    "index.js",
+    "verifier.wasm"
+  ],
+  "sideEffects": false
+}
