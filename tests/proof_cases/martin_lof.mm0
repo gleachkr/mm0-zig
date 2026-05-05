@@ -108,6 +108,12 @@ axiom is_ty_congr (A B: ty): $ A ~ B $ > $ Ty A <=> Ty B $;
 axiom has_ty_congr (s t: tm) (A B: ty):
   $ s ≈ t $ > $ A ~ B $ > $ (s : A) <=> (t : B) $;
 
+-- Regularity keeps the derived development from carrying premises that can
+-- be recovered from typing judgements.
+axiom has_ty_regular (g: ctx) (t: tm) (A: ty):
+  $ g ⊢ t : A $
+  > $ g ⊢ Ty A $;
+
 --| @congr
 axiom eq_ty_congr (A1 A2 B1 B2: ty):
   $ A1 ~ A2 $ > $ B1 ~ B2 $ > $ (A1 ≡ B1) <=> (A2 ≡ B2) $;
@@ -156,9 +162,18 @@ axiom nd_congr (g h: ctx) (J K: jdg):
 
 -- The structural core lives here so later sections can focus on the
 -- constructors they introduce rather than reopening context management.
-axiom weaken (g: ctx) (J K: jdg):
+axiom weaken (g: ctx) {x: tm} (T: ty) (J: jdg):
   $ g ⊢ J $
-  > $ g , K ⊢ J $;
+  > $ g , x : T ⊢ J $;
+
+theorem weaken2 (g: ctx) {x y: tm} (T1: ty) (T2: ty x) (J: jdg):
+  $ g ⊢ J $
+  > $ g , x : T1 , y : T2 ⊢ J $;
+
+theorem weaken3 (g: ctx) {x y z: tm} (T1: ty) (T2: ty x)
+  (T3: ty x y) (J: jdg):
+  $ g ⊢ J $
+  > $ g , x : T1 , y : T2 , z : T3 ⊢ J $;
 
 axiom var (g: ctx) {x: tm} (A: ty): $ g , x : A ⊢ x : A $;
 
@@ -314,8 +329,7 @@ theorem id_ty (g: ctx) (A: ty) {x: tm}:
   > $ g ⊢ (λ x : A. x) : (Π x : A. A) $;
 
 theorem app_id_beta (g: ctx) (A: ty) {x: tm} (u: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ u : A $
+  $ g ⊢ u : A $
   > $ g ⊢ ≡[A] ((λ x : A. x) · u) = u $;
 
 -- The generic identity theorem stays here as the smallest possible Π example;
@@ -371,21 +385,18 @@ axiom true_intro (g: ctx): $ g ⊢ true : Bool $;
 axiom false_intro (g: ctx): $ g ⊢ false : Bool $;
 
 axiom bool_elim (g: ctx) (A: ty) (t f b: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ t : A $
+  $ g ⊢ t : A $
   > $ g ⊢ f : A $
   > $ g ⊢ b : Bool $
   > $ g ⊢ bool_rec A t f b : A $;
 
 axiom bool_beta_true (g: ctx) (A: ty) (t f: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ t : A $
+  $ g ⊢ t : A $
   > $ g ⊢ f : A $
   > $ g ⊢ ≡[A] (bool_rec A t f true) = t $;
 
 axiom bool_beta_false (g: ctx) (A: ty) (t f: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ t : A $
+  $ g ⊢ t : A $
   > $ g ⊢ f : A $
   > $ g ⊢ ≡[A] (bool_rec A t f false) = f $;
 
@@ -518,21 +529,18 @@ theorem one_ty (g: ctx):
   $ g ⊢ suc zero : Nat $;
 
 theorem nat_rec_ty (g: ctx) (A: ty) (z s n: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ z : A $
+  $ g ⊢ z : A $
   > $ g ⊢ s : (A → A) $
   > $ g ⊢ n : Nat $
   > $ g ⊢ nat_rec A z s n : A $;
 
 theorem nat_rec_zero (g: ctx) (A: ty) (z s: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ z : A $
+  $ g ⊢ z : A $
   > $ g ⊢ s : (A → A) $
   > $ g ⊢ ≡[A] (nat_rec A z s zero) = z $;
 
 theorem nat_rec_suc (g: ctx) (A: ty) (z s n: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ z : A $
+  $ g ⊢ z : A $
   > $ g ⊢ s : (A → A) $
   > $ g ⊢ n : Nat $
   > $ g ⊢ ≡[A] (nat_rec A z s (suc n)) = (s · (nat_rec A z s n)) $;
@@ -586,6 +594,15 @@ axiom eq_tm_left (g: ctx) (A: ty) (s t: tm):
 axiom eq_tm_right (g: ctx) (A: ty) (s t: tm):
   $ g ⊢ ≡[A] s = t $
   > $ g ⊢ t : A $;
+
+-- Function type inversion recovers closed domain and codomain regularity.
+axiom arr_dom_regular (g: ctx) (A B: ty) (f: tm):
+  $ g ⊢ f : (A → B) $
+  > $ g ⊢ Ty A $;
+
+axiom arr_cod_regular (g: ctx) (A B: ty) (f: tm):
+  $ g ⊢ f : (A → B) $
+  > $ g ⊢ Ty B $;
 
 axiom app_eq_right (g: ctx) (A B: ty) (f s t: tm):
   $ g ⊢ f : (A → B) $
@@ -683,8 +700,7 @@ axiom sb_tm_J {w x y q: tm} (u: tm w) (A: ty w) (C: ty w x y q)
           (⟦ w / u ⟧ s) (⟦ w / u ⟧ t) (⟦ w / u ⟧ p) $;
 
 axiom Id_form (g: ctx) (A: ty) (s t: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ s : A $
+  $ g ⊢ s : A $
   > $ g ⊢ t : A $
   > $ g ⊢ Ty (Id A s t) $;
 
@@ -692,20 +708,28 @@ axiom refl_intro (g: ctx) (A: ty) (s: tm):
   $ g ⊢ s : A $
   > $ g ⊢ refl A s : Id A s s $;
 
+axiom Id_ty_regular (g: ctx) (A: ty) (s t p: tm):
+  $ g ⊢ p : Id A s t $
+  > $ g ⊢ Ty A $;
+
+axiom Id_left_regular (g: ctx) (A: ty) (s t p: tm):
+  $ g ⊢ p : Id A s t $
+  > $ g ⊢ s : A $;
+
+axiom Id_right_regular (g: ctx) (A: ty) (s t p: tm):
+  $ g ⊢ p : Id A s t $
+  > $ g ⊢ t : A $;
+
 -- Judgemental equality gives an identity path. This is the bridge that lets
 -- definitional computation feed later propositional arithmetic proofs.
 axiom eq_tm_to_Id (g: ctx) (A: ty) (s t: tm):
   $ g ⊢ ≡[A] s = t $
-  > $ g ⊢ s : A $
-  > $ g ⊢ t : A $
   > $ g ⊢ refl A s : Id A s t $;
 
 axiom J_elim (g: ctx) {x y q: tm} (A: ty) (C: ty x y q) (r: tm x)
   (s t p: tm):
   $ g , x : A , y : A , q : Id A x y ⊢ Ty C $
   > $ g , x : A ⊢ r : [y/x] [q/refl A x] C $
-  > $ g ⊢ s : A $
-  > $ g ⊢ t : A $
   > $ g ⊢ p : Id A s t $
   > $ g ⊢ J x y q A C r s t p : [x/s] [y/t] [q/p] C $;
 
@@ -735,15 +759,11 @@ axiom sb_tm_id_sym {x: tm} (u: tm x) (A: ty x) (s t p: tm x):
           (⟦ x / u ⟧ p) $;
 
 theorem id_sym_ty (g: ctx) (A: ty) (s t p: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ s : A $
-  > $ g ⊢ t : A $
-  > $ g ⊢ p : Id A s t $
+  $ g ⊢ p : Id A s t $
   > $ g ⊢ id_sym A s t p : Id A t s $;
 
 theorem id_sym_refl (g: ctx) (A: ty) (s: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ s : A $
+  $ g ⊢ s : A $
   > $ g ⊢ ≡[Id A s s] (id_sym A s s (refl A s)) = refl A s $;
 
 def id_trans (A: ty) (s t u p q: tm) {.x .y .z .w: tm}: tm =
@@ -768,19 +788,12 @@ axiom sb_tm_id_trans {x: tm} (a: tm x) (A: ty x)
           (⟦ x / a ⟧ u) (⟦ x / a ⟧ p) (⟦ x / a ⟧ q) $;
 
 theorem id_trans_ty (g: ctx) (A: ty) (s t u p q: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ s : A $
-  > $ g ⊢ t : A $
-  > $ g ⊢ u : A $
-  > $ g ⊢ p : Id A s t $
+  $ g ⊢ p : Id A s t $
   > $ g ⊢ q : Id A t u $
   > $ g ⊢ id_trans A s t u p q : Id A s u $;
 
 theorem id_trans_refl_left (g: ctx) (A: ty) (s u q: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ s : A $
-  > $ g ⊢ u : A $
-  > $ g ⊢ q : Id A s u $
+  $ g ⊢ q : Id A s u $
   > $ g ⊢ ≡[Id A s u] (id_trans A s s u (refl A s) q) = q $;
 
 def ap (A B: ty) (f s t p: tm) {.x .y .q: tm}: tm =
@@ -803,18 +816,12 @@ axiom sb_tm_ap {x: tm} (u: tm x) (A B: ty x) (f s t p: tm x):
           (⟦ x / u ⟧ t) (⟦ x / u ⟧ p) $;
 
 theorem ap_ty (g: ctx) (A B: ty) (f s t p: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ Ty B $
-  > $ g ⊢ f : (A → B) $
-  > $ g ⊢ s : A $
-  > $ g ⊢ t : A $
+  $ g ⊢ f : (A → B) $
   > $ g ⊢ p : Id A s t $
   > $ g ⊢ ap A B f s t p : Id B (f · s) (f · t) $;
 
 theorem ap_refl (g: ctx) (A B: ty) (f s: tm):
-  $ g ⊢ Ty A $
-  > $ g ⊢ Ty B $
-  > $ g ⊢ f : (A → B) $
+  $ g ⊢ f : (A → B) $
   > $ g ⊢ s : A $
   > $ g ⊢ ≡[Id B (f · s) (f · s)]
       (ap A B f s s (refl A s)) = refl B (f · s) $;
@@ -838,9 +845,7 @@ axiom sb_tm_ap_suc {x: tm} (u: tm x) (s t p: tm x):
       ≈ ap_suc (⟦ x / u ⟧ s) (⟦ x / u ⟧ t) (⟦ x / u ⟧ p) $;
 
 theorem ap_suc_ty (g: ctx) (s t p: tm):
-  $ g ⊢ s : Nat $
-  > $ g ⊢ t : Nat $
-  > $ g ⊢ p : Id Nat s t $
+  $ g ⊢ p : Id Nat s t $
   > $ g ⊢ ap_suc s t p : Id Nat (suc s) (suc t) $;
 
 theorem ap_suc_refl (g: ctx) (s: tm):
@@ -874,17 +879,13 @@ axiom sb_tm_transport {x y: tm} (a: tm x) (A: ty x) (B: ty x y)
 
 theorem transport_ty (g: ctx) (A: ty) {x: tm} (B: ty x)
   (s t p u: tm):
-  $ g ⊢ Ty A $
-  > $ g , x : A ⊢ Ty B $
-  > $ g ⊢ s : A $
-  > $ g ⊢ t : A $
+  $ g , x : A ⊢ Ty B $
   > $ g ⊢ p : Id A s t $
   > $ g ⊢ u : [x/s] B $
   > $ g ⊢ transport A x B s t p u : [x/t] B $;
 
 theorem transport_refl (g: ctx) (A: ty) {x: tm} (B: ty x) (s u: tm):
-  $ g ⊢ Ty A $
-  > $ g , x : A ⊢ Ty B $
+  $ g , x : A ⊢ Ty B $
   > $ g ⊢ s : A $
   > $ g ⊢ u : [x/s] B $
   > $ g ⊢ ≡[[x/s] B] (transport A x B s s (refl A s) u) = u $;
