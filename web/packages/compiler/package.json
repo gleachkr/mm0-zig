@@ -1,6 +1,12 @@
 {
   "name": "@aufbau/compiler",
   "version": "0.0.0",
+  "description": "Aufbau proof compiler for browsers and JavaScript runtimes.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gleachkr/aufbau.git"
+  },
   "type": "module",
   "exports": "./index.js",
   "files": [

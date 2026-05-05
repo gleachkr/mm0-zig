@@ -1,0 +1,86 @@
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Run npm publish with --dry-run
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-canary
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Cache Zig build data
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/zig-global
+            .cache/zig-local
+          key: zig-${{ runner.os }}-${{ hashFiles('build.zig.zon') }}
+          restore-keys: |
+            zig-${{ runner.os }}-
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Build packages
+        run: |
+          zig build web-packages \
+            -Doptimize=ReleaseFast \
+            --cache-dir .cache/zig-local \
+            --global-cache-dir .cache/zig-global
+
+      - name: Set canary versions
+        run: |
+          stamp="$(date -u +'%Y%m%dT%H%M%SZ')"
+          sha="$(git rev-parse --short=12 HEAD)"
+          version="0.0.0-canary.${stamp}.${GITHUB_RUN_NUMBER}.g${sha}"
+
+          echo "Publishing canary version ${version}"
+          echo "version=${version}" >> "${GITHUB_ENV}"
+
+          for pkg in compiler verifier lsp; do
+            cd "zig-out/npm/@aufbau/${pkg}"
+            npm version "${version}" --no-git-tag-version
+            cd - >/dev/null
+          done
+
+      - name: Publish packages
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          publish_args=(--access public --tag canary --provenance)
+
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            publish_args+=(--dry-run)
+          fi
+
+          for pkg in compiler verifier lsp; do
+            cd "zig-out/npm/@aufbau/${pkg}"
+            npm publish "${publish_args[@]}"
+            cd - >/dev/null
+          done
