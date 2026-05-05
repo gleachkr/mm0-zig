@@ -193,6 +193,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "hilbert", .outcome = .pass },
     .{ .stem = "hilbert_quant", .outcome = .pass },
     .{ .stem = "russell", .outcome = .pass },
+    .{ .stem = "zermelo", .outcome = .pass },
     .{ .stem = "pass_view_basic", .outcome = .pass },
     .{ .stem = "pass_view_explicit", .outcome = .pass },
     .{ .stem = "pass_recover_basic", .outcome = .pass },

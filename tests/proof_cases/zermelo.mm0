@@ -1,0 +1,389 @@
+-- A first graph-based set theory slice for the Zermelo demo.
+--
+-- The set-forming operations are primitive, with axioms matching the
+-- intended Zermelo basis.  Function-like notions are definitions over
+-- sets of ordered pairs, not primitive predicates.
+--
+-- The final Cantor theorem below now derives the diagonal case split from
+-- separation and the definition of the diagonal set.  The remaining large
+-- admitted ingredients are the functionality step behind the "out" case
+-- and the proof-side witness rule for surjectivity.
+
+delimiter $ ( ) { } [ / ] , | $;
+
+strict provable sort wff;
+--| @vars x y z u v w
+sort set;
+
+term im (p q: wff): wff;
+infixr im: $→$ prec 25;
+infixr im: $->$ prec 25;
+
+term not (p: wff): wff;
+prefix not: $¬$ prec 41;
+prefix not: $~$ prec 41;
+
+term and (p q: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
+
+term or (p q: wff): wff;
+infixr or: $∨$ prec 28;
+infixr or: $\\/$ prec 28;
+
+term bi (p q: wff): wff;
+infixr bi: $↔$ prec 20;
+infixr bi: $<->$ prec 20;
+
+term bot: wff;
+prefix bot: $⊥$ prec max;
+prefix bot: $F.$ prec max;
+
+term all {x: set} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+prefix all: $A.$ prec 41;
+
+term ex {x: set} (p: wff x): wff;
+prefix ex: $∃$ prec 41;
+prefix ex: $E.$ prec 41;
+
+term sb_f (t: set) {x: set} (p: wff x): wff;
+notation sb_f (t: set) {x: set} (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+
+term set_eq (a b: set): wff;
+infixl set_eq: $=$ prec 50;
+
+term mem (x A: set): wff;
+infixl mem: $∈$ prec 50;
+infixl mem: $e.$ prec 50;
+
+def not_mem (x A: set): wff = $ ¬ (x ∈ A) $;
+infixl not_mem: $∉$ prec 50;
+infixl not_mem: $notin$ prec 50;
+
+--| @relation wff bi biid bitr bisym mpbi
+axiom biid (p: wff): $ p ↔ p $;
+axiom bitr (p q r: wff): $ p ↔ q $ > $ q ↔ r $ > $ p ↔ r $;
+axiom bisym (p q: wff): $ p ↔ q $ > $ q ↔ p $;
+axiom mpbi (p q: wff): $ p ↔ q $ > $ p $ > $ q $;
+axiom bi1 (p q: wff): $ (p ↔ q) → (p → q) $;
+
+--| @relation set set_eq setid settr setsym _
+axiom setid (a: set): $ a = a $;
+axiom settr (a b c: set): $ a = b $ > $ b = c $ > $ a = c $;
+axiom setsym (a b: set): $ a = b $ > $ b = a $;
+
+--| @congr
+axiom im_congr (p q r s: wff):
+  $ p ↔ q $ > $ r ↔ s $ > $ (p → r) ↔ (q → s) $;
+
+--| @congr
+axiom not_congr (p q: wff): $ p ↔ q $ > $ ¬ p ↔ ¬ q $;
+
+--| @congr
+axiom and_congr (p q r s: wff):
+  $ p ↔ q $ > $ r ↔ s $ > $ (p ∧ r) ↔ (q ∧ s) $;
+
+--| @congr
+axiom or_congr (p q r s: wff):
+  $ p ↔ q $ > $ r ↔ s $ > $ (p ∨ r) ↔ (q ∨ s) $;
+
+--| @congr
+axiom all_congr {x: set} (p q: wff x):
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @congr
+axiom ex_congr {x: set} (p q: wff x):
+  $ p ↔ q $ > $ ∃ x p ↔ ∃ x q $;
+
+--| @congr
+axiom mem_congr (x y A B: set):
+  $ x = y $ > $ A = B $ > $ (x ∈ A) ↔ (y ∈ B) $;
+
+-- Basic implication and negation rules used by the proof script.
+axiom h1 (p q: wff): $ p → (q → p) $;
+axiom h2 (p q r: wff):
+  $ (p → (q → r)) → ((p → q) → (p → r)) $;
+axiom imp_not_self (p: wff): $ p → ¬ p $ > $ p → ⊥ $;
+axiom imp_not_to_self (p: wff): $ ¬ p → p $ > $ ¬ p → ⊥ $;
+axiom not_to_imp (p: wff): $ ¬ p $ > $ p → ⊥ $;
+axiom contra_imp (p q r: wff):
+  $ p → (q → r) $ > $ ¬ r → (p → ¬ q) $;
+axiom mp (p q: wff): $ p → q $ > $ p $ > $ q $;
+theorem imp_trans (p q r: wff): $ p → q $ > $ q → r $ > $ p → r $;
+theorem imp_mp_right (p q r: wff):
+  $ q $ > $ p → (q → r) $ > $ p → r $;
+axiom and1 (p q: wff): $ p → (q → p ∧ q) $;
+theorem and_intro (p q: wff): $ p $ > $ q $ > $ p ∧ q $;
+axiom and_elim_l (p q: wff): $ p ∧ q $ > $ p $;
+axiom and_elim_r (p q: wff): $ p ∧ q $ > $ q $;
+theorem and_mp_right (q r s: wff):
+  $ r $ > $ (q ∧ r) → s $ > $ q → s $;
+
+theorem bi_imp (p q: wff): $ p ↔ q $ > $ p → q $;
+theorem bi_imp_imp (p q r: wff):
+  $ p → (q ↔ r) $ > $ p → (q → r) $;
+
+-- Classical proof by cases, specialized to contradiction.
+axiom cases_bot (p: wff): $ p → ⊥ $ > $ ¬ p → ⊥ $ > $ ⊥ $;
+
+-- Zermelo set-forming primitives.
+term empty: set;
+prefix empty: $∅$ prec max;
+
+term pairset (a b: set): set;
+term union (A: set): set;
+term power (A: set): set;
+prefix power: $𝒫$ prec 80;
+term sep (A: set) {x: set} (p: wff x): set;
+notation sep (A: set) {x: set} (p: wff x): set =
+  (${$:max) x ($∈$:50) A ($|$:0) p ($}$:0);
+
+--| @view {u: set} (t: set) (p: wff u) (q: wff): $ ∀ u p → q $
+--| @recover t q p u
+axiom all_elim_imp {u: set} (t: set) (p: wff u):
+  $ ∀ u p → [u/t] p $;
+
+axiom all_intro_imp {u: set} (p: wff) (q: wff u):
+  $ p → q $ > $ p → ∀ u q $;
+
+--| @view {u: set} (a b: set) (p: wff u) (q r: wff): $ a = b → (q → r) $
+--| @abstract p q r u a b
+--| @fresh u
+axiom eq_replace_imp {u: set} (a b: set) (p: wff u):
+  $ a = b → ([u/a] p → [u/b] p) $;
+
+--| @rewrite
+axiom sb_f_im {u: set} (t: set) (p q: wff u):
+  $ [u/t] (p → q) ↔ ([u/t] p → [u/t] q) $;
+
+--| @rewrite
+axiom sb_f_and {u: set} (t: set) (p q: wff u):
+  $ [u/t] (p ∧ q) ↔ ([u/t] p ∧ [u/t] q) $;
+
+--| @rewrite
+axiom sb_f_all {u v: set} (t: set) (p: wff u v):
+  $ [u/t] (∀ v p) ↔ ∀ v [u/t] p $;
+
+--| @rewrite
+axiom sb_f_ex {u v: set} (t: set) (p: wff u v):
+  $ [u/t] (∃ v p) ↔ ∃ v [u/t] p $;
+
+--| @rewrite
+axiom sb_f_not {u: set} (t: set) (p: wff u):
+  $ [u/t] (¬ p) ↔ ¬ [u/t] p $;
+
+-- Extensionality and the proof-friendly forms of the Zermelo operations.
+def subset (A B: set) (.x: set): wff =
+  $ ∀ x (x ∈ A → x ∈ B) $;
+infixr subset: $⊆$ prec 25;
+
+axiom ext (A B: set): $ A ⊆ B $ > $ B ⊆ A $ > $ A = B $;
+
+axiom empty_elim (x: set): $ x ∈ ∅ → ⊥ $;
+
+axiom pairset_intro_left (x y: set): $ x ∈ pairset x y $;
+axiom pairset_intro_right (x y: set): $ y ∈ pairset x y $;
+axiom pairset_elim (x y z: set):
+  $ x ∈ pairset y z $ > $ x = y ∨ x = z $;
+
+axiom union_intro (x y A: set):
+  $ x ∈ y $ > $ y ∈ A $ > $ x ∈ union A $;
+
+axiom power_intro (A B: set): $ B ⊆ A $ > $ B ∈ power A $;
+axiom power_elim (A B: set): $ B ∈ power A $ > $ B ⊆ A $;
+
+axiom sep_intro {x: set} (A: set) (p: wff x):
+  $ x ∈ A $ > $ p $ > $ x ∈ {x ∈ A | p} $;
+--| @view {x: set} (t A: set) (p: wff x) (q: wff): $ t ∈ A $ > $ q → t ∈ {x ∈ A | p} $
+--| @recover t q p x
+axiom sep_intro_imp {x: set} (t A: set) (p: wff x):
+  $ t ∈ A $ > $ [x/t] p → t ∈ {x ∈ A | p} $;
+axiom sep_elim_left {x: set} (A: set) (p: wff x):
+  $ x ∈ {x ∈ A | p} $ > $ x ∈ A $;
+axiom sep_elim_left_imp {x: set} (A: set) (p: wff x):
+  $ x ∈ {x ∈ A | p} → x ∈ A $;
+axiom sep_elim_right {x: set} (A: set) (p: wff x):
+  $ x ∈ {x ∈ A | p} $ > $ p $;
+--| @view {x: set} (t A: set) (p: wff x) (q: wff): $ t ∈ {x ∈ A | p} → q $
+--| @recover t q p x
+axiom sep_elim_right_imp {x: set} (t A: set) (p: wff x):
+  $ t ∈ {x ∈ A | p} → [x/t] p $;
+axiom sep_subset {x: set} (A: set) (p: wff x):
+  $ {x ∈ A | p} ⊆ A $;
+
+-- Ordered pairs and graph membership.
+def singleton (a: set): set = $ pairset a a $;
+def opair (a b: set): set = $ pairset (singleton a) (pairset a b) $;
+def maps (f x y: set): wff = $ opair x y ∈ f $;
+
+--| @rewrite
+axiom sb_f_maps_left {u: set} (t x y: set):
+  $ [u/t] (maps u x y) ↔ maps t x y $;
+
+--| @rewrite
+axiom sb_f_maps_mid {u: set} (t f y: set):
+  $ [u/t] (maps f u y) ↔ maps f t y $;
+
+--| @rewrite
+axiom sb_f_maps_right {u: set} (t f x: set):
+  $ [u/t] (maps f x u) ↔ maps f x t $;
+
+--| @rewrite
+axiom sb_f_mem_left {u: set} (t A: set):
+  $ [u/t] (u ∈ A) ↔ t ∈ A $;
+
+--| @rewrite
+axiom sb_f_mem_right {u: set} (t x: set):
+  $ [u/t] (x ∈ u) ↔ x ∈ t $;
+
+--| @rewrite
+axiom sb_f_not_mem_left {u: set} (t A: set):
+  $ [u/t] (u ∉ A) ↔ t ∉ A $;
+
+--| @rewrite
+axiom sb_f_not_mem_right {u: set} (t x: set):
+  $ [u/t] (x ∉ u) ↔ x ∉ t $;
+
+--| @rewrite
+axiom sb_f_set_eq_left {u: set} (t y: set):
+  $ [u/t] (u = y) ↔ t = y $;
+
+--| @rewrite
+axiom sb_f_set_eq_right {u: set} (t x: set):
+  $ [u/t] (x = u) ↔ x = t $;
+
+--| @rewrite
+axiom sb_f_maps_irrel {u: set} (t f x y: set):
+  $ [u/t] (maps f x y) ↔ maps f x y $;
+
+--| @rewrite
+axiom sb_f_mem_irrel {u: set} (t x A: set):
+  $ [u/t] (x ∈ A) ↔ x ∈ A $;
+
+--| @rewrite
+axiom sb_f_not_mem_irrel {u: set} (t x A: set):
+  $ [u/t] (x ∉ A) ↔ x ∉ A $;
+
+--| @rewrite
+axiom sb_f_set_eq_irrel {u: set} (t x y: set):
+  $ [u/t] (x = y) ↔ x = y $;
+
+def functional (f: set) (.x .y .z: set): wff =
+  $ ∀ x ∀ y ∀ z ((maps f x y ∧ maps f x z) → y = z) $;
+
+theorem functional_elim_imp (f x y z: set):
+  $ functional f $ > $ maps f x z $ > $ maps f x y → y = z $;
+
+theorem functional_elim (f x y z: set):
+  $ functional f $ > $ maps f x y $ > $ maps f x z $ > $ y = z $;
+
+def domain_on (f A: set) (.x .y: set): wff =
+  $ ∀ x (x ∈ A ↔ ∃ y maps f x y) $;
+
+def range_sub (f B: set) (.x .y: set): wff =
+  $ ∀ y ((∃ x maps f x y) → y ∈ B) $;
+
+def function (f A B: set): wff =
+  $ functional f ∧ (domain_on f A ∧ range_sub f B) $;
+
+def injective (f A B: set) (.x .y .z: set): wff =
+  $ function f A B ∧
+    ∀ x ∀ y ∀ z
+      (((x ∈ A ∧ y ∈ A) ∧ (maps f x z ∧ maps f y z)) → x = y) $;
+
+def surj (f A B: set) (.x .y: set): wff =
+  $ function f A B ∧
+    ∀ y (y ∈ B → ∃ x (x ∈ A ∧ maps f x y)) $;
+
+def bijective (f A B: set): wff =
+  $ injective f A B ∧ surj f A B $;
+
+theorem surj_has_preimage (f A B y: set) {x: set}:
+  $ surj f A B $ > $ y ∈ B $ >
+  $ ∃ x (x ∈ A ∧ maps f x y) $;
+
+-- The diagonal set for Cantor's theorem.  The predicate says that x is
+-- missed by every y to which f maps x; functionality then connects this
+-- graph-based definition to the usual "x ∉ f(x)" reading.
+def misses (f x: set) (.y: set): wff =
+  $ ∀ y (maps f x y → x ∉ y) $;
+
+--| @rewrite
+axiom sb_f_misses_self {x: set} (t f: set):
+  $ [x/t] (misses f x) ↔ misses f t $;
+
+def diag (A f: set) (.x: set): set = $ {x ∈ A | misses f x} $;
+
+theorem mem_eq_imp (x A B: set): $ A = B $ > $ x ∈ A → x ∈ B $;
+theorem mem_eq_imp_imp (x A B: set): $ A = B → (x ∈ A → x ∈ B) $;
+
+theorem function_unique (f A B x y z: set):
+  $ function f A B $ > $ maps f x y $ > $ maps f x z $ > $ y = z $;
+
+theorem function_unique_imp (f A B x y z: set):
+  $ function f A B $ > $ maps f x z $ > $ maps f x y → y = z $;
+
+theorem image_not_mem_imp (A f a y: set):
+  $ function f A (power A) $ >
+  $ maps f a (diag A f) $ >
+  $ maps f a y → (a ∈ y → a ∈ diag A f) $;
+
+theorem misses_elim_imp (f x y: set):
+  $ maps f x y $ > $ misses f x → x ∉ y $;
+
+theorem misses_if_not_in_diag_imp (A f a: set):
+  $ function f A (power A) $ >
+  $ maps f a (diag A f) $ >
+  $ ¬ (a ∈ diag A f) → misses f a $;
+
+theorem diag_subset (A f: set): $ diag A f ⊆ A $;
+
+theorem diag_misses_imp (A f a: set):
+  $ a ∈ diag A f → misses f a $;
+
+theorem diag_intro_from_misses (A f a: set):
+  $ a ∈ A $ > $ misses f a → a ∈ diag A f $;
+
+theorem diagonal_intro_out_imp (A f a: set):
+  $ function f A (power A) $ >
+  $ a ∈ A $ >
+  $ maps f a (diag A f) $ >
+  $ ¬ (a ∈ diag A f) → a ∈ diag A f $;
+
+-- These two case lemmas are the diagonal argument in proof-friendly form.
+theorem diagonal_in_case (A f a: set):
+  $ function f A (power A) $ >
+  $ maps f a (diag A f) $ >
+  $ a ∈ diag A f → ⊥ $;
+
+theorem diagonal_out_case (A f a: set):
+  $ function f A (power A) $ >
+  $ a ∈ A $ >
+  $ maps f a (diag A f) $ >
+  $ ¬ (a ∈ diag A f) → ⊥ $;
+
+-- Surjectivity gives a witness for a chosen codomain element.
+term surj_wit (f A y: set): set;
+
+axiom preimage_wit_pair (f A y: set) {x: set}:
+  $ ∃ x (x ∈ A ∧ maps f x y) $ >
+  $ surj_wit f A y ∈ A ∧ maps f (surj_wit f A y) y $;
+
+theorem surj_wit_mem (f A B y: set):
+  $ surj f A B $ > $ y ∈ B $ > $ surj_wit f A y ∈ A $;
+
+theorem surj_wit_maps (f A B y: set):
+  $ surj f A B $ > $ y ∈ B $ > $ maps f (surj_wit f A y) y $;
+
+theorem cantor_witness (A f a: set):
+  $ function f A (power A) $ >
+  $ a ∈ A $ >
+  $ maps f a (diag A f) $ >
+  $ ⊥ $;
+
+theorem cantor (A f: set):
+  $ function f A (power A) $ >
+  $ surj f A (power A) $ >
+  $ ⊥ $;

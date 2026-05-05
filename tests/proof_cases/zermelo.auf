@@ -1,0 +1,164 @@
+imp_trans
+---------
+l1: $ (q → r) → (p → (q → r)) $ by h1
+l2: $ p → (q → r) $ by mp [l1, #2]
+l3: $ (p → (q → r)) → ((p → q) → (p → r)) $ by h2
+l4: $ (p → q) → (p → r) $ by mp [l3, l2]
+l5: $ p → r $ by mp [l4, #1]
+
+imp_mp_right
+------------
+l1: $ q → (p → q) $ by h1
+l2: $ p → q $ by mp [l1, #1]
+l3: $ (p → (q → r)) → ((p → q) → (p → r)) $ by h2
+l4: $ (p → q) → (p → r) $ by mp [l3, #2]
+l5: $ p → r $ by mp [l4, l2]
+
+and_intro
+---------
+l1: $ p → (q → p ∧ q) $ by and1
+l2: $ q → p ∧ q $ by mp [l1, #1]
+l3: $ p ∧ q $ by mp [l2, #2]
+
+and_mp_right
+------------
+l1: $ r → (q → r) $ by h1
+l2: $ q → r $ by mp [l1, #1]
+l3: $ q → (r → q ∧ r) $ by and1
+l4: $ (q → (r → q ∧ r)) → ((q → r) → (q → q ∧ r)) $ by h2
+l5: $ (q → r) → (q → q ∧ r) $ by mp [l4, l3]
+l6: $ q → q ∧ r $ by mp [l5, l2]
+l7: $ ((q ∧ r) → s) → (q → ((q ∧ r) → s)) $ by h1
+l8: $ q → ((q ∧ r) → s) $ by mp [l7, #2]
+l9: $ (q → ((q ∧ r) → s)) → ((q → q ∧ r) → (q → s)) $ by h2
+l10: $ (q → q ∧ r) → (q → s) $ by mp [l9, l8]
+l11: $ q → s $ by mp [l10, l6]
+
+bi_imp
+------
+l1: $ (p ↔ q) → (p → q) $ by bi1
+l2: $ p → q $ by mp [l1, #1]
+
+bi_imp_imp
+----------
+l1: $ (q ↔ r) → (q → r) $ by bi1
+l2: $ ((q ↔ r) → (q → r)) → (p → ((q ↔ r) → (q → r))) $ by h1
+l3: $ p → ((q ↔ r) → (q → r)) $ by mp [l2, l1]
+l4: $ (p → ((q ↔ r) → (q → r))) → ((p → (q ↔ r)) → (p → (q → r))) $ by h2
+l5: $ (p → (q ↔ r)) → (p → (q → r)) $ by mp [l4, l3]
+l6: $ p → (q → r) $ by mp [l5, #1]
+
+functional_elim_imp
+-------------------
+l1: $ ∀ w ∀ u ∀ v ((maps f w u ∧ maps f w v) → u = v) → ∀ u ∀ v ((maps f x u ∧ maps f x v) → u = v) $ by all_elim_imp
+l2: $ ∀ u ∀ v ((maps f x u ∧ maps f x v) → u = v) $ by mp [l1, #1]
+l3: $ ∀ u ∀ v ((maps f x u ∧ maps f x v) → u = v) → ∀ v ((maps f x y ∧ maps f x v) → y = v) $ by all_elim_imp
+l4: $ ∀ v ((maps f x y ∧ maps f x v) → y = v) $ by mp [l3, l2]
+l5: $ ∀ v ((maps f x y ∧ maps f x v) → y = v) → ((maps f x y ∧ maps f x z) → y = z) $ by all_elim_imp
+l6: $ (maps f x y ∧ maps f x z) → y = z $ by mp [l5, l4]
+l7: $ maps f x y → y = z $ by and_mp_right [#2, l6]
+
+functional_elim
+---------------
+l1: $ maps f x y → y = z $ by functional_elim_imp [#1, #3]
+l2: $ y = z $ by mp [l1, #2]
+
+surj_has_preimage
+-----------------
+l1: $ ∀ u (u ∈ B → ∃ x (x ∈ A ∧ maps f x u)) $ by and_elim_r [#1]
+l2: $ ∀ u (u ∈ B → ∃ x (x ∈ A ∧ maps f x u)) → (y ∈ B → ∃ x (x ∈ A ∧ maps f x y)) $ by all_elim_imp
+l3: $ y ∈ B → ∃ x (x ∈ A ∧ maps f x y) $ by mp [l2, l1]
+l4: $ ∃ x (x ∈ A ∧ maps f x y) $ by mp [l3, #2]
+
+mem_eq_imp
+----------
+l1: $ x = x $ by setid
+l2: $ (x ∈ A) ↔ (x ∈ B) $ by mem_congr [l1, #1]
+l3: $ x ∈ A → x ∈ B $ by bi_imp [l2]
+
+mem_eq_imp_imp
+--------------
+l1: $ A = B → (x ∈ A → x ∈ B) $ by eq_replace_imp
+
+function_unique
+---------------
+l1: $ functional f $ by and_elim_l [#1]
+l2: $ y = z $ by functional_elim [l1, #2, #3]
+
+function_unique_imp
+-------------------
+l1: $ functional f $ by and_elim_l [#1]
+l2: $ maps f x y → y = z $ by functional_elim_imp [l1, #2]
+
+image_not_mem_imp
+-----------------
+l1: $ maps f a y → y = diag A f $ by function_unique_imp [#1, #2]
+l2: $ y = diag A f → (a ∈ y → a ∈ diag A f) $ by mem_eq_imp_imp
+l3: $ maps f a y → (a ∈ y → a ∈ diag A f) $ by imp_trans [l1, l2]
+
+misses_elim_imp
+---------------
+l1: $ ∀ u (maps f x u → x ∉ u) → (maps f x y → x ∉ y) $ by all_elim_imp
+l2: $ ∀ u (maps f x u → x ∉ u) → x ∉ y $ by imp_mp_right [#1, l1]
+
+misses_if_not_in_diag_imp
+-------------------------
+l1: $ maps f a y → (a ∈ y → a ∈ diag A f) $ by image_not_mem_imp [#1, #2]
+l2: $ ¬ (a ∈ diag A f) → (maps f a y → a ∉ y) $ by contra_imp [l1]
+l3: $ ¬ (a ∈ diag A f) → misses f a $ by all_intro_imp [l2]
+
+diag_subset
+-----------
+l1: $ diag A f ⊆ A $ by sep_subset
+
+diag_misses_imp
+---------------
+l1: $ a ∈ diag A f → misses f a $ by sep_elim_right_imp
+
+diag_intro_from_misses
+----------------------
+l1: $ misses f a → a ∈ diag A f $ by sep_intro_imp [#1]
+
+diagonal_intro_out_imp
+----------------------
+l1: $ ¬ (a ∈ diag A f) → misses f a $ by misses_if_not_in_diag_imp [#1, #3]
+l2: $ misses f a → a ∈ diag A f $ by diag_intro_from_misses [#2]
+l3: $ ¬ (a ∈ diag A f) → a ∈ diag A f $ by imp_trans [l1, l2]
+
+diagonal_in_case
+----------------
+l1: $ a ∈ diag A f → misses f a $ by diag_misses_imp
+l2: $ misses f a → a ∉ diag A f $ by misses_elim_imp [#2]
+l3: $ a ∈ diag A f → a ∉ diag A f $ by imp_trans [l1, l2]
+l4: $ a ∈ diag A f → ⊥ $ by imp_not_self [l3]
+
+diagonal_out_case
+-----------------
+l1: $ ¬ (a ∈ diag A f) → a ∈ diag A f $ by diagonal_intro_out_imp [#1, #2, #3]
+l2: $ ¬ (a ∈ diag A f) → ⊥ $ by imp_not_to_self [l1]
+
+surj_wit_mem
+------------
+l1: $ ∃ x (x ∈ A ∧ maps f x y) $ by surj_has_preimage [#1, #2]
+l2: $ surj_wit f A y ∈ A ∧ maps f (surj_wit f A y) y $ by preimage_wit_pair [l1]
+l3: $ surj_wit f A y ∈ A $ by and_elim_l [l2]
+
+surj_wit_maps
+-------------
+l1: $ ∃ x (x ∈ A ∧ maps f x y) $ by surj_has_preimage [#1, #2]
+l2: $ surj_wit f A y ∈ A ∧ maps f (surj_wit f A y) y $ by preimage_wit_pair [l1]
+l3: $ maps f (surj_wit f A y) y $ by and_elim_r [l2]
+
+cantor_witness
+--------------
+l1: $ a ∈ diag A f → ⊥ $ by diagonal_in_case [#1, #3]
+l2: $ ¬ (a ∈ diag A f) → ⊥ $ by diagonal_out_case [#1, #2, #3]
+l3: $ ⊥ $ by cases_bot [l1, l2]
+
+cantor
+------
+l1: $ diag A f ⊆ A $ by diag_subset
+l2: $ diag A f ∈ power A $ by power_intro [l1]
+l3: $ surj_wit f A (diag A f) ∈ A $ by surj_wit_mem [#2, l2]
+l4: $ maps f (surj_wit f A (diag A f)) (diag A f) $ by surj_wit_maps [#2, l2]
+l5: $ ⊥ $ by cantor_witness [#1, l3, l4]
