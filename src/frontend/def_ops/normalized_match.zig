@@ -782,6 +782,123 @@ pub const RuleMatchSession = struct {
         return deps;
     }
 
+    fn replaceHoleWitnessesInSymbolic(
+        self: *RuleMatchSession,
+        symbolic_engine: *SymbolicEngine,
+        symbolic: *const SymbolicExpr,
+        hole_expr: ExprId,
+        replacement: *const SymbolicExpr,
+    ) anyerror!*const SymbolicExpr {
+        return switch (symbolic.*) {
+            .binder => |idx| blk: {
+                if (idx < self.state.bindings.len) {
+                    if (self.state.bindings[idx]) |bound| {
+                        const materialized = try symbolic_engine
+                            .materializeResolvedBoundValue(
+                            bound,
+                            &self.state,
+                        );
+                        if (materialized == hole_expr) break :blk replacement;
+                    }
+                }
+                break :blk symbolic;
+            },
+            .fixed => symbolic,
+            .dummy => |slot| blk: {
+                if (symbolic_engine.currentWitnessExpr(
+                    slot,
+                    &self.state,
+                ) == hole_expr) {
+                    break :blk replacement;
+                }
+                break :blk symbolic;
+            },
+            .app => |app| blk: {
+                const args = try self.shared.allocator.alloc(
+                    *const SymbolicExpr,
+                    app.args.len,
+                );
+                errdefer self.shared.allocator.free(args);
+                var changed = false;
+                for (app.args, 0..) |arg, idx| {
+                    args[idx] = try self.replaceHoleWitnessesInSymbolic(
+                        symbolic_engine,
+                        arg,
+                        hole_expr,
+                        replacement,
+                    );
+                    changed = changed or args[idx] != arg;
+                }
+                if (!changed) {
+                    self.shared.allocator.free(args);
+                    break :blk symbolic;
+                }
+                break :blk try symbolic_engine.allocSymbolic(.{ .app = .{
+                    .term_id = app.term_id,
+                    .args = args,
+                } });
+            },
+        };
+    }
+
+    pub fn guideBindingTowardExprReplacingHole(
+        self: *RuleMatchSession,
+        pattern_idx: usize,
+        actual: ExprId,
+        hole_idx: usize,
+        target_idx: usize,
+        budget: usize,
+    ) !bool {
+        if (pattern_idx >= self.state.bindings.len or
+            hole_idx >= self.state.bindings.len or
+            target_idx >= self.state.bindings.len)
+        {
+            return error.TemplateBinderOutOfRange;
+        }
+        const pattern = self.state.bindings[pattern_idx] orelse return false;
+        const target = self.state.bindings[target_idx] orelse return false;
+        const hole = self.state.bindings[hole_idx] orelse return false;
+
+        var symbolic_engine = self.engine();
+        const hole_expr = try symbolic_engine.materializeResolvedBoundValue(
+            hole,
+            &self.state,
+        ) orelse return false;
+        const target_expr = try symbolic_engine.materializeResolvedBoundValue(
+            target,
+            &self.state,
+        ) orelse return false;
+        const replacement = try symbolic_engine.allocSymbolic(.{
+            .fixed = target_expr,
+        });
+
+        const pattern_symbolic = switch (pattern) {
+            .concrete => |concrete| blk: {
+                const expr_id = (try symbolic_engine.concreteBindingMatchExpr(
+                    concrete,
+                    &self.state,
+                )) orelse break :blk null;
+                break :blk try symbolic_engine.allocSymbolic(.{
+                    .fixed = expr_id,
+                });
+            },
+            .symbolic => |symbolic| symbolic.expr,
+        } orelse return false;
+
+        const guided = try self.replaceHoleWitnessesInSymbolic(
+            &symbolic_engine,
+            pattern_symbolic,
+            hole_expr,
+            replacement,
+        );
+        return try symbolic_engine.matchSymbolicToExprSemantic(
+            guided,
+            actual,
+            &self.state,
+            budget,
+        );
+    }
+
     pub fn guideBindingTowardExpr(
         self: *RuleMatchSession,
         idx: usize,

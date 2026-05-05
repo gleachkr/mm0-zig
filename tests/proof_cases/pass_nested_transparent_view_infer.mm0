@@ -1,0 +1,25 @@
+delimiter $ ( ) $;
+--| @vars w u v
+sort set;
+provable sort wff;
+term im (a b: wff): wff;
+term mem (x A: set): wff;
+term opair (x y: set): set;
+term carrier (a b: set): set;
+term body (p a b: set): wff;
+term sep (A: set) {x: set} (p: wff x): set;
+
+def inner (a b: set) (.p: set): set =
+  $ sep (carrier a b) p (body p a b) $;
+def maps_like (f x y: set): wff =
+  $ mem (opair x y) f $;
+def outer (a b x y: set): wff =
+  $ maps_like (inner a b) x y $;
+
+--| @view {x: set} (t A: set) (p: wff x) (q: wff): $ im (mem t (sep A x p)) q $
+--| @recover t q p x
+axiom sep_elim {x: set} (t A: set) (p: wff x) (q: wff):
+  $ im (mem t (sep A x p)) q $;
+
+theorem pass_nested_transparent_view_infer (a b x y: set):
+  $ im (outer a b x y) (body (opair x y) a b) $;

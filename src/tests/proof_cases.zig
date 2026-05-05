@@ -149,6 +149,10 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_def_unfold_then_rewrite_view", .outcome = .pass },
     .{ .stem = "pass_def_unfold_then_rewrite_view_auto", .outcome = .pass },
     .{
+        .stem = "pass_nested_transparent_view_infer",
+        .outcome = .pass,
+    },
+    .{
         .stem = "pass_def_unfold_then_rewrite_recover",
         .outcome = .pass,
     },

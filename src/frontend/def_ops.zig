@@ -21,7 +21,7 @@ pub const MaterializedDummyAssignment =
     Types.MaterializedDummyAssignment;
 pub const SemanticStepCandidate =
     @import("./def_ops/symbolic_engine.zig").SemanticStepCandidate;
-pub const default_semantic_match_budget: usize = 3;
+pub const default_semantic_match_budget: usize = 8;
 pub const RuleMatchSession = NormalizedMatch.RuleMatchSession;
 pub const NormalizedComparison =
     NormalizedMatch.NormalizedComparison;

@@ -544,7 +544,11 @@ fn guideRecoverBindingsTowardSources(
             .recover => |recover| recover,
             .abstract => continue,
         };
-        if (view_bindings[recover.target_view_idx] != null) continue;
+        if (view_bindings[recover.target_view_idx] != null and
+            view_bindings[recover.pattern_view_idx] != null)
+        {
+            continue;
+        }
         const source_expr = view_bindings[recover.source_view_idx] orelse {
             continue;
         };
@@ -562,11 +566,22 @@ fn guideRecoverBindingsTowardSources(
                 view_seeds,
             );
         }
-        if (try session.guideBindingTowardExpr(
-            recover.pattern_view_idx,
-            source_expr,
-            recover_guidance_match_budget,
-        )) {
+        const made_progress = if (view_bindings[recover.target_view_idx] != null and
+            view_bindings[recover.pattern_view_idx] == null)
+            try session.guideBindingTowardExprReplacingHole(
+                recover.pattern_view_idx,
+                source_expr,
+                recover.hole_view_idx,
+                recover.target_view_idx,
+                recover_guidance_match_budget,
+            )
+        else
+            try session.guideBindingTowardExpr(
+                recover.pattern_view_idx,
+                source_expr,
+                recover_guidance_match_budget,
+            );
+        if (made_progress) {
             if (debug_views) {
                 ViewTrace.printMessage(
                     "guidance for {s}#{d} succeeded",

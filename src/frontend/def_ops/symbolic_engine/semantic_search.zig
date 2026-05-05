@@ -669,7 +669,6 @@ fn tryMatchSymbolicToSymbolicChildrenSemantic(
     defer WitnessState.deinitMatchSnapshot(self, &snapshot);
 
     var remaining_budget = budget;
-    var used_semantic = false;
     for (lhs_app.args, rhs_app.args) |lhs_arg, rhs_arg| {
         if (try tryMatchSymbolicToSymbolicDirect(
             self,
@@ -695,12 +694,8 @@ fn tryMatchSymbolicToSymbolicChildrenSemantic(
             try WitnessState.restoreMatchSnapshot(self, &snapshot, state);
             return false;
         }
-        used_semantic = true;
     }
-    if (!used_semantic) {
-        try WitnessState.restoreMatchSnapshot(self, &snapshot, state);
-    }
-    return used_semantic;
+    return true;
 }
 
 fn applySemanticStepToExpr(

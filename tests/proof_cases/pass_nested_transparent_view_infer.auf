@@ -1,0 +1,4 @@
+pass_nested_transparent_view_infer
+----------------------------------
+
+l1: $ im (outer a b x y) (body (opair x y) a b) $ by sep_elim

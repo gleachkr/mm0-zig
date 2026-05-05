@@ -12,6 +12,8 @@ const Proof = mm0.Proof;
 const ProofScript = mm0.ProofScript;
 const RewriteRegistry = mm0.RewriteRegistry.RewriteRegistry;
 const CompilerMetadata = mm0.CompilerSupport.Metadata;
+const CompilerViews = mm0.CompilerSupport.Views;
+const DefOps = mm0.DefOps;
 
 fn collectStatementCmds(
     allocator: std.mem.Allocator,
@@ -974,6 +976,182 @@ test "compiler infers inline child binders through views" {
     const mmb = try compiler.compileMmb(std.testing.allocator);
     defer std.testing.allocator.free(mmb);
     try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+test "compiler infers nested transparent view binders" {
+    const allocator = std.testing.allocator;
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_nested_transparent_view_infer",
+        "mm0",
+    );
+    defer allocator.free(mm0_src);
+    const proof_src = try readProofCaseFile(
+        allocator,
+        "pass_nested_transparent_view_infer",
+        "auf",
+    );
+    defer allocator.free(proof_src);
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
+fn expectNestedView(
+    allocator: std.mem.Allocator,
+    with_semantic: bool,
+) !void {
+    const mm0_src = try readProofCaseFile(
+        allocator,
+        "pass_nested_transparent_view_infer",
+        "mm0",
+    );
+
+    var metadata = try processAnnotatedMetadata(allocator, mm0_src);
+
+    var parser = MM0Parser.init(mm0_src, allocator);
+    var theorem = FrontendExpr.TheoremContext.init(allocator);
+    defer theorem.deinit();
+    var theorem_vars = std.StringHashMap(*const Expr).init(allocator);
+    defer theorem_vars.deinit();
+
+    const assertion = blk: {
+        while (try parser.next()) |stmt| {
+            switch (stmt) {
+                .assertion => |value| {
+                    if (!std.mem.eql(
+                        u8,
+                        value.name,
+                        "pass_nested_transparent_view_infer",
+                    )) continue;
+                    try theorem.seedAssertion(value);
+                    for (value.arg_names, value.arg_exprs) |name, expr| {
+                        if (name) |actual_name| {
+                            try theorem_vars.put(actual_name, expr);
+                        }
+                    }
+                    break :blk value;
+                },
+                else => {},
+            }
+        }
+        return error.MissingAssertion;
+    };
+    _ = assertion;
+
+    const view_rule = metadata.env.getRuleId("sep_elim") orelse {
+        return error.MissingRule;
+    };
+    const view = metadata.views.get(view_rule) orelse {
+        return error.MissingView;
+    };
+    const parsed_line = try parser.parseFormulaText(
+        " im (outer a b x y) (body (opair x y) a b) ",
+        &theorem_vars,
+    );
+    const line_expr = try theorem.internParsedExpr(parsed_line);
+    const partial_bindings = try allocator.alloc(?FrontendExpr.ExprId, 5);
+    defer allocator.free(partial_bindings);
+    @memset(partial_bindings, null);
+
+    if (with_semantic) {
+        try CompilerViews.applyViewBindings(
+            allocator,
+            &theorem,
+            &metadata.env,
+            &metadata.registry,
+            &view,
+            line_expr,
+            &.{},
+            partial_bindings,
+            null,
+            null,
+            false,
+        );
+        // Success here means the view/recover pipeline carried enough
+        // symbolic state to accept the nested hidden-dummy match. The full
+        // compiler test above finalizes that state through MMB emission.
+    } else {
+        var def_ops = DefOps.Context.initWithRegistry(
+            allocator,
+            &theorem,
+            &metadata.env,
+            &metadata.registry,
+        );
+        defer def_ops.deinit();
+        var seeds = [_]DefOps.BindingSeed{
+            .none,
+            .none,
+            .none,
+            .none,
+            .none,
+        };
+        var session = try def_ops.beginRuleMatch(view.arg_infos, &seeds);
+        defer session.deinit();
+        try std.testing.expect(try session.matchSemantic(
+            view.concl,
+            line_expr,
+            DefOps.default_semantic_match_budget,
+        ));
+
+        const bad_line = try parser.parseFormulaText(
+            " im (mem (opair x y) (carrier a b)) " ++
+                "(body (opair x y) a b) ",
+            &theorem_vars,
+        );
+        const bad_expr = try theorem.internParsedExpr(bad_line);
+        var bad_session = try def_ops.beginRuleMatch(view.arg_infos, &seeds);
+        defer bad_session.deinit();
+        try std.testing.expect(!try bad_session.matchSemantic(
+            view.concl,
+            bad_expr,
+            DefOps.default_semantic_match_budget,
+        ));
+    }
+}
+
+test "nested view matching rejects non-separation actual" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try expectNestedView(arena.allocator(), false);
+}
+
+test "nested view matching preserves hidden dummy witnesses" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try expectNestedView(arena.allocator(), true);
+}
+
+test "nested transparent view proof case keeps binders omitted" {
+    const allocator = std.testing.allocator;
+    const proof = try readProofCaseFile(
+        allocator,
+        "pass_nested_transparent_view_infer",
+        "auf",
+    );
+    defer allocator.free(proof);
+
+    const line_formula =
+        "l1: $ im (outer a b x y) (body (opair x y) a b) $";
+    const start = std.mem.indexOf(u8, proof, line_formula) orelse {
+        return error.ExpectedNeedle;
+    };
+    const rest = proof[start..];
+    const line_end = std.mem.indexOfScalar(u8, rest, '\n') orelse rest.len;
+    const line = rest[0..line_end];
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        line,
+        1,
+        "by sep_elim",
+    ));
+    try std.testing.expect(!std.mem.containsAtLeast(u8, line, 1, ":="));
 }
 
 test "compiler does not treat hidden applications as proof labels" {
