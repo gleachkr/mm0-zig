@@ -200,6 +200,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "zermelo", .outcome = .pass },
     .{ .stem = "pass_view_basic", .outcome = .pass },
     .{ .stem = "pass_view_explicit", .outcome = .pass },
+    .{ .stem = "pass_view_recover_phantom_repr", .outcome = .pass },
     .{ .stem = "pass_recover_basic", .outcome = .pass },
     .{ .stem = "pass_recover_bound_slot", .outcome = .pass },
     .{ .stem = "pass_abstract_basic", .outcome = .pass },

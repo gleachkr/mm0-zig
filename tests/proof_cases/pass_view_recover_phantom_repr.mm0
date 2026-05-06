@@ -1,0 +1,98 @@
+delimiter $ ( ) { } [ / ] , | @ ! $;
+
+strict provable sort wff;
+--| @vars x u X
+sort set;
+
+term im (p q: wff): wff;
+infixr im: $→$ prec 25;
+infixr im: $->$ prec 25;
+
+term bi (p q: wff): wff;
+infixr bi: $↔$ prec 20;
+infixr bi: $<->$ prec 20;
+
+term all {x: set} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+prefix all: $A.$ prec 41;
+
+term sb_f {x: set} (t: set x) (p: wff x): wff;
+notation sb_f {x: set} (t: set x) (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+term sb_s {x: set} (t: set x) (s: set x): set;
+notation sb_s {x: set} (t: set x) (s: set x): set =
+  ($@$:1000) x ($/$:0) t ($!$:0) s;
+
+term set_eq (a b: set): wff;
+infixl set_eq: $=$ prec 50;
+
+term mem (x A: set): wff;
+infixl mem: $∈$ prec 50;
+infixl mem: $e.$ prec 50;
+
+term sep (A: set) {x: set} (p: wff x): set;
+notation sep (A: set) {x: set} (p: wff x): set =
+  (${$:max) x ($∈$:50) A ($|$:0) p ($}$:0);
+
+--| @relation wff bi biid bitr bisym mpbi
+axiom biid (p: wff): $ p ↔ p $;
+axiom bitr (p q r: wff): $ p ↔ q $ > $ q ↔ r $ > $ p ↔ r $;
+axiom bisym (p q: wff): $ p ↔ q $ > $ q ↔ p $;
+axiom mpbi (p q: wff): $ p ↔ q $ > $ p $ > $ q $;
+
+--| @relation set set_eq setid settr setsym _
+axiom setid (a: set): $ a = a $;
+axiom settr (a b c: set): $ a = b $ > $ b = c $ > $ a = c $;
+axiom setsym (a b: set): $ a = b $ > $ b = a $;
+
+--| @congr
+axiom im_congr (p q r s: wff):
+  $ p ↔ q $ > $ r ↔ s $ > $ (p → r) ↔ (q → s) $;
+
+--| @congr
+axiom all_congr {x: set} (p q: wff x):
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @congr
+axiom mem_congr (x y A B: set):
+  $ x = y $ > $ A = B $ > $ (x ∈ A) ↔ (y ∈ B) $;
+
+--| @congr
+axiom sep_congr {x: set} (A B: set) (p q: wff x):
+  $ A = B $ > $ p ↔ q $ > $ {x ∈ A | p} = {x ∈ B | q} $;
+
+--| @view {x: set} (t A: set) (p: wff x) (q r s: wff): $ q → r $ > $ q → s $ > $ q → t ∈ {x ∈ A | p} $
+--| @recover t q p x
+axiom sep_intro_imp2 {x: set} (t A: set) (p: wff x) (q: wff):
+  $ q → t ∈ A $ > $ q → [x/t] p $ >
+  $ q → t ∈ {x ∈ A | p} $;
+
+def in_all_subsets (S x: set) (.X: set): wff =
+  $ ∀ X (X ∈ S → x ∈ X) $;
+
+--| @congr
+axiom in_all_subsets_congr (S T x y: set):
+  $ S = T $ > $ x = y $ > $ in_all_subsets S x ↔ in_all_subsets T y $;
+
+def inter_subsets (A S: set) (.x: set): set =
+  $ {x ∈ A | in_all_subsets S x} $;
+
+--| @rewrite
+axiom sb_s_var {u: set} (t: set u): $ @ u / t ! u = t $;
+
+--| @rewrite
+axiom sb_s_irrel {u: set} (t: set u) (s: set): $ @ u / t ! s = s $;
+
+--| @rewrite
+axiom sb_f_in_all_subsets {u: set} (t S x: set u):
+  $ [u/t] (in_all_subsets S x) ↔
+    in_all_subsets (@ u / t ! S) (@ u / t ! x) $;
+
+-- Regression for @view binder recovery with phantom binders.  The view
+-- exposes `r` and `s` only to match hypotheses; exporting them used to force
+-- representative projection for hidden witnesses and fail.  The rule binders
+-- below should recover without an explicit `(x := ..., p := ...)` list.
+theorem pass_view_recover_phantom_repr (A S x: set) (q: wff) {X: set}:
+  $ q → x ∈ A $ >
+  $ q → ∀ X (X ∈ S → x ∈ X) $ >
+  $ q → x ∈ inter_subsets A S $;

@@ -1,0 +1,4 @@
+pass_view_recover_phantom_repr
+------------------------------
+
+l1: $ q → x ∈ inter_subsets A S $ by sep_intro_imp2 [#1, #2]

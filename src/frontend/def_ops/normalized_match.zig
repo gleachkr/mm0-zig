@@ -590,21 +590,91 @@ pub const RuleMatchSession = struct {
     ) ![]?ExprId {
         std.debug.assert(materialized_bindings.len == self.state.bindings.len);
 
+        const selected = try self.shared.allocator.alloc(
+            bool,
+            self.state.bindings.len,
+        );
+        defer self.shared.allocator.free(selected);
+        @memset(selected, true);
+        return try self.representSelectedOptionalBindings(
+            materialized_bindings,
+            selected,
+        );
+    }
+
+    /// Project only selected materialized bindings through each selected
+    /// binding's representative-selection mode.
+    pub fn representSelectedOptionalBindings(
+        self: *RuleMatchSession,
+        materialized_bindings: []const ?ExprId,
+        selected: []const bool,
+    ) ![]?ExprId {
+        std.debug.assert(materialized_bindings.len == self.state.bindings.len);
+        std.debug.assert(selected.len == self.state.bindings.len);
+
         var symbolic_engine = self.engine();
         const bindings = try self.shared.allocator.alloc(
             ?ExprId,
             self.state.bindings.len,
         );
-        for (self.state.bindings, materialized_bindings, 0..) |
+        errdefer self.shared.allocator.free(bindings);
+        for (self.state.bindings, materialized_bindings, selected, 0..) |
             binding,
             materialized,
+            should_project,
             idx,
         | {
+            if (!should_project) {
+                bindings[idx] = null;
+                continue;
+            }
             bindings[idx] = if (binding) |bound|
                 try symbolic_engine.projectMaterializedExpr(
                     materialized,
                     boundValueMode(bound),
                 )
+            else
+                null;
+        }
+        return bindings;
+    }
+
+    /// Project selected bindings, but preserve a raw materialized binding
+    /// when representative selection cannot produce a concrete expression.
+    pub fn representSelectedOptionalBindingsOrRaw(
+        self: *RuleMatchSession,
+        materialized_bindings: []const ?ExprId,
+        selected: []const bool,
+    ) ![]?ExprId {
+        std.debug.assert(materialized_bindings.len == self.state.bindings.len);
+        std.debug.assert(selected.len == self.state.bindings.len);
+
+        var symbolic_engine = self.engine();
+        const bindings = try self.shared.allocator.alloc(
+            ?ExprId,
+            self.state.bindings.len,
+        );
+        errdefer self.shared.allocator.free(bindings);
+        for (self.state.bindings, materialized_bindings, selected, 0..) |
+            binding,
+            materialized,
+            should_project,
+            idx,
+        | {
+            if (!should_project) {
+                bindings[idx] = null;
+                continue;
+            }
+            bindings[idx] = if (binding) |bound|
+                symbolic_engine.projectMaterializedExpr(
+                    materialized,
+                    boundValueMode(bound),
+                ) catch |err| switch (err) {
+                    error.MissingRepresentative,
+                    error.UnresolvedDummyWitness,
+                    => materialized,
+                    else => return err,
+                }
             else
                 null;
         }

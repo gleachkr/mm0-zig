@@ -458,8 +458,17 @@ fn applyViewBindingsWithConclusion(
     const materialized_projected_bindings =
         try session.materializeOptionalBindings();
     defer allocator.free(materialized_projected_bindings);
+    const project_view_binding = try allocator.alloc(bool, view.num_binders);
+    defer allocator.free(project_view_binding);
+    @memset(project_view_binding, false);
+    for (view.binder_map, 0..) |mapping, vi| {
+        project_view_binding[vi] = mapping != null;
+    }
     const projected_view_bindings =
-        try session.representOptionalBindings(materialized_projected_bindings);
+        try session.representSelectedOptionalBindingsOrRaw(
+            materialized_projected_bindings,
+            project_view_binding,
+        );
     defer allocator.free(projected_view_bindings);
 
     for (view.derived_bindings) |binding| {
