@@ -20,6 +20,7 @@ prefix all: $A.$ prec 41;
 term mor_eq (f g: mor): wff;
 infixl mor_eq: $~$ prec 15;
 term hom (f: mor) (A B: obj): wff;
+term obj_eq (A B: obj): wff;
 term id (A: obj): mor;
 term comp (f g: mor): mor;
 infixl comp: $∘$ prec 35;
@@ -56,6 +57,12 @@ axiom mor_refl_raw (f: mor): $ f ~ f $;
 axiom mor_trans_raw (f g h: mor):
   $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
 axiom mor_sym_raw (f g: mor): $ f ~ g $ > $ g ~ f $;
+
+--| @relation obj obj_eq obj_refl obj_trans obj_sym _
+axiom obj_refl (A: obj): $ obj_eq A A $;
+axiom obj_trans (A B C: obj):
+  $ obj_eq A B $ > $ obj_eq B C $ > $ obj_eq A C $;
+axiom obj_sym (A B: obj): $ obj_eq A B $ > $ obj_eq B A $;
 
 --| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
 axiom ctx_refl (g: ctx): $ ctx_eq g g $;
@@ -97,8 +104,9 @@ axiom mor_eq_congr (f1 f2 g1 g2: mor):
   $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) ↔ (f2 ~ g2) $;
 
 --| @congr
-axiom hom_congr (f g: mor) (A B: obj):
-  $ f ~ g $ > $ hom f A B ↔ hom g A B $;
+axiom hom_congr (f g: mor) (A1 A2 B1 B2: obj):
+  $ f ~ g $ > $ obj_eq A1 A2 $ > $ obj_eq B1 B2 $ >
+  $ hom f A1 B1 ↔ hom g A2 B2 $;
 
 --| @congr
 axiom comp_congr (f1 f2 g1 g2: mor):

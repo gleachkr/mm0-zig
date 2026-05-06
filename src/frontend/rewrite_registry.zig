@@ -302,18 +302,158 @@ pub const RewriteRegistry = struct {
     ) !void {
         const rule_id = env.getRuleId(stmt_name) orelse return;
         const rule = &env.rules.items[rule_id];
+        const app = switch (rule.concl) {
+            .app => |value| value,
+            else => return error.InvalidCongruenceAnnotation,
+        };
+        if (app.args.len != 2) return error.InvalidCongruenceAnnotation;
 
-        switch (rule.concl) {
-            .app => |app| {
-                if (app.args.len != 2) return;
-                const head_id = getHeadTermId(app.args[0]) orelse return;
-                try self.congr_by_head.put(head_id, .{
-                    .rule_id = rule_id,
-                    .head_term_id = head_id,
-                    .num_binders = rule.args.len,
-                });
-            },
-            else => {},
+        const head_id = try self.validateCongrRule(
+            env,
+            rule,
+            app.args[0],
+            app.args[1],
+        );
+        try self.validateCongrRelation(env, head_id, app.term_id);
+        try self.congr_by_head.put(head_id, .{
+            .rule_id = rule_id,
+            .head_term_id = head_id,
+            .num_binders = rule.args.len,
+        });
+    }
+
+    fn validateCongrRule(
+        self: *RewriteRegistry,
+        env: *const GlobalEnv,
+        rule: *const RuleDecl,
+        lhs: TemplateExpr,
+        rhs: TemplateExpr,
+    ) !u32 {
+        const lhs_app = switch (lhs) {
+            .app => |value| value,
+            else => return error.InvalidCongruenceAnnotation,
+        };
+        const rhs_app = switch (rhs) {
+            .app => |value| value,
+            else => return error.InvalidCongruenceAnnotation,
+        };
+        if (lhs_app.term_id != rhs_app.term_id) {
+            return error.InvalidCongruenceAnnotation;
+        }
+        if (lhs_app.term_id >= env.terms.items.len) {
+            return error.InvalidCongruenceAnnotation;
+        }
+
+        const term = &env.terms.items[lhs_app.term_id];
+        if (!term.available) return error.InvalidCongruenceAnnotation;
+        if (lhs_app.args.len != term.args.len or
+            rhs_app.args.len != term.args.len)
+        {
+            return error.InvalidCongruenceAnnotation;
+        }
+
+        var binder_idx: usize = 0;
+        var hyp_idx: usize = 0;
+        for (term.args, lhs_app.args, rhs_app.args) |
+            term_arg,
+            lhs_arg,
+            rhs_arg,
+        | {
+            try expectRuleArgCompatible(
+                rule,
+                binder_idx,
+                term_arg,
+                term_arg.bound,
+            );
+
+            if (term_arg.bound) {
+                if (!isBinder(lhs_arg, binder_idx) or
+                    !isBinder(rhs_arg, binder_idx))
+                {
+                    return error.CongruenceBinderOrderMismatch;
+                }
+                binder_idx += 1;
+                continue;
+            }
+
+            const old_idx = binder_idx;
+            const new_idx = binder_idx + 1;
+            if (!isBinder(lhs_arg, old_idx) or !isBinder(rhs_arg, new_idx)) {
+                return error.CongruenceBinderOrderMismatch;
+            }
+            try expectRuleArgCompatible(rule, new_idx, term_arg, false);
+            try self.validateCongrHyp(
+                env,
+                rule,
+                hyp_idx,
+                term_arg.sort_name,
+                old_idx,
+                new_idx,
+            );
+            binder_idx += 2;
+            hyp_idx += 1;
+        }
+        if (binder_idx != rule.args.len or hyp_idx != rule.hyps.len) {
+            return error.InvalidCongruenceAnnotation;
+        }
+
+        return lhs_app.term_id;
+    }
+
+    fn validateCongrRelation(
+        self: *RewriteRegistry,
+        env: *const GlobalEnv,
+        head_id: u32,
+        rel_term_id: u32,
+    ) !void {
+        if (head_id >= env.terms.items.len) {
+            return error.InvalidCongruenceAnnotation;
+        }
+        const term = &env.terms.items[head_id];
+        const relation = self.getRelationForSort(term.ret_sort_name) orelse {
+            return error.InvalidCongruenceAnnotation;
+        };
+        const expected_rel_term_id = env.term_names.get(
+            relation.rel_term_name,
+        ) orelse {
+            return error.InvalidCongruenceAnnotation;
+        };
+        if (rel_term_id != expected_rel_term_id) {
+            return error.InvalidCongruenceAnnotation;
+        }
+    }
+
+    fn validateCongrHyp(
+        self: *RewriteRegistry,
+        env: *const GlobalEnv,
+        rule: *const RuleDecl,
+        hyp_idx: usize,
+        sort_name: []const u8,
+        old_idx: usize,
+        new_idx: usize,
+    ) !void {
+        if (hyp_idx >= rule.hyps.len) {
+            return error.InvalidCongruenceAnnotation;
+        }
+        const hyp_app = switch (rule.hyps[hyp_idx]) {
+            .app => |value| value,
+            else => return error.InvalidCongruenceAnnotation,
+        };
+        if (hyp_app.args.len != 2) return error.InvalidCongruenceAnnotation;
+        if (!isBinder(hyp_app.args[0], old_idx) or
+            !isBinder(hyp_app.args[1], new_idx))
+        {
+            return error.CongruenceBinderOrderMismatch;
+        }
+
+        const relation = self.getRelationForSort(sort_name) orelse {
+            return error.InvalidCongruenceAnnotation;
+        };
+        const rel_term_id = env.term_names.get(relation.rel_term_name) orelse {
+            return error.InvalidCongruenceAnnotation;
+        };
+        if (hyp_app.term_id != rel_term_id) {
+            return error.InvalidCongruenceAnnotation;
         }
     }
 
@@ -677,6 +817,29 @@ fn isRightUnitPattern(
     return unit_app.term_id == unit_term_id and
         unit_app.args.len == 0 and
         lhs_rhs_binder == rhs_binder;
+}
+
+fn isBinder(template: TemplateExpr, expected_idx: usize) bool {
+    return switch (template) {
+        .binder => |idx| idx == expected_idx,
+        else => false,
+    };
+}
+
+fn expectRuleArgCompatible(
+    rule: *const RuleDecl,
+    binder_idx: usize,
+    term_arg: anytype,
+    expected_bound: bool,
+) !void {
+    if (binder_idx >= rule.args.len) return error.InvalidCongruenceAnnotation;
+    const rule_arg = rule.args[binder_idx];
+    if (rule_arg.bound != expected_bound) {
+        return error.InvalidCongruenceAnnotation;
+    }
+    if (!std.mem.eql(u8, rule_arg.sort_name, term_arg.sort_name)) {
+        return error.InvalidCongruenceAnnotation;
+    }
 }
 
 fn getHeadTermId(template: TemplateExpr) ?u32 {

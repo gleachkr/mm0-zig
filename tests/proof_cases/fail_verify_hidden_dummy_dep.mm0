@@ -158,8 +158,9 @@ def nat_rec_dep (A: ty) (z0 s n: tm) {.y .z: tm}: tm =
   $ nat_ind y z (const_ty y A) z0 (s · z) n $;
 
 --| @congr
-axiom const_ty_congr (y: tm) (A B: ty):
-  $ ty_eq A B $ > $ ty_eq (const_ty y A) (const_ty y B) $;
+axiom const_ty_congr (y1 y2: tm) (A B: ty):
+  $ tm_eq y1 y2 $ > $ ty_eq A B $
+  > $ ty_eq (const_ty y1 A) (const_ty y2 B) $;
 
 --| @rewrite
 axiom sb_ty_const {y: tm} (u: tm y) (A: ty):

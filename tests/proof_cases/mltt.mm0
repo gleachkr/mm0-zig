@@ -211,8 +211,9 @@ axiom sel_tm_congr (b c: tm):
   $ tm_raw_eq b c $ > $ tm_raw_eq (sel_tm b) (sel_tm c) $;
 
 --| @congr
-axiom const_ty_congr (k: tm) (A B: ty):
-  $ ty_raw_eq A B $ > $ ty_raw_eq (const_ty k A) (const_ty k B) $;
+axiom const_ty_congr (k l: tm) (A B: ty):
+  $ k ≈ l $ > $ ty_raw_eq A B $
+  > $ ty_raw_eq (const_ty k A) (const_ty l B) $;
 
 --| @congr
 axiom stage_ty_congr (n m: tm):

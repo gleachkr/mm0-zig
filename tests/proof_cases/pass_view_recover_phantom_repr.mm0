@@ -58,7 +58,7 @@ axiom mem_congr (x y A B: set):
   $ x = y $ > $ A = B $ > $ (x ∈ A) ↔ (y ∈ B) $;
 
 --| @congr
-axiom sep_congr {x: set} (A B: set) (p q: wff x):
+axiom sep_congr (A B: set) {x: set} (p q: wff x):
   $ A = B $ > $ p ↔ q $ > $ {x ∈ A | p} = {x ∈ B | q} $;
 
 --| @view {x: set} (t A: set) (p: wff x) (q r s: wff): $ q → r $ > $ q → s $ > $ q → t ∈ {x ∈ A | p} $

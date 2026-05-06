@@ -3413,6 +3413,102 @@ test "compiler points binding validation errors at explicit assignments" {
     );
 }
 
+test "compiler rejects @congr binders declared old-old-new-new" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term bi (a b: wff): wff;
+        \\term pair (a b: wff): wff;
+        \\--| @relation wff bi biid bitr bisym mpbi
+        \\axiom biid (a: wff): $ bi a a $;
+        \\axiom bitr (a b c: wff):
+        \\  $ bi a b $ > $ bi b c $ > $ bi a c $;
+        \\axiom bisym (a b: wff): $ bi a b $ > $ bi b a $;
+        \\axiom mpbi (a b: wff): $ bi a b $ > $ a $ > $ b $;
+        \\--| @congr
+        \\axiom pair_congr (a b c d: wff):
+        \\  $ bi a c $ > $ bi b d $ >
+        \\  $ bi (pair a b) (pair c d) $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(
+        error.CongruenceBinderOrderMismatch,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.CongruenceBinderOrderMismatch, diag.err);
+    try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
+    try std.testing.expectEqualStrings("pair_congr", diag.name.?);
+    try std.testing.expectEqualStrings(
+        "@congr binders must be ordered old₀ new₀ old₁ new₁ ...",
+        mm0.compilerDiagnosticSummary(diag),
+    );
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("@congr", mm0_src[span.start..span.end]);
+}
+
+test "compiler rejects @congr regular args reused on both sides" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term bi (a b: wff): wff;
+        \\term box (a: wff): wff;
+        \\--| @relation wff bi biid bitr bisym mpbi
+        \\axiom biid (a: wff): $ bi a a $;
+        \\axiom bitr (a b c: wff):
+        \\  $ bi a b $ > $ bi b c $ > $ bi a c $;
+        \\axiom bisym (a b: wff): $ bi a b $ > $ bi b a $;
+        \\axiom mpbi (a b: wff): $ bi a b $ > $ a $ > $ b $;
+        \\--| @congr
+        \\axiom box_congr (a: wff): $ bi (box a) (box a) $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(
+        error.CongruenceBinderOrderMismatch,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.CongruenceBinderOrderMismatch, diag.err);
+    try std.testing.expectEqualStrings("box_congr", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("@congr", mm0_src[span.start..span.end]);
+}
+
+test "compiler rejects @congr with wrong outer relation" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term bi (a b: wff): wff;
+        \\term other (a b: wff): wff;
+        \\term box (a: wff): wff;
+        \\--| @relation wff bi biid bitr bisym mpbi
+        \\axiom biid (a: wff): $ bi a a $;
+        \\axiom bitr (a b c: wff):
+        \\  $ bi a b $ > $ bi b c $ > $ bi a c $;
+        \\axiom bisym (a b: wff): $ bi a b $ > $ bi b a $;
+        \\axiom mpbi (a b: wff): $ bi a b $ > $ a $ > $ b $;
+        \\--| @congr
+        \\axiom box_congr (a b: wff):
+        \\  $ bi a b $ > $ other (box a) (box b) $;
+    ;
+
+    var compiler = Compiler.init(std.testing.allocator, mm0_src);
+    try std.testing.expectError(
+        error.InvalidCongruenceAnnotation,
+        compiler.check(),
+    );
+
+    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    try std.testing.expectEqual(error.InvalidCongruenceAnnotation, diag.err);
+    try std.testing.expectEqualStrings("box_congr", diag.name.?);
+    const span = diag.span orelse return error.ExpectedDiagnosticSpan;
+    try std.testing.expectEqualStrings("@congr", mm0_src[span.start..span.end]);
+}
+
 test "compiler normalizes conclusions with automatic normalization" {
     const mm0_src =
         \\delimiter $ ( ) $;

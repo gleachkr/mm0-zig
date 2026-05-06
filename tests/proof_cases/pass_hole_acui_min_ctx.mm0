@@ -44,7 +44,7 @@ axiom nd_congr (g h: ctx) (a b: wff):
   $ ctx_eq g h $ > $ a <-> b $ > $ nd g a <-> nd h b $;
 
 --| @congr
-axiom imp_congr (a b c d: wff):
+axiom imp_congr (a c b d: wff):
   $ a <-> c $ > $ b <-> d $ > $ imp a b <-> imp c d $;
 
 axiom imp_intro (g: ctx) (a b: wff):
