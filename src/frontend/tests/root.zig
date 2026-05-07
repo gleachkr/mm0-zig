@@ -259,6 +259,53 @@ test "proof script parser reads lemma blocks" {
     try std.testing.expect((try parser.nextBlock()) == null);
 }
 
+test "proof script parser reads multiline lemma headers" {
+    const src =
+        \\lemma id (a: wff):
+        \\  $ a $ >
+        \\  $ a $
+        \\------------------
+        \\l1: $ a $ by ax_keep [#1]
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const lemma = (try parser.nextBlock()).?;
+    try std.testing.expect(lemma.kind == .lemma);
+    try std.testing.expectEqualStrings("id", lemma.name);
+    try std.testing.expectEqualStrings(
+        "(a: wff):\n  $ a $ >\n  $ a $",
+        lemma.header_tail,
+    );
+    try std.testing.expectEqual(@as(usize, 1), lemma.lines.len);
+    try std.testing.expect((try parser.nextBlock()) == null);
+}
+
+test "proof script parser allows comments before lemma underlines" {
+    const src =
+        \\lemma id (a: wff):
+        \\  $ a $
+        \\-- standalone comment before the underline
+        \\------------------
+        \\l1: $ a $ by ax_keep [#1]
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const lemma = (try parser.nextBlock()).?;
+    try std.testing.expect(lemma.kind == .lemma);
+    try std.testing.expectEqualStrings("id", lemma.name);
+    try std.testing.expectEqualStrings(
+        "(a: wff):\n  $ a $",
+        lemma.header_tail,
+    );
+    try std.testing.expectEqual(@as(usize, 1), lemma.lines.len);
+}
+
 test "proof script parser allows newlines inside math strings" {
     const src =
         \\demo

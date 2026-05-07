@@ -672,6 +672,34 @@ test "compiler accepts multiline proof-line whitespace" {
     try compiler.check();
 }
 
+test "compiler accepts multiline local lemma headers" {
+    const mm0_src =
+        \\provable sort wff;
+        \\axiom keep (a: wff): $ a $ > $ a $;
+        \\theorem target (a: wff): $ a $ > $ a $;
+    ;
+    const proof_src =
+        \\lemma helper (a: wff):
+        \\  $ a $ >
+        \\  $ a $
+        \\----------------------
+        \\l1: $ a $ by keep [#1]
+        \\
+        \\target
+        \\------
+        \\l1: $ a $ by helper [#1]
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
 test "compiler rejects lemma names that collide with earlier rules" {
     const mm0_src =
         \\provable sort wff;

@@ -455,7 +455,7 @@ pub const Parser = struct {
     fn parseLemmaHeaderTail(self: *Parser) ![]const u8 {
         self.skipHorizontalSpace();
         const start = self.pos;
-        while (self.pos < self.src.len and self.src[self.pos] != '\n') {
+        while (self.pos < self.src.len) {
             if (self.src[self.pos] == '$') {
                 const math_start = self.pos;
                 self.pos += 1;
@@ -480,10 +480,17 @@ pub const Parser = struct {
             {
                 break;
             }
+            if (self.src[self.pos] == '\n') {
+                const next_start = self.pos + 1;
+                if (self.lineIsUnderline(next_start)) break;
+            }
             self.pos += 1;
         }
         var end = self.pos;
-        while (end > start and isHorizontalSpace(self.src[end - 1])) {
+        while (end > start and
+            (isHorizontalSpace(self.src[end - 1]) or
+                self.src[end - 1] == '\n'))
+        {
             end -= 1;
         }
         self.last_header_tail_span = .{ .start = start, .end = end };
@@ -696,11 +703,6 @@ pub const Parser = struct {
         line_start: usize,
     ) bool {
         if (!self.lineStartsBlockHeaderLead(line_start)) return false;
-
-        const next_start = self.nextLineStart(line_start);
-        if (next_start >= self.src.len or !self.lineIsUnderline(next_start)) {
-            return false;
-        }
         self.pos = line_start;
         return true;
     }
@@ -727,11 +729,14 @@ pub const Parser = struct {
             return self.lineLooksLikeLemmaHeader(i);
         }
         while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
-        return i >= self.src.len or
+        const header_ok = i >= self.src.len or
             self.src[i] == '\n' or
             (i + 1 < self.src.len and
                 self.src[i] == '-' and
                 self.src[i + 1] == '-');
+        if (!header_ok) return false;
+        const next_start = self.nextLineStart(line_start);
+        return next_start < self.src.len and self.lineIsUnderline(next_start);
     }
 
     fn lineLooksLikeLemmaHeader(
@@ -744,21 +749,28 @@ pub const Parser = struct {
         i += 1;
         while (i < self.src.len and isIdentChar(self.src[i])) : (i += 1) {}
 
-        const line_end = self.lineEnd(i);
-        while (i < line_end) {
+        var saw_colon = false;
+        while (i < self.src.len) {
             if (self.src[i] == '$') {
                 i += 1;
-                while (i < line_end and self.src[i] != '$') : (i += 1) {}
-                if (i >= line_end) return false;
+                while (i < self.src.len and self.src[i] != '$') : (i += 1) {}
+                if (i >= self.src.len) return false;
                 i += 1;
                 continue;
             }
-            if (self.src[i] == ':') return true;
-            if (i + 1 < line_end and
+            if (i + 1 < self.src.len and
                 self.src[i] == '-' and
                 self.src[i + 1] == '-')
             {
-                return false;
+                const next_start = self.nextLineStart(i);
+                return saw_colon and
+                    next_start < self.src.len and
+                    self.lineIsUnderline(next_start);
+            }
+            if (self.src[i] == ':') saw_colon = true;
+            if (self.src[i] == '\n') {
+                const next_start = i + 1;
+                if (self.lineIsUnderline(next_start)) return saw_colon;
             }
             i += 1;
         }

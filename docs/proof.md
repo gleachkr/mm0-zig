@@ -71,6 +71,9 @@ one proof line. A new proof line must still begin on a fresh line with
 its label. Comments are allowed in these continuation positions.
 Newlines are also allowed inside `$ ... $` math strings.
 
+Lemma headers may also span physical lines. The header ends at the
+underline line, or at a `--` comment before that line.
+
 ## Top-level blocks
 
 An Aufbau script is a sequence of theorem blocks, lemma blocks, blank
@@ -108,21 +111,30 @@ l1: $ a -> a $ by id []
 A lemma block declares a proof-only local rule.
 
 ```text
-lemma-block ::= 'lemma' identifier lemma-binders? ':' assertion-tail
+lemma-block ::= 'lemma' identifier lemma-header-tail
                 newline underline newline* proof-line*
 
+lemma-header-tail ::= whitespace-or-newline* lemma-binders? ':'
+                      assertion-tail
 assertion-tail ::= formula ('>' formula)*
 ```
 
 `lemma-binders?` and `assertion-tail` use the same binder and theorem-tail
-syntax as MM0 assertions.
+syntax as MM0 assertions. The whitespace between lemma-header tokens may
+include line breaks. Standalone comments may appear before the underline.
 
-Example:
+Examples:
 
 ```text
 lemma id (a: wff): $ a -> a $
 ---------------------------
 l1: $ a -> a $ by ax_id (a := $ a $) []
+
+lemma keep (a: wff):
+  $ a $ >
+  $ a $
+--------------------
+l1: $ a $ by ax_keep [#1]
 ```
 
 ## Proof lines
