@@ -850,6 +850,11 @@ fn matchRuleHypForInference(
     actual: ExprId,
 ) !bool {
     if (try session.matchTransparent(template, actual)) return true;
+    if (try session.matchSemantic(
+        template,
+        actual,
+        DefOps.default_semantic_match_budget,
+    )) return true;
     // This intentionally mirrors `Matching.tryMatchHypothesis`: a referenced
     // line may be stored in the raw form produced by its rule, while final
     // validation can transport it to the expected hypothesis. Binder inference

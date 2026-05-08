@@ -603,12 +603,7 @@ l3: $ G , G ⊢ cb_core A B f g = cb_step A B f g (cb_core A B f g) $
 cb_bijection_maps_pair_mem
 --------------------------
 l1: $ G ⊢ ⟨ x , y ⟩ ∈ pair_carrier A B $
-  by sep_elim_left
-    (x := $ w $,
-     p := $ ∃ u ∃ v
-       (w = ⟨ u , v ⟩ ∧
-        ((u ∈ cb_core A B f g ∧ maps f u v) ∨
-         (u ∉ cb_core A B f g ∧ maps g v u))) $) [#1]
+  by sep_elim_left (x := $ w $) [#1]
 
 cb_bijection_maps_cases
 -----------------------

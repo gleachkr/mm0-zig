@@ -568,8 +568,6 @@ axiom sep_intro {x: set} (G H: ctx x) (t A: set) (p: wff x):
   $ G ⊢ t ∈ A $ > $ H ⊢ [x/t] p $ >
   $ G , H ⊢ t ∈ {x ∈ A | p} $;
 
---| @view {x:set}(G:ctx x)(t A:set)(p:wff x)(q:wff): $ G ⊢ t ∈ {x ∈ A | p} $ > $ G ⊢ q $
---| @recover t q p x
 axiom sep_elim_left {x: set} (G: ctx x) (t A: set) (p: wff x):
   $ G ⊢ t ∈ {x ∈ A | p} $ > $ G ⊢ t ∈ A $;
 
