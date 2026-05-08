@@ -300,6 +300,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/smullyan.auf"),
         "web-demo/fixtures/smullyan.auf",
     );
+    const install_zermelo_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/zermelo.mm0"),
+        "web-demo/fixtures/zermelo.mm0",
+    );
+    const install_zermelo_proof = b.addInstallFile(
+        b.path("tests/proof_cases/zermelo.auf"),
+        "web-demo/fixtures/zermelo.auf",
+    );
     web_demo_step.dependOn(&install_demo_compiler_pkg.step);
     web_demo_step.dependOn(&install_demo_verifier_pkg.step);
     web_demo_step.dependOn(&install_demo_lsp_pkg.step);
@@ -344,6 +352,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_peano_proof.step);
     web_demo_step.dependOn(&install_smullyan_mm0.step);
     web_demo_step.dependOn(&install_smullyan_proof.step);
+    web_demo_step.dependOn(&install_zermelo_mm0.step);
+    web_demo_step.dependOn(&install_zermelo_proof.step);
 
     const run_step = b.step("run", "Run the mm0-zig verifier");
     const run_cmd = b.addRunArtifact(verifier_exe);

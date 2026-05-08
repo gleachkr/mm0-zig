@@ -94,6 +94,11 @@ const examples = {
     mm0: "./fixtures/smullyan.mm0",
     proof: "./fixtures/smullyan.auf",
   },
+  zermelo: {
+    label: "zermelo",
+    mm0: "./fixtures/zermelo.mm0",
+    proof: "./fixtures/zermelo.auf",
+  },
 };
 
 const editorTheme = EditorView.theme({
@@ -210,6 +215,8 @@ let mm0View = null;
 let proofView = null;
 let lspClient = null;
 let lspServer = null;
+let currentExample = null;
+let currentRouteKey = null;
 
 initTheme();
 initTabs();
@@ -251,13 +258,43 @@ function makeExtensions(ariaLabel, withLint, lspExtension) {
   return exts;
 }
 
-function exampleFromHash() {
-  const name = location.hash.replace(/^#/, "");
-  return examples[name] ? name : "hilbert";
+function routeFromHash() {
+  const raw = location.hash.replace(/^#/, "");
+  const slash = raw.indexOf("/");
+  const rawExample = slash < 0 ? raw : raw.slice(0, slash);
+  const rawTheorem = slash < 0 ? "" : raw.slice(slash + 1);
+  const name = safeDecode(rawExample);
+  const theorem = rawTheorem ? safeDecode(rawTheorem) : null;
+  return {
+    example: examples[name] ? name : "hilbert",
+    theorem,
+  };
+}
+
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function routeHash(name, theorem) {
+  const parts = [encodeURIComponent(name)];
+  if (theorem) parts.push(encodeURIComponent(theorem));
+  return `#${parts.join("/")}`;
+}
+
+function pushRoute(name, theorem) {
+  const next = routeHash(name, theorem);
+  if (location.hash !== next) {
+    window.history.pushState(null, "", next);
+  }
 }
 
 async function main() {
-  const initial = exampleFromHash();
+  const initialRoute = routeFromHash();
+  const initial = initialRoute.example;
   const [compiler, verifier, server, mm0Text, proofText] = await Promise.all([
     loadCompiler(),
     loadVerifier(),
@@ -306,11 +343,12 @@ async function main() {
     btn.addEventListener("click", () => loadExample(btn.dataset.example));
   }
 
+  currentExample = initial;
+  currentRouteKey = routeHash(initial, initialRoute.theorem);
   markActiveExample(initial);
-  window.addEventListener("hashchange", () => {
-    const name = exampleFromHash();
-    loadExample(name);
-  });
+  revealTheoremFromRoute(initialRoute.theorem);
+  window.addEventListener("hashchange", handleRouteChange);
+  window.addEventListener("popstate", handleRouteChange);
 
   warmUpAnalysis(mm0Text, proofText);
   await runAnalysis();
@@ -327,14 +365,30 @@ function markActiveExample(name) {
   ui.examplesBtn.textContent = example.label;
 }
 
-async function loadExample(name) {
+async function handleRouteChange() {
+  const route = routeFromHash();
+  const routeKey = routeHash(route.example, route.theorem);
+  if (routeKey === currentRouteKey) return;
+  currentRouteKey = routeKey;
+
+  if (route.example === currentExample) {
+    revealTheoremFromRoute(route.theorem);
+    return;
+  }
+  await loadExample(route.example, {
+    theorem: route.theorem,
+    updateHash: false,
+  });
+}
+
+async function loadExample(name, options = {}) {
   const example = examples[name];
   if (!example || !compilerRuntime || !verifierRuntime || !mm0View || !proofView) {
     return;
   }
 
-  if (location.hash.replace(/^#/, "") !== name) {
-    window.history.pushState(null, "", `#${name}`);
+  if (options.updateHash !== false) {
+    pushRoute(name, options.theorem ?? null);
   }
 
   const [mm0Text, proofText] = await Promise.all([
@@ -349,7 +403,10 @@ async function loadExample(name) {
   clearDiagnosticStatus();
   clearDiagnostics();
 
+  currentExample = name;
+  currentRouteKey = routeHash(name, options.theorem ?? null);
   markActiveExample(name);
+  revealTheoremFromRoute(options.theorem ?? null);
   ui.exampleModal.close();
 
   await runAnalysis();
@@ -358,6 +415,89 @@ async function loadExample(name) {
 function setEditorContent(view, text) {
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
+  });
+}
+
+function revealTheoremFromRoute(name) {
+  if (!name) return;
+  if (revealProofBlock(name)) return;
+  if (revealMm0Assertion(name)) return;
+  console.warn(`No theorem named ${name} in ${currentExample}`);
+}
+
+function revealProofBlock(name) {
+  if (!proofView) return false;
+  const range = findProofBlock(proofView, name);
+  if (!range) return false;
+  focusRange("proof", proofView, range);
+  return true;
+}
+
+function revealMm0Assertion(name) {
+  if (!mm0View) return false;
+  const range = findMm0Assertion(mm0View, name);
+  if (!range) return false;
+  focusRange("mm0", mm0View, range);
+  return true;
+}
+
+function findProofBlock(view, name) {
+  const doc = view.state.doc;
+  for (let i = 1; i <= doc.lines; i += 1) {
+    const line = doc.line(i);
+    const trimmed = line.text.trim();
+    if (trimmed === name && isProofUnderline(doc, i + 1)) {
+      return rangeForName(line, name);
+    }
+
+    const lemma = line.text.match(/^\s*lemma\s+([A-Za-z_][A-Za-z0-9_']*)\b/);
+    if (lemma?.[1] === name) {
+      return rangeForName(line, name);
+    }
+  }
+  return null;
+}
+
+function isProofUnderline(doc, lineNumber) {
+  if (lineNumber > doc.lines) return false;
+  return /^-+\s*$/.test(doc.line(lineNumber).text);
+}
+
+function findMm0Assertion(view, name) {
+  const doc = view.state.doc;
+  const pattern = /^\s*(?:(?:pub|local)\s+)?(?:axiom|theorem|lemma)\s+/;
+  for (let i = 1; i <= doc.lines; i += 1) {
+    const line = doc.line(i);
+    if (!pattern.test(line.text)) continue;
+    const assertion = line.text.slice(line.text.search(pattern));
+    const match = assertion.match(
+      /^\s*(?:(?:pub|local)\s+)?(?:axiom|theorem|lemma)\s+([^\s({:]+)/,
+    );
+    if (match?.[1] === name) {
+      return rangeForName(line, name);
+    }
+  }
+  return null;
+}
+
+function rangeForName(line, name) {
+  const column = line.text.indexOf(name);
+  const from = line.from + Math.max(column, 0);
+  return { from, to: from + name.length };
+}
+
+function focusRange(pane, view, range) {
+  setActivePane(pane);
+  view.focus();
+  view.dispatch({
+    selection: {
+      anchor: range.from,
+      head: range.to,
+    },
+    effects: EditorView.scrollIntoView(range.from, {
+      y: "start",
+      yMargin: 16,
+    }),
   });
 }
 
