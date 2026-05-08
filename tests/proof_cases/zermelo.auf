@@ -197,7 +197,7 @@ l1: $ G ⊢ ∃ x (x ∈ X ∧ maps f x y) $ by sep_elim_right [#1]
 image_intro
 -----------
 l1: $ H , K ⊢ has_preimage f X y $ by has_preimage_intro [#2, #3]
-l2: $ G , H , K ⊢ y ∈ image f X B $ by sep_intro (x := $ u $) [#1, l1]
+l2: $ G , H , K ⊢ y ∈ image f X B $ by sep_intro [#1, l1]
 
 mem_eq_right
 ------------
