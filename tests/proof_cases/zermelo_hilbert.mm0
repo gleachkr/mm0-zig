@@ -1,0 +1,835 @@
+-- A graph-based set theory slice culminating in Cantor's theorem and
+-- the Cantor-Bernstein theorem.
+--
+-- The set-forming operations are primitive, with axioms matching the
+-- intended Zermelo basis.  Function-like notions are definitions over
+-- sets of ordered pairs, not primitive predicates.
+--
+-- Organization:
+--   1.  logical syntax, equality, and congruence;
+--   2.  propositional and first-order proof plumbing;
+--   3.  Zermelo set-forming primitives;
+--   4.  derived set operations;
+--   5.  ordered pairs, graph membership, and image predicates;
+--   6.  substitution rewrites;
+--   7.  subset, separation, and image lemmas;
+--   8.  equality transport;
+--   9.  function-like graph predicates;
+--  10.  Cantor's theorem via the diagonal set;
+--  11.  Cantor-Bernstein fixed-point scaffold;
+--  12.  the Cantor-Bernstein theorem.
+--
+-- Proof-specific trusted helpers are marked "Proof debt" below.  The
+-- intent is to keep these easy to find while the theorem is still being
+-- streamlined.
+
+delimiter $ ( ) { } [ / ] , | $;
+
+strict provable sort wff;
+--| @vars x y z u v w X Y a b c d
+sort set;
+
+term im (p q: wff): wff;
+infixr im: $→$ prec 25;
+infixr im: $->$ prec 25;
+
+term not (p: wff): wff;
+prefix not: $¬$ prec 41;
+prefix not: $~$ prec 41;
+
+term and (p q: wff): wff;
+infixr and: $∧$ prec 30;
+infixr and: $/\\$ prec 30;
+
+term or (p q: wff): wff;
+infixr or: $∨$ prec 28;
+infixr or: $\\/$ prec 28;
+
+term bi (p q: wff): wff;
+infixr bi: $↔$ prec 20;
+infixr bi: $<->$ prec 20;
+
+term bot: wff;
+prefix bot: $⊥$ prec max;
+prefix bot: $F.$ prec max;
+
+term all {x: set} (p: wff x): wff;
+prefix all: $∀$ prec 41;
+prefix all: $A.$ prec 41;
+
+term ex {x: set} (p: wff x): wff;
+prefix ex: $∃$ prec 41;
+prefix ex: $E.$ prec 41;
+
+term sb_f {x: set} (t: set x) (p: wff x): wff;
+notation sb_f {x: set} (t: set x) (p: wff x): wff =
+  ($[$:41) x ($/$:0) t ($]$:0) p;
+term sb_s {x: set} (t: set x) (s: set x): set;
+notation sb_s {x: set} (t: set x) (s: set x): set =
+  ($⟦$:41) x ($/$:0) t ($⟧$:0) s;
+
+term set_eq (a b: set): wff;
+infixl set_eq: $=$ prec 50;
+
+term mem (x A: set): wff;
+infixl mem: $∈$ prec 50;
+infixl mem: $e.$ prec 50;
+
+def not_mem (x A: set): wff = $ ¬ (x ∈ A) $;
+infixl not_mem: $∉$ prec 50;
+infixl not_mem: $notin$ prec 50;
+
+-- --------------------------------------------------------------------------
+-- Logical syntax, equality, and congruence
+-- --------------------------------------------------------------------------
+--| @relation wff bi biid bitr bisym mpbi
+axiom biid (p: wff): $ p ↔ p $;
+axiom bitr (p q r: wff): $ p ↔ q $ > $ q ↔ r $ > $ p ↔ r $;
+axiom bisym (p q: wff): $ p ↔ q $ > $ q ↔ p $;
+axiom mpbi (p q: wff): $ p ↔ q $ > $ p $ > $ q $;
+axiom bi1 (p q: wff): $ (p ↔ q) → (p → q) $;
+axiom bi_intro (p q: wff): $ p → q $ > $ q → p $ > $ p ↔ q $;
+
+--| @relation set set_eq setid settr setsym _
+axiom setid (a: set): $ a = a $;
+axiom settr (a b c: set): $ a = b $ > $ b = c $ > $ a = c $;
+axiom setsym (a b: set): $ a = b $ > $ b = a $;
+
+--| @congr
+axiom set_eq_congr (a b c d: set):
+  $ a = b $ > $ c = d $ > $ (a = c) ↔ (b = d) $;
+
+--| @congr
+axiom im_congr (p q r s: wff):
+  $ p ↔ q $ > $ r ↔ s $ > $ (p → r) ↔ (q → s) $;
+
+--| @congr
+axiom not_congr (p q: wff): $ p ↔ q $ > $ ¬ p ↔ ¬ q $;
+
+--| @congr
+axiom and_congr (p q r s: wff):
+  $ p ↔ q $ > $ r ↔ s $ > $ (p ∧ r) ↔ (q ∧ s) $;
+
+--| @congr
+axiom or_congr (p q r s: wff):
+  $ p ↔ q $ > $ r ↔ s $ > $ (p ∨ r) ↔ (q ∨ s) $;
+
+--| @congr
+axiom bi_congr (p q r s: wff):
+  $ p ↔ q $ > $ r ↔ s $ > $ (p ↔ r) ↔ (q ↔ s) $;
+
+--| @congr
+axiom all_congr {x: set} (p q: wff x):
+  $ p ↔ q $ > $ ∀ x p ↔ ∀ x q $;
+
+--| @congr
+axiom ex_congr {x: set} (p q: wff x):
+  $ p ↔ q $ > $ ∃ x p ↔ ∃ x q $;
+
+--| @congr
+axiom mem_congr (x y A B: set):
+  $ x = y $ > $ A = B $ > $ (x ∈ A) ↔ (y ∈ B) $;
+
+--| @congr
+axiom not_mem_congr (x y A B: set):
+  $ x = y $ > $ A = B $ > $ (x ∉ A) ↔ (y ∉ B) $;
+
+-- --------------------------------------------------------------------------
+-- Propositional and first-order proof plumbing
+-- --------------------------------------------------------------------------
+-- Basic implication and negation rules used by the proof script.
+axiom h1 (p q: wff): $ p → (q → p) $;
+axiom h2 (p q r: wff):
+  $ (p → (q → r)) → ((p → q) → (p → r)) $;
+axiom imp_not_self (p: wff): $ p → ¬ p $ > $ p → ⊥ $;
+axiom imp_not_to_self (p: wff): $ ¬ p → p $ > $ ¬ p → ⊥ $;
+axiom mp (p q: wff): $ p → q $ > $ p $ > $ q $;
+theorem not_to_imp (p: wff): $ ¬ p $ > $ p → ⊥ $;
+axiom contra_imp (p q r: wff):
+  $ p → (q → r) $ > $ ¬ r → (p → ¬ q) $;
+theorem imp_id (p: wff): $ p → p $;
+theorem imp_trans (p q r: wff): $ p → q $ > $ q → r $ > $ p → r $;
+theorem imp_const (p q: wff): $ q $ > $ p → q $;
+theorem imp_const2 (p q r: wff): $ r $ > $ p → (q → r) $;
+theorem imp_const3 (p q r s: wff):
+  $ s $ > $ p → (q → (r → s)) $;
+theorem imp_lift (p q r: wff): $ p → r $ > $ p → (q → r) $;
+theorem imp_mp_right (p q r: wff):
+  $ q $ > $ p → (q → r) $ > $ p → r $;
+theorem imp_swap (p q r: wff): $ p → (q → r) $ > $ q → (p → r) $;
+theorem imp_apply_under (p q r: wff):
+  $ p → (q → r) $ > $ p → q $ > $ p → r $;
+theorem imp_apply_under2 (p q r s: wff):
+  $ p → (q → (r → s)) $ > $ p → (q → r) $ >
+  $ p → (q → s) $;
+theorem imp_apply_under3 (p q r s t: wff):
+  $ p → (q → (r → (s → t))) $ >
+  $ p → (q → (r → s)) $ > $ p → (q → (r → t)) $;
+theorem imp_apply_under4 (p q r s t u: wff):
+  $ p → (q → (r → (s → (t → u)))) $ >
+  $ p → (q → (r → (s → t))) $ >
+  $ p → (q → (r → (s → u))) $;
+theorem imp_lift_under2 (p q r s: wff):
+  $ p → (q → s) $ > $ p → (q → (r → s)) $;
+theorem imp_lift_under3 (p q r s t: wff):
+  $ p → (q → (r → t)) $ > $ p → (q → (r → (s → t))) $;
+theorem imp_trans_under (p q r s: wff):
+  $ p → (q → r) $ > $ p → (r → s) $ > $ p → (q → s) $;
+theorem imp_trans_under2 (p q r s t: wff):
+  $ p → (q → (r → s)) $ > $ p → (q → (s → t)) $ >
+  $ p → (q → (r → t)) $;
+theorem imp_trans_under3 (p q r s t u: wff):
+  $ p → (q → (r → (s → t))) $ >
+  $ p → (q → (r → (t → u))) $ >
+  $ p → (q → (r → (s → u))) $;
+theorem imp_swap_imp (p q r: wff):
+  $ (p → (q → r)) → (q → (p → r)) $;
+theorem imp_swap_under (p q r s: wff):
+  $ p → (q → (r → s)) $ > $ p → (r → (q → s)) $;
+theorem imp_swap_under2 (p q r s t: wff):
+  $ p → (q → (r → (s → t))) $ >
+  $ p → (q → (s → (r → t))) $;
+axiom not_intro (p q r: wff):
+  $ p → (q → r) $ > $ p → (q → ¬ r) $ > $ p → ¬ q $;
+axiom not_intro_under2 (p q r s: wff):
+  $ p → (q → (r → s)) $ >
+  $ p → (q → (r → ¬ s)) $ > $ p → (q → ¬ r) $;
+axiom cases_imp_under3 (p q r s t: wff):
+  $ p → (q → (r → (s → t))) $ >
+  $ p → (q → (r → (¬ s → t))) $ > $ p → (q → (r → t)) $;
+axiom and1 (p q: wff): $ p → (q → p ∧ q) $;
+theorem and_intro (p q: wff): $ p $ > $ q $ > $ p ∧ q $;
+theorem and_intro_imp (p q r: wff):
+  $ p → q $ > $ p → r $ > $ p → q ∧ r $;
+theorem and_intro_imp_imp (p q r: wff):
+  $ (p → q) → ((p → r) → (p → q ∧ r)) $;
+theorem and_intro_imp_under (p q r s: wff):
+  $ p → (q → r) $ > $ p → (q → s) $ >
+  $ p → (q → r ∧ s) $;
+theorem and_intro_imp_under2 (p q r s t: wff):
+  $ p → (q → (r → s)) $ > $ p → (q → (r → t)) $ >
+  $ p → (q → (r → s ∧ t)) $;
+theorem and_intro_imp_under3 (p q r s t u: wff):
+  $ p → (q → (r → (s → t))) $ >
+  $ p → (q → (r → (s → u))) $ >
+  $ p → (q → (r → (s → t ∧ u))) $;
+axiom and_elim_l_imp (p q: wff): $ p ∧ q → p $;
+axiom and_elim_r_imp (p q: wff): $ p ∧ q → q $;
+theorem and_elim_l (p q: wff): $ p ∧ q $ > $ p $;
+theorem and_elim_r (p q: wff): $ p ∧ q $ > $ q $;
+theorem and_mp_right (q r s: wff):
+  $ r $ > $ (q ∧ r) → s $ > $ q → s $;
+theorem and_mp_right_imp (q r s: wff):
+  $ (q ∧ r) → s $ > $ r → (q → s) $;
+axiom or_intro_l_imp (p q: wff): $ p → p ∨ q $;
+axiom or_intro_r_imp (p q: wff): $ q → p ∨ q $;
+axiom excluded_middle (p: wff): $ p ∨ ¬ p $;
+axiom or_elim_imp (p q r: wff):
+  $ p → r $ > $ q → r $ > $ p ∨ q → r $;
+axiom or_elim_imp_under (p q r s: wff):
+  $ s → (p → r) $ > $ s → (q → r) $ > $ s → (p ∨ q → r) $;
+axiom or_elim_imp_under2 (p q r s t: wff):
+  $ s → (t → (p → r)) $ > $ s → (t → (q → r)) $ >
+  $ s → (t → ((p ∨ q) → r)) $;
+axiom or_elim_imp_under3 (p q r s t u: wff):
+  $ s → (t → (u → (p → r))) $ >
+  $ s → (t → (u → (q → r))) $ >
+  $ s → (t → (u → ((p ∨ q) → r))) $;
+axiom contradiction_imp_under (p q r s: wff):
+  $ p → (q → r) $ > $ p → (q → ¬ r) $ > $ p → (q → s) $;
+axiom contradiction_imp_under3 (p q r s t u: wff):
+  $ p → (q → (r → (s → t))) $ >
+  $ p → (q → (r → (s → ¬ t))) $ >
+  $ p → (q → (r → (s → u))) $;
+
+theorem bi_imp (p q: wff): $ p ↔ q $ > $ p → q $;
+theorem bi_imp_rev (p q: wff): $ p ↔ q $ > $ q → p $;
+theorem bi_imp_imp (p q r: wff):
+  $ p → (q ↔ r) $ > $ p → (q → r) $;
+
+-- Classical proof by cases, specialized to contradiction.
+axiom cases_bot (p: wff): $ p → ⊥ $ > $ ¬ p → ⊥ $ > $ ⊥ $;
+theorem double_neg_elim (p: wff): $ ¬ ¬ p → p $;
+
+-- --------------------------------------------------------------------------
+-- Zermelo set-forming primitives
+-- --------------------------------------------------------------------------
+term empty: set;
+prefix empty: $∅$ prec max;
+
+term pairset (a b: set): set;
+term union (A: set): set;
+term power (A: set): set;
+prefix power: $𝒫$ prec 80;
+term sep (A: set) {x: set} (p: wff x): set;
+notation sep (A: set) {x: set} (p: wff x): set =
+  (${$:max) x ($∈$:50) A ($|$:0) p ($}$:0);
+
+--| @view {u: set} (t: set) (p: wff u) (q: wff): $ ∀ u p → q $
+--| @recover t q p u
+axiom all_elim_imp {u: set} (t: set) (p: wff u):
+  $ ∀ u p → [u/t] p $;
+axiom all_elim_self_imp {u: set} (p: wff u): $ ∀ u p → p $;
+
+axiom all_intro_imp {u: set} (p: wff) (q: wff u):
+  $ p → q $ > $ p → ∀ u q $;
+
+axiom all_intro {u: set} (p: wff u): $ p $ > $ ∀ u p $;
+
+--| @view {u: set} (t: set) (p: wff u) (q: wff): $ q $ > $ ∃ u p $
+--| @recover t q p u
+axiom ex_intro {u: set} (t: set) (p: wff u):
+  $ [u/t] p $ > $ ∃ u p $;
+
+--| @view {u: set} (t: set) (p: wff u) (q r: wff): $ q → r $ > $ q → ∃ u p $
+--| @recover t r p u
+axiom ex_intro_imp {u: set} (t: set) (p: wff u) (q: wff):
+  $ q → [u/t] p $ > $ q → ∃ u p $;
+
+axiom ex_elim_imp {u: set} (p: wff u) (q: wff):
+  $ ∀ u (p → q) $ > $ ∃ u p → q $;
+axiom ex_elim_imp_under2 {u: set} (p: wff u) (q r s: wff):
+  $ q → (r → (p → s)) $ > $ q → (r → ((∃ u p) → s)) $;
+
+--| @view {u: set} (a b: set) (p: wff u) (q r: wff): $ a = b → (q → r) $
+--| @abstract p q r u a b
+--| @fresh u
+axiom eq_replace_imp {u: set} (a b: set) (p: wff u):
+  $ a = b → ([u/a] p → [u/b] p) $;
+
+--| @rewrite
+axiom sb_f_im {u: set} (t: set) (p q: wff u):
+  $ [u/t] (p → q) ↔ ([u/t] p → [u/t] q) $;
+
+--| @rewrite
+axiom sb_f_and {u: set} (t: set) (p q: wff u):
+  $ [u/t] (p ∧ q) ↔ ([u/t] p ∧ [u/t] q) $;
+
+--| @rewrite
+axiom sb_f_or {u: set} (t: set) (p q: wff u):
+  $ [u/t] (p ∨ q) ↔ ([u/t] p ∨ [u/t] q) $;
+
+--| @rewrite
+axiom sb_f_bi {u: set} (t: set) (p q: wff u):
+  $ [u/t] (p ↔ q) ↔ ([u/t] p ↔ [u/t] q) $;
+
+--| @rewrite
+axiom sb_f_all {u v: set} (t: set) (p: wff u v):
+  $ [u/t] (∀ v p) ↔ ∀ v [u/t] p $;
+
+--| @rewrite
+axiom sb_f_ex {u v: set} (t: set) (p: wff u v):
+  $ [u/t] (∃ v p) ↔ ∃ v [u/t] p $;
+
+--| @rewrite
+axiom sb_f_not {u: set} (t: set) (p: wff u):
+  $ [u/t] (¬ p) ↔ ¬ [u/t] p $;
+
+--| @rewrite
+axiom sb_f_id {u: set} (p: wff u): $ [u/u] p ↔ p $;
+
+-- Extensionality and proof-friendly forms of the Zermelo operations.
+def subset (A B: set) (.x: set): wff =
+  $ ∀ x (x ∈ A → x ∈ B) $;
+infixr subset: $⊆$ prec 25;
+
+theorem subset_intro_imp (A B: set) {x: set}:
+  $ x ∈ A → x ∈ B $ > $ A ⊆ B $;
+theorem subset_intro_imp_imp (A B: set) (p: wff) {x: set}:
+  $ p → (x ∈ A → x ∈ B) $ > $ p → (A ⊆ B) $;
+
+axiom ext (A B: set): $ A ⊆ B $ > $ B ⊆ A $ > $ A = B $;
+
+axiom empty_elim (x: set): $ x ∈ ∅ → ⊥ $;
+
+axiom pairset_intro_left (x y: set): $ x ∈ pairset x y $;
+axiom pairset_intro_right (x y: set): $ y ∈ pairset x y $;
+axiom pairset_elim (x y z: set):
+  $ x ∈ pairset y z $ > $ x = y ∨ x = z $;
+
+axiom union_intro (x y A: set):
+  $ x ∈ y $ > $ y ∈ A $ > $ x ∈ union A $;
+
+axiom power_intro (A B: set): $ B ⊆ A $ > $ B ∈ power A $;
+axiom power_elim (A B: set): $ B ∈ power A $ > $ B ⊆ A $;
+
+axiom sep_intro {x: set} (A: set) (p: wff x):
+  $ x ∈ A $ > $ p $ > $ x ∈ {x ∈ A | p} $;
+--| @view {x: set} (t A: set) (p: wff x) (q: wff): $ t ∈ A $ > $ q → t ∈ {x ∈ A | p} $
+--| @recover t q p x
+axiom sep_intro_imp {x: set} (t A: set) (p: wff x):
+  $ t ∈ A $ > $ [x/t] p → t ∈ {x ∈ A | p} $;
+--| @view {x: set} (t A: set) (p: wff x) (q r: wff): $ q → (r → t ∈ {x ∈ A | p}) $
+--| @recover t r p x
+axiom sep_intro_imp_imp {x: set} (t A: set) (p: wff x):
+  $ t ∈ A → ([x/t] p → t ∈ {x ∈ A | p}) $;
+--| @view {x: set} (t A: set) (p: wff x) (q r s: wff): $ q → r $ > $ q → s $ > $ q → t ∈ {x ∈ A | p} $
+--| @recover t q p x
+axiom sep_intro_imp2 {x: set} (t A: set) (p: wff x) (q: wff):
+  $ q → t ∈ A $ > $ q → [x/t] p $ >
+  $ q → t ∈ {x ∈ A | p} $;
+axiom sep_elim_left {x: set} (A: set) (p: wff x):
+  $ x ∈ {x ∈ A | p} $ > $ x ∈ A $;
+--| @view {x: set} (t A: set) (p: wff x) (q: wff): $ t ∈ {x ∈ A | p} → q $
+--| @recover t q p x
+axiom sep_elim_left_imp {x: set} (t A: set) (p: wff x):
+  $ t ∈ {x ∈ A | p} → t ∈ A $;
+axiom sep_elim_right {x: set} (A: set) (p: wff x):
+  $ x ∈ {x ∈ A | p} $ > $ p $;
+--| @view {x: set} (t A: set) (p: wff x) (q: wff): $ t ∈ {x ∈ A | p} → q $
+--| @recover t q p x
+axiom sep_elim_right_imp {x: set} (t A: set) (p: wff x):
+  $ t ∈ {x ∈ A | p} → [x/t] p $;
+axiom sep_subset {x: set} (A: set) (p: wff x):
+  $ {x ∈ A | p} ⊆ A $;
+
+-- --------------------------------------------------------------------------
+-- Derived set operations
+-- --------------------------------------------------------------------------
+def setdiff (A B: set) (.x: set): set = $ {x ∈ A | x ∉ B} $;
+infixl setdiff: $∖$ prec 60;
+infixl setdiff: $\\$ prec 60;
+
+def in_all_subsets (S x: set) (.X: set): wff =
+  $ ∀ X (X ∈ S → x ∈ X) $;
+
+--| @congr
+axiom in_all_subsets_congr (S T x y: set):
+  $ S = T $ > $ x = y $ > $ in_all_subsets S x ↔ in_all_subsets T y $;
+
+def inter_subsets (A S: set) (.x: set): set =
+  $ {x ∈ A | in_all_subsets S x} $;
+
+-- --------------------------------------------------------------------------
+-- Ordered pairs, graph membership, and image predicates
+-- --------------------------------------------------------------------------
+def singleton (a: set): set = $ pairset a a $;
+def opair (a b: set): set = $ pairset (singleton a) (pairset a b) $;
+notation opair (a b: set): set =
+  ($⟨$:max) a ($,$:0) b ($⟩$:0);
+--| @congr
+axiom opair_congr (a c b d: set):
+  $ a = c $ > $ b = d $ > $ ⟨ a , b ⟩ = ⟨ c , d ⟩ $;
+axiom opair_eq_left_imp (a b c d: set): $ ⟨ a , b ⟩ = ⟨ c , d ⟩ → a = c $;
+axiom opair_eq_right_imp (a b c d: set): $ ⟨ a , b ⟩ = ⟨ c , d ⟩ → b = d $;
+theorem opair_eq_left (a b c d: set): $ ⟨ a , b ⟩ = ⟨ c , d ⟩ $ > $ a = c $;
+theorem opair_eq_right (a b c d: set): $ ⟨ a , b ⟩ = ⟨ c , d ⟩ $ > $ b = d $;
+def maps (f x y: set): wff = $ ⟨ x , y ⟩ ∈ f $;
+
+--| @congr
+axiom maps_congr (f g x y a b: set):
+  $ f = g $ > $ x = y $ > $ a = b $ > $ maps f x a ↔ maps g y b $;
+
+def has_preimage (f X y: set) (.x: set): wff =
+  $ ∃ x (x ∈ X ∧ maps f x y) $;
+
+--| @congr
+axiom has_preimage_congr (f g X Y y z: set):
+  $ f = g $ > $ X = Y $ > $ y = z $ >
+  $ has_preimage f X y ↔ has_preimage g Y z $;
+
+def image (f X B: set) (.y: set): set =
+  $ {y ∈ B | has_preimage f X y} $;
+
+-- Ordered-pair carrier for graphs from A to B.  A Kuratowski pair of
+-- elements of A∪B lies in 𝒫(𝒫(A∪B)), so separation over this set can
+-- carve out graph-like subsets without taking graph formation primitive.
+def pair_carrier (A B: set): set =
+  $ 𝒫 (𝒫 (union (pairset A B))) $;
+axiom opair_mem_pair_carrier_imp (A B x y: set):
+  $ x ∈ A → (y ∈ B → ⟨ x , y ⟩ ∈ pair_carrier A B) $;
+
+
+-- --------------------------------------------------------------------------
+-- Substitution rewrites
+-- --------------------------------------------------------------------------
+--| @rewrite
+axiom sb_s_var {u: set} (t: set u): $ (⟦ u / t ⟧ u) = t $;
+
+--| @rewrite
+axiom sb_s_other {u v: set} (t: set u): $ (⟦ u / t ⟧ v) = v $;
+
+--| @rewrite
+axiom sb_s_irrel {u: set} (t: set u) (s: set): $ (⟦ u / t ⟧ s) = s $;
+
+--| @rewrite
+axiom sb_s_pairset {u: set} (t a b: set u):
+  $ (⟦ u / t ⟧ (pairset a b)) =
+    pairset (⟦ u / t ⟧ a) (⟦ u / t ⟧ b) $;
+
+--| @rewrite
+axiom sb_s_union {u: set} (t A: set u):
+  $ (⟦ u / t ⟧ (union A)) = union (⟦ u / t ⟧ A) $;
+
+--| @rewrite
+axiom sb_s_power {u: set} (t A: set u):
+  $ (⟦ u / t ⟧ (power A)) = power (⟦ u / t ⟧ A) $;
+
+--| @rewrite
+axiom sb_s_sep {u v: set} (t A: set u) (p: wff u v):
+  $ (⟦ u / t ⟧ {v ∈ A | p}) =
+    {v ∈ (⟦ u / t ⟧ A) | [u/t] p} $;
+
+--| @rewrite
+axiom sb_s_singleton {u: set} (t a: set u):
+  $ (⟦ u / t ⟧ (singleton a)) = singleton (⟦ u / t ⟧ a) $;
+
+--| @rewrite
+axiom sb_s_opair {u: set} (t a b: set u):
+  $ (⟦ u / t ⟧ ⟨ a , b ⟩) =
+    ⟨ (⟦ u / t ⟧ a) , (⟦ u / t ⟧ b) ⟩ $;
+
+--| @rewrite
+axiom sb_f_mem {u: set} (t a A: set u):
+  $ [u/t] (a ∈ A) ↔ (⟦ u / t ⟧ a) ∈ (⟦ u / t ⟧ A) $;
+
+--| @rewrite
+axiom sb_f_not_mem {u: set} (t a A: set u):
+  $ [u/t] (a ∉ A) ↔ (⟦ u / t ⟧ a) ∉ (⟦ u / t ⟧ A) $;
+
+--| @rewrite
+axiom sb_f_set_eq {u: set} (t a b: set u):
+  $ [u/t] (a = b) ↔ (⟦ u / t ⟧ a) = (⟦ u / t ⟧ b) $;
+
+--| @rewrite
+axiom sb_f_maps {u: set} (t f x y: set u):
+  $ [u/t] (maps f x y) ↔
+    maps (⟦ u / t ⟧ f) (⟦ u / t ⟧ x) (⟦ u / t ⟧ y) $;
+
+--| @rewrite
+axiom sb_f_has_preimage {u: set} (t f X y: set u):
+  $ [u/t] (has_preimage f X y) ↔
+    has_preimage (⟦ u / t ⟧ f) (⟦ u / t ⟧ X) (⟦ u / t ⟧ y) $;
+
+--| @rewrite
+axiom sb_f_in_all_subsets {u: set} (t S x: set u):
+  $ [u/t] (in_all_subsets S x) ↔
+    in_all_subsets (⟦ u / t ⟧ S) (⟦ u / t ⟧ x) $;
+
+
+-- --------------------------------------------------------------------------
+-- Subset, separation, and image lemmas
+-- --------------------------------------------------------------------------
+theorem inter_subsets_intro_imp2 (A S x: set) (p: wff) {X: set}:
+  $ p → x ∈ A $ >
+  $ p → ∀ X (X ∈ S → x ∈ X) $ >
+  $ p → x ∈ inter_subsets A S $;
+
+theorem subset_elim_imp (A B x: set): $ A ⊆ B $ > $ x ∈ A → x ∈ B $;
+theorem subset_elim_imp_imp (A B x: set):
+  $ (A ⊆ B) → (x ∈ A → x ∈ B) $;
+theorem subset_not_mem_imp (A B x: set):
+  $ A ⊆ B $ > $ x ∉ B → x ∉ A $;
+theorem subset_not_mem_imp_imp (A B x: set):
+  $ (A ⊆ B) → (x ∉ B → x ∉ A) $;
+
+theorem setdiff_subset (A B: set): $ A ∖ B ⊆ A $;
+theorem setdiff_elim_left (A B x: set): $ x ∈ A ∖ B → x ∈ A $;
+theorem setdiff_elim_right (A B x: set): $ x ∈ A ∖ B → x ∉ B $;
+theorem setdiff_intro (A B x: set):
+  $ x ∈ A $ > $ x ∉ B → x ∈ A ∖ B $;
+theorem setdiff_intro_imp2 (A B x: set) (p: wff):
+  $ p → x ∈ A $ > $ p → x ∉ B $ > $ p → x ∈ A ∖ B $;
+theorem setdiff_intro_imp2_under (A B x: set) (p q: wff):
+  $ p → (q → x ∈ A) $ > $ p → (q → x ∉ B) $ >
+  $ p → (q → x ∈ A ∖ B) $;
+theorem setdiff_antitone_right (A B C: set):
+  $ B ⊆ C $ > $ A ∖ C ⊆ A ∖ B $;
+-- Classical elimination for set difference, derived from separation and
+-- double-negation elimination.
+theorem setdiff_missing_imp (A B x: set):
+  $ x ∈ A → (x ∉ A ∖ B → x ∈ B) $;
+theorem setdiff_antitone_right_imp_imp (A B C: set):
+  $ (B ⊆ C) → (A ∖ C ⊆ A ∖ B) $;
+
+theorem image_subset (f X B: set): $ image f X B ⊆ B $;
+theorem image_elim_mem (f X B y: set):
+  $ y ∈ image f X B → y ∈ B $;
+theorem image_has_preimage (f X B y: set) {x: set}:
+  $ y ∈ image f X B → ∃ x (x ∈ X ∧ maps f x y) $;
+theorem image_intro (f X B x y: set):
+  $ y ∈ B $ > $ x ∈ X $ > $ maps f x y $ > $ y ∈ image f X B $;
+theorem image_intro_imp_under2 (f X B x y: set) (p q: wff):
+  $ p → (q → y ∈ B) $ > $ p → (q → x ∈ X) $ >
+  $ p → (q → maps f x y) $ > $ p → (q → y ∈ image f X B) $;
+theorem has_preimage_mono_imp (f X Y y: set):
+  $ X ⊆ Y $ > $ has_preimage f X y → has_preimage f Y y $;
+theorem has_preimage_mono_imp_imp (f X Y y: set):
+  $ (X ⊆ Y) → (has_preimage f X y → has_preimage f Y y) $;
+theorem image_mono (f X Y B: set):
+  $ X ⊆ Y $ > $ image f X B ⊆ image f Y B $;
+theorem image_mono_imp_imp (f X Y B: set):
+  $ (X ⊆ Y) → (image f X B ⊆ image f Y B) $;
+
+theorem inter_subsets_subset (A S: set): $ inter_subsets A S ⊆ A $;
+theorem inter_subsets_elim (A S x X: set):
+  $ x ∈ inter_subsets A S $ > $ X ∈ S $ > $ x ∈ X $;
+theorem inter_subsets_elim_imp (A S x X: set):
+  $ X ∈ S $ > $ x ∈ inter_subsets A S → x ∈ X $;
+theorem inter_subsets_elim_imp_imp (A S x X: set):
+  $ X ∈ S → (x ∈ inter_subsets A S → x ∈ X) $;
+theorem inter_subsets_intro (A S x: set) {X: set}:
+  $ x ∈ A $ > $ ∀ X (X ∈ S → x ∈ X) → x ∈ inter_subsets A S $;
+
+-- --------------------------------------------------------------------------
+-- Equality transport
+-- --------------------------------------------------------------------------
+
+theorem mem_arg_eq_left_imp_imp (x y A: set):
+  $ x = y → (y ∈ A → x ∈ A) $;
+theorem mem_arg_eq_left_imp (x y A: set):
+  $ x = y $ > $ y ∈ A → x ∈ A $;
+theorem mem_arg_eq_left (x y A: set):
+  $ x = y $ > $ y ∈ A $ > $ x ∈ A $;
+theorem not_mem_eq_imp (x A B: set):
+  $ A = B $ > $ x ∉ A → x ∉ B $;
+theorem mem_eq_imp (x A B: set):
+  $ A = B $ > $ x ∈ A → x ∈ B $;
+theorem mem_eq_imp_imp (x A B: set):
+  $ A = B → (x ∈ A → x ∈ B) $;
+theorem set_sym_imp (a b: set): $ a = b → b = a $;
+theorem set_eq_from_common_left (a b c: set):
+  $ a = b $ > $ a = c $ > $ b = c $;
+theorem set_eq_from_common_left_imp_imp (a b c: set):
+  $ a = b → (a = c → b = c) $;
+theorem settr_imp_left (a b c: set):
+  $ a = b $ > $ b = c → a = c $;
+theorem settr_imp_left_imp (a b c: set):
+  $ a = b → (b = c → a = c) $;
+theorem settr_imp_right (a b c: set):
+  $ b = c $ > $ a = b → a = c $;
+theorem settr_imp_right_imp (a b c: set):
+  $ b = c → (a = b → a = c) $;
+theorem opair_rights_eq_imp (x y z u v w t: set):
+  $ ⟨ x , z ⟩ = ⟨ u , v ⟩ → (⟨ y , z ⟩ = ⟨ w , t ⟩ → v = t) $;
+theorem opair_lefts_eq_imp (x y z u v w t: set):
+  $ ⟨ x , z ⟩ = ⟨ u , v ⟩ → (⟨ y , z ⟩ = ⟨ w , t ⟩ →
+    (u = w → x = y)) $;
+theorem maps_arg_eq_left_imp (f x y z: set):
+  $ x = y → (maps f y z → maps f x z) $;
+theorem maps_arg_eq_right_imp (f x y z: set):
+  $ y = z → (maps f x y → maps f x z) $;
+
+-- --------------------------------------------------------------------------
+-- Function-like graph predicates
+-- --------------------------------------------------------------------------
+def functional (f: set) (.x .y .z: set): wff =
+  $ ∀ x ∀ y ∀ z ((maps f x y ∧ maps f x z) → y = z) $;
+
+theorem functional_elim_imp (f x y z: set):
+  $ functional f $ > $ maps f x z $ > $ maps f x y → y = z $;
+theorem functional_elim_imp_imp (f x y z: set):
+  $ functional f $ > $ maps f x z → (maps f x y → y = z) $;
+
+theorem functional_elim (f x y z: set):
+  $ functional f $ > $ maps f x y $ > $ maps f x z $ > $ y = z $;
+
+def domain_on (f A: set) (.x .y: set): wff =
+  $ ∀ x (x ∈ A ↔ ∃ y maps f x y) $;
+
+theorem domain_on_maps_mem_imp (f A x y: set):
+  $ domain_on f A $ > $ maps f x y → x ∈ A $;
+theorem domain_on_maps_mem (f A x y: set):
+  $ domain_on f A $ > $ maps f x y $ > $ x ∈ A $;
+theorem domain_on_has_maps_imp (f A x: set) {a: set}:
+  $ domain_on f A $ > $ x ∈ A → ∃ a maps f x a $;
+
+def range_sub (f B: set) (.x .y: set): wff =
+  $ ∀ y ((∃ x maps f x y) → y ∈ B) $;
+
+theorem range_sub_elim_imp (f B x y: set):
+  $ range_sub f B $ > $ maps f x y → y ∈ B $;
+theorem range_sub_elim (f B x y: set):
+  $ range_sub f B $ > $ maps f x y $ > $ y ∈ B $;
+theorem range_sub_intro (f B: set) {x y: set}:
+  $ ∀ y ∀ x (maps f x y → y ∈ B) $ > $ range_sub f B $;
+
+def function (f A B: set): wff =
+  $ functional f ∧ (domain_on f A ∧ range_sub f B) $;
+theorem function_intro (f A B: set):
+  $ functional f $ > $ domain_on f A $ > $ range_sub f B $ >
+  $ function f A B $;
+theorem function_functional (f A B: set):
+  $ function f A B $ > $ functional f $;
+theorem function_domain_on (f A B: set):
+  $ function f A B $ > $ domain_on f A $;
+theorem function_range_sub (f A B: set):
+  $ function f A B $ > $ range_sub f B $;
+theorem function_maps_range (f A B x y: set):
+  $ function f A B $ > $ maps f x y $ > $ y ∈ B $;
+theorem function_maps_range_imp (f A B x y: set):
+  $ function f A B $ > $ maps f x y → y ∈ B $;
+theorem function_maps_domain_imp (f A B x y: set):
+  $ function f A B $ > $ maps f x y → x ∈ A $;
+theorem function_maps_domain (f A B x y: set):
+  $ function f A B $ > $ maps f x y $ > $ x ∈ A $;
+theorem function_unique (f A B x y z: set):
+  $ function f A B $ > $ maps f x y $ > $ maps f x z $ > $ y = z $;
+theorem function_unique_imp (f A B x y z: set):
+  $ function f A B $ > $ maps f x z $ > $ maps f x y → y = z $;
+
+def injective (f A B: set) (.x .y .z: set): wff =
+  $ function f A B ∧
+    ∀ x ∀ y ∀ z
+      (((x ∈ A ∧ y ∈ A) ∧ (maps f x z ∧ maps f y z)) → x = y) $;
+theorem injective_intro (f A B: set) {x y z: set}:
+  $ function f A B $ >
+  $ ∀ x ∀ y ∀ z
+      (((x ∈ A ∧ y ∈ A) ∧ (maps f x z ∧ maps f y z)) → x = y) $ >
+  $ injective f A B $;
+theorem injective_function (f A B: set):
+  $ injective f A B $ > $ function f A B $;
+theorem injective_functional (f A B: set):
+  $ injective f A B $ > $ functional f $;
+theorem injective_domain_on (f A B: set):
+  $ injective f A B $ > $ domain_on f A $;
+theorem injective_range_sub (f A B: set):
+  $ injective f A B $ > $ range_sub f B $;
+theorem injective_maps_range (f A B x y: set):
+  $ injective f A B $ > $ maps f x y $ > $ y ∈ B $;
+theorem injective_maps_range_imp (f A B x y: set):
+  $ injective f A B $ > $ maps f x y → y ∈ B $;
+theorem injective_maps_domain_imp (f A B x y: set):
+  $ injective f A B $ > $ maps f x y → x ∈ A $;
+theorem injective_maps_domain (f A B x y: set):
+  $ injective f A B $ > $ maps f x y $ > $ x ∈ A $;
+theorem injective_elim (f A B x y z: set):
+  $ injective f A B $ > $ x ∈ A $ > $ y ∈ A $ >
+  $ maps f x z $ > $ maps f y z $ > $ x = y $;
+theorem injective_elim_imp (f A B x y z: set):
+  $ injective f A B $ > $ x ∈ A $ > $ y ∈ A $ >
+  $ maps f x z $ > $ maps f y z → x = y $;
+theorem injective_elim_imp_under (f A B x y z: set) (p: wff):
+  $ injective f A B $ > $ x ∈ A $ > $ p → y ∈ A $ >
+  $ maps f x z $ > $ p → maps f y z $ > $ p → x = y $;
+theorem injective_elim_eq_right (f A B x y z t: set):
+  $ injective f A B $ > $ x ∈ A $ > $ y ∈ A $ > $ z = t $ >
+  $ maps f x z $ > $ maps f y t $ > $ x = y $;
+theorem functional_elim_eq_left (f x y z t: set):
+  $ functional f $ > $ x = y $ > $ maps f x z $ >
+  $ maps f y t $ > $ z = t $;
+theorem injective_elim_eq_right_under4
+    (f A B x y z t: set) (p q r s: wff):
+  $ injective f A B $ > $ p → (q → (r → (s → x ∈ A))) $ >
+  $ p → (q → (r → (s → y ∈ A))) $ >
+  $ p → (q → (r → (s → z = t))) $ >
+  $ p → (q → (r → (s → maps f x z))) $ >
+  $ p → (q → (r → (s → maps f y t))) $ >
+  $ p → (q → (r → (s → x = y))) $;
+theorem functional_elim_eq_left_under4
+    (f x y z t: set) (p q r s: wff):
+  $ functional f $ > $ p → (q → (r → (s → x = y))) $ >
+  $ p → (q → (r → (s → maps f x z))) $ >
+  $ p → (q → (r → (s → maps f y t))) $ >
+  $ p → (q → (r → (s → z = t))) $;
+-- This is the core "out" branch fact for the CB construction: if an
+-- injective g sends t to w, and w appears in the g-image of B ∖ C,
+-- then t cannot lie in C.
+theorem image_preimage_not_mem_imp (g B A C t w: set):
+  $ injective g B A $ > $ t ∈ B $ > $ maps g t w $ >
+  $ w ∈ image g (B ∖ C) A → t ∉ C $;
+-- Proof debt: this is only the three-hypothesis lifted form of the
+-- previous theorem.  It should become a derived lifting lemma.
+axiom image_preimage_not_mem_imp_under3
+    (g B A C t w: set) (p q r: wff):
+  $ injective g B A $ > $ p → (q → (r → t ∈ B)) $ >
+  $ p → (q → (r → maps g t w)) $ >
+  $ p → (q → (r →
+    (w ∈ image g (B ∖ C) A → t ∉ C))) $;
+
+-- Surjectivity and bijectivity for graph-coded functions.
+def surj (f A B: set) (.y: set): wff =
+  $ function f A B ∧ ∀ y (y ∈ B → has_preimage f A y) $;
+theorem surj_intro (f A B: set) {y: set}:
+  $ function f A B $ > $ ∀ y (y ∈ B → has_preimage f A y) $ >
+  $ surj f A B $;
+theorem surj_function (f A B: set):
+  $ surj f A B $ > $ function f A B $;
+
+def bijective (f A B: set): wff =
+  $ injective f A B ∧ surj f A B $;
+theorem bijective_intro (f A B: set):
+  $ injective f A B $ > $ surj f A B $ > $ bijective f A B $;
+theorem bijective_injective (f A B: set):
+  $ bijective f A B $ > $ injective f A B $;
+theorem bijective_surj (f A B: set):
+  $ bijective f A B $ > $ surj f A B $;
+
+theorem surj_has_preimage (f A B y: set) {x: set}:
+  $ surj f A B $ > $ y ∈ B $ >
+  $ ∃ x (x ∈ A ∧ maps f x y) $;
+
+-- --------------------------------------------------------------------------
+-- Cantor's theorem via the diagonal set
+-- --------------------------------------------------------------------------
+-- The diagonal set for Cantor's theorem.  The predicate says that x is
+-- missed by every y to which f maps x; functionality then connects this
+-- graph-based definition to the usual "x ∉ f(x)" reading.
+def misses (f x: set) (.y: set): wff =
+  $ ∀ y (maps f x y → x ∉ y) $;
+
+--| @rewrite
+axiom sb_f_misses_self {x: set} (t f: set):
+  $ [x/t] (misses f x) ↔ misses f t $;
+
+def diag (A f: set) (.x: set): set = $ {x ∈ A | misses f x} $;
+
+-- Proof debt: this Hilbert-choice-style witness packages the proof-side
+-- existential witness used by the diagonal argument.
+term surj_wit (f A y: set): set;
+
+axiom preimage_wit_pair (f A y: set) {x: set}:
+  $ ∃ x (x ∈ A ∧ maps f x y) $ >
+  $ surj_wit f A y ∈ A ∧ maps f (surj_wit f A y) y $;
+
+theorem cantor (A f: set):
+  $ function f A (power A) $ >
+  $ surj f A (power A) $ >
+  $ ⊥ $;
+
+-- --------------------------------------------------------------------------
+-- Cantor-Bernstein fixed-point scaffold
+-- --------------------------------------------------------------------------
+-- The standard fixed-point proof uses the
+-- monotone operator Φ(X) = A ∖ g[B ∖ f[X]].  The core set is the
+-- intersection of all prefixed points of Φ.
+def cb_step (A B f g X: set): set =
+  $ A ∖ image g (B ∖ image f X B) A $;
+
+def cb_prefixed (A B f g X: set): wff = $ cb_step A B f g X ⊆ X $;
+
+--| @rewrite
+axiom sb_f_cb_prefixed {u: set} (t A B f g X: set u):
+  $ [u/t] (cb_prefixed A B f g X) ↔
+    cb_prefixed (⟦ u / t ⟧ A) (⟦ u / t ⟧ B) (⟦ u / t ⟧ f)
+      (⟦ u / t ⟧ g) (⟦ u / t ⟧ X) $;
+
+--| @congr
+axiom cb_prefixed_congr (A C B D f h g k X Y: set):
+  $ A = C $ > $ B = D $ > $ f = h $ > $ g = k $ > $ X = Y $ >
+  $ cb_prefixed A B f g X ↔ cb_prefixed C D h k Y $;
+
+def cb_prefixeds (A B f g: set) (.X: set): set =
+  $ {X ∈ 𝒫 A | cb_prefixed A B f g X} $;
+
+def cb_core (A B f g: set): set =
+  $ inter_subsets A (cb_prefixeds A B f g) $;
+
+-- The induced graph sends x by f on the core, and by the inverse of g on
+-- its complement.  Proving this is a bijection is the Cantor-Bernstein
+-- construction target.
+def cb_bijection (A B f g: set) (.p .x .y: set): set =
+  $ {p ∈ pair_carrier A B |
+      ∃ x ∃ y
+        (p = ⟨ x , y ⟩ ∧
+          ((x ∈ cb_core A B f g ∧ maps f x y) ∨
+           (x ∉ cb_core A B f g ∧ maps g y x)))} $;
+
+-- --------------------------------------------------------------------------
+-- The Cantor-Bernstein theorem
+-- --------------------------------------------------------------------------
+-- The construction packages cb_bijection into a 
+-- bijection between A and B given mutual injections.
+theorem cantor_bernstein (A B f g: set):
+  $ injective f A B $ > $ injective g B A $ >
+  $ bijective (cb_bijection A B f g) A B $;
