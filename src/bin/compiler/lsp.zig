@@ -208,6 +208,7 @@ pub const Handler = struct {
             },
             .hoverProvider = .{ .bool = true },
             .definitionProvider = .{ .bool = true },
+            .implementationProvider = .{ .bool = true },
             .completionProvider = .{
                 .resolveProvider = false,
             },
@@ -456,6 +457,39 @@ pub const Handler = struct {
                     .range = sourceRangeToLsp(
                         nav.snapshot,
                         definition.selection_range,
+                        self.offset_encoding,
+                    ),
+                },
+            },
+        };
+    }
+
+    pub fn @"textDocument/implementation"(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        params: types.ImplementationParams,
+    ) !lsp.ResultType("textDocument/implementation") {
+        const nav = try self.navigationSnapshotForUri(
+            arena,
+            params.textDocument.uri,
+        ) orelse return null;
+        const text = nav.snapshot.textForDocument(nav.document) orelse return null;
+        const offset = lsp.offsets.positionToIndex(
+            text,
+            params.position,
+            self.offset_encoding,
+        );
+        const implementation = nav.snapshot.implementationAt(
+            nav.document,
+            offset,
+        ) orelse return null;
+        return .{
+            .Definition = .{
+                .Location = .{
+                    .uri = implementation.uri,
+                    .range = sourceRangeToLsp(
+                        nav.snapshot,
+                        implementation.selection_range,
                         self.offset_encoding,
                     ),
                 },
@@ -1537,6 +1571,19 @@ fn expectDefinitionLocation(
     };
 }
 
+fn expectImplementationLocation(
+    result: lsp.ResultType("textDocument/implementation"),
+) !types.Location {
+    const value = result orelse return error.ExpectedImplementation;
+    return switch (value) {
+        .Definition => |definition| switch (definition) {
+            .Location => |location| location,
+            else => error.ExpectedImplementationLocation,
+        },
+        else => error.ExpectedImplementationLocation,
+    };
+}
+
 fn expectDocumentSymbols(
     result: lsp.ResultType("textDocument/documentSymbol"),
 ) ![]const types.DocumentSymbol {
@@ -1638,6 +1685,14 @@ test "LSP initialize advertises navigation capabilities" {
     switch (definition) {
         .bool => |enabled| try std.testing.expect(enabled),
         else => return error.ExpectedBooleanDefinitionProvider,
+    }
+
+    const implementation = result.capabilities.implementationProvider orelse {
+        return error.ExpectedImplementationProvider;
+    };
+    switch (implementation) {
+        .bool => |enabled| try std.testing.expect(enabled),
+        else => return error.ExpectedBooleanImplementationProvider,
     }
 
     const completion = result.capabilities.completionProvider orelse {
@@ -1970,6 +2025,38 @@ test "LSP proof definition resolves rules and line references" {
     );
     try std.testing.expectEqualStrings(proof_uri, line_location.uri);
     try expectRangeText(lsp_navigation_proof_text, line_location.range, "l1");
+}
+
+test "LSP implementation resolves theorem declarations to proofs" {
+    const mm0_uri = "file:///tmp/lsp-stage2.mm0";
+    const proof_uri = "file:///tmp/lsp-stage2.auf";
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try putLspNavigationDocuments(&handler, mm0_uri, proof_uri);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const location = try expectImplementationLocation(
+        try handler.@"textDocument/implementation"(arena, .{
+            .textDocument = .{ .uri = mm0_uri },
+            .position = try testLastPosition(lsp_navigation_mm0_text, "main"),
+        }),
+    );
+    try std.testing.expectEqualStrings(proof_uri, location.uri);
+    try expectRangeText(lsp_navigation_proof_text, location.range, "main");
+
+    const axiom = try handler.@"textDocument/implementation"(arena, .{
+        .textDocument = .{ .uri = mm0_uri },
+        .position = try testLastPosition(lsp_navigation_mm0_text, "keep"),
+    });
+    try std.testing.expect(axiom == null);
 }
 
 test "LSP document symbols returns quiet proof outline" {

@@ -118,13 +118,20 @@ pub const Snapshot = struct {
     ) ?DefinitionResult {
         const hit = self.lookupAt(document, offset) orelse return null;
         const target_range = hit.target_range orelse return null;
-        return .{
-            .uri = self.uriForDocument(target_range.document) orelse {
-                return null;
-            },
-            .range = target_range,
-            .selection_range = target_range,
+        return self.locationForRange(target_range);
+    }
+
+    pub fn implementationAt(
+        self: *const Snapshot,
+        document: DocumentId,
+        offset: usize,
+    ) ?DefinitionResult {
+        if (document != .mm0) return null;
+        const decl_index = self.theoremDeclarationAt(offset) orelse return null;
+        const target_range = self.proofBlockForTheorem(decl_index) orelse {
+            return null;
         };
+        return self.locationForRange(target_range);
     }
 
     pub fn textForDocument(
@@ -188,6 +195,40 @@ pub const Snapshot = struct {
             .mm0 => self.mm0_uri,
             .proof => self.proof_uri,
         };
+    }
+
+    fn locationForRange(
+        self: *const Snapshot,
+        range: SourceRange,
+    ) ?DefinitionResult {
+        return .{
+            .uri = self.uriForDocument(range.document) orelse return null,
+            .range = range,
+            .selection_range = range,
+        };
+    }
+
+    fn theoremDeclarationAt(
+        self: *const Snapshot,
+        offset: usize,
+    ) ?usize {
+        for (self.declarations, 0..) |decl, i| {
+            if (decl.kind != .theorem) continue;
+            if (rangeContains(decl.name_range, .mm0, offset)) return i;
+        }
+        return null;
+    }
+
+    fn proofBlockForTheorem(
+        self: *const Snapshot,
+        decl_index: usize,
+    ) ?SourceRange {
+        for (self.proof_blocks) |block| {
+            if (block.kind != .theorem) continue;
+            if (block.decl_index != decl_index) continue;
+            return block.name_range;
+        }
+        return null;
     }
 };
 

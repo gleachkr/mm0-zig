@@ -1207,6 +1207,44 @@ test "proof block header resolves to matching theorem" {
     );
 }
 
+test "implementation lookup resolves theorem declarations to proof blocks" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem main: $ top $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ top $ by top_i []
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const offset =
+        (std.mem.indexOf(u8, mm0_text, "main") orelse unreachable) + 1;
+    const implementation = snapshot.implementationAt(.mm0, offset) orelse {
+        return error.MissingImplementation;
+    };
+    try std.testing.expectEqualStrings("file:///test.auf", implementation.uri);
+    try std.testing.expectEqualStrings(
+        "main",
+        snapshot.proof_text.?[implementation.range.start..implementation.range.end],
+    );
+
+    const axiom_offset =
+        (std.mem.indexOf(u8, mm0_text, "top_i") orelse unreachable) + 1;
+    try std.testing.expect(
+        snapshot.implementationAt(.mm0, axiom_offset) == null,
+    );
+}
+
 test "proof block header ignores non-theorem globals" {
     const mm0_text =
         \\provable sort wff;
