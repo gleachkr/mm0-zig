@@ -134,6 +134,35 @@ pub const Snapshot = struct {
         return self.locationForRange(target_range);
     }
 
+    pub fn referencesAt(
+        self: *const Snapshot,
+        allocator: std.mem.Allocator,
+        document: DocumentId,
+        offset: usize,
+        include_declaration: bool,
+    ) ![]const SourceRange {
+        const hit = self.lookupAt(document, offset) orelse {
+            return try allocator.alloc(SourceRange, 0);
+        };
+        const target_range = hit.target_range orelse {
+            return try allocator.alloc(SourceRange, 0);
+        };
+
+        var list = std.ArrayListUnmanaged(SourceRange){};
+        for (self.symbols) |symbol| {
+            const symbol_target = symbol.target_range orelse continue;
+            if (!sourceRangeEql(symbol_target, target_range)) continue;
+            if (!include_declaration and
+                sourceRangeEql(symbol.source_range, target_range))
+            {
+                continue;
+            }
+            if (rangeAlreadyListed(list.items, symbol.source_range)) continue;
+            try list.append(allocator, symbol.source_range);
+        }
+        return try list.toOwnedSlice(allocator);
+    }
+
     pub fn textForDocument(
         self: *const Snapshot,
         document: DocumentId,
@@ -187,7 +216,7 @@ pub const Snapshot = struct {
         return null;
     }
 
-    fn uriForDocument(
+    pub fn uriForDocument(
         self: *const Snapshot,
         document: DocumentId,
     ) ?[]const u8 {
@@ -235,4 +264,15 @@ pub const Snapshot = struct {
 fn rangeContains(range: SourceRange, document: DocumentId, offset: usize) bool {
     return range.document == document and offset >= range.start and
         offset < range.end;
+}
+
+fn sourceRangeEql(a: SourceRange, b: SourceRange) bool {
+    return a.document == b.document and a.start == b.start and a.end == b.end;
+}
+
+fn rangeAlreadyListed(ranges: []const SourceRange, needle: SourceRange) bool {
+    for (ranges) |range| {
+        if (sourceRangeEql(range, needle)) return true;
+    }
+    return false;
 }

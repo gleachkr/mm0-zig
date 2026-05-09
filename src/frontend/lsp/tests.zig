@@ -1245,6 +1245,81 @@ test "implementation lookup resolves theorem declarations to proof blocks" {
     );
 }
 
+test "references lookup returns matching indexed symbol uses" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem main: $ top $;
+    ;
+    const proof_text =
+        \\main
+        \\----
+        \\l1: $ top $ by top_i []
+        \\l2: $ top $ by top_i []
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const rule_offset =
+        (std.mem.lastIndexOf(u8, proof_text, "top_i") orelse unreachable) + 1;
+    const rule_refs = try snapshot.referencesAt(
+        std.testing.allocator,
+        .proof,
+        rule_offset,
+        true,
+    );
+    defer std.testing.allocator.free(rule_refs);
+    try std.testing.expectEqual(@as(usize, 3), rule_refs.len);
+    try std.testing.expectEqual(Index.DocumentId.mm0, rule_refs[0].document);
+    try std.testing.expectEqual(Index.DocumentId.proof, rule_refs[1].document);
+    try std.testing.expectEqual(Index.DocumentId.proof, rule_refs[2].document);
+    for (rule_refs) |range| {
+        const text = snapshot.textForDocument(range.document) orelse unreachable;
+        try std.testing.expectEqualStrings("top_i", text[range.start..range.end]);
+    }
+
+    const rule_uses = try snapshot.referencesAt(
+        std.testing.allocator,
+        .proof,
+        rule_offset,
+        false,
+    );
+    defer std.testing.allocator.free(rule_uses);
+    try std.testing.expectEqual(@as(usize, 2), rule_uses.len);
+    for (rule_uses) |range| {
+        try std.testing.expectEqual(Index.DocumentId.proof, range.document);
+    }
+
+    const theorem_offset =
+        (std.mem.indexOf(u8, mm0_text, "main") orelse unreachable) + 1;
+    const theorem_refs = try snapshot.referencesAt(
+        std.testing.allocator,
+        .mm0,
+        theorem_offset,
+        true,
+    );
+    defer std.testing.allocator.free(theorem_refs);
+    try std.testing.expectEqual(@as(usize, 2), theorem_refs.len);
+    try std.testing.expectEqual(Index.DocumentId.mm0, theorem_refs[0].document);
+    try std.testing.expectEqual(Index.DocumentId.proof, theorem_refs[1].document);
+
+    const theorem_uses = try snapshot.referencesAt(
+        std.testing.allocator,
+        .mm0,
+        theorem_offset,
+        false,
+    );
+    defer std.testing.allocator.free(theorem_uses);
+    try std.testing.expectEqual(@as(usize, 1), theorem_uses.len);
+    try std.testing.expectEqual(Index.DocumentId.proof, theorem_uses[0].document);
+}
+
 test "proof block header ignores non-theorem globals" {
     const mm0_text =
         \\provable sort wff;

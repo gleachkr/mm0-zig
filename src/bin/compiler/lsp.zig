@@ -209,6 +209,7 @@ pub const Handler = struct {
             .hoverProvider = .{ .bool = true },
             .definitionProvider = .{ .bool = true },
             .implementationProvider = .{ .bool = true },
+            .referencesProvider = .{ .bool = true },
             .completionProvider = .{
                 .resolveProvider = false,
             },
@@ -495,6 +496,35 @@ pub const Handler = struct {
                 },
             },
         };
+    }
+
+    pub fn @"textDocument/references"(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        params: types.ReferenceParams,
+    ) !lsp.ResultType("textDocument/references") {
+        const nav = try self.navigationSnapshotForUri(
+            arena,
+            params.textDocument.uri,
+        ) orelse return null;
+        const text = nav.snapshot.textForDocument(nav.document) orelse return null;
+        const offset = lsp.offsets.positionToIndex(
+            text,
+            params.position,
+            self.offset_encoding,
+        );
+        const ranges = try nav.snapshot.referencesAt(
+            arena,
+            nav.document,
+            offset,
+            params.context.includeDeclaration,
+        );
+        return try sourceRangesToLocations(
+            arena,
+            nav.snapshot,
+            ranges,
+            self.offset_encoding,
+        );
     }
 
     pub fn onResponse(
@@ -1421,6 +1451,23 @@ fn sourceRangeToLsp(
     );
 }
 
+fn sourceRangesToLocations(
+    allocator: std.mem.Allocator,
+    snapshot: *const LspIndex.Snapshot,
+    ranges: []const LspIndex.SourceRange,
+    encoding: lsp.offsets.Encoding,
+) ![]const types.Location {
+    var locations = std.ArrayListUnmanaged(types.Location){};
+    for (ranges) |range| {
+        const uri = snapshot.uriForDocument(range.document) orelse continue;
+        try locations.append(allocator, .{
+            .uri = uri,
+            .range = sourceRangeToLsp(snapshot, range, encoding),
+        });
+    }
+    return try locations.toOwnedSlice(allocator);
+}
+
 fn completionsToLsp(
     arena: std.mem.Allocator,
     snapshot: *const LspIndex.Snapshot,
@@ -1693,6 +1740,14 @@ test "LSP initialize advertises navigation capabilities" {
     switch (implementation) {
         .bool => |enabled| try std.testing.expect(enabled),
         else => return error.ExpectedBooleanImplementationProvider,
+    }
+
+    const references = result.capabilities.referencesProvider orelse {
+        return error.ExpectedReferencesProvider;
+    };
+    switch (references) {
+        .bool => |enabled| try std.testing.expect(enabled),
+        else => return error.ExpectedBooleanReferencesProvider,
     }
 
     const completion = result.capabilities.completionProvider orelse {
@@ -2057,6 +2112,52 @@ test "LSP implementation resolves theorem declarations to proofs" {
         .position = try testLastPosition(lsp_navigation_mm0_text, "keep"),
     });
     try std.testing.expect(axiom == null);
+}
+
+test "LSP references returns matching indexed symbol uses" {
+    const mm0_uri = "file:///tmp/lsp-stage2.mm0";
+    const proof_uri = "file:///tmp/lsp-stage2.auf";
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try putLspNavigationDocuments(&handler, mm0_uri, proof_uri);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+
+    const rule_refs = (try handler.@"textDocument/references"(arena, .{
+        .textDocument = .{ .uri = proof_uri },
+        .position = try testPosition(lsp_navigation_proof_text, "top_i"),
+        .context = .{ .includeDeclaration = true },
+    })) orelse return error.ExpectedReferences;
+    try std.testing.expectEqual(@as(usize, 2), rule_refs.len);
+    try std.testing.expectEqualStrings(mm0_uri, rule_refs[0].uri);
+    try expectRangeText(lsp_navigation_mm0_text, rule_refs[0].range, "top_i");
+    try std.testing.expectEqualStrings(proof_uri, rule_refs[1].uri);
+    try expectRangeText(lsp_navigation_proof_text, rule_refs[1].range, "top_i");
+
+    const rule_uses = (try handler.@"textDocument/references"(arena, .{
+        .textDocument = .{ .uri = proof_uri },
+        .position = try testPosition(lsp_navigation_proof_text, "top_i"),
+        .context = .{ .includeDeclaration = false },
+    })) orelse return error.ExpectedReferences;
+    try std.testing.expectEqual(@as(usize, 1), rule_uses.len);
+    try std.testing.expectEqualStrings(proof_uri, rule_uses[0].uri);
+    try expectRangeText(lsp_navigation_proof_text, rule_uses[0].range, "top_i");
+
+    const theorem_uses = (try handler.@"textDocument/references"(arena, .{
+        .textDocument = .{ .uri = mm0_uri },
+        .position = try testLastPosition(lsp_navigation_mm0_text, "main"),
+        .context = .{ .includeDeclaration = false },
+    })) orelse return error.ExpectedReferences;
+    try std.testing.expectEqual(@as(usize, 1), theorem_uses.len);
+    try std.testing.expectEqualStrings(proof_uri, theorem_uses[0].uri);
+    try expectRangeText(lsp_navigation_proof_text, theorem_uses[0].range, "main");
 }
 
 test "LSP document symbols returns quiet proof outline" {
