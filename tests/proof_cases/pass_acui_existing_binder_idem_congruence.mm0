@@ -1,0 +1,93 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+--| @vars x y
+sort obj;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+infixr iff: $<->$ prec 20;
+term all {x: obj} (p: wff x): wff;
+prefix all: $A.$ prec 41;
+term ex {x: obj} (p: wff x): wff;
+prefix ex: $E.$ prec 41;
+term eq (a b: obj): wff;
+infixl eq: $=$ prec 35;
+term pred (x A: obj): wff;
+term maps (f x y: obj): wff;
+
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff): $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation obj eq eq_refl eq_trans eq_sym _
+axiom eq_refl (a: obj): $ a = a $;
+axiom eq_trans (a b c: obj): $ a = b $ > $ b = c $ > $ a = c $;
+axiom eq_sym (a b: obj): $ a = b $ > $ b = a $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom pred_congr (x y A B: obj):
+  $ x = y $ > $ A = B $ > $ pred x A ↔ pred y B $;
+
+--| @congr
+axiom maps_congr (f g x y u v: obj):
+  $ f = g $ > $ x = y $ > $ u = v $ > $ maps f x u ↔ maps g y v $;
+
+--| @congr
+axiom iff_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ↔ c) ↔ (b ↔ d) $;
+
+--| @congr
+axiom all_congr {x: obj} (p q: wff x):
+  $ p ↔ q $ > $ A. x p ↔ A. x q $;
+
+--| @congr
+axiom ex_congr {x: obj} (p q: wff x):
+  $ p ↔ q $ > $ E. x p ↔ E. x q $;
+
+--| @freshen g x
+axiom all_intro (g: ctx) {x: obj} (p: wff x):
+  $ g ⊢ p $ > $ g ⊢ A. x p $;
+
+axiom have_body (f A: obj) (F G: ctx) {x y: obj}:
+  $ F , G , G ⊢ pred x A ↔ E. y maps f x y $;
+
+def domain_like (f A: obj) (.x .y: obj): wff =
+  $ A. x (pred x A ↔ E. y maps f x y) $;
+
+theorem acui_existing_binder_idem_congruence
+    (f A: obj) (F G: ctx):
+  $ F , G ⊢ domain_like f A $;

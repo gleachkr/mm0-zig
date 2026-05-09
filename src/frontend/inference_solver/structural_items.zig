@@ -3,6 +3,7 @@ const ExprId = @import("../expr.zig").ExprId;
 const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const compareExprIds = @import("../acui_support.zig").compareExprIds;
 const SemanticCompare = @import("./semantic_compare.zig");
+const StructuralCongruence = @import("./structural_congruence.zig");
 const types = @import("./types.zig");
 const BinderSpace = types.BinderSpace;
 const StructuralProfile = types.StructuralProfile;
@@ -137,34 +138,12 @@ pub fn collectConcreteStructuralItems(
     profile: StructuralProfile,
     out: *std.ArrayListUnmanaged(ExprId),
 ) anyerror!void {
-    const node = self.theorem.interner.node(expr_id);
-    switch (node.*) {
-        .variable => try appendStructuralItem(self, profile, out, expr_id),
-        .placeholder => try appendStructuralItem(self, profile, out, expr_id),
-        .app => |app| {
-            if (app.term_id == profile.headTermId() and app.args.len == 2) {
-                try collectConcreteStructuralItems(
-                    self,
-                    app.args[0],
-                    profile,
-                    out,
-                );
-                try collectConcreteStructuralItems(
-                    self,
-                    app.args[1],
-                    profile,
-                    out,
-                );
-                return;
-            }
-            if (app.term_id == profile.unitTermId() and app.args.len == 0 and
-                profile.combiner.supportsLeftUnit() and
-                profile.combiner.supportsRightUnit())
-            {
-                return;
-            }
-            try appendStructuralItem(self, profile, out, expr_id);
-        },
+    var raw = std.ArrayListUnmanaged(ExprId){};
+    defer raw.deinit(self.allocator);
+
+    try StructuralCongruence.collectItems(self, expr_id, profile, &raw);
+    for (raw.items) |item| {
+        try appendStructuralItem(self, profile, out, item);
     }
 }
 

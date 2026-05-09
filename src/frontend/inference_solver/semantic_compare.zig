@@ -1,4 +1,7 @@
+const StructuralCongruence = @import("./structural_congruence.zig");
 const ExprId = @import("../expr.zig").ExprId;
+const types = @import("./types.zig");
+const StructuralProfile = types.StructuralProfile;
 
 pub fn commonStructuralTarget(
     self: anytype,
@@ -18,7 +21,27 @@ pub fn bindingCompatible(
     const lhs_canon = try self.canonicalizer.canonicalize(lhs);
     const rhs_canon = try self.canonicalizer.canonicalize(rhs);
     if (lhs_canon == rhs_canon) return true;
-    return (try commonStructuralTarget(self, lhs_canon, rhs_canon)) != null;
+    if ((try commonStructuralTarget(self, lhs_canon, rhs_canon)) != null) {
+        return true;
+    }
+    return try structuralCongruenceCompatible(self, lhs_canon, rhs_canon);
+}
+
+fn structuralCongruenceCompatible(
+    self: anytype,
+    lhs: ExprId,
+    rhs: ExprId,
+) anyerror!bool {
+    var support = self.structuralSupport();
+    const combiner = try support.sharedStructuralCombiner(lhs, rhs) orelse {
+        return false;
+    };
+    return try StructuralCongruence.expressionsEqual(
+        self,
+        lhs,
+        rhs,
+        StructuralProfile.init(combiner),
+    );
 }
 
 pub fn sameRuleBindingsCompatible(

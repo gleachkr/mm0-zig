@@ -325,6 +325,10 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_acui_same_side_absorb_commuted", .outcome = .pass },
     .{ .stem = "pass_acui_same_side_duplicate_def", .outcome = .pass },
     .{ .stem = "pass_acui_same_side_absorb_infer", .outcome = .pass },
+    .{
+        .stem = "pass_acui_existing_binder_idem_congruence",
+        .outcome = .pass,
+    },
     .{ .stem = "pass_acui_cross_side_absorb", .outcome = .pass },
     .{ .stem = "pass_acui_cross_side_cancel", .outcome = .pass },
     .{ .stem = "pass_acui_cross_side_cancel_then_absorb", .outcome = .pass },

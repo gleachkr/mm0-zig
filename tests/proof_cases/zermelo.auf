@@ -1008,7 +1008,7 @@ l5: $ G ⊢ (∃ y (maps (cb_bijection A B f g) x y)) → x ∈ A $
 l6: $ F , G , G ⊢
       x ∈ A ↔ ∃ y (maps (cb_bijection A B f g) x y) $
   by bi_intro [l2, l5]
-l7: $ F , G , G ⊢ domain_on (cb_bijection A B f g) A $
+l7: $ F , G ⊢ domain_on (cb_bijection A B f g) A $
   by all_intro [l6]
 
 cb_bijection_functional_from_injections

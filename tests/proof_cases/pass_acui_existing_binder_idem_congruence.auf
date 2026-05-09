@@ -1,0 +1,5 @@
+acui_existing_binder_idem_congruence
+------------------------------------
+
+l1: $ F , G , G ⊢ pred x A ↔ E. y maps f x y $ by have_body []
+l2: $ F , G ⊢ domain_like f A $ by all_intro [l1]
