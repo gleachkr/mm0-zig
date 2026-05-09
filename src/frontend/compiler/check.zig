@@ -542,17 +542,12 @@ fn tryApplyRuleApplicationWithCandidate(
     );
     defer allocator.free(expected_refs);
 
-    // Ownership of `refs` flows asymmetrically. The freshen path duplicates it
-    // internally and we free our copy explicitly on success below. The normal
-    // path passes it to `Matching.tryBuildConclusionLine`, which transfers
-    // ownership to a CheckedLine via `appendRuleLine`; from then on,
-    // `rollbackToMark` (in the fallback handler) or final teardown will free it.
-    // We therefore deliberately omit an `errdefer free(refs)` here: it would
-    // double-free in the late-error case where `appendRuleLine` already stored
-    // refs in a CheckedLine before a subsequent step (e.g. `appendTransportLine`
-    // or `emitTransport`) failed. The trade-off is that errors before refs is
-    // stored leak this small allocation; that matches pre-refactor behavior.
+    // Ownership of `refs` transfers to a CheckedLine on the normal path. Until
+    // that happens, errors should free it locally. Late errors after transfer
+    // leave ownership with `checked`, whose rollback/final teardown frees it.
     const refs = try allocator.alloc(CheckedRef, application.refs.len);
+    var refs_owned = true;
+    errdefer if (refs_owned) allocator.free(refs);
     const ref_exprs = try allocator.alloc(ExprId, application.refs.len);
     defer allocator.free(ref_exprs);
     try elaborateRefs(
@@ -620,7 +615,7 @@ fn tryApplyRuleApplicationWithCandidate(
             partial_bindings,
         );
     const rule_has_advanced_inference =
-        Inference.shouldUseAdvancedInference(maybe_view) or
+        maybe_view != null or
         has_omitted_structural;
     const use_advanced_inference = had_omitted and
         rule_has_advanced_inference;
@@ -664,16 +659,20 @@ fn tryApplyRuleApplicationWithCandidate(
         .sort_vars = context.sort_vars,
     };
 
+    const inference_context: Inference.RuleInferenceContext = .{
+        .allocator = allocator,
+        .env = env,
+        .registry = registry,
+        .scratch = diag_scratch,
+        .theorem = theorem,
+        .assertion = assertion,
+        .rule_id = rule_id,
+        .rule = rule,
+        .rule_unify_cache = context.rule_unify_cache,
+    };
     const bindings = try inferCandidateBindings(
         self,
-        allocator,
-        env,
-        registry,
-        diag_scratch,
-        theorem,
-        assertion,
-        rule_id,
-        rule,
+        &inference_context,
         diag_line,
         line_assertion,
         partial_bindings,
@@ -686,7 +685,6 @@ fn tryApplyRuleApplicationWithCandidate(
         use_advanced_inference,
         has_omitted_structural,
         prefer_structural_solver,
-        context.rule_unify_cache,
     );
 
     var resolved_bindings = bindings;
@@ -862,6 +860,7 @@ fn tryApplyRuleApplicationWithCandidate(
             return err;
         };
         allocator.free(refs);
+        refs_owned = false;
         return .{
             .line_idx = line_idx,
             .theorem = theorem.*,
@@ -996,6 +995,7 @@ fn tryApplyRuleApplicationWithCandidate(
         );
     }
 
+    const concl_checked_mark = checked.items.len;
     const concl_mark = diag_scratch.mark();
     const line_idx = (Matching.tryBuildConclusionLine(
         allocator,
@@ -1011,6 +1011,9 @@ fn tryApplyRuleApplicationWithCandidate(
         candidate.resolved_bindings,
         refs,
     ) catch |err| {
+        if (checkedRangeOwnsRefs(checked.items[concl_checked_mark..], refs)) {
+            refs_owned = false;
+        }
         if (CompilerDiag.setProofScratchDiagnosticIfPresent(
             self,
             diag_scratch,
@@ -1052,6 +1055,7 @@ fn tryApplyRuleApplicationWithCandidate(
         CompilerDiag.setProof(self, diag);
         return error.ConclusionMismatch;
     };
+    refs_owned = false;
     diag_scratch.discard(concl_mark);
 
     return .{
@@ -1059,6 +1063,25 @@ fn tryApplyRuleApplicationWithCandidate(
         .theorem = theorem.*,
         .theorem_vars = theorem_vars.*,
     };
+}
+
+fn checkedRangeOwnsRefs(
+    lines: []const CheckedLine,
+    refs: []const CheckedRef,
+) bool {
+    for (lines) |checked_line| {
+        switch (checked_line.data) {
+            .rule => |rule| {
+                if (rule.refs.ptr == refs.ptr and
+                    rule.refs.len == refs.len)
+                {
+                    return true;
+                }
+            },
+            .transport => {},
+        }
+    }
+    return false;
 }
 
 fn resolveLineAssertionForBindings(
@@ -1137,14 +1160,7 @@ fn requireConcreteBindingsWithDiagnostic(
 
 fn inferCandidateBindings(
     self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    diag_scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const Inference.RuleInferenceContext,
     line: ApplicationLine,
     line_assertion: LineAssertion,
     partial_bindings: []const ?ExprId,
@@ -1157,8 +1173,14 @@ fn inferCandidateBindings(
     use_advanced_inference: bool,
     has_omitted_structural: bool,
     prefer_structural_solver: bool,
-    rule_unify_cache: *Inference.RuleUnifyCache,
 ) ![]const ExprId {
+    const allocator = context.allocator;
+    const env = context.env;
+    const registry = context.registry;
+    const theorem = context.theorem;
+    const assertion = context.assertion;
+    const rule = context.rule;
+
     return switch (line_assertion) {
         .holey => |holey| blk: {
             const has_structural_hole = try Holes.containsStructuralHole(
@@ -1190,14 +1212,7 @@ fn inferCandidateBindings(
             if (use_holey_advanced) {
                 break :blk Inference.inferBindingsFromHoleyAdvanced(
                     self,
-                    allocator,
-                    env,
-                    registry,
-                    diag_scratch,
-                    theorem,
-                    assertion,
-                    rule_id,
-                    rule,
+                    context,
                     line,
                     partial_bindings,
                     base_ref_exprs,
@@ -1247,14 +1262,7 @@ fn inferCandidateBindings(
                 {
                     if (Inference.inferBindingsFromHoleyAdvanced(
                         self,
-                        allocator,
-                        env,
-                        registry,
-                        diag_scratch,
-                        theorem,
-                        assertion,
-                        rule_id,
-                        rule,
+                        context,
                         line,
                         partial_bindings,
                         base_ref_exprs,
@@ -1286,14 +1294,7 @@ fn inferCandidateBindings(
                 if (expected_conclusion_hint) |hint| {
                     if (Inference.inferBindings(
                         self,
-                        allocator,
-                        env,
-                        registry,
-                        diag_scratch,
-                        theorem,
-                        assertion,
-                        rule_id,
-                        rule,
+                        context,
                         line,
                         partial_bindings,
                         base_ref_exprs,
@@ -1302,7 +1303,6 @@ fn inferCandidateBindings(
                         maybe_view,
                         use_advanced_inference,
                         prefer_structural_solver,
-                        rule_unify_cache,
                     )) |hint_bindings| {
                         restoreDiagnostic(self, null);
                         break :blk hint_bindings;
@@ -1379,14 +1379,7 @@ fn inferCandidateBindings(
                     } };
                     break :blk try Inference.inferBindingsFromHoleyAdvanced(
                         self,
-                        allocator,
-                        env,
-                        registry,
-                        diag_scratch,
-                        theorem,
-                        assertion,
-                        rule_id,
-                        rule,
+                        context,
                         line,
                         partial_bindings,
                         base_ref_exprs,
@@ -1411,14 +1404,7 @@ fn inferCandidateBindings(
             if (had_omitted) {
                 break :blk try Inference.inferBindings(
                     self,
-                    allocator,
-                    env,
-                    registry,
-                    diag_scratch,
-                    theorem,
-                    assertion,
-                    rule_id,
-                    rule,
+                    context,
                     line,
                     partial_bindings,
                     base_ref_exprs,
@@ -1427,7 +1413,6 @@ fn inferCandidateBindings(
                     maybe_view,
                     use_advanced_inference,
                     prefer_structural_solver,
-                    rule_unify_cache,
                 );
             }
             break :blk try Inference.requireConcreteBindings(

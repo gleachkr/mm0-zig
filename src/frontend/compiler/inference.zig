@@ -131,6 +131,29 @@ pub const HiddenWitnessFreshContext = struct {
     sort_vars: *const SortVarRegistry,
 };
 
+/// Shared state for one rule application inference attempt.
+///
+/// The compiler-specific diagnostic receiver and source line stay outside this
+/// context because they are `anytype` values.  Everything else here is the
+/// stable rule/application state that used to be threaded through most
+/// inference helpers as a long positional prefix.
+pub const RuleInferenceContext = struct {
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    scratch: *CompilerDiag.Scratch,
+    theorem: *TheoremContext,
+    assertion: AssertionStmt,
+    rule_id: u32,
+    rule: *const RuleDecl,
+    rule_unify_cache: ?*RuleUnifyCache = null,
+
+    fn cachedUnify(self: *const RuleInferenceContext) !?[]const u8 {
+        const cache = self.rule_unify_cache orelse return null;
+        return try cache.get(self.rule_id, self.rule);
+    }
+};
+
 pub const InferenceContext = struct {
     allocator: std.mem.Allocator,
     theorem: *const TheoremContext,
@@ -1155,19 +1178,18 @@ fn tryFinalizeRuleMatchSession(
 }
 
 fn finishRuleMatchSession(
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     session: *DefOps.RuleMatchSession,
     fresh_context: ?HiddenWitnessFreshContext,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
     explicit_bindings: []const ?ExprId,
 ) !RuleMatchResult {
-    _ = rule_id;
+    const allocator = context.allocator;
+    const env = context.env;
+    const registry = context.registry;
+    const scratch = context.scratch;
+    const rule = context.rule;
 
     for (rule.hyps, ref_exprs) |hyp, ref_expr| {
         if (try matchRuleHypForInference(
@@ -1214,24 +1236,21 @@ fn finishRuleMatchSession(
 }
 
 fn inferBindingsByRuleMatchSession(
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     seeds: []const DefOps.BindingSeed,
     fresh_context: ?HiddenWitnessFreshContext,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
     explicit_bindings: []const ?ExprId,
 ) !RuleMatchResult {
+    const allocator = context.allocator;
+    const rule = context.rule;
+
     var def_ops = DefOps.Context.initWithRegistry(
         allocator,
-        theorem,
-        env,
-        registry,
+        context.theorem,
+        context.env,
+        context.registry,
     );
     defer def_ops.deinit();
 
@@ -1239,12 +1258,7 @@ fn inferBindingsByRuleMatchSession(
     defer session.deinit();
 
     return try finishRuleMatchSession(
-        allocator,
-        env,
-        registry,
-        scratch,
-        rule_id,
-        rule,
+        context,
         &session,
         fresh_context,
         ref_exprs,
@@ -1254,24 +1268,21 @@ fn inferBindingsByRuleMatchSession(
 }
 
 fn inferBindingsByMatchSeedState(
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     seed_state: *const DefOps.MatchSeedState,
     fresh_context: ?HiddenWitnessFreshContext,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
     explicit_bindings: []const ?ExprId,
 ) !RuleMatchResult {
+    const allocator = context.allocator;
+    const rule = context.rule;
+
     var def_ops = DefOps.Context.initWithRegistry(
         allocator,
-        theorem,
-        env,
-        registry,
+        context.theorem,
+        context.env,
+        context.registry,
     );
     defer def_ops.deinit();
 
@@ -1282,12 +1293,7 @@ fn inferBindingsByMatchSeedState(
     defer session.deinit();
 
     return try finishRuleMatchSession(
-        allocator,
-        env,
-        registry,
-        scratch,
-        rule_id,
-        rule,
+        context,
         &session,
         fresh_context,
         ref_exprs,
@@ -1355,14 +1361,7 @@ fn matchRulePartSurface(
 
 fn finishHoleyRuleMatchSession(
     self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     line: anytype,
     session: *DefOps.RuleMatchSession,
     fresh_context: ?HiddenWitnessFreshContext,
@@ -1371,7 +1370,14 @@ fn finishHoleyRuleMatchSession(
     holey_concl: *const Expr,
     diagnostic_bindings: []const ?ExprId,
 ) !RuleMatchResult {
-    _ = rule_id;
+    const allocator = context.allocator;
+    const env = context.env;
+    const registry = context.registry;
+    const scratch = context.scratch;
+    const theorem = context.theorem;
+    const assertion = context.assertion;
+    const rule = context.rule;
+
     for (rule.hyps, ref_exprs) |hyp, ref_expr| {
         if (try matchRuleHypForInference(
             allocator,
@@ -1456,14 +1462,7 @@ fn finishHoleyRuleMatchSession(
 
 pub fn inferBindingsFromHoleyAdvanced(
     self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
@@ -1471,16 +1470,16 @@ pub fn inferBindingsFromHoleyAdvanced(
     maybe_view: ?ViewDecl,
     fresh_context: ?HiddenWitnessFreshContext,
 ) ![]const ExprId {
+    const allocator = context.allocator;
+    const env = context.env;
+    const registry = context.registry;
+    const theorem = context.theorem;
+    const assertion = context.assertion;
+    const rule = context.rule;
+
     if (try tryInferHoleyStructuralSolver(
         self,
-        allocator,
-        env,
-        registry,
-        scratch,
-        theorem,
-        assertion,
-        rule_id,
-        rule,
+        context,
         line,
         partial_bindings,
         ref_exprs,
@@ -1528,14 +1527,7 @@ pub fn inferBindingsFromHoleyAdvanced(
     );
     const result = finishHoleyRuleMatchSession(
         self,
-        allocator,
-        env,
-        registry,
-        scratch,
-        theorem,
-        assertion,
-        rule_id,
-        rule,
+        context,
         line,
         &session,
         fresh_context,
@@ -1592,20 +1584,22 @@ pub fn inferBindingsFromHoleyAdvanced(
 // conclusion whose context binder is recoverable only from ACUI hypotheses.
 fn tryInferHoleyStructuralSolver(
     self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     holey_concl: *const Expr,
     maybe_view: ?ViewDecl,
 ) !?[]const ExprId {
+    const allocator = context.allocator;
+    const env = context.env;
+    const registry = context.registry;
+    const scratch = context.scratch;
+    const theorem = context.theorem;
+    const assertion = context.assertion;
+    const rule_id = context.rule_id;
+    const rule = context.rule;
+
     const has_structural_hole = try SurfaceExpr.containsStructuralHole(
         env,
         registry,
@@ -1709,19 +1703,21 @@ fn maybeAddStructuralAmbiguityWarning(
 
 fn tryConcreteStructuralSolver(
     self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
 ) ![]const ExprId {
+    const allocator = context.allocator;
+    const env = context.env;
+    const registry = context.registry;
+    const scratch = context.scratch;
+    const theorem = context.theorem;
+    const assertion = context.assertion;
+    const rule_id = context.rule_id;
+    const rule = context.rule;
+
     var solver = InferenceSolver.init(
         allocator,
         env,
@@ -1779,14 +1775,7 @@ fn tryConcreteStructuralSolver(
 
 fn tryConcreteRuleMatchSessionFallback(
     self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     line: anytype,
     seeds: []const DefOps.BindingSeed,
     fresh_context: ?HiddenWitnessFreshContext,
@@ -1795,6 +1784,13 @@ fn tryConcreteRuleMatchSessionFallback(
     explicit_bindings: []const ?ExprId,
     diagnostic_bindings: []const ?ExprId,
 ) !?[]const ExprId {
+    const allocator = context.allocator;
+    const env = context.env;
+    const scratch = context.scratch;
+    const theorem = context.theorem;
+    const assertion = context.assertion;
+    const rule = context.rule;
+
     DebugTrace.traceInference(
         self.debug,
         "non-structural inference: trying normalized session fallback",
@@ -1802,13 +1798,7 @@ fn tryConcreteRuleMatchSessionFallback(
     );
     const mark = scratch.mark();
     const result = inferBindingsByRuleMatchSession(
-        allocator,
-        env,
-        registry,
-        scratch,
-        theorem,
-        rule_id,
-        rule,
+        context,
         seeds,
         fresh_context,
         ref_exprs,
@@ -1859,32 +1849,28 @@ fn tryConcreteRuleMatchSessionFallback(
 
 fn inferBindingsNoView(
     self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
     line_expr: ExprId,
     fresh_context: ?HiddenWitnessFreshContext,
     prefer_structural: bool,
-    rule_unify_cache: ?*RuleUnifyCache,
 ) ![]const ExprId {
+    const allocator = context.allocator;
+    const env = context.env;
+    const registry = context.registry;
+    const theorem = context.theorem;
+    const assertion = context.assertion;
+    const rule = context.rule;
+
     const has_structural = try hasOmittedStructuralBindings(
         env,
         registry,
         rule,
         partial_bindings,
     );
-    const cached_unify = if (rule_unify_cache) |cache|
-        try cache.get(rule_id, rule)
-    else
-        null;
+    const cached_unify = try context.cachedUnify();
 
     try traceInferenceAttempt(
         self.debug,
@@ -1970,14 +1956,7 @@ fn inferBindingsNoView(
                 defer allocator.free(seeds);
                 if (try tryConcreteRuleMatchSessionFallback(
                     self,
-                    allocator,
-                    env,
-                    registry,
-                    scratch,
-                    theorem,
-                    assertion,
-                    rule_id,
-                    rule,
+                    context,
                     line,
                     seeds,
                     fresh_context,
@@ -2004,14 +1983,7 @@ fn inferBindingsNoView(
                 );
                 return try tryConcreteStructuralSolver(
                     self,
-                    allocator,
-                    env,
-                    registry,
-                    scratch,
-                    theorem,
-                    assertion,
-                    rule_id,
-                    rule,
+                    context,
                     line,
                     partial_bindings,
                     ref_exprs,
@@ -2060,20 +2032,9 @@ fn inferBindingsNoView(
     }
 }
 
-pub fn shouldUseAdvancedInference(maybe_view: ?ViewDecl) bool {
-    return maybe_view != null;
-}
-
 pub fn inferBindings(
     self: anytype,
-    allocator: std.mem.Allocator,
-    env: *const GlobalEnv,
-    registry: *RewriteRegistry,
-    scratch: *CompilerDiag.Scratch,
-    theorem: *TheoremContext,
-    assertion: AssertionStmt,
-    rule_id: u32,
-    rule: *const RuleDecl,
+    context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
     ref_exprs: []const ExprId,
@@ -2082,26 +2043,26 @@ pub fn inferBindings(
     maybe_view: ?ViewDecl,
     use_advanced_inference: bool,
     prefer_structural_solver: bool,
-    rule_unify_cache: ?*RuleUnifyCache,
 ) ![]const ExprId {
+    const allocator = context.allocator;
+    const env = context.env;
+    const registry = context.registry;
+    const scratch = context.scratch;
+    const theorem = context.theorem;
+    const assertion = context.assertion;
+    const rule_id = context.rule_id;
+    const rule = context.rule;
+
     if (maybe_view == null) {
         return try inferBindingsNoView(
             self,
-            allocator,
-            env,
-            registry,
-            scratch,
-            theorem,
-            assertion,
-            rule_id,
-            rule,
+            context,
             line,
             partial_bindings,
             ref_exprs,
             line_expr,
             fresh_context,
             prefer_structural_solver,
-            rule_unify_cache,
         );
     }
 
@@ -2165,13 +2126,7 @@ pub fn inferBindings(
         const match_mark = scratch.mark();
         const match_result = (if (seed_setup.view_seed_state) |*seed_state|
             inferBindingsByMatchSeedState(
-                allocator,
-                env,
-                registry,
-                scratch,
-                theorem,
-                rule_id,
-                rule,
+                context,
                 seed_state,
                 fresh_context,
                 ref_exprs,
@@ -2180,13 +2135,7 @@ pub fn inferBindings(
             )
         else
             inferBindingsByRuleMatchSession(
-                allocator,
-                env,
-                registry,
-                scratch,
-                theorem,
-                rule_id,
-                rule,
+                context,
                 seed_setup.session_seeds.?,
                 fresh_context,
                 ref_exprs,
@@ -2335,10 +2284,7 @@ pub fn inferBindings(
         partial_bindings,
     );
 
-    const cached_unify = if (rule_unify_cache) |cache|
-        try cache.get(rule_id, rule)
-    else
-        null;
+    const cached_unify = try context.cachedUnify();
     const strict_result = try strictInferBindingsDetailed(
         self,
         allocator,
