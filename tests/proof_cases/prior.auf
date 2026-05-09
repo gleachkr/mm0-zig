@@ -1,0 +1,67 @@
+prior_fp
+--------
+
+l1: $ w : p , w R v ⊢ w R v $ by ax
+l2: $ w : p , w R v ⊢ w : p $ by ax
+l3: $ w : p , w R v ⊢ v : P p $ by pop_intro [l1, l2]
+l4: $ w : p ⊢ w : G P p $ by gop_intro [l3]
+l5: $ _ ⊢ w : p → G P p $ by imp_intro [l4]
+
+prior_pf
+--------
+
+l1: $ w : p , v R w ⊢ v R w $ by ax
+l2: $ w : p , v R w ⊢ w : p $ by ax
+l3: $ w : p , v R w ⊢ v : F p $ by fop_intro [l1, l2]
+l4: $ w : p ⊢ w : H F p $ by hop_intro [l3]
+l5: $ _ ⊢ w : p → H F p $ by imp_intro [l4]
+
+gop_k
+-----
+
+l1: $ w : G (p → q) , w : G p , w R v ⊢ w : G (p → q) $ by ax
+l2: $ w : G (p → q) , w : G p , w R v ⊢ w : G p $ by ax
+l3: $ w : G (p → q) , w : G p , w R v ⊢ w R v $ by ax
+l4: $ w : G (p → q) , w : G p , w R v ⊢ v : p → q $ by gop_elim [l1, l3]
+l5: $ w : G (p → q) , w : G p , w R v ⊢ v : p $ by gop_elim [l2, l3]
+l6: $ w : G (p → q) , w : G p , w R v ⊢ v : q $ by imp_elim [l4, l5]
+l7: $ w : G (p → q) , w : G p ⊢ w : G q $ by gop_intro [l6]
+l8: $ w : G (p → q) ⊢ w : G p → G q $ by imp_intro [l7]
+l9: $ _ ⊢ w : G (p → q) → (G p → G q) $ by imp_intro [l8]
+
+hop_k
+-----
+
+l1: $ w : H (p → q) , w : H p , v R w ⊢ w : H (p → q) $ by ax
+l2: $ w : H (p → q) , w : H p , v R w ⊢ w : H p $ by ax
+l3: $ w : H (p → q) , w : H p , v R w ⊢ v R w $ by ax
+l4: $ w : H (p → q) , w : H p , v R w ⊢ v : p → q $ by hop_elim [l1, l3]
+l5: $ w : H (p → q) , w : H p , v R w ⊢ v : p $ by hop_elim [l2, l3]
+l6: $ w : H (p → q) , w : H p , v R w ⊢ v : q $ by imp_elim [l4, l5]
+l7: $ w : H (p → q) , w : H p ⊢ w : H q $ by hop_intro [l6]
+l8: $ w : H (p → q) ⊢ w : H p → H q $ by imp_intro [l7]
+l9: $ _ ⊢ w : H (p → q) → (H p → H q) $ by imp_intro [l8]
+
+gop_4
+-----
+
+l1: $ w : G p , w R v , v R u ⊢ w : G p $ by ax
+l2: $ w : G p , w R v , v R u ⊢ w R v $ by ax
+l3: $ w : G p , w R v , v R u ⊢ v R u $ by ax
+l4: $ w : G p , w R v , v R u ⊢ w R u $ by acc_trans [l2, l3]
+l5: $ w : G p , w R v , v R u ⊢ u : p $ by gop_elim [l1, l4]
+l6: $ w : G p , w R v ⊢ v : G p $ by gop_intro [l5]
+l7: $ w : G p ⊢ w : G G p $ by gop_intro [l6]
+l8: $ _ ⊢ w : G p → G G p $ by imp_intro [l7]
+
+hop_4
+-----
+
+l1: $ w : H p , v R w , u R v ⊢ w : H p $ by ax
+l2: $ w : H p , v R w , u R v ⊢ v R w $ by ax
+l3: $ w : H p , v R w , u R v ⊢ u R v $ by ax
+l4: $ w : H p , v R w , u R v ⊢ u R w $ by acc_trans [l3, l2]
+l5: $ w : H p , v R w , u R v ⊢ u : p $ by hop_elim [l1, l4]
+l6: $ w : H p , v R w ⊢ v : H p $ by hop_intro [l5]
+l7: $ w : H p ⊢ w : H H p $ by hop_intro [l6]
+l8: $ _ ⊢ w : H p → H H p $ by imp_intro [l7]

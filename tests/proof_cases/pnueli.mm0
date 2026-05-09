@@ -1,0 +1,151 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+
+term imp (a b: wff): wff;
+infixr imp: $→$ prec 25;
+term and (a b: wff): wff;
+infixr and: $∧$ prec 30;
+
+-- Linear-time temporal operators.
+term next (a: wff): wff;
+prefix next: $○$ prec 40;
+term globally (a: wff): wff;
+prefix globally: $G$ prec 40;
+term eventually (a: wff): wff;
+prefix eventually: $F$ prec 40;
+
+-- Atomic propositions for the request/response server.
+term req: wff;
+term res: wff;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a → c) ↔ (b → d) $;
+
+--| @congr
+axiom and_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a ∧ c) ↔ (b ∧ d) $;
+
+--| @congr
+axiom next_congr (a b: wff): $ a ↔ b $ > $ ○ a ↔ ○ b $;
+
+--| @congr
+axiom globally_congr (a b: wff): $ a ↔ b $ > $ G a ↔ G b $;
+
+--| @congr
+axiom eventually_congr (a b: wff): $ a ↔ b $ > $ F a ↔ F b $;
+
+-- Propositional ND fragment.
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+
+axiom imp_intro (g: ctx) (a b: wff):
+  $ g , a ⊢ b $ > $ g ⊢ a → b $;
+
+axiom imp_elim (g: ctx) (a b: wff):
+  $ g ⊢ a → b $ > $ g ⊢ a $ > $ g ⊢ b $;
+
+axiom and_intro (g: ctx) (a b: wff):
+  $ g ⊢ a $ > $ g ⊢ b $ > $ g ⊢ a ∧ b $;
+
+axiom and_elim_l (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ a $;
+axiom and_elim_r (g: ctx) (a b: wff): $ g ⊢ a ∧ b $ > $ g ⊢ b $;
+
+-- LTL inference rules.
+--
+-- These are sound under the standard "linear, discrete, infinite future"
+-- semantics where worlds are natural-number stamps and ⊢ asserts a fact
+-- "now" given hypotheses "now". Note that necessitation (from `g ⊢ a`,
+-- conclude `g ⊢ G a`) is NOT sound for arbitrary g — only the rules below
+-- are admitted.
+
+-- K-axiom (modus ponens under G).
+axiom gop_K (g: ctx) (a b: wff):
+  $ g ⊢ G (a → b) $ > $ g ⊢ G a $ > $ g ⊢ G b $;
+
+-- T-axiom (reflexivity: G refers to all worlds including the current one).
+axiom gop_T (g: ctx) (a: wff): $ g ⊢ G a $ > $ g ⊢ a $;
+
+-- Conjunction under G.
+axiom gop_and (g: ctx) (a b: wff):
+  $ g ⊢ G a $ > $ g ⊢ G b $ > $ g ⊢ G (a ∧ b) $;
+
+-- Pnueli's induction rule: from a step law and a base case, conclude
+-- a global invariant.
+axiom gop_ind (g: ctx) (a: wff):
+  $ g ⊢ G (a → ○ a) $ > $ g ⊢ a $ > $ g ⊢ G a $;
+
+-- F-pair: an eventual `a` together with the always-implication `a → b`
+-- yields an eventual state where both `b` and `a` hold simultaneously.
+axiom fop_pair (g: ctx) (a b: wff):
+  $ g ⊢ F a $ > $ g ⊢ G (a → b) $ > $ g ⊢ F (b ∧ a) $;
+
+-- Server specification: request/response with sticky bits, eventual
+-- response, and causality.
+axiom sr_req_sticky (g: ctx): $ g ⊢ G (req → ○ req) $;
+axiom sr_res_sticky (g: ctx): $ g ⊢ G (res → ○ res) $;
+axiom sr_responsive (g: ctx): $ g ⊢ G (req → F res) $;
+axiom sr_causal (g: ctx): $ g ⊢ G (res → req) $;
+
+-- Pnueli's induction principle, stated as a wff implication.
+theorem gop_ind_thm (p: wff):
+  $ emp ⊢ ((G (p → ○ p)) → (p → G p)) $;
+
+-- K-distribution stated as a wff implication.
+theorem gop_K_thm (p q: wff):
+  $ emp ⊢ ((G (p → q)) → ((G p) → G q)) $;
+
+-- Safety: a request, once issued, persists forever.
+theorem stick_req: $ emp ⊢ (req → G req) $;
+
+-- Safety: a response, once issued, persists forever.
+theorem stick_res: $ emp ⊢ (res → G res) $;
+
+-- Punchline. Combined safety + liveness for the server: every request
+-- eventually reaches a moment at which the request and the response
+-- both hold.
+theorem req_response: $ emp ⊢ (req → F (req ∧ res)) $;

@@ -1,0 +1,166 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+--| @vars v u
+sort world;
+sort mform;
+
+term miff (a b: mform): wff;
+infixr miff: $≃$ prec 20;
+term imp (a b: mform): mform;
+infixr imp: $→$ prec 25;
+
+term gop (a: mform): mform;
+prefix gop: $G$ prec 40;
+term hop (a: mform): mform;
+prefix hop: $H$ prec 40;
+term fop (a: mform): mform;
+prefix fop: $F$ prec 40;
+term pop (a: mform): mform;
+prefix pop: $P$ prec 40;
+
+term world_eq (w v: world): wff;
+infixl world_eq: $≈$ prec 35;
+
+term at (w: world) (a: mform): wff;
+infixl at: $:$ prec 24;
+term acc (w v: world): wff;
+infixl acc: $R$ prec 35;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation mform miff miff_refl miff_trans miff_sym _
+axiom miff_refl (a: mform): $ a ≃ a $;
+axiom miff_trans (a b c: mform):
+  $ a ≃ b $ > $ b ≃ c $ > $ a ≃ c $;
+axiom miff_sym (a b: mform): $ a ≃ b $ > $ b ≃ a $;
+
+--| @relation world world_eq world_refl world_trans world_sym _
+axiom world_refl (w: world): $ w ≈ w $;
+axiom world_trans (w v u: world):
+  $ w ≈ v $ > $ v ≈ u $ > $ w ≈ u $;
+axiom world_sym (w v: world): $ w ≈ v $ > $ v ≈ w $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom at_congr (w1 w2: world) (a b: mform):
+  $ w1 ≈ w2 $ > $ a ≃ b $ > $ w1 : a ↔ w2 : b $;
+
+axiom at_nd_mp (g: ctx) (w: world) (a b: mform):
+  $ a ≃ b $ > $ g ⊢ w : a $ > $ g ⊢ w : b $;
+
+--| @congr
+axiom acc_congr (w1 w2 v1 v2: world):
+  $ w1 ≈ w2 $ > $ v1 ≈ v2 $ > $ (w1 R v1) ↔ (w2 R v2) $;
+
+--| @congr
+axiom imp_congr (a b c d: mform):
+  $ a ≃ b $ > $ c ≃ d $ > $ (a → c) ≃ (b → d) $;
+
+--| @congr
+axiom gop_congr (a b: mform): $ a ≃ b $ > $ G a ≃ G b $;
+
+--| @congr
+axiom hop_congr (a b: mform): $ a ≃ b $ > $ H a ≃ H b $;
+
+--| @congr
+axiom fop_congr (a b: mform): $ a ≃ b $ > $ F a ≃ F b $;
+
+--| @congr
+axiom pop_congr (a b: mform): $ a ≃ b $ > $ P a ≃ P b $;
+
+-- Axiom
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+
+-- Implication
+axiom imp_intro (g: ctx) (w: world) (a b: mform):
+  $ g , w : a ⊢ w : b $ > $ g ⊢ w : (a → b) $;
+
+axiom imp_elim (g: ctx) (w: world) (a b: mform):
+  $ g ⊢ w : (a → b) $ > $ g ⊢ w : a $ > $ g ⊢ w : b $;
+
+-- Future tense rules: G is a forward box, F a forward diamond.
+axiom gop_intro (g: ctx) (w: world) {v: world} (a: mform):
+  $ g , (w R v) ⊢ v : a $ > $ g ⊢ w : G a $;
+
+axiom gop_elim (g h: ctx) (w v: world) (a: mform):
+  $ g ⊢ w : G a $ > $ h ⊢ w R v $ > $ g , h ⊢ v : a $;
+
+axiom fop_intro (g h: ctx) (w v: world) (a: mform):
+  $ g ⊢ w R v $ > $ h ⊢ v : a $ > $ g , h ⊢ w : F a $;
+
+-- Past tense rules: H is a backward box, P a backward diamond.
+axiom hop_intro (g: ctx) (w: world) {v: world} (a: mform):
+  $ g , (v R w) ⊢ v : a $ > $ g ⊢ w : H a $;
+
+axiom hop_elim (g h: ctx) (w v: world) (a: mform):
+  $ g ⊢ w : H a $ > $ h ⊢ v R w $ > $ g , h ⊢ v : a $;
+
+axiom pop_intro (g h: ctx) (w v: world) (a: mform):
+  $ g ⊢ v R w $ > $ h ⊢ v : a $ > $ g , h ⊢ w : P a $;
+
+-- Frame property: time is transitive.
+axiom acc_trans (g h: ctx) (w v u: world):
+  $ g ⊢ w R v $ > $ h ⊢ v R u $ > $ g , h ⊢ w R u $;
+
+-- Prior's tense interaction axioms.
+theorem prior_fp (w: world) (p: mform):
+  $ emp ⊢ w : (p → G P p) $;
+
+theorem prior_pf (w: world) (p: mform):
+  $ emp ⊢ w : (p → H F p) $;
+
+-- K-distribution for both tense boxes.
+theorem gop_k (w: world) (p q: mform):
+  $ emp ⊢ w : ((G (p → q)) → ((G p) → G q)) $;
+
+theorem hop_k (w: world) (p q: mform):
+  $ emp ⊢ w : ((H (p → q)) → ((H p) → H q)) $;
+
+-- 4-axioms (nesting via transitivity of the frame).
+theorem gop_4 (w: world) (p: mform):
+  $ emp ⊢ w : ((G p) → G G p) $;
+
+theorem hop_4 (w: world) (p: mform):
+  $ emp ⊢ w : ((H p) → H H p) $;

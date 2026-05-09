@@ -1,0 +1,40 @@
+loeb_thm
+--------
+
+l1: $ □ (□ p → p) ⊢ □ (□ p → p) $ by ax
+l2: $ □ (□ p → p) ⊢ □ p $ by box_loeb [l1]
+l3: $ _ ⊢ (□ (□ p → p)) → □ p $ by imp_intro [l2]
+
+box_K_thm
+---------
+
+l1: $ □ (p → q) , □ p ⊢ □ (p → q) $ by ax
+l2: $ □ (p → q) , □ p ⊢ □ p $ by ax
+l3: $ □ (p → q) , □ p ⊢ □ q $ by box_K [l1, l2]
+l4: $ □ (p → q) ⊢ (□ p) → □ q $ by imp_intro [l3]
+l5: $ _ ⊢ (□ (p → q)) → ((□ p) → □ q) $ by imp_intro [l4]
+
+goedel_2
+--------
+
+-- Direct instance of Löb at p := ⊥. Reading □ as "is provable",
+-- □⊥ asserts inconsistency and (□⊥ → ⊥) asserts consistency, so
+-- this says: a system that proves its own consistency is in fact
+-- inconsistent.
+l1: $ □ (□ ⊥ → ⊥) ⊢ □ (□ ⊥ → ⊥) $ by ax
+l2: $ □ (□ ⊥ → ⊥) ⊢ □ ⊥ $ by box_loeb [l1]
+l3: $ _ ⊢ (□ (□ ⊥ → ⊥)) → □ ⊥ $ by imp_intro [l2]
+
+goedel_2_consistent
+-------------------
+
+-- Contrapositive form. From consistency (□⊥ → ⊥) and a proof of
+-- consistency (□(□⊥ → ⊥)), Löb gives □⊥, which contradicts
+-- consistency. So: a consistent system does not prove its own
+-- consistency.
+l1: $ □ ⊥ → ⊥ , □ (□ ⊥ → ⊥) ⊢ □ ⊥ → ⊥ $ by ax
+l2: $ □ ⊥ → ⊥ , □ (□ ⊥ → ⊥) ⊢ □ (□ ⊥ → ⊥) $ by ax
+l3: $ □ ⊥ → ⊥ , □ (□ ⊥ → ⊥) ⊢ □ ⊥ $ by box_loeb [l2]
+l4: $ □ ⊥ → ⊥ , □ (□ ⊥ → ⊥) ⊢ ⊥ $ by imp_elim [l1, l3]
+l5: $ □ ⊥ → ⊥ ⊢ (□ (□ ⊥ → ⊥)) → ⊥ $ by imp_intro [l4]
+l6: $ _ ⊢ (□ ⊥ → ⊥) → ((□ (□ ⊥ → ⊥)) → ⊥) $ by imp_intro [l5]

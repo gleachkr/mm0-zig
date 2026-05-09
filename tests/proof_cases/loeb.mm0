@@ -1,0 +1,111 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+
+term imp (a b: wff): wff;
+infixr imp: $→$ prec 25;
+term bot: wff;
+notation bot: wff = ($⊥$:max);
+
+-- The provability box.
+term box (a: wff): wff;
+prefix box: $□$ prec 40;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom imp_congr (a b c d: wff):
+  $ a ↔ b $ > $ c ↔ d $ > $ (a → c) ↔ (b → d) $;
+
+--| @congr
+axiom box_congr (a b: wff): $ a ↔ b $ > $ □ a ↔ □ b $;
+
+-- Propositional ND fragment with ⊥.
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+
+axiom imp_intro (g: ctx) (a b: wff):
+  $ g , a ⊢ b $ > $ g ⊢ a → b $;
+
+axiom imp_elim (g: ctx) (a b: wff):
+  $ g ⊢ a → b $ > $ g ⊢ a $ > $ g ⊢ b $;
+
+axiom bot_elim (g: ctx) (a: wff): $ g ⊢ ⊥ $ > $ g ⊢ a $;
+
+-- Modal apparatus of GL.
+--
+-- K-axiom: □ distributes over implication. This is a common modal
+-- axiom shared with K, S4, etc.
+axiom box_K (g: ctx) (a b: wff):
+  $ g ⊢ □ (a → b) $ > $ g ⊢ □ a $ > $ g ⊢ □ b $;
+
+-- Löb's axiom (the defining axiom of GL, stated as a derivation
+-- rule). Reading □ as "is provable in arithmetic", Löb's axiom says
+-- that if a system proves "if I prove p, then p", then the system
+-- already proves p. This is the modal version of the formalized
+-- second incompleteness theorem. Note that GL deliberately omits
+-- the T-axiom (□p → p), which together with Löb would collapse
+-- everything onto p ↔ □p.
+axiom box_loeb (g: ctx) (a: wff):
+  $ g ⊢ □ (□ a → a) $ > $ g ⊢ □ a $;
+
+-- Löb's theorem stated as a wff implication.
+theorem loeb_thm (p: wff):
+  $ emp ⊢ ((□ (□ p → p)) → □ p) $;
+
+-- K-distribution stated as a wff implication.
+theorem box_K_thm (p q: wff):
+  $ emp ⊢ ((□ (p → q)) → ((□ p) → □ q)) $;
+
+-- Gödel's second incompleteness theorem in modal form. Read □ as
+-- arithmetic provability and ⊥ as a contradiction; then □⊥ asserts
+-- that the system is inconsistent, and (□⊥ → ⊥) asserts that the
+-- system is consistent. The theorem says: if a system proves its
+-- own consistency, then it is inconsistent.
+theorem goedel_2: $ emp ⊢ ((□ (□ ⊥ → ⊥)) → □ ⊥) $;
+
+-- The contrapositive form (more famous): if the system is
+-- consistent, then it does NOT prove its own consistency.
+theorem goedel_2_consistent:
+  $ emp ⊢ ((□ ⊥ → ⊥) → ((□ (□ ⊥ → ⊥)) → ⊥)) $;

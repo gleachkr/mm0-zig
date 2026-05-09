@@ -1,0 +1,49 @@
+gop_ind_thm
+-----------
+
+l1: $ G (p → ○ p) , p ⊢ G (p → ○ p) $ by ax
+l2: $ G (p → ○ p) , p ⊢ p $ by ax
+l3: $ G (p → ○ p) , p ⊢ G p $ by gop_ind [l1, l2]
+l4: $ G (p → ○ p) ⊢ p → G p $ by imp_intro [l3]
+l5: $ _ ⊢ (G (p → ○ p)) → (p → G p) $ by imp_intro [l4]
+
+gop_K_thm
+---------
+
+l1: $ G (p → q) , G p ⊢ G (p → q) $ by ax
+l2: $ G (p → q) , G p ⊢ G p $ by ax
+l3: $ G (p → q) , G p ⊢ G q $ by gop_K [l1, l2]
+l4: $ G (p → q) ⊢ G p → G q $ by imp_intro [l3]
+l5: $ _ ⊢ (G (p → q)) → (G p → G q) $ by imp_intro [l4]
+
+stick_req
+---------
+
+l1: $ req ⊢ G (req → ○ req) $ by sr_req_sticky
+l2: $ req ⊢ req $ by ax
+l3: $ req ⊢ G req $ by gop_ind [l1, l2]
+l4: $ _ ⊢ req → G req $ by imp_intro [l3]
+
+stick_res
+---------
+
+l1: $ res ⊢ G (res → ○ res) $ by sr_res_sticky
+l2: $ res ⊢ res $ by ax
+l3: $ res ⊢ G res $ by gop_ind [l1, l2]
+l4: $ _ ⊢ res → G res $ by imp_intro [l3]
+
+req_response
+------------
+
+-- Take the responsiveness axiom and instantiate it at the current
+-- world via gop_T to obtain the local implication req → F res.
+l1: $ req ⊢ G (req → F res) $ by sr_responsive
+l2: $ req ⊢ req → F res $ by gop_T [l1]
+l3: $ req ⊢ req $ by ax
+l4: $ req ⊢ F res $ by imp_elim [l2, l3]
+-- Combine the eventual response with causality (G(res → req)) using
+-- fop_pair: at the future res-state, req must also hold by sr_causal,
+-- so req ∧ res is reachable.
+l5: $ req ⊢ G (res → req) $ by sr_causal
+l6: $ req ⊢ F (req ∧ res) $ by fop_pair [l4, l5]
+l7: $ _ ⊢ req → F (req ∧ res) $ by imp_intro [l6]
