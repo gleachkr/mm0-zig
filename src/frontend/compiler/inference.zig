@@ -56,6 +56,35 @@ const StrictReplayResult = union(enum) {
     failed: StrictReplayFailure,
 };
 
+const InferenceConclusion = union(enum) {
+    concrete: ExprId,
+    surface: *const Expr,
+};
+
+const ViewSeedSetup = struct {
+    seeded_bindings: ?[]?ExprId = null,
+    view_seed_state: ?DefOps.MatchSeedState = null,
+    session_seeds: ?[]DefOps.BindingSeed = null,
+
+    fn deinit(self: *ViewSeedSetup, allocator: std.mem.Allocator) void {
+        if (self.seeded_bindings) |bindings| allocator.free(bindings);
+        if (self.view_seed_state) |*state| state.deinit(allocator);
+        if (self.session_seeds) |seeds| allocator.free(seeds);
+    }
+
+    fn diagnosticBindings(
+        self: *const ViewSeedSetup,
+        partial_bindings: []const ?ExprId,
+    ) []const ?ExprId {
+        return self.seeded_bindings orelse partial_bindings;
+    }
+};
+
+const ViewSeedSetupResult = union(enum) {
+    setup: ViewSeedSetup,
+    concrete: []const ExprId,
+};
+
 /// Per-proof cache for verifier-style rule unify streams used by strict
 /// inference replay.  Rule templates are immutable once they enter the env,
 /// so the stream only depends on the rule id.
@@ -624,23 +653,6 @@ pub fn canConvertTransparent(
     )) != null;
 }
 
-fn exactBindingSeeds(
-    allocator: std.mem.Allocator,
-    partial_bindings: []const ?ExprId,
-) ![]DefOps.BindingSeed {
-    const seeds = try allocator.alloc(
-        DefOps.BindingSeed,
-        partial_bindings.len,
-    );
-    for (partial_bindings, 0..) |binding, idx| {
-        seeds[idx] = if (binding) |expr_id|
-            .{ .exact = expr_id }
-        else
-            .none;
-    }
-    return seeds;
-}
-
 fn bindingSeedsFromSeededBindings(
     allocator: std.mem.Allocator,
     seeded_bindings: []const ?ExprId,
@@ -714,6 +726,134 @@ fn bindingSeedsForViewReuse(
     return seeds;
 }
 
+fn buildViewSeedSetup(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    env: *const GlobalEnv,
+    registry: *RewriteRegistry,
+    theorem: *TheoremContext,
+    rule: *const RuleDecl,
+    view: ?ViewDecl,
+    conclusion: InferenceConclusion,
+    ref_exprs: []const ExprId,
+    partial_bindings: []const ?ExprId,
+    view_seed_overrides: ?[]const DefOps.BindingSeed,
+) !ViewSeedSetupResult {
+    var setup = ViewSeedSetup{};
+    errdefer setup.deinit(allocator);
+
+    const actual_view = view orelse {
+        setup.session_seeds = try DefOps.BindingSeed.fromOptionalBindings(
+            allocator,
+            partial_bindings,
+        );
+        return .{ .setup = setup };
+    };
+
+    const seeded = try allocator.dupe(?ExprId, partial_bindings);
+    var seeded_owned = true;
+    errdefer if (seeded_owned) allocator.free(seeded);
+
+    switch (conclusion) {
+        .concrete => |line_expr| {
+            CompilerViews.applyViewBindings(
+                allocator,
+                theorem,
+                env,
+                registry,
+                &actual_view,
+                line_expr,
+                ref_exprs,
+                seeded,
+                view_seed_overrides,
+                &setup.view_seed_state,
+                self.debug.views,
+            ) catch |err| {
+                DebugTrace.traceViews(
+                    self.debug,
+                    "applyViewBindings failed for rule {s}: {s}",
+                    .{ rule.name, @errorName(err) },
+                );
+                allocator.free(seeded);
+                seeded_owned = false;
+                setup.session_seeds =
+                    try DefOps.BindingSeed.fromOptionalBindings(
+                        allocator,
+                        partial_bindings,
+                    );
+                return .{ .setup = setup };
+            };
+        },
+        .surface => |surface_concl| {
+            CompilerViews.applyViewBindingsSurfaceConclusion(
+                allocator,
+                theorem,
+                env,
+                registry,
+                &actual_view,
+                surface_concl,
+                ref_exprs,
+                seeded,
+                view_seed_overrides,
+                &setup.view_seed_state,
+                self.debug.views,
+            ) catch |err| {
+                DebugTrace.traceViews(
+                    self.debug,
+                    "applyViewBindings failed for rule {s}: {s}",
+                    .{ rule.name, @errorName(err) },
+                );
+                allocator.free(seeded);
+                seeded_owned = false;
+                setup.session_seeds =
+                    try DefOps.BindingSeed.fromOptionalBindings(
+                        allocator,
+                        partial_bindings,
+                    );
+                return .{ .setup = setup };
+            };
+        },
+    }
+
+    if (!hasOmittedBindings(seeded)) {
+        const bindings = try requireConcreteBindings(allocator, seeded);
+        allocator.free(seeded);
+        seeded_owned = false;
+        return .{ .concrete = bindings };
+    }
+
+    setup.seeded_bindings = seeded;
+    seeded_owned = false;
+
+    const semantic_mask = try derivedViewRuleSeedMask(
+        allocator,
+        rule.args.len,
+        actual_view,
+    );
+    defer allocator.free(semantic_mask);
+
+    const concrete_seeds = try bindingSeedsForViewReuse(
+        allocator,
+        partial_bindings,
+        seeded,
+        semantic_mask,
+        .transparent,
+    );
+    if (setup.view_seed_state) |*seed_state| {
+        for (concrete_seeds, 0..) |seed, idx| {
+            switch (seed) {
+                .none => {},
+                else => seed_state.bindings[idx] = seed,
+            }
+        }
+        allocator.free(concrete_seeds);
+    } else {
+        setup.session_seeds = concrete_seeds;
+    }
+
+    return .{ .setup = setup };
+}
+
 fn inferBindingsTransparentWithSeeds(
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
@@ -756,7 +896,7 @@ pub fn inferBindingsTransparent(
     ref_exprs: []const ExprId,
     line_expr: ExprId,
 ) ![]const ExprId {
-    const seeds = try exactBindingSeeds(allocator, partial_bindings);
+    const seeds = try DefOps.BindingSeed.fromOptionalBindings(allocator, partial_bindings);
     defer allocator.free(seeds);
 
     return try inferBindingsTransparentWithSeeds(
@@ -849,12 +989,7 @@ fn matchRuleHypForInference(
     template: TemplateExpr,
     actual: ExprId,
 ) !bool {
-    if (try session.matchTransparent(template, actual)) return true;
-    if (try session.matchSemantic(
-        template,
-        actual,
-        DefOps.default_semantic_match_budget,
-    )) return true;
+    if (try session.matchTransparentOrSemantic(template, actual)) return true;
     // This intentionally mirrors `Matching.tryMatchHypothesis`: a referenced
     // line may be stored in the raw form produced by its rule, while final
     // validation can transport it to the expected hypothesis. Binder inference
@@ -1047,7 +1182,7 @@ fn finishRuleMatchSession(
         return .no_match;
     }
 
-    if (!try session.matchTransparent(rule.concl, line_expr)) {
+    if (!try session.matchTransparentOrSemantic(rule.concl, line_expr)) {
         if (!try matchRulePartNormalized(
             allocator,
             env,
@@ -1191,7 +1326,10 @@ fn matchRulePartSurface(
         .binder => blk: {
             if (SurfaceExpr.containsHole(actual)) break :blk true;
             const actual_id = try theorem.internParsedExpr(actual);
-            break :blk try session.matchTransparent(template, actual_id);
+            break :blk try session.matchTransparentOrSemantic(
+                template,
+                actual_id,
+            );
         },
         .app => |app| blk: {
             const actual_term = switch (actual.*) {
@@ -1333,13 +1471,6 @@ pub fn inferBindingsFromHoleyAdvanced(
     maybe_view: ?ViewDecl,
     fresh_context: ?HiddenWitnessFreshContext,
 ) ![]const ExprId {
-    var seeded_bindings_storage: ?[]?ExprId = null;
-    defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
-    var view_seed_state: ?DefOps.MatchSeedState = null;
-    defer if (view_seed_state) |*seed_state| seed_state.deinit(allocator);
-    var session_seeds: ?[]DefOps.BindingSeed = null;
-    defer if (session_seeds) |seeds| allocator.free(seeds);
-
     if (try tryInferHoleyStructuralSolver(
         self,
         allocator,
@@ -1360,64 +1491,23 @@ pub fn inferBindingsFromHoleyAdvanced(
         return bindings;
     }
 
-    if (maybe_view) |view| {
-        const seeded = try allocator.dupe(?ExprId, partial_bindings);
-        CompilerViews.applyViewBindingsSurfaceConclusion(
-            allocator,
-            theorem,
-            env,
-            registry,
-            &view,
-            holey_concl,
-            ref_exprs,
-            seeded,
-            null,
-            &view_seed_state,
-            self.debug.views,
-        ) catch |err| {
-            DebugTrace.traceViews(
-                self.debug,
-                "applyViewBindings failed for rule {s}: {s}",
-                .{ rule.name, @errorName(err) },
-            );
-            allocator.free(seeded);
-            session_seeds = try exactBindingSeeds(allocator, partial_bindings);
-        };
-        if (session_seeds == null) {
-            seeded_bindings_storage = seeded;
-            if (!hasOmittedBindings(seeded)) {
-                return try requireConcreteBindings(allocator, seeded);
-            }
-
-            const semantic_mask = try derivedViewRuleSeedMask(
-                allocator,
-                rule.args.len,
-                view,
-            );
-            defer allocator.free(semantic_mask);
-
-            const concrete_seeds = try bindingSeedsForViewReuse(
-                allocator,
-                partial_bindings,
-                seeded,
-                semantic_mask,
-                .transparent,
-            );
-            if (view_seed_state) |*seed_state| {
-                for (concrete_seeds, 0..) |seed, idx| {
-                    switch (seed) {
-                        .none => {},
-                        else => seed_state.bindings[idx] = seed,
-                    }
-                }
-                allocator.free(concrete_seeds);
-            } else {
-                session_seeds = concrete_seeds;
-            }
-        }
-    } else {
-        session_seeds = try exactBindingSeeds(allocator, partial_bindings);
-    }
+    var seed_setup = switch (try buildViewSeedSetup(
+        self,
+        allocator,
+        env,
+        registry,
+        theorem,
+        rule,
+        maybe_view,
+        .{ .surface = holey_concl },
+        ref_exprs,
+        partial_bindings,
+        null,
+    )) {
+        .concrete => |bindings| return bindings,
+        .setup => |setup| setup,
+    };
+    defer seed_setup.deinit(allocator);
 
     var def_ops = DefOps.Context.initWithRegistry(
         allocator,
@@ -1427,16 +1517,15 @@ pub fn inferBindingsFromHoleyAdvanced(
     );
     defer def_ops.deinit();
 
-    var session = if (view_seed_state) |*seed_state|
+    var session = if (seed_setup.view_seed_state) |*seed_state|
         try def_ops.beginRuleMatchFromSeedState(rule.args, seed_state)
     else
-        try def_ops.beginRuleMatch(rule.args, session_seeds.?);
+        try def_ops.beginRuleMatch(rule.args, seed_setup.session_seeds.?);
     defer session.deinit();
 
-    const diagnostic_bindings = if (seeded_bindings_storage) |seeded|
-        seeded
-    else
-        partial_bindings;
+    const diagnostic_bindings = seed_setup.diagnosticBindings(
+        partial_bindings,
+    );
     const result = finishHoleyRuleMatchSession(
         self,
         allocator,
@@ -1455,49 +1544,11 @@ pub fn inferBindingsFromHoleyAdvanced(
         holey_concl,
         diagnostic_bindings,
     ) catch |err| {
-        if (try tryInferHoleyStructuralSolver(
-            self,
-            allocator,
-            env,
-            registry,
-            scratch,
-            theorem,
-            assertion,
-            rule_id,
-            rule,
-            line,
-            partial_bindings,
-            ref_exprs,
-            holey_concl,
-            maybe_view,
-        )) |bindings| {
-            self.last_diagnostic = null;
-            return bindings;
-        }
         return err;
     };
     return switch (result) {
         .concrete => |bindings| bindings,
         .no_match => {
-            if (try tryInferHoleyStructuralSolver(
-                self,
-                allocator,
-                env,
-                registry,
-                scratch,
-                theorem,
-                assertion,
-                rule_id,
-                rule,
-                line,
-                partial_bindings,
-                ref_exprs,
-                holey_concl,
-                maybe_view,
-            )) |bindings| {
-                self.last_diagnostic = null;
-                return bindings;
-            }
             CompilerDiag.setProof(
                 self,
                 try buildInferenceFailureDiagnostic(
@@ -1612,32 +1663,13 @@ fn tryInferHoleyStructuralSolver(
         };
     };
 
-    if (solver.hadAmbiguityWarning()) {
-        var diag = CompilerDiag.withPhase(.{
-            .severity = .warning,
-            .kind = .inference_failed,
-            .err = error.AmbiguousAcuiMatch,
-            .source = .proof,
-            .theorem_name = assertion.name,
-            .line_label = line.label,
-            .rule_name = line.application.rule_name,
-            .span = line.ruleApplicationSpan(),
-            .detail = .{ .inference_failure = .{
-                .path = .structural_solver,
-                .first_unsolved_binder_name = null,
-            } },
-        }, .inference);
-        try addFormattedInferenceNote(
-            allocator,
-            &diag,
-            "inference path: {s}",
-            .{CompilerDiag.inferencePathName(.structural_solver)},
-        );
-        if (solver.getAmbiguityReport()) |report| {
-            try addAmbiguityWarningNotes(allocator, &diag, report);
-        }
-        self.addWarning(diag);
-    }
+    try maybeAddStructuralAmbiguityWarning(
+        self,
+        allocator,
+        assertion,
+        line,
+        &solver,
+    );
     return bindings;
 }
 
@@ -1840,6 +1872,7 @@ fn inferBindingsNoView(
     ref_exprs: []const ExprId,
     line_expr: ExprId,
     fresh_context: ?HiddenWitnessFreshContext,
+    prefer_structural: bool,
     rule_unify_cache: ?*RuleUnifyCache,
 ) ![]const ExprId {
     const has_structural = try hasOmittedStructuralBindings(
@@ -1848,13 +1881,6 @@ fn inferBindingsNoView(
         rule,
         partial_bindings,
     );
-    const prefer_structural = has_structural and
-        try shouldPreferStructuralSolver(
-            env,
-            registry,
-            rule,
-            partial_bindings,
-        );
     const cached_unify = if (rule_unify_cache) |cache|
         try cache.get(rule_id, rule)
     else
@@ -1937,7 +1963,7 @@ fn inferBindingsNoView(
                     self.last_diagnostic = null;
                 }
 
-                const seeds = try exactBindingSeeds(
+                const seeds = try DefOps.BindingSeed.fromOptionalBindings(
                     allocator,
                     partial_bindings,
                 );
@@ -2055,6 +2081,7 @@ pub fn inferBindings(
     fresh_context: ?HiddenWitnessFreshContext,
     maybe_view: ?ViewDecl,
     use_advanced_inference: bool,
+    prefer_structural_solver: bool,
     rule_unify_cache: ?*RuleUnifyCache,
 ) ![]const ExprId {
     if (maybe_view == null) {
@@ -2073,178 +2100,53 @@ pub fn inferBindings(
             ref_exprs,
             line_expr,
             fresh_context,
+            prefer_structural_solver,
             rule_unify_cache,
         );
     }
 
-    const prefer_structural_solver = use_advanced_inference and
-        maybe_view == null and
-        try shouldPreferStructuralSolver(
-            env,
-            registry,
-            rule,
-            partial_bindings,
-        );
-    const needs_strict_replay = maybe_view == null or !use_advanced_inference;
-    const cached_unify = if (needs_strict_replay)
-        if (rule_unify_cache) |cache|
-            try cache.get(rule_id, rule)
-        else
-            null
-    else
-        null;
+    const view = maybe_view.?;
 
-    if (use_advanced_inference and maybe_view == null) {
-        try traceInferenceAttempt(
-            self.debug,
-            allocator,
-            theorem,
-            env,
-            rule,
-            .strict_replay,
-            partial_bindings,
-            partial_bindings,
-        );
-        const strict_result = try strictInferBindingsDetailed(
+    if (use_advanced_inference) {
+        var view_seed_overrides: ?[]DefOps.BindingSeed = null;
+        defer if (view_seed_overrides) |seeds| allocator.free(seeds);
+
+        if (fresh_context) |fresh| {
+            view_seed_overrides =
+                try CompilerFresh.seedRecoverHolesFromVarsPool(
+                    allocator,
+                    fresh.parser,
+                    env,
+                    theorem,
+                    fresh.theorem_vars,
+                    fresh.sort_vars,
+                    line_expr,
+                    ref_exprs,
+                    partial_bindings,
+                    view.num_binders,
+                    view.binder_map,
+                    view.arg_infos,
+                    view.derived_bindings,
+                );
+        }
+
+        var seed_setup = switch (try buildViewSeedSetup(
             self,
             allocator,
             env,
+            registry,
             theorem,
-            assertion,
             rule,
-            line,
-            partial_bindings,
+            view,
+            .{ .concrete = line_expr },
             ref_exprs,
-            line_expr,
-            cached_unify,
-        );
-        switch (strict_result) {
-            .complete => |bindings| return bindings,
-            .failed => |failure| {
-                defer allocator.free(failure.partial_bindings);
-                self.last_diagnostic = null;
-                if (!prefer_structural_solver) {
-                    try traceInferenceAttempt(
-                        self.debug,
-                        allocator,
-                        theorem,
-                        env,
-                        rule,
-                        .transparent_fallback,
-                        partial_bindings,
-                        failure.partial_bindings,
-                    );
-                    if (inferBindingsTransparentFromStrictFailure(
-                        allocator,
-                        env,
-                        theorem,
-                        rule,
-                        partial_bindings,
-                        failure.partial_bindings,
-                        ref_exprs,
-                        line_expr,
-                    )) |bindings| {
-                        return bindings;
-                    } else |_| {
-                        self.last_diagnostic = null;
-                    }
-                }
-            },
-        }
-    }
-
-    if (use_advanced_inference) {
-        var seeded_bindings_storage: ?[]?ExprId = null;
-        defer if (seeded_bindings_storage) |seeded| allocator.free(seeded);
-        var view_seed_state: ?DefOps.MatchSeedState = null;
-        defer if (view_seed_state) |*seed_state| seed_state.deinit(allocator);
-        var session_seeds: ?[]DefOps.BindingSeed = null;
-        defer if (session_seeds) |seeds| allocator.free(seeds);
-
-        if (maybe_view) |view| {
-            var view_seed_overrides: ?[]DefOps.BindingSeed = null;
-            defer if (view_seed_overrides) |seeds| allocator.free(seeds);
-
-            if (fresh_context) |fresh| {
-                view_seed_overrides =
-                    try CompilerFresh.seedRecoverHolesFromVarsPool(
-                        allocator,
-                        fresh.parser,
-                        env,
-                        theorem,
-                        fresh.theorem_vars,
-                        fresh.sort_vars,
-                        line_expr,
-                        ref_exprs,
-                        partial_bindings,
-                        view.num_binders,
-                        view.binder_map,
-                        view.arg_infos,
-                        view.derived_bindings,
-                    );
-            }
-
-            const seeded = try allocator.dupe(?ExprId, partial_bindings);
-            CompilerViews.applyViewBindings(
-                allocator,
-                theorem,
-                env,
-                registry,
-                &view,
-                line_expr,
-                ref_exprs,
-                seeded,
-                view_seed_overrides,
-                &view_seed_state,
-                self.debug.views,
-            ) catch |err| {
-                DebugTrace.traceViews(
-                    self.debug,
-                    "applyViewBindings failed for rule {s}: {s}",
-                    .{ rule.name, @errorName(err) },
-                );
-                allocator.free(seeded);
-                session_seeds = try exactBindingSeeds(
-                    allocator,
-                    partial_bindings,
-                );
-            };
-            if (session_seeds == null) {
-                seeded_bindings_storage = seeded;
-
-                if (!hasOmittedBindings(seeded)) {
-                    return try requireConcreteBindings(allocator, seeded);
-                }
-
-                const semantic_mask = try derivedViewRuleSeedMask(
-                    allocator,
-                    rule.args.len,
-                    view,
-                );
-                defer allocator.free(semantic_mask);
-
-                const concrete_seeds = try bindingSeedsForViewReuse(
-                    allocator,
-                    partial_bindings,
-                    seeded,
-                    semantic_mask,
-                    .transparent,
-                );
-                if (view_seed_state) |*seed_state| {
-                    for (concrete_seeds, 0..) |seed, idx| {
-                        switch (seed) {
-                            .none => {},
-                            else => seed_state.bindings[idx] = seed,
-                        }
-                    }
-                    allocator.free(concrete_seeds);
-                } else {
-                    session_seeds = concrete_seeds;
-                }
-            }
-        } else {
-            session_seeds = try exactBindingSeeds(allocator, partial_bindings);
-        }
+            partial_bindings,
+            view_seed_overrides,
+        )) {
+            .concrete => |bindings| return bindings,
+            .setup => |setup| setup,
+        };
+        defer seed_setup.deinit(allocator);
 
         try traceInferenceAttempt(
             self.debug,
@@ -2254,44 +2156,84 @@ pub fn inferBindings(
             rule,
             .structural_solver,
             partial_bindings,
-            if (seeded_bindings_storage) |seeded|
-                seeded
+            if (seed_setup.seeded_bindings) |stored|
+                stored
             else
                 partial_bindings,
         );
 
-        if (!prefer_structural_solver) {
-            const match_mark = scratch.mark();
-            const match_result = (if (view_seed_state) |*seed_state|
-                inferBindingsByMatchSeedState(
-                    allocator,
-                    env,
-                    registry,
-                    scratch,
-                    theorem,
-                    rule_id,
-                    rule,
-                    seed_state,
-                    fresh_context,
-                    ref_exprs,
-                    line_expr,
+        const match_mark = scratch.mark();
+        const match_result = (if (seed_setup.view_seed_state) |*seed_state|
+            inferBindingsByMatchSeedState(
+                allocator,
+                env,
+                registry,
+                scratch,
+                theorem,
+                rule_id,
+                rule,
+                seed_state,
+                fresh_context,
+                ref_exprs,
+                line_expr,
+                partial_bindings,
+            )
+        else
+            inferBindingsByRuleMatchSession(
+                allocator,
+                env,
+                registry,
+                scratch,
+                theorem,
+                rule_id,
+                rule,
+                seed_setup.session_seeds.?,
+                fresh_context,
+                ref_exprs,
+                line_expr,
+                partial_bindings,
+            )) catch |err| {
+            try traceInferenceFailure(
+                self.debug,
+                allocator,
+                theorem,
+                env,
+                rule,
+                .structural_solver,
+                err,
+                partial_bindings,
+                if (seed_setup.seeded_bindings) |stored|
+                    stored
+                else
                     partial_bindings,
-                )
-            else
-                inferBindingsByRuleMatchSession(
-                    allocator,
-                    env,
-                    registry,
-                    scratch,
-                    theorem,
-                    rule_id,
-                    rule,
-                    session_seeds.?,
-                    fresh_context,
-                    ref_exprs,
-                    line_expr,
-                    partial_bindings,
-                )) catch |err| {
+            );
+            if (CompilerDiag.setProofScratchDiagnosticIfPresent(
+                self,
+                scratch,
+                match_mark,
+                env,
+                .inference,
+                .inference_failed,
+                err,
+                assertion.name,
+                line.label,
+                line.application.rule_name,
+                line.ruleApplicationSpan(),
+            )) {
+                return err;
+            }
+            scratch.discard(match_mark);
+            return err;
+        };
+        scratch.discard(match_mark);
+        switch (match_result) {
+            .concrete => |bindings| return bindings,
+            .no_match => {},
+            .unresolved_dummy_witness => {
+                const solver_bindings = if (seed_setup.seeded_bindings) |stored|
+                    stored
+                else
+                    partial_bindings;
                 try traceInferenceFailure(
                     self.debug,
                     allocator,
@@ -2299,71 +2241,27 @@ pub fn inferBindings(
                     env,
                     rule,
                     .structural_solver,
-                    err,
+                    error.UnresolvedDummyWitness,
                     partial_bindings,
-                    if (seeded_bindings_storage) |seeded|
-                        seeded
-                    else
-                        partial_bindings,
+                    solver_bindings,
                 );
-                if (CompilerDiag.setProofScratchDiagnosticIfPresent(
+                CompilerDiag.setProof(
                     self,
-                    scratch,
-                    match_mark,
-                    env,
-                    .inference,
-                    .inference_failed,
-                    err,
-                    assertion.name,
-                    line.label,
-                    line.application.rule_name,
-                    line.ruleApplicationSpan(),
-                )) {
-                    return err;
-                }
-                scratch.discard(match_mark);
-                return err;
-            };
-            scratch.discard(match_mark);
-            switch (match_result) {
-                .concrete => |bindings| {
-                    return bindings;
-                },
-                .no_match => {},
-                .unresolved_dummy_witness => {
-                    const solver_bindings = if (seeded_bindings_storage) |seeded|
-                        seeded
-                    else
-                        partial_bindings;
-                    try traceInferenceFailure(
-                        self.debug,
+                    try buildInferenceFailureDiagnostic(
                         allocator,
-                        theorem,
                         env,
+                        theorem,
+                        assertion,
                         rule,
+                        line,
                         .structural_solver,
                         error.UnresolvedDummyWitness,
                         partial_bindings,
                         solver_bindings,
-                    );
-                    CompilerDiag.setProof(
-                        self,
-                        try buildInferenceFailureDiagnostic(
-                            allocator,
-                            env,
-                            theorem,
-                            assertion,
-                            rule,
-                            line,
-                            .structural_solver,
-                            error.UnresolvedDummyWitness,
-                            partial_bindings,
-                            solver_bindings,
-                        ),
-                    );
-                    return error.UnresolvedDummyWitness;
-                },
-            }
+                    ),
+                );
+                return error.UnresolvedDummyWitness;
+            },
         }
 
         var solver = InferenceSolver.init(
@@ -2373,13 +2271,13 @@ pub fn inferBindings(
             registry,
             rule_id,
             rule,
-            if (maybe_view) |*view| view else null,
+            &view,
             scratch,
             self.debug,
         );
         defer solver.deinit();
-        const solver_bindings = if (seeded_bindings_storage) |seeded|
-            seeded
+        const solver_bindings = if (seed_setup.seeded_bindings) |stored|
+            stored
         else
             partial_bindings;
         const bindings = solver.solve(
@@ -2416,32 +2314,13 @@ pub fn inferBindings(
             return err;
         };
 
-        if (solver.hadAmbiguityWarning()) {
-            var diag = CompilerDiag.withPhase(.{
-                .severity = .warning,
-                .kind = .inference_failed,
-                .err = error.AmbiguousAcuiMatch,
-                .source = .proof,
-                .theorem_name = assertion.name,
-                .line_label = line.label,
-                .rule_name = line.application.rule_name,
-                .span = line.ruleApplicationSpan(),
-                .detail = .{ .inference_failure = .{
-                    .path = .structural_solver,
-                    .first_unsolved_binder_name = null,
-                } },
-            }, .inference);
-            try addFormattedInferenceNote(
-                allocator,
-                &diag,
-                "inference path: {s}",
-                .{CompilerDiag.inferencePathName(.structural_solver)},
-            );
-            if (solver.getAmbiguityReport()) |report| {
-                try addAmbiguityWarningNotes(allocator, &diag, report);
-            }
-            self.addWarning(diag);
-        }
+        try maybeAddStructuralAmbiguityWarning(
+            self,
+            allocator,
+            assertion,
+            line,
+            &solver,
+        );
         return bindings;
     }
 
@@ -2456,6 +2335,10 @@ pub fn inferBindings(
         partial_bindings,
     );
 
+    const cached_unify = if (rule_unify_cache) |cache|
+        try cache.get(rule_id, rule)
+    else
+        null;
     const strict_result = try strictInferBindingsDetailed(
         self,
         allocator,
@@ -2474,89 +2357,6 @@ pub fn inferBindings(
         .failed => |strict_failure| {
             defer allocator.free(strict_failure.partial_bindings);
             if (self.last_diagnostic != null) return strict_failure.err;
-            if (maybe_view == null) {
-                try traceInferenceFailure(
-                    self.debug,
-                    allocator,
-                    theorem,
-                    env,
-                    rule,
-                    .strict_replay,
-                    strict_failure.err,
-                    partial_bindings,
-                    strict_failure.partial_bindings,
-                );
-                try traceInferenceAttempt(
-                    self.debug,
-                    allocator,
-                    theorem,
-                    env,
-                    rule,
-                    .transparent_fallback,
-                    partial_bindings,
-                    strict_failure.partial_bindings,
-                );
-                const transparent = inferBindingsTransparentFromStrictFailure(
-                    allocator,
-                    env,
-                    theorem,
-                    rule,
-                    partial_bindings,
-                    strict_failure.partial_bindings,
-                    ref_exprs,
-                    line_expr,
-                ) catch |transparent_err| blk: {
-                    if (transparent_err == error.UnresolvedDummyWitness) {
-                        try traceInferenceFailure(
-                            self.debug,
-                            allocator,
-                            theorem,
-                            env,
-                            rule,
-                            .transparent_fallback,
-                            transparent_err,
-                            partial_bindings,
-                            strict_failure.partial_bindings,
-                        );
-                        CompilerDiag.setProof(
-                            self,
-                            try buildInferenceFailureDiagnostic(
-                                allocator,
-                                env,
-                                theorem,
-                                assertion,
-                                rule,
-                                line,
-                                .transparent_fallback,
-                                transparent_err,
-                                partial_bindings,
-                                strict_failure.partial_bindings,
-                            ),
-                        );
-                        return transparent_err;
-                    }
-                    break :blk null;
-                };
-                if (transparent) |bindings| {
-                    return bindings;
-                }
-                CompilerDiag.setProof(
-                    self,
-                    try buildInferenceFailureDiagnostic(
-                        allocator,
-                        env,
-                        theorem,
-                        assertion,
-                        rule,
-                        line,
-                        .transparent_fallback,
-                        strict_failure.err,
-                        partial_bindings,
-                        strict_failure.partial_bindings,
-                    ),
-                );
-                return strict_failure.err;
-            }
             CompilerDiag.setProof(
                 self,
                 try buildInferenceFailureDiagnostic(

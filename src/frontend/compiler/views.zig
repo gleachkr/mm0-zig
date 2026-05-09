@@ -855,12 +855,7 @@ fn matchConcreteViewConclusion(
     view: *const ViewDecl,
     line_expr: ExprId,
 ) !bool {
-    if (try session.matchTransparent(view.concl, line_expr)) return true;
-    return try session.matchSemantic(
-        view.concl,
-        line_expr,
-        DefOps.default_semantic_match_budget,
-    );
+    return try session.matchTransparentOrSemantic(view.concl, line_expr);
 }
 
 fn matchSurfaceViewConclusion(
@@ -1040,13 +1035,9 @@ fn matchViewHypsAgainstConcreteExprs(
     ref_exprs: []const ExprId,
 ) !void {
     for (view.hyps, ref_exprs) |hyp_template, ref_expr| {
-        if (!try session.matchTransparent(
+        if (!try session.matchTransparentOrSemantic(
             hyp_template,
             ref_expr,
-        ) and !try session.matchSemantic(
-            hyp_template,
-            ref_expr,
-            DefOps.default_semantic_match_budget,
         )) {
             return error.ViewHypothesisMismatch;
         }

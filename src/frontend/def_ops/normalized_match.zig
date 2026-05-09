@@ -28,6 +28,7 @@ const DummyAliasMap = Types.DummyAliasMap;
 const ProvisionalWitnessInfoMap = Types.ProvisionalWitnessInfoMap;
 const MaterializedWitnessInfoMap = Types.MaterializedWitnessInfoMap;
 const MatchSession = MatchState.MatchSession;
+const default_semantic_match_budget: usize = 8;
 
 const NormalizedPlaceholderTarget = union(enum) {
     binder: usize,
@@ -509,6 +510,19 @@ pub const RuleMatchSession = struct {
             actual,
             &self.state,
             budget,
+        );
+    }
+
+    pub fn matchTransparentOrSemantic(
+        self: *RuleMatchSession,
+        template: TemplateExpr,
+        actual: ExprId,
+    ) anyerror!bool {
+        if (try self.matchTransparent(template, actual)) return true;
+        return try self.matchSemantic(
+            template,
+            actual,
+            default_semantic_match_budget,
         );
     }
 

@@ -49,6 +49,20 @@ pub const BindingSeed = union(enum) {
     /// Carry a pre-built BoundValue (possibly symbolic) from one session
     /// into another without collapsing it to a concrete ExprId first.
     bound: BoundValue,
+
+    pub fn fromOptionalBindings(
+        allocator: std.mem.Allocator,
+        bindings: []const ?ExprId,
+    ) ![]BindingSeed {
+        const seeds = try allocator.alloc(BindingSeed, bindings.len);
+        for (bindings, 0..) |binding, idx| {
+            seeds[idx] = if (binding) |expr_id|
+                .{ .exact = expr_id }
+            else
+                .none;
+        }
+        return seeds;
+    }
 };
 
 pub const ConcreteBinding = struct {

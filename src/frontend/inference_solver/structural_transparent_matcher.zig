@@ -100,7 +100,10 @@ fn matchNormalizedOnly(
         .rule => state.rule_bindings,
         .view => state.view_bindings.?,
     };
-    const seeds = try exactBindingSeeds(self.allocator, old_bindings);
+    const seeds = try DefOps.BindingSeed.fromOptionalBindings(
+        self.allocator,
+        old_bindings,
+    );
     defer self.allocator.free(seeds);
 
     var def_ops = DefOps.Context.initWithRegistry(
@@ -205,20 +208,6 @@ fn copySessionBindingsToBranch(
     const out = try self.allocator.alloc(BranchState, 1);
     out[0] = new_state;
     return out;
-}
-
-fn exactBindingSeeds(
-    allocator: std.mem.Allocator,
-    bindings: []const ?ExprId,
-) ![]DefOps.BindingSeed {
-    const seeds = try allocator.alloc(DefOps.BindingSeed, bindings.len);
-    for (bindings, 0..) |binding, idx| {
-        seeds[idx] = if (binding) |expr_id|
-            .{ .exact = expr_id }
-        else
-            .none;
-    }
-    return seeds;
 }
 
 fn ruleArgsForSpace(

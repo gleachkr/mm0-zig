@@ -48,25 +48,6 @@ pub const Normalizer = struct {
         );
     }
 
-    pub fn initWithDebug(
-        allocator: std.mem.Allocator,
-        theorem: *TheoremContext,
-        registry: *RewriteRegistry,
-        env: *const GlobalEnv,
-        lines: *std.ArrayListUnmanaged(CheckedLine),
-        debug: DebugConfig,
-    ) Normalizer {
-        return initWithDebugAndScratch(
-            allocator,
-            theorem,
-            registry,
-            env,
-            lines,
-            null,
-            debug,
-        );
-    }
-
     pub fn initWithScratch(
         allocator: std.mem.Allocator,
         theorem: *TheoremContext,

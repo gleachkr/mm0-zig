@@ -1301,6 +1301,7 @@ fn inferCandidateBindings(
                         fresh_context,
                         maybe_view,
                         use_advanced_inference,
+                        prefer_structural_solver,
                         rule_unify_cache,
                     )) |hint_bindings| {
                         restoreDiagnostic(self, null);
@@ -1425,6 +1426,7 @@ fn inferCandidateBindings(
                     fresh_context,
                     maybe_view,
                     use_advanced_inference,
+                    prefer_structural_solver,
                     rule_unify_cache,
                 );
             }

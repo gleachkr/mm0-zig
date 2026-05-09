@@ -34,6 +34,11 @@ const SolutionPreference = enum {
     minimal_structural,
 };
 
+const ConclusionConstraint = union(enum) {
+    concrete: ExprId,
+    surface: *const Expr,
+};
+
 pub const AmbiguityReport = struct {
     distinct_solution_count: usize = 0,
     chosen_bindings: ?[]const u8 = null,
@@ -132,49 +137,10 @@ pub const Solver = struct {
         ref_exprs: []const ExprId,
         line_expr: ExprId,
     ) anyerror![]const ExprId {
-        var states = try self.initialStates(partial_bindings);
-
-        if (self.view) |view| {
-            var constraints = std.ArrayListUnmanaged(MatchConstraint){};
-            for (view.hyps, ref_exprs) |hyp, actual| {
-                try constraints.append(self.allocator, .{
-                    .template = hyp,
-                    .actual = actual,
-                });
-            }
-            try constraints.append(self.allocator, .{
-                .template = view.concl,
-                .actual = line_expr,
-            });
-            states = try self.applyConstraints(
-                states.items,
-                constraints.items,
-                .view,
-            );
-            states = try self.finalizeViewAndRuleStates(states.items, view);
-        } else {
-            var constraints = std.ArrayListUnmanaged(MatchConstraint){};
-            for (self.rule.hyps, ref_exprs) |hyp, actual| {
-                try constraints.append(self.allocator, .{
-                    .template = hyp,
-                    .actual = actual,
-                });
-            }
-            try constraints.append(self.allocator, .{
-                .template = self.rule.concl,
-                .actual = line_expr,
-            });
-            states = try self.applyConstraints(
-                states.items,
-                constraints.items,
-                .rule,
-            );
-            states = try self.finalizeStructuralStates(states.items, .rule);
-        }
-
-        return try self.pickUniqueSolution(
-            states.items,
-            .minimal_structural,
+        return try self.solveWithConclusion(
+            partial_bindings,
+            ref_exprs,
+            .{ .concrete = line_expr },
         );
     }
 
@@ -184,45 +150,46 @@ pub const Solver = struct {
         ref_exprs: []const ExprId,
         holey_concl: *const Expr,
     ) anyerror![]const ExprId {
+        return try self.solveWithConclusion(
+            partial_bindings,
+            ref_exprs,
+            .{ .surface = holey_concl },
+        );
+    }
+
+    fn solveWithConclusion(
+        self: *Solver,
+        partial_bindings: []const ?ExprId,
+        ref_exprs: []const ExprId,
+        conclusion: ConclusionConstraint,
+    ) anyerror![]const ExprId {
         var states = try self.initialStates(partial_bindings);
 
         if (self.view) |view| {
-            var constraints = std.ArrayListUnmanaged(MatchConstraint){};
-            for (view.hyps, ref_exprs) |hyp, actual| {
-                try constraints.append(self.allocator, .{
-                    .template = hyp,
-                    .actual = actual,
-                });
-            }
-            states = try self.applyConstraints(
+            states = try self.applyHypConstraints(
                 states.items,
-                constraints.items,
+                view.hyps,
+                ref_exprs,
                 .view,
             );
-            states = try self.applySurfaceConstraint(
+            states = try self.applyConclusionConstraint(
                 states.items,
                 view.concl,
-                holey_concl,
+                conclusion,
                 .view,
             );
             states = try self.finalizeViewAndRuleStates(states.items, view);
         } else {
-            var constraints = std.ArrayListUnmanaged(MatchConstraint){};
-            for (self.rule.hyps, ref_exprs) |hyp, actual| {
-                try constraints.append(self.allocator, .{
-                    .template = hyp,
-                    .actual = actual,
-                });
-            }
-            states = try self.applyConstraints(
+            states = try self.applyHypConstraints(
                 states.items,
-                constraints.items,
+                self.rule.hyps,
+                ref_exprs,
                 .rule,
             );
-            states = try self.applySurfaceConstraint(
+            states = try self.applyConclusionConstraint(
                 states.items,
                 self.rule.concl,
-                holey_concl,
+                conclusion,
                 .rule,
             );
             states = try self.finalizeStructuralStates(states.items, .rule);
@@ -257,6 +224,52 @@ pub const Solver = struct {
         try self.propagateViewBindings(next.items, view);
         next = try self.finalizeStructuralStates(next.items, .rule);
         return next;
+    }
+
+    fn applyHypConstraints(
+        self: *Solver,
+        states: []const BranchState,
+        hyps: []const TemplateExpr,
+        ref_exprs: []const ExprId,
+        space: BinderSpace,
+    ) anyerror!std.ArrayListUnmanaged(BranchState) {
+        var constraints = std.ArrayListUnmanaged(MatchConstraint){};
+        defer constraints.deinit(self.allocator);
+        for (hyps, ref_exprs) |hyp, actual| {
+            try constraints.append(self.allocator, .{
+                .template = hyp,
+                .actual = actual,
+            });
+        }
+        return try self.applyConstraints(states, constraints.items, space);
+    }
+
+    fn applyConclusionConstraint(
+        self: *Solver,
+        states: []const BranchState,
+        template: TemplateExpr,
+        conclusion: ConclusionConstraint,
+        space: BinderSpace,
+    ) anyerror!std.ArrayListUnmanaged(BranchState) {
+        return switch (conclusion) {
+            .concrete => |actual| blk: {
+                const constraints = [_]MatchConstraint{.{
+                    .template = template,
+                    .actual = actual,
+                }};
+                break :blk try self.applyConstraints(
+                    states,
+                    constraints[0..],
+                    space,
+                );
+            },
+            .surface => |actual| try self.applySurfaceConstraint(
+                states,
+                template,
+                actual,
+                space,
+            ),
+        };
     }
 
     fn applyConstraints(

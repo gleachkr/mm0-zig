@@ -35,27 +35,6 @@ pub const ComparisonSnapshot = struct {
     normalized_actual: ?ExprId = null,
 };
 
-pub fn maybeBuildComparisonSnapshot(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    scratch: *CompilerDiag.Scratch,
-    expected: ExprId,
-    actual: ExprId,
-) ComparisonSnapshot {
-    return maybeBuildComparisonSnapshotWithDebug(
-        allocator,
-        theorem,
-        registry,
-        env,
-        scratch,
-        expected,
-        actual,
-        .none,
-    );
-}
-
 pub fn maybeBuildComparisonSnapshotWithDebug(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
@@ -135,29 +114,6 @@ pub fn normalizeExprForSnapshot(
     };
     scratch.discard(mark);
     return normalized.result_expr;
-}
-
-pub fn buildNormalizedConversion(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    scratch: *CompilerDiag.Scratch,
-    actual: ExprId,
-    expected: ExprId,
-) !?NormalizedConversion {
-    return buildNormalizedConversionWithDebug(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        scratch,
-        actual,
-        expected,
-        .none,
-    );
 }
 
 pub fn buildNormalizedConversionWithDebug(
@@ -284,27 +240,6 @@ pub fn buildNormalizedConversionWithDebug(
     };
 }
 
-pub fn buildExpectedNormalization(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    scratch: *CompilerDiag.Scratch,
-    expected: ExprId,
-) !?ExpectedNormalization {
-    return buildExpectedNormalizationWithDebug(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        scratch,
-        expected,
-        .none,
-    );
-}
-
 pub fn buildExpectedNormalizationWithDebug(
     allocator: std.mem.Allocator,
     theorem: *TheoremContext,
@@ -341,31 +276,6 @@ pub fn buildExpectedNormalizationWithDebug(
         .conv_line_idx = normalized.conv_line_idx,
         .normalizer = normalizer,
     };
-}
-
-pub fn buildTransparentNormalizedHypRef(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    scratch: *CompilerDiag.Scratch,
-    actual_ref: CheckedRef,
-    actual: ExprId,
-    expected: ExprId,
-) !?CheckedRef {
-    return buildTransparentNormalizedHypRefWithDebug(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        scratch,
-        actual_ref,
-        actual,
-        expected,
-        .none,
-    );
 }
 
 pub fn buildTransparentNormalizedHypRefWithDebug(
@@ -432,35 +342,6 @@ pub fn buildTransparentNormalizedHypRefWithDebug(
         ) };
     }
     return normalized_ref;
-}
-
-pub fn buildTransparentNormalizedConclusionLine(
-    allocator: std.mem.Allocator,
-    theorem: *TheoremContext,
-    registry: *RewriteRegistry,
-    env: *const GlobalEnv,
-    checked: *std.ArrayListUnmanaged(CheckedLine),
-    scratch: *CompilerDiag.Scratch,
-    line_expr: ExprId,
-    expected_line: ExprId,
-    rule_id: u32,
-    bindings: []const ExprId,
-    refs: []const CheckedRef,
-) !?usize {
-    return buildTransparentNormalizedConclusionLineWithDebug(
-        allocator,
-        theorem,
-        registry,
-        env,
-        checked,
-        scratch,
-        line_expr,
-        expected_line,
-        rule_id,
-        bindings,
-        refs,
-        .none,
-    );
 }
 
 pub fn buildTransparentNormalizedConclusionLineWithDebug(
