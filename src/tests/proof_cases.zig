@@ -385,6 +385,7 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "prior", .outcome = .pass },
     .{ .stem = "pnueli", .outcome = .pass },
     .{ .stem = "loeb", .outcome = .pass },
+    .{ .stem = "barwise", .outcome = .pass },
     .{ .stem = "church", .outcome = .pass },
     .{ .stem = "pass_church_holes", .outcome = .pass },
     .{ .stem = "pass_church_holes_hard", .outcome = .pass },

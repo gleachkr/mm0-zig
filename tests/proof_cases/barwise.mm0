@@ -1,0 +1,215 @@
+delimiter $ ( ) $;
+provable sort wff;
+sort ctx;
+--| @vars v u
+sort world;
+sort mform;
+
+term miff (a b: mform): wff;
+infixr miff: $≃$ prec 20;
+
+-- Connectives at the modal level.
+term imp (a b: mform): mform;
+infixr imp: $→$ prec 25;
+term or (a b: mform): mform;
+infixr or: $∨$ prec 28;
+term bot: mform;
+notation bot: mform = ($⊥$:max);
+
+-- Knowledge operators for two agents (Alice, Bob).
+term ka (a: mform): mform;
+prefix ka: $Ka$ prec 40;
+term kb (a: mform): mform;
+prefix kb: $Kb$ prec 40;
+
+-- Atomic propositions for the muddy children scenario.
+-- m_a: "Alice is muddy"; m_b: "Bob is muddy".
+term m_a: mform;
+term m_b: mform;
+
+term world_eq (w v: world): wff;
+infixl world_eq: $≈$ prec 35;
+term at (w: world) (a: mform): wff;
+infixl at: $:$ prec 24;
+term acc_a (w v: world): wff;
+infixl acc_a: $Ra$ prec 35;
+term acc_b (w v: world): wff;
+infixl acc_b: $Rb$ prec 35;
+
+term iff (a b: wff): wff;
+infixr iff: $↔$ prec 20;
+term ctx_eq (g h: ctx): wff;
+term emp: ctx;
+notation emp: ctx = ($_$:max);
+
+--| @acui ctx_assoc ctx_comm emp ctx_idem
+term join (g h: ctx): ctx;
+infixl join: $,$ prec 5;
+term hyp (a: wff): ctx;
+coercion hyp: wff > ctx;
+term nd (g: ctx) (a: wff): wff;
+infixl nd: $⊢$ prec 0;
+
+--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+axiom iff_refl (a: wff): $ a ↔ a $;
+axiom iff_trans (a b c: wff):
+  $ a ↔ b $ > $ b ↔ c $ > $ a ↔ c $;
+axiom iff_sym (a b: wff): $ a ↔ b $ > $ b ↔ a $;
+axiom iff_mp (a b: wff): $ a ↔ b $ > $ a $ > $ b $;
+
+--| @relation mform miff miff_refl miff_trans miff_sym _
+axiom miff_refl (a: mform): $ a ≃ a $;
+axiom miff_trans (a b c: mform):
+  $ a ≃ b $ > $ b ≃ c $ > $ a ≃ c $;
+axiom miff_sym (a b: mform): $ a ≃ b $ > $ b ≃ a $;
+
+--| @relation world world_eq world_refl world_trans world_sym _
+axiom world_refl (w: world): $ w ≈ w $;
+axiom world_trans (w v u: world):
+  $ w ≈ v $ > $ v ≈ u $ > $ w ≈ u $;
+axiom world_sym (w v: world): $ w ≈ v $ > $ v ≈ w $;
+
+--| @relation ctx ctx_eq ctx_refl ctx_trans ctx_sym _
+axiom ctx_refl (g: ctx): $ ctx_eq g g $;
+axiom ctx_trans (g h i: ctx):
+  $ ctx_eq g h $ > $ ctx_eq h i $ > $ ctx_eq g i $;
+axiom ctx_sym (g h: ctx): $ ctx_eq g h $ > $ ctx_eq h g $;
+axiom ctx_assoc (g h i: ctx):
+  $ ctx_eq ((g , h) , i) (g , (h , i)) $;
+axiom ctx_comm (g h: ctx): $ ctx_eq (g , h) (h , g) $;
+axiom ctx_idem (g: ctx): $ ctx_eq (g , g) g $;
+axiom ctx_unit (g: ctx): $ ctx_eq (emp , g) g $;
+
+--| @congr
+axiom join_congr (g1 g2 h1 h2: ctx):
+  $ ctx_eq g1 g2 $ > $ ctx_eq h1 h2 $ >
+  $ ctx_eq (g1 , h1) (g2 , h2) $;
+
+--| @congr
+axiom hyp_congr (a b: wff): $ a ↔ b $ > $ ctx_eq (hyp a) (hyp b) $;
+
+--| @congr
+axiom nd_congr (g h: ctx) (a b: wff):
+  $ ctx_eq g h $ > $ a ↔ b $ > $ (g ⊢ a) ↔ (h ⊢ b) $;
+
+--| @congr
+axiom at_congr (w1 w2: world) (a b: mform):
+  $ w1 ≈ w2 $ > $ a ≃ b $ > $ w1 : a ↔ w2 : b $;
+
+axiom at_nd_mp (g: ctx) (w: world) (a b: mform):
+  $ a ≃ b $ > $ g ⊢ w : a $ > $ g ⊢ w : b $;
+
+--| @congr
+axiom acc_a_congr (w1 w2 v1 v2: world):
+  $ w1 ≈ w2 $ > $ v1 ≈ v2 $ > $ (w1 Ra v1) ↔ (w2 Ra v2) $;
+
+--| @congr
+axiom acc_b_congr (w1 w2 v1 v2: world):
+  $ w1 ≈ w2 $ > $ v1 ≈ v2 $ > $ (w1 Rb v1) ↔ (w2 Rb v2) $;
+
+--| @congr
+axiom imp_congr (a b c d: mform):
+  $ a ≃ b $ > $ c ≃ d $ > $ (a → c) ≃ (b → d) $;
+
+--| @congr
+axiom or_congr (a b c d: mform):
+  $ a ≃ b $ > $ c ≃ d $ > $ (a ∨ c) ≃ (b ∨ d) $;
+
+--| @congr
+axiom ka_congr (a b: mform): $ a ≃ b $ > $ Ka a ≃ Ka b $;
+
+--| @congr
+axiom kb_congr (a b: mform): $ a ≃ b $ > $ Kb a ≃ Kb b $;
+
+-- Propositional ND fragment.
+axiom ax (g: ctx) (a: wff): $ g , a ⊢ a $;
+
+axiom imp_intro (g: ctx) (w: world) (a b: mform):
+  $ g , w : a ⊢ w : b $ > $ g ⊢ w : (a → b) $;
+
+axiom imp_elim (g: ctx) (w: world) (a b: mform):
+  $ g ⊢ w : (a → b) $ > $ g ⊢ w : a $ > $ g ⊢ w : b $;
+
+axiom or_intro_l (g: ctx) (w: world) (a b: mform):
+  $ g ⊢ w : a $ > $ g ⊢ w : (a ∨ b) $;
+
+axiom or_intro_r (g: ctx) (w: world) (a b: mform):
+  $ g ⊢ w : b $ > $ g ⊢ w : (a ∨ b) $;
+
+axiom or_elim (g: ctx) (w: world) (a b c: mform):
+  $ g ⊢ w : (a ∨ b) $ > $ g , w : a ⊢ w : c $ > $ g , w : b ⊢ w : c $ >
+  $ g ⊢ w : c $;
+
+-- Cross-world ⊥-elim. ⊥ is constantly false; if a context derives it
+-- at any world, the context is inconsistent and entails anything
+-- anywhere.
+axiom bot_elim (g: ctx) (w v: world) (a: mform):
+  $ g ⊢ w : ⊥ $ > $ g ⊢ v : a $;
+
+-- Knowledge rules. Each K_i is a normal modal box for accessibility R_i.
+axiom ka_intro (g: ctx) (w: world) {v: world} (a: mform):
+  $ g , (w Ra v) ⊢ v : a $ > $ g ⊢ w : Ka a $;
+
+axiom ka_elim (g h: ctx) (w v: world) (a: mform):
+  $ g ⊢ w : Ka a $ > $ h ⊢ w Ra v $ > $ g , h ⊢ v : a $;
+
+axiom kb_intro (g: ctx) (w: world) {v: world} (a: mform):
+  $ g , (w Rb v) ⊢ v : a $ > $ g ⊢ w : Kb a $;
+
+axiom kb_elim (g h: ctx) (w v: world) (a: mform):
+  $ g ⊢ w : Kb a $ > $ h ⊢ w Rb v $ > $ g , h ⊢ v : a $;
+
+-- S5 frame conditions: each accessibility relation is reflexive,
+-- transitive, and euclidean. (Together these are equivalent to the
+-- standard equivalence-relation presentation of S5.)
+axiom acc_a_refl (g: ctx) (w: world): $ g ⊢ w Ra w $;
+axiom acc_a_trans (g h: ctx) (w v u: world):
+  $ g ⊢ w Ra v $ > $ h ⊢ v Ra u $ > $ g , h ⊢ w Ra u $;
+axiom acc_a_eucl (g h: ctx) (w v u: world):
+  $ g ⊢ w Ra v $ > $ h ⊢ w Ra u $ > $ g , h ⊢ v Ra u $;
+
+axiom acc_b_refl (g: ctx) (w: world): $ g ⊢ w Rb w $;
+axiom acc_b_trans (g h: ctx) (w v u: world):
+  $ g ⊢ w Rb v $ > $ h ⊢ v Rb u $ > $ g , h ⊢ w Rb u $;
+axiom acc_b_eucl (g h: ctx) (w v u: world):
+  $ g ⊢ w Rb v $ > $ h ⊢ w Rb u $ > $ g , h ⊢ v Rb u $;
+
+-- The four standard S5 axioms for K_a (the symmetric statements for
+-- K_b are provable by the same proofs but are omitted to keep the
+-- file short).
+--
+-- K-distribution.
+theorem ka_K (w: world) (p q: mform):
+  $ emp ⊢ w : ((Ka (p → q)) → ((Ka p) → Ka q)) $;
+
+-- T (knowledge implies truth).
+theorem ka_T (w: world) (p: mform):
+  $ emp ⊢ w : ((Ka p) → p) $;
+
+-- 4 (positive introspection: knowing implies knowing that one knows).
+theorem ka_4 (w: world) (p: mform):
+  $ emp ⊢ w : ((Ka p) → Ka Ka p) $;
+
+-- 5 (negative introspection: not knowing implies knowing that one
+-- does not know). Stated with → ⊥ in place of ¬.
+theorem ka_5 (w: world) (p: mform):
+  $ emp ⊢ w : ((Ka p → ⊥) → Ka (Ka p → ⊥)) $;
+
+-- Cross-agent veridicality: if Alice knows that Bob knows p, then p.
+-- Two T-applications, one through each agent's reflexive accessibility.
+theorem ka_kb_T (w: world) (p: mform):
+  $ emp ⊢ w : ((Ka (Kb p)) → p) $;
+
+-- Punchline: the Muddy Children Puzzle, two-child round-1 form. The
+-- premises encode (i) common knowledge of "at least one is muddy",
+-- (ii) Alice's perfect perception of Bob's status, and (iii) Alice's
+-- public report that she does not know her own status. The
+-- conclusion is the famous deduction: Bob must be muddy. The proof
+-- is by case analysis on Alice's perception: if she sees Bob muddy,
+-- the conclusion is immediate by T; if she sees Bob clean, she could
+-- combine that with (i) to know her own status — contradicting (iii).
+theorem muddy_two (w: world):
+  $ emp ⊢ w :
+    ((Ka (m_a ∨ m_b)) →
+      ((Ka m_b ∨ Ka (m_b → ⊥)) →
+        ((Ka m_a → ⊥) → m_b))) $;

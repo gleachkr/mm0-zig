@@ -1,0 +1,110 @@
+ka_K
+----
+
+l1: $ w : Ka (p → q) , w : Ka p , w Ra v ⊢ w : Ka (p → q) $ by ax
+l2: $ w : Ka (p → q) , w : Ka p , w Ra v ⊢ w : Ka p $ by ax
+l3: $ w : Ka (p → q) , w : Ka p , w Ra v ⊢ w Ra v $ by ax
+l4: $ w : Ka (p → q) , w : Ka p , w Ra v ⊢ v : p → q $ by ka_elim [l1, l3]
+l5: $ w : Ka (p → q) , w : Ka p , w Ra v ⊢ v : p $ by ka_elim [l2, l3]
+l6: $ w : Ka (p → q) , w : Ka p , w Ra v ⊢ v : q $ by imp_elim [l4, l5]
+l7: $ w : Ka (p → q) , w : Ka p ⊢ w : Ka q $ by ka_intro [l6]
+l8: $ w : Ka (p → q) ⊢ w : Ka p → Ka q $ by imp_intro [l7]
+l9: $ _ ⊢ w : (Ka (p → q)) → (Ka p → Ka q) $ by imp_intro [l8]
+
+ka_T
+----
+
+l1: $ w : Ka p ⊢ w : Ka p $ by ax
+l2: $ w : Ka p ⊢ w Ra w $ by acc_a_refl
+l3: $ w : Ka p ⊢ w : p $ by ka_elim [l1, l2]
+l4: $ _ ⊢ w : Ka p → p $ by imp_intro [l3]
+
+ka_4
+----
+
+l1: $ w : Ka p , w Ra v , v Ra u ⊢ w : Ka p $ by ax
+l2: $ w : Ka p , w Ra v , v Ra u ⊢ w Ra v $ by ax
+l3: $ w : Ka p , w Ra v , v Ra u ⊢ v Ra u $ by ax
+l4: $ w : Ka p , w Ra v , v Ra u ⊢ w Ra u $ by acc_a_trans [l2, l3]
+l5: $ w : Ka p , w Ra v , v Ra u ⊢ u : p $ by ka_elim [l1, l4]
+l6: $ w : Ka p , w Ra v ⊢ v : Ka p $ by ka_intro [l5]
+l7: $ w : Ka p ⊢ w : Ka Ka p $ by ka_intro [l6]
+l8: $ _ ⊢ w : Ka p → Ka Ka p $ by imp_intro [l7]
+
+ka_5
+----
+
+-- Strategy: assume ¬Ka p at w. Pick Alice-accessible v, and assume
+-- Ka p at v. We need ⊥ at v. Show Ka p back at w using the
+-- euclidean property (any two Alice-successors of w are
+-- Alice-related), contradict the original assumption, then move ⊥
+-- across worlds via bot_elim.
+l1: $ w : Ka p → ⊥ , w Ra v , v : Ka p , w Ra u ⊢ w Ra v $ by ax
+l2: $ w : Ka p → ⊥ , w Ra v , v : Ka p , w Ra u ⊢ w Ra u $ by ax
+l3: $ w : Ka p → ⊥ , w Ra v , v : Ka p , w Ra u ⊢ v Ra u $ by acc_a_eucl [l1, l2]
+l4: $ w : Ka p → ⊥ , w Ra v , v : Ka p , w Ra u ⊢ v : Ka p $ by ax
+l5: $ w : Ka p → ⊥ , w Ra v , v : Ka p , w Ra u ⊢ u : p $ by ka_elim [l4, l3]
+l6: $ w : Ka p → ⊥ , w Ra v , v : Ka p ⊢ w : Ka p $ by ka_intro [l5]
+l7: $ w : Ka p → ⊥ , w Ra v , v : Ka p ⊢ w : Ka p → ⊥ $ by ax
+l8: $ w : Ka p → ⊥ , w Ra v , v : Ka p ⊢ w : ⊥ $ by imp_elim [l7, l6]
+l9: $ w : Ka p → ⊥ , w Ra v , v : Ka p ⊢ v : ⊥ $ by bot_elim [l8]
+l10: $ w : Ka p → ⊥ , w Ra v ⊢ v : Ka p → ⊥ $ by imp_intro [l9]
+l11: $ w : Ka p → ⊥ ⊢ w : Ka (Ka p → ⊥) $ by ka_intro [l10]
+l12: $ _ ⊢ w : (Ka p → ⊥) → Ka (Ka p → ⊥) $ by imp_intro [l11]
+
+ka_kb_T
+-------
+
+l1: $ w : Ka (Kb p) ⊢ w : Ka (Kb p) $ by ax
+l2: $ w : Ka (Kb p) ⊢ w Ra w $ by acc_a_refl
+l3: $ w : Ka (Kb p) ⊢ w : Kb p $ by ka_elim [l1, l2]
+l4: $ w : Ka (Kb p) ⊢ w Rb w $ by acc_b_refl
+l5: $ w : Ka (Kb p) ⊢ w : p $ by kb_elim [l3, l4]
+l6: $ _ ⊢ w : (Ka (Kb p)) → p $ by imp_intro [l5]
+
+muddy_two
+---------
+
+-- The disjunction (ii): Alice can either see Bob muddy or see Bob clean.
+d1: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ ⊢ w : Ka m_b ∨ Ka (m_b → ⊥) $ by ax
+
+-- Case A: Alice already knows Bob is muddy. Apply T (reflexivity of Ra).
+ca1: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka m_b ⊢ w : Ka m_b $ by ax
+ca2: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka m_b ⊢ w Ra w $ by acc_a_refl
+ca3: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka m_b ⊢ w : m_b $ by ka_elim [ca1, ca2]
+
+-- Case B: Alice knows Bob is clean. We will derive Ka m_a, contradicting (iii).
+-- Sub-derivation B.1: at any Alice-successor v, m_a holds.
+b1: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v ⊢ w : Ka (m_a ∨ m_b) $ by ax
+b2: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v ⊢ w Ra v $ by ax
+b3: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v ⊢ v : m_a ∨ m_b $ by ka_elim [b1, b2]
+
+-- Subcase B.A: at v, m_a — done.
+sa1: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v , v : m_a ⊢ v : m_a $ by ax
+
+-- Subcase B.B: at v, m_b — contradicts m_b → ⊥ at v, so anything follows.
+sb1: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v , v : m_b ⊢ w : Ka (m_b → ⊥) $ by ax
+sb2: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v , v : m_b ⊢ w Ra v $ by ax
+sb3: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v , v : m_b ⊢ v : m_b → ⊥ $ by ka_elim [sb1, sb2]
+sb4: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v , v : m_b ⊢ v : m_b $ by ax
+sb5: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v , v : m_b ⊢ v : ⊥ $ by imp_elim [sb3, sb4]
+sb6: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v , v : m_b ⊢ v : m_a $ by bot_elim [sb5]
+
+-- Inner or-elim collapses both subcases to v : m_a.
+b4: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) , w Ra v ⊢ v : m_a $ by or_elim [b3, sa1, sb6]
+
+-- Generalize over v to get Ka m_a at w.
+b5: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) ⊢ w : Ka m_a $ by ka_intro [b4]
+
+-- Apply Alice's ignorance to derive ⊥, then m_b by bot_elim.
+b6: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) ⊢ w : Ka m_a → ⊥ $ by ax
+b7: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) ⊢ w : ⊥ $ by imp_elim [b6, b5]
+b8: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ , w : Ka (m_b → ⊥) ⊢ w : m_b $ by bot_elim [b7]
+
+-- Outer or-elim combines cases A and B.
+e1: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) , w : Ka m_a → ⊥ ⊢ w : m_b $ by or_elim [d1, ca3, b8]
+
+-- Discharge premises in reverse to obtain the wff implication.
+i1: $ w : Ka (m_a ∨ m_b) , w : Ka m_b ∨ Ka (m_b → ⊥) ⊢ w : (Ka m_a → ⊥) → m_b $ by imp_intro [e1]
+i2: $ w : Ka (m_a ∨ m_b) ⊢ w : (Ka m_b ∨ Ka (m_b → ⊥)) → ((Ka m_a → ⊥) → m_b) $ by imp_intro [i1]
+i3: $ _ ⊢ w : (Ka (m_a ∨ m_b)) → ((Ka m_b ∨ Ka (m_b → ⊥)) → ((Ka m_a → ⊥) → m_b)) $ by imp_intro [i2]
