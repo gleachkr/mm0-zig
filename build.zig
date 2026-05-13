@@ -252,6 +252,38 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/barcan.auf"),
         "web-demo/fixtures/barcan.auf",
     );
+    const install_prior_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/prior.mm0"),
+        "web-demo/fixtures/prior.mm0",
+    );
+    const install_prior_proof = b.addInstallFile(
+        b.path("tests/proof_cases/prior.auf"),
+        "web-demo/fixtures/prior.auf",
+    );
+    const install_pnueli_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/pnueli.mm0"),
+        "web-demo/fixtures/pnueli.mm0",
+    );
+    const install_pnueli_proof = b.addInstallFile(
+        b.path("tests/proof_cases/pnueli.auf"),
+        "web-demo/fixtures/pnueli.auf",
+    );
+    const install_barwise_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/barwise.mm0"),
+        "web-demo/fixtures/barwise.mm0",
+    );
+    const install_barwise_proof = b.addInstallFile(
+        b.path("tests/proof_cases/barwise.auf"),
+        "web-demo/fixtures/barwise.auf",
+    );
+    const install_loeb_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/loeb.mm0"),
+        "web-demo/fixtures/loeb.mm0",
+    );
+    const install_loeb_proof = b.addInstallFile(
+        b.path("tests/proof_cases/loeb.auf"),
+        "web-demo/fixtures/loeb.auf",
+    );
     const install_hol_beta_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/church.mm0"),
         "web-demo/fixtures/church.mm0",
@@ -340,6 +372,14 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_prawitz_proof.step);
     web_demo_step.dependOn(&install_barcan_mm0.step);
     web_demo_step.dependOn(&install_barcan_proof.step);
+    web_demo_step.dependOn(&install_prior_mm0.step);
+    web_demo_step.dependOn(&install_prior_proof.step);
+    web_demo_step.dependOn(&install_pnueli_mm0.step);
+    web_demo_step.dependOn(&install_pnueli_proof.step);
+    web_demo_step.dependOn(&install_barwise_mm0.step);
+    web_demo_step.dependOn(&install_barwise_proof.step);
+    web_demo_step.dependOn(&install_loeb_mm0.step);
+    web_demo_step.dependOn(&install_loeb_proof.step);
     web_demo_step.dependOn(&install_hol_beta_mm0.step);
     web_demo_step.dependOn(&install_hol_beta_proof.step);
     web_demo_step.dependOn(&install_calculus_product_rule_mm0.step);

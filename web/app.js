@@ -64,6 +64,26 @@ const examples = {
     mm0: "./fixtures/barcan.mm0",
     proof: "./fixtures/barcan.auf",
   },
+  prior: {
+    label: "prior",
+    mm0: "./fixtures/prior.mm0",
+    proof: "./fixtures/prior.auf",
+  },
+  pnueli: {
+    label: "pnueli",
+    mm0: "./fixtures/pnueli.mm0",
+    proof: "./fixtures/pnueli.auf",
+  },
+  barwise: {
+    label: "barwise",
+    mm0: "./fixtures/barwise.mm0",
+    proof: "./fixtures/barwise.auf",
+  },
+  loeb: {
+    label: "loeb",
+    mm0: "./fixtures/loeb.mm0",
+    proof: "./fixtures/loeb.auf",
+  },
   church: {
     label: "church",
     mm0: "./fixtures/church.mm0",
