@@ -5,6 +5,13 @@ that serve as local variables. They are frontend features: the trusted
 verifier sees only ordinary theorem applications with concrete dummy
 variables already in place.
 
+`@vars` is a sort-level annotation and belongs on sort declarations in
+`.mm0` files. `@fresh`, `@freshen`, and `@alpha` are rule-level
+annotations. They may attach to ordinary MM0 assertions, or to local
+`.auf` lemmas when the `--|` line is placed immediately before the
+`lemma` block. Lemma metadata is available only after that lemma proof
+has checked.
+
 ---
 
 ## `@vars`
@@ -132,8 +139,8 @@ Line `l2` is the ordinary case: `t` is already a theorem binder, so no
 `@vars` allocation happens.
 
 In both lines, the omitted binder `a` of `eq_refl` is inferred from the
-written assertion — `@vars` only makes a name available in proof math; it does 
-not itself force a rule binder to be filled.
+written assertion — `@vars` only makes a name available in proof math;
+it does not itself force a rule binder to be filled.
 
 ### Unicode tokens
 
@@ -184,7 +191,8 @@ pool variable is already available.
 ```
 
 The named binder must be a real bound rule binder in a sort that permits
-local theorem dummies.
+local theorem dummies. The annotated rule may be an MM0 assertion or a
+local `.auf` lemma.
 
 ### Selection rule
 
@@ -244,11 +252,12 @@ applications. Suppose a rule has a bound binder `{x : obj}` and also a
 regular argument `(p : wff)` which does not declare any dependence on
 `x`.
 
-Then the expression substituted for `p` is not allowed to use the variable `x` 
-*at all*. This is the surprising part: MM0 checks dependency against all 
-variable occurrences, even occurrences where a variable like `x` is itself 
-bound by an quantifier. So if the candidate expression for `p` contains `x` 
-anywhere, whether free or attached to a quantifier, the application can fail.
+Then the expression substituted for `p` is not allowed to use the
+variable `x` *at all*. This is the surprising part: MM0 checks
+dependency against all variable occurrences, even occurrences where a
+variable like `x` is itself bound by a quantifier. So if the candidate
+expression for `p` contains `x` anywhere, whether free or attached to a
+quantifier, the application can fail.
 
 For rules like ∀-introduction, that is often stricter than the usual
 textbook presentation, where we only care that the generalized variable
@@ -268,9 +277,9 @@ Zero: The Cartesian Theorem Prover*, and the MM0 specs in Mario's repo:
 and [`mmb.md`, under
 "Proof Checking"](https://github.com/digama0/mm0/blob/master/mm0-c/mmb.md#proof-checking).
 
-If a regular rule argument still depends on a bound binder, the application is 
-rejected unless the frontend can rewrite that regular argument to an 
-alpha-equivalent fresh form first.
+If a regular rule argument still depends on a bound binder, the
+application is rejected unless the frontend can rewrite that regular
+argument to an alpha-equivalent fresh form first.
 
 `@freshen` declares exactly which `(regular argument, bound binder)` pair
 may be repaired that way.
@@ -295,7 +304,8 @@ that dependency.
 
 ### Requirements
 
-The annotation is accepted only when:
+The annotated rule may be an MM0 assertion or a local `.auf` lemma. The
+annotation is accepted only when:
 
 - `target-arg` names a regular rule argument
 - `blocker-binder` names a bound rule binder

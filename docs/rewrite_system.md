@@ -10,11 +10,12 @@ applications that the verifier checks in the usual way.
 
 ### Axiom instantiation
 
-Every proof line in the Aufbau script applies a named rule — an axiom
-or a previously proved theorem — to produce a new assertion. Before
-the rewrite system enters the picture, the compiler needs to determine
-the *concrete arguments* to that rule application: what expressions to
-substitute for each binder declared by the rule.
+Every proof line in the Aufbau script applies a named rule — an axiom,
+a previously proved public theorem, or an earlier local lemma — to
+produce a new assertion. Before the rewrite system enters the picture,
+the compiler first determines the *concrete arguments* to that rule
+application: which expressions to substitute for each binder declared
+by the rule.
 
 Several mechanisms can supply these arguments, and they compose:
 
@@ -52,11 +53,11 @@ conclusion and hypotheses, producing fully concrete expressions. If raw and
 transparent comparison do not already match the user's proof line, the
 instantiated conclusion and hypotheses can be reconciled by normalization.
 
-If the application still fails, the compiler may retry with a fallback rule.
-An axiom or theorem annotated with `@fallback other_rule` says: "if applying
+If the application still fails, the compiler may retry with a fallback
+rule. A rule annotated with `@fallback other_rule` says: "if applying
 this rule to a proof line fails, try the same proof line again using
-`other_rule`." This retry happens after ordinary binding inference and line
-checking have been attempted for the original rule.
+`other_rule`." This retry happens after ordinary binding inference and
+line checking have been attempted for the original rule.
 
 ### How normalization fits in
 
@@ -97,14 +98,20 @@ form. The two normalized forms agree, so the line is accepted.
 
 ## Overview of the annotation vocabulary
 
-| Annotation      | Attaches to         | Purpose |
-|-----------------|---------------------|---------|
-| `@relation`     | `axiom`             | Declares an equivalence relation on a sort |
-| `@rewrite`      | `axiom`             | Marks an axiom as an oriented rewrite rule |
-| `@congr`        | `axiom`             | Marks an axiom as a congruence rule for a term constructor |
-| `@acui`         | `term`              | Marks a binary combiner for structural AU / ACU / AUI / ACUI normalization |
-| `@fallback`     | `axiom` / `theorem` | Retries theorem application through another named rule |
-| `@alpha`        | `axiom`             | Registers an alpha-renaming lemma for freshening |
+| Annotation  | Attaches to       | Purpose |
+|-------------|-------------------|---------|
+| `@relation` | MM0 assertion / lemma | Declares a relation bundle |
+| `@rewrite`  | MM0 assertion / lemma | Registers an oriented rewrite |
+| `@congr`    | MM0 assertion / lemma | Registers a congruence rule |
+| `@acui`     | `term`            | Enables ACUI-style normalization |
+| `@fallback` | MM0 assertion / lemma | Retries through another rule |
+| `@alpha`    | MM0 assertion / lemma | Registers an alpha-renaming rule |
+
+Here "MM0 assertion" means an MM0 `axiom` or `theorem`. A `.auf`
+`lemma` accepts these annotations when the `--|` line is placed
+immediately before the lemma block. Local lemma metadata is registered
+only after the lemma has been proved and added to the rule environment.
+It is available only to later proof lines and later proof blocks.
 
 Transparent def unfolding at theorem-application boundaries is covered
 in `docs/transparent_defs.md`. `@view`, `@recover`, and `@abstract` are
@@ -141,6 +148,9 @@ Example:
 axiom all_alpha {x y: obj} (p: wff x y):
   $ ∀ x p ↔ ∀ y ([x/y] p) $;
 ```
+
+The same annotation may be placed before a local `lemma` block in an
+`.auf` file when the alpha rule is proof-local.
 
 ### Requirements
 
@@ -187,6 +197,11 @@ transitivity, symmetry, and (optionally) a modus-ponens-style transport rule.
 ```
 --| @relation <sort> <rel_term> <refl> <trans> <symm> <transport>
 ```
+
+The annotation line may appear before an MM0 assertion or before a local
+`.auf` lemma. The named relation rules must be in scope when the
+annotation is processed. For local lemmas, that is after the lemma has
+been proved and added as a rule.
 
 | Field | Meaning |
 |-------|---------|

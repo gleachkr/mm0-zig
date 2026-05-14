@@ -121,6 +121,7 @@ pub fn lemmaMarkdown(
     var buf = std.ArrayListUnmanaged(u8){};
     var writer = buf.writer(allocator);
     try writer.writeAll("```auf\n");
+    try writeSignatureAnnotations(&writer, block.annotations);
     try writer.print("lemma {s}", .{block.name});
     if (block.header_tail.len != 0) {
         try writer.print(" {s}", .{block.header_tail});
@@ -133,6 +134,7 @@ pub fn lemmaMarkdown(
             if (hyp_count == 1) "hypothesis" else "hypotheses",
         });
     }
+    try writeMetadataSummary(&writer, block.annotations);
     return try buf.toOwnedSlice(allocator);
 }
 

@@ -700,6 +700,54 @@ test "compiler accepts multiline local lemma headers" {
     try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
 }
 
+test "compiler applies rewrite annotations on local lemmas" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term bi (a b: wff): wff; infixr bi: $<->$ prec 20;
+        \\term sb (a b: wff): wff;
+        \\term pair (a b: wff): wff;
+        \\term P: wff;
+        \\term Q: wff;
+        \\--| @relation wff bi biid bitr bisym mpbi
+        \\axiom biid (a: wff): $ a <-> a $;
+        \\axiom bitr (a b c: wff):
+        \\  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+        \\axiom bisym (a b: wff): $ a <-> b $ > $ b <-> a $;
+        \\axiom mpbi (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+        \\axiom sb_P_base (a: wff): $ sb a P <-> a $;
+        \\--| @congr
+        \\axiom pair_congr (a b c d: wff):
+        \\  $ a <-> b $ > $ c <-> d $ >
+        \\  $ pair a c <-> pair b d $;
+        \\axiom all_elim (b: wff): $ pair (sb P P) b $;
+        \\theorem target: $ pair P Q $;
+    ;
+    const proof_src =
+        \\lemma prelude: $ P <-> P $
+        \\---------------------------
+        \\l1: $ P <-> P $ by biid
+        \\
+        \\--| @rewrite
+        \\lemma sb_local (a: wff): $ sb a P <-> a $
+        \\-------------------------------------------
+        \\l1: $ sb a P <-> a $ by sb_P_base
+        \\
+        \\target
+        \\------
+        \\l1: $ pair P Q $ by all_elim
+    ;
+
+    var compiler = Compiler.initWithProof(
+        std.testing.allocator,
+        mm0_src,
+        proof_src,
+    );
+    const mmb = try compiler.compileMmb(std.testing.allocator);
+    defer std.testing.allocator.free(mmb);
+    try mm0.verifyPair(std.testing.allocator, mm0_src, mmb);
+}
+
 test "compiler rejects lemma names that collide with earlier rules" {
     const mm0_src =
         \\provable sort wff;

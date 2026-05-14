@@ -5,6 +5,11 @@ shape of a proof line, even when ordinary unification is not a good fit.
 They are all frontend features: the trusted verifier sees only ordinary
 theorem applications.
 
+The annotations attach to ordinary MM0 assertions in `.mm0` files. They
+can also attach to proof-local `.auf` lemmas when the `--|` line is
+placed immediately before the `lemma` block. In that case the metadata
+is available only after the lemma proof has checked.
+
 ## Mental model
 
 ### The core problem
@@ -127,7 +132,8 @@ that boundary. See `docs/transparent_defs.md` for the def-specific rules.
 
 The text after `@view` is parsed as a theorem-like signature: it may declare
 binders, has zero or more hypotheses separated by `>`, and ends with a
-conclusion. The whole annotation must fit on one line.
+conclusion. The whole annotation must fit on one line. The next
+declaration may be an MM0 axiom or theorem, or a local `.auf` lemma.
 ```
 --| @view (a b: wff): $ a -> b $ > $ a $ > $ b $
 axiom ax_mp (a b: wff): $ a -> b $ > $ a $ > $ b $;

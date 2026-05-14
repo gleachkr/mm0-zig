@@ -51,6 +51,7 @@ This means:
 - proof blocks may reference only earlier proof lines in the same block
 - proof blocks may reference only axioms, public theorems, and earlier
   lemmas already declared
+- lemma metadata is available only after that lemma block has been checked
 - no forward references are permitted
 
 The frontend therefore streams through the MM0 declarations and proof
@@ -66,9 +67,19 @@ MM0 comment syntax. Standalone comment lines may appear between blocks or
 between proof lines. Trailing comments are also allowed on theorem
 headers, lemma headers, and proof lines.
 
+Annotation comments begin with `--|`. In `.mm0` files these attach to the
+next MM0 statement. In `.auf` files they may attach to the next `lemma`
+block, giving that proof-local rule the same rule-level metadata as an
+ordinary assertion. Annotation comments before public theorem proof
+blocks are not theorem metadata; put theorem metadata on the theorem's
+`.mm0` declaration instead.
+
 Outside math strings, newlines may be mixed with other whitespace inside
 one proof line. A new proof line must still begin on a fresh line with
-its label. Comments are allowed in these continuation positions.
+its label. Ordinary `--` comments are allowed in these continuation
+positions. A standalone `--|` annotation line ends the current proof
+block and is considered trivia for the next block, so it can be placed
+directly after the last line of the previous proof.
 Newlines are also allowed inside `$ ... $` math strings.
 
 Lemma headers may also span physical lines. The header ends at the
@@ -82,6 +93,7 @@ lines, and comments.
 ```text
 aufbau-script ::= (theorem-block | lemma-block | blank | comment)*
 comment ::= '--' (any char except newline)* newline
+annotation-comment ::= '--|' annotation-text newline
 ```
 
 ### Theorem blocks
@@ -111,7 +123,7 @@ l1: $ a -> a $ by id []
 A lemma block declares a proof-only local rule.
 
 ```text
-lemma-block ::= 'lemma' identifier lemma-header-tail
+lemma-block ::= annotation-comment* 'lemma' identifier lemma-header-tail
                 newline underline newline* proof-line*
 
 lemma-header-tail ::= whitespace-or-newline* lemma-binders? ':'
@@ -122,6 +134,26 @@ assertion-tail ::= formula ('>' formula)*
 `lemma-binders?` and `assertion-tail` use the same binder and theorem-tail
 syntax as MM0 assertions. The whitespace between lemma-header tokens may
 include line breaks. Standalone comments may appear before the underline.
+
+A lemma's leading annotation comments are processed after the lemma proof
+checks and after the lemma has been added to the rule environment. The
+supported annotations are the assertion / rule-level annotations used by
+ordinary axioms and theorems:
+
+- `@relation`
+- `@rewrite`
+- `@congr`
+- `@fallback`
+- `@alpha`
+- `@fresh`
+- `@freshen`
+- `@view`
+- `@recover`
+- `@abstract`
+
+Sort-level and term-level annotations such as `@vars`, `@hole`, and
+`@acui` still belong in the `.mm0` file on their corresponding sort or
+term declarations.
 
 Examples:
 
@@ -135,6 +167,11 @@ lemma keep (a: wff):
   $ a $
 --------------------
 l1: $ a $ by ax_keep [#1]
+
+--| @rewrite
+lemma sb_local (a: wff): $ sb a P <-> a $
+-------------------------------------------
+l1: $ sb a P <-> a $ by sb_P_base
 ```
 
 ## Proof lines

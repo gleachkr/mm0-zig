@@ -92,6 +92,7 @@ pub const ProofBlock = struct {
     header_span: Span,
     header_tail: []const u8 = "",
     header_tail_span: Span = .{ .start = 0, .end = 0 },
+    annotations: []const []const u8 = &.{},
     underline_span: ?Span,
     lines: []const ProofLine,
     span: Span,
@@ -120,16 +121,21 @@ pub const Parser = struct {
         self.current_block_name_span = null;
         self.last_error_span = null;
         self.last_header_tail_span = null;
-        self.skipBlankLines();
+        const annotations = try self.skipBlockTriviaAndCaptureAnnotations();
         if (self.pos >= self.src.len) return null;
 
         const block_start = self.pos;
         const ident_start = self.pos;
         const ident = try self.parseIdentifier();
         if (std.mem.eql(u8, ident, "lemma") and self.startsLemmaHeader()) {
-            return try self.parseLemmaBlock(block_start);
+            return try self.parseLemmaBlock(block_start, annotations);
         }
-        return try self.parseTheoremBlock(block_start, ident, ident_start);
+        return try self.parseTheoremBlock(
+            block_start,
+            ident,
+            ident_start,
+            annotations,
+        );
     }
 
     pub fn diagnosticSpan(self: *const Parser) ?Span {
@@ -172,6 +178,7 @@ pub const Parser = struct {
         block_start: usize,
         name: []const u8,
         name_start: usize,
+        annotations: []const []const u8,
     ) !ProofBlock {
         self.setCurrentBlockContext(name, name_start);
         try self.expectLineEnd();
@@ -189,6 +196,7 @@ pub const Parser = struct {
                 .end = name_start + name.len,
             },
             .header_span = header_span,
+            .annotations = annotations,
             .underline_span = underline_span,
             .lines = lines,
             .span = .{
@@ -201,6 +209,7 @@ pub const Parser = struct {
     fn parseLemmaBlock(
         self: *Parser,
         block_start: usize,
+        annotations: []const []const u8,
     ) !ProofBlock {
         self.skipHorizontalSpace();
         const name_start = self.pos;
@@ -228,6 +237,7 @@ pub const Parser = struct {
             .header_span = header_span,
             .header_tail = tail,
             .header_tail_span = tail_span,
+            .annotations = annotations,
             .underline_span = underline_span,
             .lines = lines,
             .span = .{
@@ -238,10 +248,10 @@ pub const Parser = struct {
     }
 
     fn parseProofLines(self: *Parser) ![]const ProofLine {
-        self.skipBlankLines();
+        self.pos = self.skipProofLineTriviaFrom(self.pos);
         var lines = std.ArrayListUnmanaged(ProofLine){};
         while (true) {
-            const line_start = self.skipBlankLinesFrom(self.pos);
+            const line_start = self.skipProofLineTriviaFrom(self.pos);
             self.pos = line_start;
             if (self.pos >= self.src.len) break;
             if (!self.lineStartsProofLine()) break;
@@ -677,6 +687,54 @@ pub const Parser = struct {
         self.pos = self.skipBlankLinesFrom(self.pos);
     }
 
+    fn skipProofLineTriviaFrom(
+        self: *Parser,
+        start: usize,
+    ) usize {
+        var i = start;
+        while (true) {
+            const line_start = i;
+            while (i < self.src.len and isHorizontalSpace(self.src[i])) {
+                i += 1;
+            }
+            if (i >= self.src.len) return i;
+            if (self.lineStartsComment(i)) {
+                if (self.lineStartsAnnotation(i)) return line_start;
+                i = self.nextLineStart(i);
+                continue;
+            }
+            if (self.src[i] != '\n') return line_start;
+            i += 1;
+        }
+    }
+
+    fn skipBlockTriviaAndCaptureAnnotations(
+        self: *Parser,
+    ) ![]const []const u8 {
+        var annotations = std.ArrayListUnmanaged([]const u8){};
+        while (true) {
+            const line_start = self.pos;
+            self.skipHorizontalSpace();
+            if (self.pos >= self.src.len) break;
+            if (self.src[self.pos] == '\n') {
+                self.pos += 1;
+                continue;
+            }
+            if (!self.lineStartsComment(self.pos)) {
+                self.pos = line_start;
+                break;
+            }
+            if (self.lineStartsAnnotation(self.pos)) {
+                const text = self.annotationTextFromLine(self.pos);
+                if (text.len > 0) {
+                    try annotations.append(self.allocator, text);
+                }
+            }
+            self.pos = self.nextLineStart(self.pos);
+        }
+        return try annotations.toOwnedSlice(self.allocator);
+    }
+
     fn skipBlankLinesFrom(self: *Parser, start: usize) usize {
         var i = start;
         while (true) {
@@ -696,6 +754,40 @@ pub const Parser = struct {
             if (self.src[i] != '\n') return line_start;
             i += 1;
         }
+    }
+
+    fn lineStartsComment(self: *const Parser, start: usize) bool {
+        return start + 1 < self.src.len and
+            self.src[start] == '-' and
+            self.src[start + 1] == '-';
+    }
+
+    fn lineStartsAnnotation(self: *const Parser, start: usize) bool {
+        return start + 2 < self.src.len and
+            self.src[start] == '-' and
+            self.src[start + 1] == '-' and
+            self.src[start + 2] == '|';
+    }
+
+    fn annotationTextFromLine(
+        self: *const Parser,
+        start: usize,
+    ) []const u8 {
+        var text_start = start + 3;
+        const line_end = self.lineEnd(start);
+        while (text_start < line_end and
+            isHorizontalSpace(self.src[text_start]))
+        {
+            text_start += 1;
+        }
+        var text_end = line_end;
+        while (text_end > text_start and
+            (isHorizontalSpace(self.src[text_end - 1]) or
+                self.src[text_end - 1] == '\r'))
+        {
+            text_end -= 1;
+        }
+        return self.src[text_start..text_end];
     }
 
     fn lineLooksLikeBlockHeader(

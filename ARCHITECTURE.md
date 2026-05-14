@@ -60,7 +60,7 @@ Most project-specific docs now live under `docs/`:
 - `docs/rewrite_system.md` for rewrite metadata and normalization
 - `docs/transparent_defs.md` for transparent def handling
 - `docs/view_recover.md` for `@view`, `@recover`, and `@abstract`
-- `docs/fresh_binders.md` for `@vars` and `@fresh`
+- `docs/fresh_binders.md` for `@vars`, `@fresh`, and `@freshen`
 - `docs/holes.md` for proof-side holes (`@hole`)
 
 The language / binary specs remain under `specs/`:
@@ -400,6 +400,12 @@ A proof block is either:
 - a theorem block, named to match an MM0 theorem, or
 - a local lemma block, which carries a theorem-like header and becomes a
   local MMB theorem during emission
+
+The proof-script parser also carries leading `--|` annotation comments
+on a block. Public theorem metadata still comes from the `.mm0` theorem
+declaration, but local lemma annotations are attached to the lemma
+`ProofBlock`. After the pipeline checks and registers the local rule, it
+runs the normal assertion-metadata path for those annotations.
 
 A proof line contains:
 

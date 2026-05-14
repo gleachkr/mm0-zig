@@ -855,9 +855,9 @@ fn analyzeTheoremProof(
     env: *GlobalEnv,
     registry: *RewriteRegistry,
     rule_catalog: *const RuleCatalog.Catalog,
-    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
-    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
-    views: *const std.AutoHashMap(u32, ViewDecl),
+    fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
+    views: *std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
     proof: *ProofAnalysisState,
     assertion: AssertionStmt,
@@ -1292,9 +1292,9 @@ fn nextTheoremBlock(
     env: *GlobalEnv,
     registry: *RewriteRegistry,
     rule_catalog: *const RuleCatalog.Catalog,
-    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
-    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
-    views: *const std.AutoHashMap(u32, ViewDecl),
+    fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
+    views: *std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
     proofs: *ProofScriptParser,
     theorem_name: []const u8,
@@ -1373,9 +1373,9 @@ fn processLocalProofBlock(
     env: *GlobalEnv,
     registry: *RewriteRegistry,
     rule_catalog: *const RuleCatalog.Catalog,
-    fresh_bindings: *const std.AutoHashMap(u32, []const FreshDecl),
-    freshen_bindings: *const std.AutoHashMap(u32, []const FreshenDecl),
-    views: *const std.AutoHashMap(u32, ViewDecl),
+    fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
+    views: *std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
     block: TheoremBlock,
     emit: ?*Output,
@@ -1478,6 +1478,28 @@ fn processLocalProofBlock(
         block.name_span,
         .proof,
     );
+    Metadata.processAssertionMetadata(
+        allocator,
+        parser,
+        env,
+        registry,
+        fresh_bindings,
+        freshen_bindings,
+        views,
+        assertion,
+        block.annotations,
+    ) catch |err| {
+        env.removeLastRule(assertion.name);
+        CompilerDiag.setIfMissing(
+            self,
+            CompilerDiag.proofBlockDiagnostic(
+                block.name,
+                block.header_span,
+                err,
+            ),
+        );
+        return err;
+    };
 }
 
 fn addAssertionToEnv(
