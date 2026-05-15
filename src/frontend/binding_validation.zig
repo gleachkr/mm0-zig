@@ -2,7 +2,7 @@ const std = @import("std");
 const ExprId = @import("./expr.zig").ExprId;
 const TheoremContext = @import("./expr.zig").TheoremContext;
 const GlobalEnv = @import("./env.zig").GlobalEnv;
-const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
+const ArgInfo = @import("parse_recovery.zig").ArgInfo;
 
 pub const ExprInfo = struct {
     sort_name: []const u8,

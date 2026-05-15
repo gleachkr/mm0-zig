@@ -1,7 +1,7 @@
 const std = @import("std");
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const Expr = @import("../../trusted/expressions.zig").Expr;
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const Sort = @import("../../trusted/sorts.zig").Sort;
 
 const NameExprMap = std.StringHashMap(*const Expr);
@@ -96,7 +96,7 @@ pub fn processSortVarAnnotations(
         if (sort_modifiers.strict) return error.VarsStrictSort;
         if (sort_modifiers.free) return error.VarsFreeSort;
 
-        const sort_id = parser.sort_names.get(sort_name) orelse {
+        const sort_id = parser.core.sort_names.get(sort_name) orelse {
             return error.UnknownSort;
         };
 
@@ -138,8 +138,8 @@ pub fn ensureMathTextVars(
     while (nextMathToken(
         math,
         &pos,
-        parser.left_delims,
-        parser.right_delims,
+        parser.core.left_delims,
+        parser.core.right_delims,
     )) |token| {
         if (theorem_vars.contains(token)) {
             if (parser.isRegisteredHoleToken(token)) {
@@ -155,7 +155,7 @@ pub fn ensureMathTextVars(
                 return error.HoleTokenNameCollision;
             }
             try theorem.ensureNamedDummyParserVar(
-                parser.allocator,
+                parser.core.allocator,
                 theorem_vars,
                 token,
                 decl.sort_name,
@@ -182,10 +182,10 @@ fn validateTokenHasNoSyntaxCollision(
 }
 
 fn hasSyntaxCollision(parser: *const MM0Parser, token: []const u8) bool {
-    return parser.term_names.contains(token) or
-        parser.formula_markers.contains(token) or
-        parser.prefix_notations.contains(token) or
-        parser.infix_notations.contains(token);
+    return parser.core.term_names.contains(token) or
+        parser.core.formula_markers.contains(token) or
+        parser.core.prefix_notations.contains(token) or
+        parser.core.infix_notations.contains(token);
 }
 
 fn isAsciiWhitespace(ch: u8) bool {

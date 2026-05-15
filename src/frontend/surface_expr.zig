@@ -3,7 +3,7 @@ const std = @import("std");
 const ExprModule = @import("../trusted/expressions.zig");
 const Expr = ExprModule.Expr;
 const SourceSpan = ExprModule.SourceSpan;
-const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
+const MM0Parser = @import("parse_recovery.zig").MM0Parser;
 const ExprId = @import("./expr.zig").ExprId;
 const TheoremContext = @import("./expr.zig").TheoremContext;
 const GlobalEnv = @import("./env.zig").GlobalEnv;
@@ -44,7 +44,7 @@ pub fn sortNameById(env: *const GlobalEnv, sort_id: u7) ?[]const u8 {
 }
 
 pub fn parserSortName(parser: *const MM0Parser, sort: u7) []const u8 {
-    var iter = parser.sort_names.iterator();
+    var iter = parser.core.sort_names.iterator();
     while (iter.next()) |entry| {
         if (entry.value_ptr.* == sort) return entry.key_ptr.*;
     }
@@ -74,7 +74,7 @@ pub fn exprIdSort(
     expr_id: ExprId,
 ) !u7 {
     const name = try exprIdSortName(theorem, env, expr_id);
-    return @intCast(parser.sort_names.get(name) orelse {
+    return @intCast(parser.core.sort_names.get(name) orelse {
         return error.UnknownSort;
     });
 }

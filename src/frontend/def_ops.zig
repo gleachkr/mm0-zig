@@ -10,7 +10,7 @@ const MatchState = @import("./def_ops/match_state.zig");
 const SharedContext = @import("./def_ops/shared_context.zig").SharedContext;
 const SymbolicEngine = @import("./def_ops/symbolic_engine.zig").SymbolicEngine;
 const NormalizedMatch = @import("./def_ops/normalized_match.zig");
-const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
+const ArgInfo = @import("parse_recovery.zig").ArgInfo;
 
 pub const ConversionPlan = Types.ConversionPlan;
 pub const BindingMode = Types.BindingMode;

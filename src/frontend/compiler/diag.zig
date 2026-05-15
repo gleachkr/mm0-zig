@@ -3,10 +3,10 @@ const Span = @import("../proof_script.zig").Span;
 const ProofScriptParser = @import("../proof_script.zig").Parser;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const DiagScratch = @import("../diag_scratch.zig");
-const MathParseError = @import("../../trusted/parse.zig").MathParseError;
-const MathSpan = @import("../../trusted/parse.zig").MathSpan;
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
-const MM0Stmt = @import("../../trusted/parse.zig").MM0Stmt;
+const MathParseError = @import("../parse_recovery.zig").MathParseError;
+const MathSpan = @import("../parse_recovery.zig").MathSpan;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
+const MM0Stmt = @import("../parse_recovery.zig").MM0Stmt;
 
 pub const DiagnosticKind = enum {
     generic,
@@ -278,7 +278,7 @@ pub fn mm0ParserDiagnostic(
         .name = parser.diagnosticName(),
         .span = mathSpanToSpanOpt(parser.diagnosticSpan()),
     };
-    return mathErrorDiagnostic(diag, err, parser.last_math_error);
+    return mathErrorDiagnostic(diag, err, parser.mathError());
 }
 
 pub fn mm0StatementDiagnostic(
@@ -507,7 +507,7 @@ pub fn proofMathParseDiagnostic(
         .span = math_span,
     };
     setPhase(&diag, .parse);
-    const math_err = parser.last_math_error orelse return diag;
+    const math_err = parser.mathError() orelse return diag;
     return proofMathErrorDiagnostic(diag, math_err, math_span);
 }
 

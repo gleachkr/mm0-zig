@@ -1,5 +1,5 @@
 const std = @import("std");
-const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
+const ArgInfo = @import("../parse_recovery.zig").ArgInfo;
 const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
@@ -729,7 +729,7 @@ pub fn validateRewriteBindings(
 }
 
 test "validateRewriteBindings rejects bound alias after regular arg" {
-    const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+    const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
     const allocator = std.testing.allocator;
     const mm0_src =
         \\sort obj;

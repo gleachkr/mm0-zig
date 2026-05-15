@@ -8,9 +8,9 @@ const CompilerVars = @import("./vars.zig");
 const SortVarRegistry = CompilerVars.SortVarRegistry;
 const DefOps = @import("../def_ops.zig");
 const DerivedBinding = @import("../derived_bindings.zig").DerivedBinding;
-const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
-const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const ArgInfo = @import("../parse_recovery.zig").ArgInfo;
+const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 
 pub const FreshDecl = struct {
     target_arg_idx: usize,
@@ -140,7 +140,7 @@ pub fn chooseFreshBinding(
 
     const token = first_unallocated orelse return error.FreshNoAvailableVar;
     try theorem.ensureNamedDummyParserVar(
-        parser.allocator,
+        parser.core.allocator,
         theorem_vars,
         token,
         pool.sort_name,
@@ -365,10 +365,10 @@ fn parseFreshAnnotation(
     }
 
     const sort_name = rule.args[target_arg_idx].sort_name;
-    const sort_id = parser.sort_names.get(sort_name) orelse {
+    const sort_id = parser.core.sort_names.get(sort_name) orelse {
         return error.UnknownSort;
     };
-    const sort = parser.sort_infos.items[sort_id];
+    const sort = parser.core.sort_infos.items[sort_id];
     if (sort.strict) return error.FreshStrictSort;
     if (sort.free) return error.FreshFreeSort;
 

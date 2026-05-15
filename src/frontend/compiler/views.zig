@@ -10,9 +10,9 @@ const DerivedBindings = @import("../derived_bindings.zig");
 const BindingValidation = @import("../binding_validation.zig");
 const Expr = @import("../../trusted/expressions.zig").Expr;
 const SurfaceExpr = @import("../surface_expr.zig");
-const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
-const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const ArgInfo = @import("../parse_recovery.zig").ArgInfo;
+const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const ViewTrace = @import("../view_trace.zig");
 
 const recover_guidance_match_budget: usize = 8;
@@ -1119,20 +1119,20 @@ fn parseViewSignature(
 }
 
 fn cloneParserEnv(dst: *MM0Parser, src: *const MM0Parser) void {
-    dst.sort_names = src.sort_names;
-    dst.term_names = src.term_names;
-    dst.sort_infos = src.sort_infos;
-    dst.terms = src.terms;
-    dst.prefix_notations = src.prefix_notations;
-    dst.infix_notations = src.infix_notations;
-    dst.formula_markers = src.formula_markers;
-    dst.token_precs = src.token_precs;
-    dst.infix_assoc = src.infix_assoc;
-    dst.leading_tokens = src.leading_tokens;
-    dst.infixy_tokens = src.infixy_tokens;
-    dst.coercion_table = src.coercion_table;
-    dst.left_delims = src.left_delims;
-    dst.right_delims = src.right_delims;
+    dst.core.sort_names = src.core.sort_names;
+    dst.core.term_names = src.core.term_names;
+    dst.core.sort_infos = src.core.sort_infos;
+    dst.core.terms = src.core.terms;
+    dst.core.prefix_notations = src.core.prefix_notations;
+    dst.core.infix_notations = src.core.infix_notations;
+    dst.core.formula_markers = src.core.formula_markers;
+    dst.core.token_precs = src.core.token_precs;
+    dst.core.infix_assoc = src.core.infix_assoc;
+    dst.core.leading_tokens = src.core.leading_tokens;
+    dst.core.infixy_tokens = src.core.infixy_tokens;
+    dst.core.coercion_table = src.core.coercion_table;
+    dst.core.left_delims = src.core.left_delims;
+    dst.core.right_delims = src.core.right_delims;
 }
 
 fn parseRecoverAnnotation(

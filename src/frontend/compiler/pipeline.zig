@@ -8,13 +8,14 @@ const Statement = MmbWriter.Statement;
 const Metadata = @import("./metadata.zig");
 const Sort = @import("../../trusted/sorts.zig").Sort;
 const Expr = @import("../../trusted/expressions.zig").Expr;
-const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
-const SortStmt = @import("../../trusted/parse.zig").SortStmt;
-const TermStmt = @import("../../trusted/parse.zig").TermStmt;
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
-const MM0Stmt = @import("../../trusted/parse.zig").MM0Stmt;
-const MathSpan = @import("../../trusted/parse.zig").MathSpan;
-const PublicStmtHeader = @import("../../trusted/parse.zig").PublicStmtHeader;
+const ArgInfo = @import("../parse_recovery.zig").ArgInfo;
+const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
+const SortStmt = @import("../parse_recovery.zig").SortStmt;
+const TermStmt = @import("../parse_recovery.zig").TermStmt;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
+const MM0Stmt = @import("../parse_recovery.zig").MM0Stmt;
+const MathSpan = @import("../parse_recovery.zig").MathSpan;
+const PublicStmtHeader = @import("../parse_recovery.zig").PublicStmtHeader;
 const ProofScript = @import("../proof_script.zig");
 const ProofScriptParser = ProofScript.Parser;
 const TheoremBlock = ProofScript.TheoremBlock;
@@ -533,7 +534,7 @@ fn publicDefBodyParseDiagnostic(
             def.body.span,
     };
     if (err == error.UnknownMathToken) {
-        if (parser.last_math_error) |math_err| {
+        if (parser.mathError()) |math_err| {
             switch (math_err) {
                 .unknown_token => |token| {
                     diag.detail = .{ .unknown_math_token = .{
@@ -804,7 +805,7 @@ fn localDefParseDiagnostic(
             def.name_span,
     };
     if (err == error.UnknownMathToken) {
-        if (parser.last_math_error) |math_err| {
+        if (parser.mathError()) |math_err| {
             switch (math_err) {
                 .unknown_token => |token| {
                     diag.detail = .{ .unknown_math_token = .{
@@ -1282,7 +1283,7 @@ fn analyzeLocalDefItem(
 ) !void {
     const warnings = WarningSnapshot.capture(self);
     const snapshot = try TermRecoverySnapshot.capture(allocator, state);
-    const parser_term_count = state.parser.terms.items.len;
+    const parser_term_count = state.parser.core.terms.items.len;
 
     processLocalDefItem(
         self,
@@ -1312,11 +1313,11 @@ fn discardFailedLocalTerm(
     parser_term_count: usize,
     name: []const u8,
 ) !void {
-    if (parser.terms.items.len <= parser_term_count) return;
-    while (env.terms.items.len + 1 < parser.terms.items.len) {
+    if (parser.core.terms.items.len <= parser_term_count) return;
+    while (env.terms.items.len + 1 < parser.core.terms.items.len) {
         try env.appendInvalidTerm(name);
     }
-    if (env.terms.items.len < parser.terms.items.len) {
+    if (env.terms.items.len < parser.core.terms.items.len) {
         try env.appendInvalidTerm(name);
     } else {
         env.invalidateLastTerm(name);
@@ -2486,7 +2487,7 @@ fn shouldSuppressAssertionMetadataFailure(
 
 fn validateTermDependencies(
     env: *const GlobalEnv,
-    stmt: @import("../../trusted/parse.zig").TermStmt,
+    stmt: TermStmt,
 ) DependencyStatus {
     if (!validateArgSortsAvailable(env, stmt.args)) return .blocked;
     if (!validateArgSortsAvailable(env, stmt.dummy_args)) return .blocked;
@@ -2510,7 +2511,7 @@ fn validateAssertionDependencies(
 
 fn validateArgSortsAvailable(
     env: *const GlobalEnv,
-    args: []const @import("../../trusted/parse.zig").ArgInfo,
+    args: []const ArgInfo,
 ) bool {
     for (args) |arg| {
         if (!env.sort_names.contains(arg.sort_name)) return false;

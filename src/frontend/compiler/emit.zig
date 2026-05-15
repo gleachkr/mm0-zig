@@ -6,9 +6,9 @@ const RuleDecl = @import("../env.zig").RuleDecl;
 const MmbWriter = @import("../mmb_writer.zig");
 const TermRecord = MmbWriter.TermRecord;
 const DefOps = @import("../def_ops.zig");
-const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
-const TermStmt = @import("../../trusted/parse.zig").TermStmt;
+const ArgInfo = @import("../parse_recovery.zig").ArgInfo;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
+const TermStmt = @import("../parse_recovery.zig").TermStmt;
 const ProofCmd = @import("../../trusted/proof.zig").ProofCmd;
 const UnifyCmd = @import("../../trusted/proof.zig").UnifyCmd;
 const Arg = @import("../../trusted/args.zig").Arg;
@@ -460,7 +460,7 @@ pub fn buildArgArray(
     parser: *MM0Parser,
     args: []const ArgInfo,
 ) ![]const Arg {
-    const result = try parser.allocator.alloc(Arg, args.len);
+    const result = try parser.core.allocator.alloc(Arg, args.len);
     for (args, 0..) |arg, idx| {
         result[idx] = .{
             .deps = arg.deps,
@@ -473,7 +473,7 @@ pub fn buildArgArray(
 }
 
 pub fn lookupSortId(parser: *const MM0Parser, sort_name: []const u8) !u7 {
-    const sort_id = parser.sort_names.get(sort_name) orelse return error.UnknownSort;
+    const sort_id = parser.core.sort_names.get(sort_name) orelse return error.UnknownSort;
     return @intCast(sort_id);
 }
 

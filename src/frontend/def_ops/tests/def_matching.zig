@@ -5,7 +5,7 @@ const FrontendEnv = @import("../../env.zig");
 const FrontendExpr = @import("../../expr.zig");
 const BindingMode = @import("../types.zig").BindingMode;
 const Expr = @import("../../../trusted/expressions.zig").Expr;
-const MM0Parser = @import("../../../trusted/parse.zig").MM0Parser;
+const MM0Parser = @import("../../parse_recovery.zig").MM0Parser;
 const allocNoneSeeds = @import("./fixtures.zig").allocNoneSeeds;
 const Testing = DefOps.Testing;
 const MatchSession = Testing.MatchSession;
@@ -178,7 +178,7 @@ test "transparent comparison unfolds bic and allc under coercion" {
         arena.allocator(),
     );
     defer theorem_vars.deinit();
-    var host_assertion: ?@import("../../../trusted/parse.zig").AssertionStmt = null;
+    var host_assertion: ?@import("../../parse_recovery.zig").AssertionStmt = null;
 
     while (try parser.next()) |stmt| {
         try env.addStmt(stmt);

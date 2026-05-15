@@ -4,7 +4,7 @@ const ExprModule = @import("../../trusted/expressions.zig");
 const Expr = ExprModule.Expr;
 const SourceSpan = ExprModule.SourceSpan;
 const SurfaceExpr = @import("../surface_expr.zig");
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
@@ -282,7 +282,7 @@ pub fn matchesConcreteDetailed(
     switch (holey.*) {
         .hole => |hole| {
             const actual_sort_name = try exprIdSortName(theorem, env, concrete);
-            const actual_sort = parser.sort_names.get(actual_sort_name) orelse {
+            const actual_sort = parser.core.sort_names.get(actual_sort_name) orelse {
                 return error.UnknownSort;
             };
             if (hole.sort == actual_sort) return true;
@@ -357,7 +357,7 @@ pub fn materializeSurfaceWithCandidate(
     switch (holey.*) {
         .hole => |hole| {
             const actual_sort_name = try exprIdSortName(theorem, env, candidate);
-            const actual_sort = parser.sort_names.get(actual_sort_name) orelse {
+            const actual_sort = parser.core.sort_names.get(actual_sort_name) orelse {
                 return error.UnknownSort;
             };
             if (hole.sort == actual_sort) return candidate;
@@ -458,7 +458,7 @@ fn matchesConcreteSemanticallyWithContext(
     switch (holey.*) {
         .hole => |hole| {
             const actual_sort_name = try exprIdSortName(theorem, env, concrete);
-            const actual_sort = parser.sort_names.get(actual_sort_name) orelse {
+            const actual_sort = parser.core.sort_names.get(actual_sort_name) orelse {
                 return error.UnknownSort;
             };
             if (hole.sort == actual_sort) return true;
@@ -586,8 +586,8 @@ const TestFixture = struct {
             .vars = vars,
             .sort_vars = SortVarRegistry.init(allocator),
             .rule_id = rule_id.?,
-            .wff_sort = @intCast(parser.sort_names.get("wff").?),
-            .obj_sort = @intCast(parser.sort_names.get("obj").?),
+            .wff_sort = @intCast(parser.core.sort_names.get("wff").?),
+            .obj_sort = @intCast(parser.core.sort_names.get("obj").?),
         };
     }
 

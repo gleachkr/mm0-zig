@@ -1,5 +1,5 @@
 const std = @import("std");
-const parse = @import("../../trusted/parse.zig");
+const parse = @import("../parse_recovery.zig");
 const proof_script = @import("../proof_script.zig");
 const source = @import("source.zig");
 const Types = @import("types.zig");

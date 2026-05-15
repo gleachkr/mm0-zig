@@ -6,10 +6,10 @@ const CompilerHoles = @import("./holes.zig");
 const CompilerViews = @import("./views.zig");
 const CompilerVars = @import("./vars.zig");
 const TermAnnotations = @import("../term_annotations.zig");
-const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
-const SortStmt = @import("../../trusted/parse.zig").SortStmt;
-const TermStmt = @import("../../trusted/parse.zig").TermStmt;
+const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
+const SortStmt = @import("../parse_recovery.zig").SortStmt;
+const TermStmt = @import("../parse_recovery.zig").TermStmt;
 
 pub const ViewDecl = CompilerViews.ViewDecl;
 pub const FreshDecl = CompilerFresh.FreshDecl;

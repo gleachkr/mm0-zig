@@ -8,9 +8,9 @@ const DerivedBinding =
     @import("../frontend/derived_bindings.zig").DerivedBinding;
 const DefOps = @import("../frontend/def_ops.zig");
 const Expr = @import("../trusted/expressions.zig").Expr;
-const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
-const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
-const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
+const ArgInfo = @import("../frontend/parse_recovery.zig").ArgInfo;
+const AssertionStmt = @import("../frontend/parse_recovery.zig").AssertionStmt;
+const MM0Parser = @import("../frontend/parse_recovery.zig").MM0Parser;
 
 const FreshFixture = struct {
     arena: *std.heap.ArenaAllocator,
@@ -37,7 +37,7 @@ const FreshFixture = struct {
             return error.MissingSortVarToken;
         };
         try self.theorem.ensureNamedDummyParserVar(
-            self.parser.allocator,
+            self.parser.core.allocator,
             &self.theorem_vars,
             token,
             decl.sort_name,

@@ -1,10 +1,10 @@
 const std = @import("std");
 const TemplateExpr = @import("./rules.zig").TemplateExpr;
 const Expr = @import("../trusted/expressions.zig").Expr;
-const AssertionStmt = @import("../trusted/parse.zig").AssertionStmt;
-const ArgInfo = @import("../trusted/parse.zig").ArgInfo;
-const MM0Parser = @import("../trusted/parse.zig").MM0Parser;
-const TermStmt = @import("../trusted/parse.zig").TermStmt;
+const AssertionStmt = @import("parse_recovery.zig").AssertionStmt;
+const ArgInfo = @import("parse_recovery.zig").ArgInfo;
+const MM0Parser = @import("parse_recovery.zig").MM0Parser;
+const TermStmt = @import("parse_recovery.zig").TermStmt;
 
 pub const ExprId = u32;
 pub const TheoremVarId = u32;
@@ -332,7 +332,7 @@ pub const TheoremContext = struct {
         parser: *const MM0Parser,
         arg: ArgInfo,
     ) !ExprId {
-        const sort_id = parser.sort_names.get(arg.sort_name) orelse {
+        const sort_id = parser.core.sort_names.get(arg.sort_name) orelse {
             return error.UnknownSort;
         };
         return try self.addDummyVarResolved(arg.sort_name, sort_id);

@@ -1,6 +1,6 @@
 const std = @import("std");
-const AssertionStmt = @import("../../trusted/parse.zig").AssertionStmt;
-const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
+const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
+const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const CompilerDiag = @import("./diag.zig");
 const Span = @import("../proof_script.zig").Span;
 

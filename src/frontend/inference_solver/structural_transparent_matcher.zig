@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const ArgInfo = @import("../../trusted/parse.zig").ArgInfo;
+const ArgInfo = @import("../parse_recovery.zig").ArgInfo;
 const ExprId = @import("../expr.zig").ExprId;
 const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const DefOps = @import("../def_ops.zig");

@@ -7,9 +7,9 @@ const RewriteRegistry = @import("../../rewrite_registry.zig").RewriteRegistry;
 const SemanticStepCandidate =
     @import("../symbolic_engine.zig").SemanticStepCandidate;
 const BindingSeed = @import("../types.zig").BindingSeed;
-const ArgInfo = @import("../../../trusted/parse.zig").ArgInfo;
-const AssertionStmt = @import("../../../trusted/parse.zig").AssertionStmt;
-const MM0Parser = @import("../../../trusted/parse.zig").MM0Parser;
+const ArgInfo = @import("../../parse_recovery.zig").ArgInfo;
+const AssertionStmt = @import("../../parse_recovery.zig").AssertionStmt;
+const MM0Parser = @import("../../parse_recovery.zig").MM0Parser;
 const Expr = @import("../../../trusted/expressions.zig").Expr;
 
 pub const SessionWitnessFixture = struct {

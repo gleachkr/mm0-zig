@@ -1,6 +1,6 @@
 const std = @import("std");
 const GlobalEnv = @import("./env.zig").GlobalEnv;
-const TermStmt = @import("../trusted/parse.zig").TermStmt;
+const TermStmt = @import("parse_recovery.zig").TermStmt;
 
 pub fn processTermAnnotations(
     env: *GlobalEnv,

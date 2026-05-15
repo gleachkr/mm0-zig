@@ -249,15 +249,8 @@ pub const MM0Parser = struct {
     coercion_table: [MAX_SORTS][MAX_SORTS + 1]CoercionRoute,
     left_delims: [256]bool,
     right_delims: [256]bool,
-    // Annotations captured from `--|` comment lines. Accumulated between
-    // statements and moved to `last_annotations` when a statement is yielded.
-    pending_annotations: std.ArrayListUnmanaged([]const u8) = .{},
-    pending_annotation_spans: std.ArrayListUnmanaged(MathSpan) = .{},
-    last_annotations: []const []const u8 = &.{},
-    last_annotation_spans: []const MathSpan = &.{},
     last_math_error: ?MathParseError = null,
     last_math_span: ?MathSpan = null,
-    allow_math_holes: bool = false,
     current_decl_name: ?[]const u8 = null,
     current_decl_name_span: ?MathSpan = null,
     last_error_span: ?MathSpan = null,
@@ -286,32 +279,6 @@ pub const MM0Parser = struct {
             .left_delims = [_]bool{false} ** 256,
             .right_delims = [_]bool{false} ** 256,
         };
-    }
-
-    fn flushAnnotations(self: *MM0Parser) void {
-        if (self.pending_annotations.items.len > 0) {
-            self.last_annotations = self.pending_annotations.toOwnedSlice(
-                self.allocator,
-            ) catch &.{};
-            self.last_annotation_spans =
-                self.pending_annotation_spans.toOwnedSlice(
-                    self.allocator,
-                ) catch &.{};
-        } else {
-            self.last_annotations = &.{};
-            self.last_annotation_spans = &.{};
-        }
-    }
-
-    pub fn discardPendingAnnotations(self: *MM0Parser) void {
-        self.pending_annotations.clearRetainingCapacity();
-        self.pending_annotation_spans.clearRetainingCapacity();
-        self.last_annotations = &.{};
-        self.last_annotation_spans = &.{};
-    }
-
-    pub fn recoverToStatementBoundary(self: *MM0Parser) !void {
-        try self.skipToSemicolon();
     }
 
     pub fn peekNextPublicStmtHeader(self: *const MM0Parser) ?PublicStmtHeader {
@@ -515,49 +482,37 @@ pub const MM0Parser = struct {
         self.last_error_span = self.last_math_span;
     }
 
-    fn clearPendingAnnotations(self: *MM0Parser) void {
-        self.pending_annotations.clearRetainingCapacity();
-        self.pending_annotation_spans.clearRetainingCapacity();
-    }
-
     fn consumeNonPublicLead(
         self: *MM0Parser,
         lead: TopLevelLead,
     ) !bool {
         switch (lead) {
             .local, .input, .output => {
-                self.clearPendingAnnotations();
                 try self.skipToSemicolon();
                 return true;
             },
             .delimiter => {
-                self.clearPendingAnnotations();
                 try self.parseDelimiterStmt();
                 return true;
             },
             .prefix => {
-                self.clearPendingAnnotations();
                 try self.parseSimpleNotationStmt(.prefix);
                 return true;
             },
             .infixl => {
-                self.clearPendingAnnotations();
                 try self.parseSimpleNotationStmt(.infixl);
                 return true;
             },
             .infixr => {
-                self.clearPendingAnnotations();
                 try self.parseSimpleNotationStmt(.infixr);
                 return true;
             },
             .notation => {
-                self.clearPendingAnnotations();
                 if (try self.parseBareNotationMarker()) return true;
                 try self.parseGeneralNotationStmt();
                 return true;
             },
             .coercion => {
-                self.clearPendingAnnotations();
                 try self.parseCoercionStmt();
                 return true;
             },
@@ -572,7 +527,6 @@ pub const MM0Parser = struct {
             if (self.pos >= self.src.len) return;
 
             const word = self.peekIdent() orelse {
-                self.clearPendingAnnotations();
                 self.recordCurrentTokenError();
                 return error.UnexpectedChar;
             };
@@ -593,34 +547,28 @@ pub const MM0Parser = struct {
             if (self.pos >= self.src.len) return null;
 
             const word = self.peekIdent() orelse {
-                self.clearPendingAnnotations();
                 self.recordCurrentTokenError();
                 return error.UnexpectedChar;
             };
             const lead = classifyTopLevelLead(word);
 
             if (lead == .sort) {
-                self.flushAnnotations();
                 const stmt = try self.parseSortStmt();
                 return MM0Stmt{ .sort = stmt };
             }
             if (lead == .term) {
-                self.flushAnnotations();
                 const stmt = try self.parseTermStmt(false);
                 return MM0Stmt{ .term = stmt };
             }
             if (lead == .def) {
-                self.flushAnnotations();
                 const stmt = try self.parseTermStmt(true);
                 return MM0Stmt{ .term = stmt };
             }
             if (lead == .axiom) {
-                self.flushAnnotations();
                 const stmt = try self.parseAssertionStmt(.axiom, false);
                 return MM0Stmt{ .assertion = stmt };
             }
             if (lead == .theorem) {
-                self.flushAnnotations();
                 const stmt = try self.parseAssertionStmt(.theorem, false);
                 return MM0Stmt{ .assertion = stmt };
             }
@@ -632,12 +580,10 @@ pub const MM0Parser = struct {
                     return error.ExpectedKeyword;
                 };
                 if (std.mem.eql(u8, next_word, "def")) {
-                    self.flushAnnotations();
                     const stmt = try self.parseTermStmt(true);
                     return MM0Stmt{ .term = stmt };
                 }
                 if (std.mem.eql(u8, next_word, "theorem")) {
-                    self.flushAnnotations();
                     const stmt = try self.parseAssertionStmt(.theorem, false);
                     return MM0Stmt{ .assertion = stmt };
                 }
@@ -647,7 +593,6 @@ pub const MM0Parser = struct {
             // Non-public declarations: annotations don't attach to these
             if (try self.consumeNonPublicLead(lead)) continue;
 
-            self.clearPendingAnnotations();
             self.recordCurrentTokenError();
             return error.UnexpectedKeyword;
         }
@@ -722,7 +667,7 @@ pub const MM0Parser = struct {
         if (is_def and self.peek() == '=') {
             self.pos += 1;
             const math = try self.readMathString();
-            const expr = try self.parseMathString(math, &ctx.vars);
+            const expr = try self.parseMathString(math, &ctx.vars, false);
             body = try self.coerceExpr(expr, ret_sort);
         }
 
@@ -1236,14 +1181,34 @@ pub const MM0Parser = struct {
         var parser = self.*;
         parser.src = src;
         parser.pos = 0;
-        parser.pending_annotations = .{};
-        parser.pending_annotation_spans = .{};
-        parser.last_annotations = &.{};
-        parser.last_annotation_spans = &.{};
         parser.resetDiagnosticContext();
         const stmt = try parser.parseAssertionStmt(kind, is_local);
         parser.skipWhitespaceAndComments();
         if (parser.pos != parser.src.len) {
+            return error.UnexpectedTrailingInput;
+        }
+        return stmt;
+    }
+
+    pub fn parseTermText(
+        self: *MM0Parser,
+        src: []const u8,
+        is_def: bool,
+    ) anyerror!TermStmt {
+        const saved_src = self.src;
+        const saved_pos = self.pos;
+        defer {
+            self.src = saved_src;
+            self.pos = saved_pos;
+        }
+
+        self.src = src;
+        self.pos = 0;
+        self.resetDiagnosticContext();
+        const stmt = try self.parseTermStmt(is_def);
+        self.skipWhitespaceAndComments();
+        if (self.pos != self.src.len) {
+            self.recordCurrentTokenError();
             return error.UnexpectedTrailingInput;
         }
         return stmt;
@@ -1277,100 +1242,9 @@ pub const MM0Parser = struct {
             self.term_names.put(entry.key, entry.value) catch unreachable;
         };
 
-        const expr = try self.parseMathString(math, &vars);
+        const expr = try self.parseMathString(math, &vars, false);
         const ret_sort = try self.lookupSortId(stmt.ret_sort_name);
         return try self.coerceExpr(expr, ret_sort);
-    }
-
-    pub fn parseLocalDefText(
-        self: *MM0Parser,
-        name: []const u8,
-        name_span: MathSpan,
-        header_tail: []const u8,
-        body: []const u8,
-        body_span: ?MathSpan,
-    ) anyerror!TermStmt {
-        self.resetDiagnosticContext();
-        if (self.term_names.contains(name)) {
-            self.current_decl_name = name;
-            self.current_decl_name_span = name_span;
-            self.last_error_span = name_span;
-            return error.DuplicateTermName;
-        }
-
-        const synthetic_body_start = "def ".len + name.len +
-            " ".len + header_tail.len + " = $".len;
-        const synthetic_body_span = MathSpan{
-            .start = synthetic_body_start,
-            .end = synthetic_body_start + body.len,
-        };
-        const src = try std.fmt.allocPrint(
-            self.allocator,
-            "def {s} {s} = ${s}$;",
-            .{ name, header_tail, body },
-        );
-
-        const saved_src = self.src;
-        const saved_pos = self.pos;
-        const saved_pending_annotations = self.pending_annotations;
-        const saved_pending_annotation_spans = self.pending_annotation_spans;
-        const saved_last_annotations = self.last_annotations;
-        const saved_last_annotation_spans = self.last_annotation_spans;
-        defer {
-            self.src = saved_src;
-            self.pos = saved_pos;
-            self.pending_annotations = saved_pending_annotations;
-            self.pending_annotation_spans = saved_pending_annotation_spans;
-            self.last_annotations = saved_last_annotations;
-            self.last_annotation_spans = saved_last_annotation_spans;
-        }
-
-        self.src = src;
-        self.pos = 0;
-        self.pending_annotations = .{};
-        self.pending_annotation_spans = .{};
-        self.last_annotations = &.{};
-        self.last_annotation_spans = &.{};
-        self.resetDiagnosticContext();
-
-        var stmt = self.parseTermStmt(true) catch |err| {
-            if (body_span) |real_body_span| {
-                self.remapSyntheticBodyDiagnostic(
-                    synthetic_body_span,
-                    real_body_span,
-                );
-            }
-            return err;
-        };
-        self.skipWhitespaceAndComments();
-        if (self.pos != self.src.len) return error.UnexpectedTrailingInput;
-        stmt.name = name;
-        stmt.name_span = name_span;
-        return stmt;
-    }
-
-    fn remapSyntheticBodyDiagnostic(
-        self: *MM0Parser,
-        synthetic_body_span: MathSpan,
-        real_body_span: MathSpan,
-    ) void {
-        if (self.last_math_span) |span| {
-            if (!spanTouches(span, synthetic_body_span)) return;
-            self.last_math_span = remapSyntheticSpan(
-                span,
-                synthetic_body_span,
-                real_body_span,
-            );
-            if (self.last_error_span) |error_span| {
-                self.last_error_span = remapSyntheticSpan(
-                    error_span,
-                    synthetic_body_span,
-                    real_body_span,
-                );
-            } else {
-                self.last_error_span = real_body_span;
-            }
-        }
     }
 
     pub fn parseFormulaText(
@@ -1382,15 +1256,12 @@ pub const MM0Parser = struct {
         return try self.coerceExprToProvable(expr);
     }
 
-    pub fn parseHoleyFormulaText(
+    pub fn parseFormulaTextAllowHoles(
         self: *MM0Parser,
         math: []const u8,
         vars: *const std.StringHashMap(*const Expr),
     ) anyerror!*const Expr {
-        const old_allow = self.allow_math_holes;
-        self.allow_math_holes = true;
-        defer self.allow_math_holes = old_allow;
-        const expr = try self.parseMathText(math, vars);
+        const expr = try self.parseMathString(math, vars, true);
         return try self.coerceExprToProvable(expr);
     }
 
@@ -1425,13 +1296,14 @@ pub const MM0Parser = struct {
         math: []const u8,
         vars: *const std.StringHashMap(*const Expr),
     ) anyerror!*const Expr {
-        return try self.parseMathString(math, vars);
+        return try self.parseMathString(math, vars, false);
     }
 
     fn parseMathString(
         self: *MM0Parser,
         math: []const u8,
         vars: *const std.StringHashMap(*const Expr),
+        allow_holes: bool,
     ) anyerror!*const Expr {
         var cursor = MathCursor{
             .src = math,
@@ -1440,7 +1312,7 @@ pub const MM0Parser = struct {
         };
         self.last_math_error = null;
         self.last_error_span = null;
-        const expr = self.parseExpr(&cursor, vars, 0) catch |err| {
+        const expr = self.parseExpr(&cursor, vars, 0, allow_holes) catch |err| {
             self.recordMathParseFailure();
             return err;
         };
@@ -1458,8 +1330,14 @@ pub const MM0Parser = struct {
         cursor: *MathCursor,
         vars: *const std.StringHashMap(*const Expr),
         min_prec: u16,
+        allow_holes: bool,
     ) anyerror!*const Expr {
-        var lhs = try self.parsePrefixExpr(cursor, vars, min_prec);
+        var lhs = try self.parsePrefixExpr(
+            cursor,
+            vars,
+            min_prec,
+            allow_holes,
+        );
         while (true) {
             const token = cursor.peek() orelse break;
             const infix = self.infix_notations.get(token.text) orelse break;
@@ -1469,7 +1347,7 @@ pub const MM0Parser = struct {
                 infix.prec
             else
                 try std.math.add(u16, infix.prec, 1);
-            const rhs = try self.parseExpr(cursor, vars, rhs_prec);
+            const rhs = try self.parseExpr(cursor, vars, rhs_prec, allow_holes);
             lhs = try self.applyTerm(infix.term_id, &.{ lhs, rhs });
         }
         return lhs;
@@ -1480,6 +1358,7 @@ pub const MM0Parser = struct {
         cursor: *MathCursor,
         vars: *const std.StringHashMap(*const Expr),
         min_prec: u16,
+        allow_holes: bool,
     ) anyerror!*const Expr {
         const token = cursor.next() orelse {
             self.last_math_error = .{
@@ -1488,7 +1367,7 @@ pub const MM0Parser = struct {
             return error.ExpectedMathToken;
         };
         if (std.mem.eql(u8, token.text, "(")) {
-            const expr = try self.parseExpr(cursor, vars, 0);
+            const expr = try self.parseExpr(cursor, vars, 0, allow_holes);
             const close = cursor.next() orelse {
                 self.last_math_error = .{
                     .unexpected_end = cursor.pos,
@@ -1506,12 +1385,12 @@ pub const MM0Parser = struct {
 
         if (vars.get(token.text)) |expr| return expr;
 
-        if (self.allow_math_holes) {
+        if (allow_holes) {
             if (try self.parseHoleToken(token)) |hole| return hole;
         }
 
         if (self.formula_markers.contains(token.text)) {
-            return try self.parsePrefixExpr(cursor, vars, min_prec);
+            return try self.parsePrefixExpr(cursor, vars, min_prec, allow_holes);
         }
 
         if (self.prefix_notations.get(token.text)) |prefix| {
@@ -1521,7 +1400,12 @@ pub const MM0Parser = struct {
                 };
                 return error.PrecMismatch;
             }
-            return try self.parsePrefixNotation(cursor, vars, prefix);
+            return try self.parsePrefixNotation(
+                cursor,
+                vars,
+                prefix,
+                allow_holes,
+            );
         }
 
         if (self.term_names.get(token.text)) |term_id| {
@@ -1535,7 +1419,12 @@ pub const MM0Parser = struct {
             }
             var args: std.ArrayListUnmanaged(*const Expr) = .{};
             for (term.args) |_| {
-                const arg = try self.parseExpr(cursor, vars, MAX_PRECEDENCE);
+                const arg = try self.parseExpr(
+                    cursor,
+                    vars,
+                    MAX_PRECEDENCE,
+                    allow_holes,
+                );
                 try args.append(self.allocator, arg);
             }
             return try self.applyTerm(term_id, args.items);
@@ -1608,6 +1497,7 @@ pub const MM0Parser = struct {
         cursor: *MathCursor,
         vars: *const std.StringHashMap(*const Expr),
         prefix: PrefixEnv,
+        allow_holes: bool,
     ) anyerror!*const Expr {
         const term = self.terms.items[prefix.term_id];
         const args = try self.allocator.alloc(?*const Expr, term.args.len);
@@ -1630,7 +1520,12 @@ pub const MM0Parser = struct {
                     }
                 },
                 .variable => |info| {
-                    const parsed = try self.parseExpr(cursor, vars, info.prec);
+                    const parsed = try self.parseExpr(
+                        cursor,
+                        vars,
+                        info.prec,
+                        allow_holes,
+                    );
                     if (info.arg_index >= args.len or args[info.arg_index] != null) {
                         self.last_error_span = self.last_math_span;
                         return error.InvalidNotationVariables;
@@ -2040,53 +1935,16 @@ pub const MM0Parser = struct {
                 self.src[self.pos + 1] == '-')
             {
                 self.pos += 2;
-                // Check for annotation marker `--|`
-                if (self.pos < self.src.len and self.src[self.pos] == '|') {
+                while (self.pos < self.src.len and
+                    self.src[self.pos] != '\n')
+                {
                     self.pos += 1;
-                    // Skip leading whitespace after `--|`
-                    while (self.pos < self.src.len and
-                        (self.src[self.pos] == ' ' or
-                            self.src[self.pos] == '\t'))
-                    {
-                        self.pos += 1;
-                    }
-                    const start = self.pos;
-                    while (self.pos < self.src.len and
-                        self.src[self.pos] != '\n')
-                    {
-                        self.pos += 1;
-                    }
-                    // Trim trailing whitespace
-                    var end = self.pos;
-                    while (end > start and
-                        (self.src[end - 1] == ' ' or
-                            self.src[end - 1] == '\t' or
-                            self.src[end - 1] == '\r'))
-                    {
-                        end -= 1;
-                    }
-                    if (end > start) {
-                        self.pending_annotations.append(
-                            self.allocator,
-                            self.src[start..end],
-                        ) catch {};
-                        self.pending_annotation_spans.append(
-                            self.allocator,
-                            .{ .start = start, .end = end },
-                        ) catch {};
-                    }
-                } else {
-                    while (self.pos < self.src.len and
-                        self.src[self.pos] != '\n')
-                    {
-                        self.pos += 1;
-                    }
                 }
             } else break;
         }
     }
 
-    fn skipToSemicolon(self: *MM0Parser) !void {
+    pub fn skipToSemicolon(self: *MM0Parser) !void {
         while (self.pos < self.src.len) {
             const ch = self.src[self.pos];
             self.pos += 1;
@@ -2103,6 +1961,11 @@ pub const MM0Parser = struct {
                     return error.UnterminatedMathStr;
                 }
                 self.pos += 1;
+            } else if (ch == '"') {
+                while (self.pos < self.src.len and self.src[self.pos] != '"') {
+                    self.pos += 1;
+                }
+                if (self.pos < self.src.len) self.pos += 1;
             } else if (ch == '-' and
                 self.pos < self.src.len and
                 self.src[self.pos] == '-')
@@ -2112,11 +1975,13 @@ pub const MM0Parser = struct {
                     self.pos += 1;
                 }
             } else if (ch == ';') {
-                self.skipWhitespaceAndComments();
                 return;
             }
         }
-        self.last_error_span = self.currentTokenSpan();
+        self.last_error_span = self.currentTokenSpan() orelse .{
+            .start = self.src.len,
+            .end = self.src.len,
+        };
         return error.UnexpectedEOF;
     }
 };
@@ -2157,31 +2022,6 @@ fn isPublicLead(lead: TopLevelLead) bool {
         .pub_kw,
         => true,
         else => false,
-    };
-}
-
-fn spanTouches(span: MathSpan, target: MathSpan) bool {
-    return span.start <= target.end and span.end >= target.start;
-}
-
-fn remapSyntheticSpan(
-    span: MathSpan,
-    synthetic_body_span: MathSpan,
-    real_body_span: MathSpan,
-) MathSpan {
-    const start = std.math.clamp(
-        span.start,
-        synthetic_body_span.start,
-        synthetic_body_span.end,
-    );
-    const end = std.math.clamp(
-        span.end,
-        synthetic_body_span.start,
-        synthetic_body_span.end,
-    );
-    return .{
-        .start = real_body_span.start + start - synthetic_body_span.start,
-        .end = real_body_span.start + end - synthetic_body_span.start,
     };
 }
 
