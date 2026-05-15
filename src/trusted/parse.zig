@@ -14,6 +14,20 @@ pub const MM0Stmt = union(enum) {
     assertion: AssertionStmt,
 };
 
+pub const PublicStmtHeaderKind = enum {
+    sort,
+    term,
+    def,
+    axiom,
+    theorem,
+};
+
+pub const PublicStmtHeader = struct {
+    kind: PublicStmtHeaderKind,
+    name: ?[]const u8,
+    name_span: MathSpan,
+};
+
 pub const SortStmt = struct {
     name: []const u8,
     name_span: MathSpan = .{ .start = 0, .end = 0 },
@@ -32,6 +46,7 @@ pub const TermStmt = struct {
     arg_names: []const ?[]const u8,
     arg_exprs: []const *const Expr,
     dummy_args: []const ArgInfo = &.{},
+    dummy_names: []const ?[]const u8 = &.{},
     dummy_exprs: []const *const Expr = &.{},
     ret_sort_name: []const u8,
     is_def: bool,
@@ -112,6 +127,25 @@ const IdentInfo = struct {
     span: MathSpan,
 };
 
+const TopLevelLead = enum {
+    sort,
+    term,
+    def,
+    axiom,
+    theorem,
+    pub_kw,
+    local,
+    input,
+    output,
+    delimiter,
+    prefix,
+    infixl,
+    infixr,
+    notation,
+    coercion,
+    unknown,
+};
+
 pub const MathParseError = union(enum) {
     unknown_token: MathTokenInfo,
     unexpected_token: MathTokenInfo,
@@ -125,6 +159,7 @@ const BinderContext = struct {
     arg_exprs: std.ArrayListUnmanaged(*const Expr) = .{},
     bound_names: std.ArrayListUnmanaged([]const u8) = .{},
     dummy_infos: std.ArrayListUnmanaged(ArgInfo) = .{},
+    dummy_names: std.ArrayListUnmanaged(?[]const u8) = .{},
     dummy_exprs: std.ArrayListUnmanaged(*const Expr) = .{},
 
     fn init(allocator: std.mem.Allocator) BinderContext {
@@ -279,6 +314,83 @@ pub const MM0Parser = struct {
         try self.skipToSemicolon();
     }
 
+    pub fn peekNextPublicStmtHeader(self: *const MM0Parser) ?PublicStmtHeader {
+        var pos = self.pos;
+        while (true) {
+            scanWhitespaceAndComments(self.src, &pos);
+            const word_info = scanIdentInfo(self.src, pos) orelse return null;
+            const lead = classifyTopLevelLead(word_info.text);
+
+            switch (lead) {
+                .sort => return scanSortHeader(self.src, pos),
+                .term => {
+                    return scanNamedHeader(
+                        self.src,
+                        word_info.span.end,
+                        .term,
+                    );
+                },
+                .def => {
+                    return scanNamedHeader(
+                        self.src,
+                        word_info.span.end,
+                        .def,
+                    );
+                },
+                .axiom => {
+                    return scanNamedHeader(
+                        self.src,
+                        word_info.span.end,
+                        .axiom,
+                    );
+                },
+                .theorem => {
+                    return scanNamedHeader(
+                        self.src,
+                        word_info.span.end,
+                        .theorem,
+                    );
+                },
+                .pub_kw => {
+                    pos = word_info.span.end;
+                    scanWhitespaceAndComments(self.src, &pos);
+                    const pub_kw = scanIdentInfo(self.src, pos) orelse {
+                        return null;
+                    };
+                    const pub_lead = classifyTopLevelLead(pub_kw.text);
+                    return switch (pub_lead) {
+                        .def => scanNamedHeader(
+                            self.src,
+                            pub_kw.span.end,
+                            .def,
+                        ),
+                        .theorem => scanNamedHeader(
+                            self.src,
+                            pub_kw.span.end,
+                            .theorem,
+                        ),
+                        else => null,
+                    };
+                },
+                .local,
+                .input,
+                .output,
+                .delimiter,
+                .prefix,
+                .infixl,
+                .infixr,
+                .notation,
+                .coercion,
+                => {
+                    pos = word_info.span.end;
+                    scanToStatementEnd(self.src, &pos);
+                    continue;
+                },
+                .unknown => return null,
+            }
+        }
+    }
+
     pub fn diagnosticName(self: *const MM0Parser) ?[]const u8 {
         return self.current_decl_name;
     }
@@ -403,6 +515,75 @@ pub const MM0Parser = struct {
         self.last_error_span = self.last_math_span;
     }
 
+    fn clearPendingAnnotations(self: *MM0Parser) void {
+        self.pending_annotations.clearRetainingCapacity();
+        self.pending_annotation_spans.clearRetainingCapacity();
+    }
+
+    fn consumeNonPublicLead(
+        self: *MM0Parser,
+        lead: TopLevelLead,
+    ) !bool {
+        switch (lead) {
+            .local, .input, .output => {
+                self.clearPendingAnnotations();
+                try self.skipToSemicolon();
+                return true;
+            },
+            .delimiter => {
+                self.clearPendingAnnotations();
+                try self.parseDelimiterStmt();
+                return true;
+            },
+            .prefix => {
+                self.clearPendingAnnotations();
+                try self.parseSimpleNotationStmt(.prefix);
+                return true;
+            },
+            .infixl => {
+                self.clearPendingAnnotations();
+                try self.parseSimpleNotationStmt(.infixl);
+                return true;
+            },
+            .infixr => {
+                self.clearPendingAnnotations();
+                try self.parseSimpleNotationStmt(.infixr);
+                return true;
+            },
+            .notation => {
+                self.clearPendingAnnotations();
+                if (try self.parseBareNotationMarker()) return true;
+                try self.parseGeneralNotationStmt();
+                return true;
+            },
+            .coercion => {
+                self.clearPendingAnnotations();
+                try self.parseCoercionStmt();
+                return true;
+            },
+            else => return false,
+        }
+    }
+
+    pub fn prepareNextPublicStatement(self: *MM0Parser) !void {
+        while (true) {
+            self.resetDiagnosticContext();
+            self.skipWhitespaceAndComments();
+            if (self.pos >= self.src.len) return;
+
+            const word = self.peekIdent() orelse {
+                self.clearPendingAnnotations();
+                self.recordCurrentTokenError();
+                return error.UnexpectedChar;
+            };
+            const lead = classifyTopLevelLead(word);
+
+            if (isPublicLead(lead)) return;
+            if (try self.consumeNonPublicLead(lead)) continue;
+            return;
+        }
+    }
+
     // Returns next public statement, while processing notation and coercion
     // declarations so later math strings are parsed with the correct grammar.
     pub fn next(self: *MM0Parser) !?MM0Stmt {
@@ -412,43 +593,38 @@ pub const MM0Parser = struct {
             if (self.pos >= self.src.len) return null;
 
             const word = self.peekIdent() orelse {
-                self.pending_annotations.clearRetainingCapacity();
-                self.pending_annotation_spans.clearRetainingCapacity();
+                self.clearPendingAnnotations();
                 self.recordCurrentTokenError();
                 return error.UnexpectedChar;
             };
+            const lead = classifyTopLevelLead(word);
 
-            if (std.mem.eql(u8, word, "pure") or
-                std.mem.eql(u8, word, "strict") or
-                std.mem.eql(u8, word, "provable") or
-                std.mem.eql(u8, word, "free") or
-                std.mem.eql(u8, word, "sort"))
-            {
+            if (lead == .sort) {
                 self.flushAnnotations();
                 const stmt = try self.parseSortStmt();
                 return MM0Stmt{ .sort = stmt };
             }
-            if (std.mem.eql(u8, word, "term")) {
+            if (lead == .term) {
                 self.flushAnnotations();
                 const stmt = try self.parseTermStmt(false);
                 return MM0Stmt{ .term = stmt };
             }
-            if (std.mem.eql(u8, word, "def")) {
+            if (lead == .def) {
                 self.flushAnnotations();
                 const stmt = try self.parseTermStmt(true);
                 return MM0Stmt{ .term = stmt };
             }
-            if (std.mem.eql(u8, word, "axiom")) {
+            if (lead == .axiom) {
                 self.flushAnnotations();
                 const stmt = try self.parseAssertionStmt(.axiom, false);
                 return MM0Stmt{ .assertion = stmt };
             }
-            if (std.mem.eql(u8, word, "theorem")) {
+            if (lead == .theorem) {
                 self.flushAnnotations();
                 const stmt = try self.parseAssertionStmt(.theorem, false);
                 return MM0Stmt{ .assertion = stmt };
             }
-            if (std.mem.eql(u8, word, "pub")) {
+            if (lead == .pub_kw) {
                 _ = self.consumeIdent();
                 self.skipWhitespaceAndComments();
                 const next_word = self.peekIdent() orelse {
@@ -469,55 +645,9 @@ pub const MM0Parser = struct {
                 return error.UnexpectedKeyword;
             }
             // Non-public declarations: annotations don't attach to these
-            if (std.mem.eql(u8, word, "local") or
-                std.mem.eql(u8, word, "input") or
-                std.mem.eql(u8, word, "output"))
-            {
-                self.pending_annotations.clearRetainingCapacity();
-                self.pending_annotation_spans.clearRetainingCapacity();
-                try self.skipToSemicolon();
-                continue;
-            }
-            if (std.mem.eql(u8, word, "delimiter")) {
-                self.pending_annotations.clearRetainingCapacity();
-                self.pending_annotation_spans.clearRetainingCapacity();
-                try self.parseDelimiterStmt();
-                continue;
-            }
-            if (std.mem.eql(u8, word, "prefix")) {
-                self.pending_annotations.clearRetainingCapacity();
-                self.pending_annotation_spans.clearRetainingCapacity();
-                try self.parseSimpleNotationStmt(.prefix);
-                continue;
-            }
-            if (std.mem.eql(u8, word, "infixl")) {
-                self.pending_annotations.clearRetainingCapacity();
-                self.pending_annotation_spans.clearRetainingCapacity();
-                try self.parseSimpleNotationStmt(.infixl);
-                continue;
-            }
-            if (std.mem.eql(u8, word, "infixr")) {
-                self.pending_annotations.clearRetainingCapacity();
-                self.pending_annotation_spans.clearRetainingCapacity();
-                try self.parseSimpleNotationStmt(.infixr);
-                continue;
-            }
-            if (std.mem.eql(u8, word, "notation")) {
-                self.pending_annotations.clearRetainingCapacity();
-                self.pending_annotation_spans.clearRetainingCapacity();
-                if (try self.parseBareNotationMarker()) continue;
-                try self.parseGeneralNotationStmt();
-                continue;
-            }
-            if (std.mem.eql(u8, word, "coercion")) {
-                self.pending_annotations.clearRetainingCapacity();
-                self.pending_annotation_spans.clearRetainingCapacity();
-                try self.parseCoercionStmt();
-                continue;
-            }
+            if (try self.consumeNonPublicLead(lead)) continue;
 
-            self.pending_annotations.clearRetainingCapacity();
-            self.pending_annotation_spans.clearRetainingCapacity();
+            self.clearPendingAnnotations();
             self.recordCurrentTokenError();
             return error.UnexpectedKeyword;
         }
@@ -617,6 +747,7 @@ pub const MM0Parser = struct {
             .arg_names = arg_names,
             .arg_exprs = arg_exprs,
             .dummy_args = try ctx.dummy_infos.toOwnedSlice(self.allocator),
+            .dummy_names = try ctx.dummy_names.toOwnedSlice(self.allocator),
             .dummy_exprs = try ctx.dummy_exprs.toOwnedSlice(self.allocator),
             .ret_sort_name = ret_sort_name,
             .is_def = is_def,
@@ -777,6 +908,11 @@ pub const MM0Parser = struct {
                     try ctx.arg_exprs.append(self.allocator, expr);
                 } else {
                     try ctx.dummy_infos.append(self.allocator, actual_arg);
+                    const dummy_name = if (std.mem.eql(u8, name, "_"))
+                        null
+                    else
+                        name;
+                    try ctx.dummy_names.append(self.allocator, dummy_name);
                     try ctx.dummy_exprs.append(self.allocator, expr);
                 }
             }
@@ -1111,6 +1247,130 @@ pub const MM0Parser = struct {
             return error.UnexpectedTrailingInput;
         }
         return stmt;
+    }
+
+    pub fn parsePublicDefBodyText(
+        self: *MM0Parser,
+        stmt: TermStmt,
+        math: []const u8,
+        math_span: ?MathSpan,
+    ) anyerror!*const Expr {
+        var vars = std.StringHashMap(*const Expr).init(self.allocator);
+        defer vars.deinit();
+        for (stmt.arg_names, stmt.arg_exprs) |maybe_name, expr| {
+            if (maybe_name) |name| {
+                try vars.put(name, expr);
+            }
+        }
+        for (stmt.dummy_names, stmt.dummy_exprs) |maybe_name, expr| {
+            if (maybe_name) |name| {
+                try vars.put(name, expr);
+            }
+        }
+
+        const old_math_span = self.last_math_span;
+        self.last_math_span = math_span;
+        defer self.last_math_span = old_math_span;
+
+        const hidden_self = self.term_names.fetchRemove(stmt.name);
+        defer if (hidden_self) |entry| {
+            self.term_names.put(entry.key, entry.value) catch unreachable;
+        };
+
+        const expr = try self.parseMathString(math, &vars);
+        const ret_sort = try self.lookupSortId(stmt.ret_sort_name);
+        return try self.coerceExpr(expr, ret_sort);
+    }
+
+    pub fn parseLocalDefText(
+        self: *MM0Parser,
+        name: []const u8,
+        name_span: MathSpan,
+        header_tail: []const u8,
+        body: []const u8,
+        body_span: ?MathSpan,
+    ) anyerror!TermStmt {
+        self.resetDiagnosticContext();
+        if (self.term_names.contains(name)) {
+            self.current_decl_name = name;
+            self.current_decl_name_span = name_span;
+            self.last_error_span = name_span;
+            return error.DuplicateTermName;
+        }
+
+        const synthetic_body_start = "def ".len + name.len +
+            " ".len + header_tail.len + " = $".len;
+        const synthetic_body_span = MathSpan{
+            .start = synthetic_body_start,
+            .end = synthetic_body_start + body.len,
+        };
+        const src = try std.fmt.allocPrint(
+            self.allocator,
+            "def {s} {s} = ${s}$;",
+            .{ name, header_tail, body },
+        );
+
+        const saved_src = self.src;
+        const saved_pos = self.pos;
+        const saved_pending_annotations = self.pending_annotations;
+        const saved_pending_annotation_spans = self.pending_annotation_spans;
+        const saved_last_annotations = self.last_annotations;
+        const saved_last_annotation_spans = self.last_annotation_spans;
+        defer {
+            self.src = saved_src;
+            self.pos = saved_pos;
+            self.pending_annotations = saved_pending_annotations;
+            self.pending_annotation_spans = saved_pending_annotation_spans;
+            self.last_annotations = saved_last_annotations;
+            self.last_annotation_spans = saved_last_annotation_spans;
+        }
+
+        self.src = src;
+        self.pos = 0;
+        self.pending_annotations = .{};
+        self.pending_annotation_spans = .{};
+        self.last_annotations = &.{};
+        self.last_annotation_spans = &.{};
+        self.resetDiagnosticContext();
+
+        var stmt = self.parseTermStmt(true) catch |err| {
+            if (body_span) |real_body_span| {
+                self.remapSyntheticBodyDiagnostic(
+                    synthetic_body_span,
+                    real_body_span,
+                );
+            }
+            return err;
+        };
+        self.skipWhitespaceAndComments();
+        if (self.pos != self.src.len) return error.UnexpectedTrailingInput;
+        stmt.name = name;
+        stmt.name_span = name_span;
+        return stmt;
+    }
+
+    fn remapSyntheticBodyDiagnostic(
+        self: *MM0Parser,
+        synthetic_body_span: MathSpan,
+        real_body_span: MathSpan,
+    ) void {
+        if (self.last_math_span) |span| {
+            if (!spanTouches(span, synthetic_body_span)) return;
+            self.last_math_span = remapSyntheticSpan(
+                span,
+                synthetic_body_span,
+                real_body_span,
+            );
+            if (self.last_error_span) |error_span| {
+                self.last_error_span = remapSyntheticSpan(
+                    error_span,
+                    synthetic_body_span,
+                    real_body_span,
+                );
+            } else {
+                self.last_error_span = real_body_span;
+            }
+        }
     }
 
     pub fn parseFormulaText(
@@ -1860,6 +2120,160 @@ pub const MM0Parser = struct {
         return error.UnexpectedEOF;
     }
 };
+
+fn classifyTopLevelLead(word: []const u8) TopLevelLead {
+    if (std.mem.eql(u8, word, "pure") or
+        std.mem.eql(u8, word, "strict") or
+        std.mem.eql(u8, word, "provable") or
+        std.mem.eql(u8, word, "free") or
+        std.mem.eql(u8, word, "sort"))
+    {
+        return .sort;
+    }
+    if (std.mem.eql(u8, word, "term")) return .term;
+    if (std.mem.eql(u8, word, "def")) return .def;
+    if (std.mem.eql(u8, word, "axiom")) return .axiom;
+    if (std.mem.eql(u8, word, "theorem")) return .theorem;
+    if (std.mem.eql(u8, word, "pub")) return .pub_kw;
+    if (std.mem.eql(u8, word, "local")) return .local;
+    if (std.mem.eql(u8, word, "input")) return .input;
+    if (std.mem.eql(u8, word, "output")) return .output;
+    if (std.mem.eql(u8, word, "delimiter")) return .delimiter;
+    if (std.mem.eql(u8, word, "prefix")) return .prefix;
+    if (std.mem.eql(u8, word, "infixl")) return .infixl;
+    if (std.mem.eql(u8, word, "infixr")) return .infixr;
+    if (std.mem.eql(u8, word, "notation")) return .notation;
+    if (std.mem.eql(u8, word, "coercion")) return .coercion;
+    return .unknown;
+}
+
+fn isPublicLead(lead: TopLevelLead) bool {
+    return switch (lead) {
+        .sort,
+        .term,
+        .def,
+        .axiom,
+        .theorem,
+        .pub_kw,
+        => true,
+        else => false,
+    };
+}
+
+fn spanTouches(span: MathSpan, target: MathSpan) bool {
+    return span.start <= target.end and span.end >= target.start;
+}
+
+fn remapSyntheticSpan(
+    span: MathSpan,
+    synthetic_body_span: MathSpan,
+    real_body_span: MathSpan,
+) MathSpan {
+    const start = std.math.clamp(
+        span.start,
+        synthetic_body_span.start,
+        synthetic_body_span.end,
+    );
+    const end = std.math.clamp(
+        span.end,
+        synthetic_body_span.start,
+        synthetic_body_span.end,
+    );
+    return .{
+        .start = real_body_span.start + start - synthetic_body_span.start,
+        .end = real_body_span.start + end - synthetic_body_span.start,
+    };
+}
+
+fn scanWhitespaceAndComments(src: []const u8, pos: *usize) void {
+    while (pos.* < src.len) {
+        const ch = src[pos.*];
+        if (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r') {
+            pos.* += 1;
+        } else if (ch == '-' and pos.* + 1 < src.len and src[pos.* + 1] == '-') {
+            pos.* += 2;
+            while (pos.* < src.len and src[pos.*] != '\n') {
+                pos.* += 1;
+            }
+        } else break;
+    }
+}
+
+fn scanIdentInfo(src: []const u8, pos: usize) ?IdentInfo {
+    var end = pos;
+    if (end >= src.len or !isIdentStart(src[end])) return null;
+    end += 1;
+    while (end < src.len and isIdentChar(src[end])) end += 1;
+    return .{
+        .text = src[pos..end],
+        .span = .{ .start = pos, .end = end },
+    };
+}
+
+fn scanNamedHeader(
+    src: []const u8,
+    after_keyword: usize,
+    kind: PublicStmtHeaderKind,
+) ?PublicStmtHeader {
+    var pos = after_keyword;
+    scanWhitespaceAndComments(src, &pos);
+    const name_info = scanIdentInfo(src, pos) orelse return null;
+    return .{
+        .kind = kind,
+        .name = name_info.text,
+        .name_span = name_info.span,
+    };
+}
+
+fn scanSortHeader(src: []const u8, start: usize) ?PublicStmtHeader {
+    var pos = start;
+    while (true) {
+        scanWhitespaceAndComments(src, &pos);
+        const word_info = scanIdentInfo(src, pos) orelse return null;
+        pos = word_info.span.end;
+        if (std.mem.eql(u8, word_info.text, "sort")) {
+            scanWhitespaceAndComments(src, &pos);
+            const name_info = scanIdentInfo(src, pos) orelse return null;
+            return .{
+                .kind = .sort,
+                .name = name_info.text,
+                .name_span = name_info.span,
+            };
+        }
+        if (!std.mem.eql(u8, word_info.text, "pure") and
+            !std.mem.eql(u8, word_info.text, "strict") and
+            !std.mem.eql(u8, word_info.text, "provable") and
+            !std.mem.eql(u8, word_info.text, "free"))
+        {
+            return null;
+        }
+    }
+}
+
+fn scanToStatementEnd(src: []const u8, pos: *usize) void {
+    while (pos.* < src.len) {
+        const ch = src[pos.*];
+        pos.* += 1;
+        if (ch == '$') {
+            while (pos.* < src.len and src[pos.*] != '$') {
+                pos.* += 1;
+            }
+            if (pos.* < src.len) pos.* += 1;
+        } else if (ch == '"') {
+            while (pos.* < src.len and src[pos.*] != '"') {
+                pos.* += 1;
+            }
+            if (pos.* < src.len) pos.* += 1;
+        } else if (ch == '-' and pos.* < src.len and src[pos.*] == '-') {
+            pos.* += 1;
+            while (pos.* < src.len and src[pos.*] != '\n') {
+                pos.* += 1;
+            }
+        } else if (ch == ';') {
+            return;
+        }
+    }
+}
 
 fn isIdentStart(ch: u8) bool {
     return std.ascii.isAlphabetic(ch) or ch == '_';

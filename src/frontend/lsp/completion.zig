@@ -1127,8 +1127,11 @@ fn globalDeclarationAvailable(
     available_before: ?usize,
 ) bool {
     return switch (document) {
-        .mm0 => decl.name_range.start <= use_start,
-        .proof => if (available_before) |before|
+        .mm0 => decl.name_range.document == .mm0 and
+            decl.name_range.start <= use_start,
+        .proof => if (decl.name_range.document == .proof)
+            decl.name_range.start <= use_start
+        else if (available_before) |before|
             decl.name_range.start < before
         else
             true,

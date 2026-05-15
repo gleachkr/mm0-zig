@@ -56,6 +56,7 @@ pub const Expr = @import("./trusted/expressions.zig").Expr;
 pub const Header = @import("./trusted/headers.zig").Header;
 pub const MAGIC = @import("./trusted/headers.zig").MAGIC;
 pub const Heap = @import("./trusted/heap.zig").Heap;
+pub const MathSpan = @import("./trusted/parse.zig").MathSpan;
 pub const MM0Parser = @import("./trusted/parse.zig").MM0Parser;
 pub const Mmb = @import("./trusted/mmb.zig").Mmb;
 pub const Index = @import("./trusted/mmb.zig").Index;

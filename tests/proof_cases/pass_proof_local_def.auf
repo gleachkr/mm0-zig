@@ -1,0 +1,5 @@
+def local_top: wff = $ top $
+
+use_local
+---------
+p: $ local_top $ by ax_top []

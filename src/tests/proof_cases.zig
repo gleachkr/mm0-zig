@@ -88,6 +88,8 @@ const proof_cases = [_]ProofCase{
     .{ .stem = "pass_gen", .outcome = .pass },
     .{ .stem = "pass_dup", .outcome = .pass },
     .{ .stem = "pass_def", .outcome = .pass },
+    .{ .stem = "pass_public_bodyless_def", .outcome = .pass },
+    .{ .stem = "pass_proof_local_def", .outcome = .pass },
     .{ .stem = "pass_def_dummy", .outcome = .pass },
     .{ .stem = "pass_def_transport", .outcome = .pass },
     .{ .stem = "pass_def_unfold_line", .outcome = .pass },

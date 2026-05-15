@@ -120,39 +120,51 @@ pub const Builder = struct {
 
     pub fn indexProof(self: *Builder, text: []const u8) !void {
         var parser = proof_script.Parser.init(self.allocator, text);
-        var blocks = std.ArrayListUnmanaged(proof_script.ProofBlock){};
+        var items = std.ArrayListUnmanaged(proof_script.TopLevelItem){};
         while (true) {
-            const next = parser.nextBlock() catch |err| {
+            const next = parser.nextItem() catch |err| {
                 if (isFatalIndexError(err)) return err;
-                if (!parser.recoverToNextBlockBoundary()) break;
+                if (!parser.recoverToNextItemBoundary()) break;
                 continue;
             };
-            const block = next orelse break;
-            try blocks.append(self.allocator, block);
+            const item = next orelse break;
+            try items.append(self.allocator, item);
         }
 
-        for (blocks.items, 0..) |block, i| {
-            try self.addProofBlock(
-                block,
-                self.globalAvailabilityForProofBlock(blocks.items, i),
-            );
+        for (items.items, 0..) |item, i| {
+            switch (item) {
+                .block => |block| try self.addProofBlock(
+                    block,
+                    self.globalAvailabilityForProofItem(items.items, i),
+                ),
+                .def => |def| try self.addProofDefItem(text, def),
+            }
         }
     }
 
-    fn globalAvailabilityForProofBlock(
+    fn globalAvailabilityForProofItem(
         self: *const Builder,
-        blocks: []const proof_script.ProofBlock,
+        items: []const proof_script.TopLevelItem,
         index: usize,
     ) ?usize {
-        const block = blocks[index];
-        if (block.kind == .theorem) {
-            return self.theoremAvailabilityBound(block.name);
+        const item = items[index];
+        switch (item) {
+            .block => |block| {
+                if (block.kind == .theorem) {
+                    return self.theoremAvailabilityBound(block.name);
+                }
+            },
+            .def => {},
         }
 
         var i = index + 1;
-        while (i < blocks.len) : (i += 1) {
-            if (blocks[i].kind != .theorem) continue;
-            return self.theoremAvailabilityBound(blocks[i].name);
+        while (i < items.len) : (i += 1) {
+            const block = switch (items[i]) {
+                .block => |block| block,
+                .def => continue,
+            };
+            if (block.kind != .theorem) continue;
+            return self.theoremAvailabilityBound(block.name);
         }
         return null;
     }
@@ -210,12 +222,11 @@ pub const Builder = struct {
                         term,
                         annotations,
                     ),
-                    .binders = try bindersFromArgs(
+                    .binders = try bindersFromTerm(
                         self.allocator,
                         .mm0,
                         text,
-                        term.arg_names,
-                        term.args,
+                        term,
                     ),
                     .completion_args = try completionArgsFromArgs(
                         self.allocator,
@@ -423,6 +434,147 @@ pub const Builder = struct {
 
     fn addProofOutline(self: *Builder, symbol: OutlineSymbol) !void {
         try self.proof_outline.append(self.allocator, symbol);
+    }
+
+    fn addProofDefItem(
+        self: *Builder,
+        text: []const u8,
+        def: proof_script.DefItem,
+    ) !void {
+        if (def.header_tail) |header_tail| {
+            try self.addLocalProofDef(text, def, header_tail);
+        } else {
+            try self.addPublicDefBodyItem(def);
+        }
+    }
+
+    fn addPublicDefBodyItem(
+        self: *Builder,
+        def: proof_script.DefItem,
+    ) !void {
+        const decl_index = self.decl_by_name.get(def.name) orelse return;
+        const decl = self.declarations.items[decl_index];
+        if (decl.kind != .def) return;
+
+        try self.addProofOutline(.{
+            .name = def.name,
+            .kind = .def,
+            .range = proofSpanRange(def.span),
+            .selection_range = proofSpanRange(def.name_span),
+        });
+        try self.addSymbol(.{
+            .source_range = proofSpanRange(def.name_span),
+            .target_range = decl.name_range,
+            .markdown = decl.markdown,
+        });
+        try self.indexMathString(
+            .proof,
+            def.body.text,
+            def.body.span.start + 1,
+            decl_index,
+            false,
+            decl.name_range.start,
+        );
+    }
+
+    fn addLocalProofDef(
+        self: *Builder,
+        text: []const u8,
+        def: proof_script.DefItem,
+        header_tail: []const u8,
+    ) !void {
+        var parser = self.mm0_parser orelse return;
+        const term = parser.parseLocalDefText(
+            def.name,
+            .{ .start = def.name_span.start, .end = def.name_span.end },
+            header_tail,
+            def.body.text,
+            proofMathTextSpan(def.body.span),
+        ) catch |err| {
+            if (isFatalIndexError(err)) return err;
+            return;
+        };
+        self.mm0_parser = parser;
+
+        const decl_index = try self.addDeclaration(.{
+            .name = def.name,
+            .kind = .def,
+            .name_range = proofSpanRange(def.name_span),
+            .markdown = try termMarkdown(
+                self.allocator,
+                text,
+                term,
+                def.annotations,
+            ),
+            .binders = try bindersFromProofDef(
+                self.allocator,
+                def,
+                term,
+            ),
+            .completion_args = try completionArgsFromArgs(
+                self.allocator,
+                .proof,
+                text,
+                term.arg_names,
+                term.args,
+            ),
+        });
+        try self.addProofOutline(.{
+            .name = def.name,
+            .kind = .def,
+            .range = proofSpanRange(def.span),
+            .selection_range = proofSpanRange(def.name_span),
+        });
+        try self.indexProofDefHeaderSorts(def, term);
+        try self.indexMathString(
+            .proof,
+            def.body.text,
+            def.body.span.start + 1,
+            decl_index,
+            false,
+            null,
+        );
+        try self.decl_by_name.put(self.allocator, def.name, decl_index);
+    }
+
+    fn indexProofDefHeaderSorts(
+        self: *Builder,
+        def: proof_script.DefItem,
+        term: parse.TermStmt,
+    ) !void {
+        const header_tail = def.header_tail orelse return;
+        var pos: usize = 0;
+        for (term.args) |arg| {
+            try self.addProofHeaderSortUse(header_tail, def, &pos, arg.sort_name);
+        }
+        for (term.dummy_args) |arg| {
+            try self.addProofHeaderSortUse(header_tail, def, &pos, arg.sort_name);
+        }
+        try self.addProofHeaderSortUse(header_tail, def, &pos, term.ret_sort_name);
+    }
+
+    fn addProofHeaderSortUse(
+        self: *Builder,
+        header_tail: []const u8,
+        def: proof_script.DefItem,
+        pos: *usize,
+        sort_name: []const u8,
+    ) !void {
+        const rel = findIdentIn(header_tail, sort_name, pos.*) orelse return;
+        pos.* = rel + sort_name.len;
+        const span = def.header_tail_span orelse return;
+        const range = SourceRange{
+            .document = .proof,
+            .start = span.start + rel,
+            .end = span.start + rel + sort_name.len,
+        };
+        const decl_index = self.sortDeclIndex(sort_name) orelse return;
+        const decl = self.declarations.items[decl_index];
+        try self.addSymbol(.{
+            .source_range = range,
+            .target_range = decl.name_range,
+            .markdown = decl.markdown,
+        });
     }
 
     fn addProofBlock(
@@ -1247,6 +1399,13 @@ fn proofSpanRange(span: proof_script.Span) SourceRange {
     };
 }
 
+fn proofMathTextSpan(span: proof_script.Span) parse.MathSpan {
+    return .{
+        .start = @min(span.start + 1, span.end),
+        .end = if (span.end > span.start) span.end - 1 else span.end,
+    };
+}
+
 fn rangeContains(range: SourceRange, document: DocumentId, offset: usize) bool {
     return range.document == document and offset >= range.start and
         offset < range.end;
@@ -1266,6 +1425,10 @@ fn targetRangeForUse(
     return switch (document) {
         .mm0 => targetRangeIfAvailable(decl, use_start),
         .proof => {
+            if (decl.name_range.document == .proof) {
+                if (decl.name_range.start <= use_start) return decl.name_range;
+                return null;
+            }
             const before = available_before orelse return decl.name_range;
             if (decl.name_range.start < before) return decl.name_range;
             return null;
@@ -1285,6 +1448,173 @@ fn findBinder(decl: Declaration, name: []const u8) ?BinderDecl {
         if (std.mem.eql(u8, binder.name, name)) return binder;
     }
     return null;
+}
+
+fn bindersFromTerm(
+    allocator: std.mem.Allocator,
+    document: DocumentId,
+    text: []const u8,
+    term: parse.TermStmt,
+) ![]const BinderDecl {
+    var binders = std.ArrayListUnmanaged(BinderDecl){};
+    try appendBindersFromArgs(
+        allocator,
+        &binders,
+        document,
+        text,
+        term.arg_names,
+        term.args,
+        0,
+    );
+    try appendBindersFromArgs(
+        allocator,
+        &binders,
+        document,
+        text,
+        term.dummy_names,
+        term.dummy_args,
+        term.args.len,
+    );
+    return try binders.toOwnedSlice(allocator);
+}
+
+fn appendBindersFromArgs(
+    allocator: std.mem.Allocator,
+    binders: *std.ArrayListUnmanaged(BinderDecl),
+    document: DocumentId,
+    text: []const u8,
+    names: []const ?[]const u8,
+    args: []const parse.ArgInfo,
+    ordinal_base: usize,
+) !void {
+    for (args, 0..) |arg, i| {
+        if (i >= names.len) continue;
+        const name = names[i] orelse continue;
+        try binders.append(allocator, .{
+            .name = name,
+            .sort_name = arg.sort_name,
+            .bound = arg.bound,
+            .range = sourceRangeFromSlice(document, text, name),
+            .sort_text = try completionSortText(
+                allocator,
+                sort_group_local_binder,
+                ordinal_base + i,
+                name,
+            ),
+        });
+    }
+}
+
+const ScannedProofBinder = struct {
+    name: []const u8,
+    range: SourceRange,
+    is_dummy: bool,
+};
+
+fn bindersFromProofDef(
+    allocator: std.mem.Allocator,
+    def: proof_script.DefItem,
+    term: parse.TermStmt,
+) ![]const BinderDecl {
+    const header_tail = def.header_tail orelse return &.{};
+    const header_span = def.header_tail_span orelse return &.{};
+    const scanned = try scanProofDefBinders(
+        allocator,
+        header_tail,
+        header_span.start,
+    );
+
+    var binders = std.ArrayListUnmanaged(BinderDecl){};
+    var arg_index: usize = 0;
+    var dummy_index: usize = 0;
+    var ordinal: usize = 0;
+    for (scanned) |item| {
+        const arg = if (item.is_dummy) blk: {
+            if (dummy_index >= term.dummy_args.len) continue;
+            const arg = term.dummy_args[dummy_index];
+            dummy_index += 1;
+            break :blk arg;
+        } else blk: {
+            if (arg_index >= term.args.len) continue;
+            const arg = term.args[arg_index];
+            arg_index += 1;
+            break :blk arg;
+        };
+        const maybe_name = if (item.is_dummy)
+            term.dummy_names[dummy_index - 1]
+        else
+            term.arg_names[arg_index - 1];
+        const name = maybe_name orelse continue;
+        try binders.append(allocator, .{
+            .name = name,
+            .sort_name = arg.sort_name,
+            .bound = arg.bound,
+            .range = item.range,
+            .sort_text = try completionSortText(
+                allocator,
+                sort_group_local_binder,
+                ordinal,
+                name,
+            ),
+        });
+        ordinal += 1;
+    }
+    return try binders.toOwnedSlice(allocator);
+}
+
+fn scanProofDefBinders(
+    allocator: std.mem.Allocator,
+    header_tail: []const u8,
+    base: usize,
+) ![]const ScannedProofBinder {
+    var result = std.ArrayListUnmanaged(ScannedProofBinder){};
+    var pos: usize = 0;
+    while (pos < header_tail.len) : (pos += 1) {
+        const open = header_tail[pos];
+        if (open != '(' and open != '{') continue;
+        pos += 1;
+        while (pos < header_tail.len) {
+            skipProofDefHeaderSpace(header_tail, &pos);
+            if (pos >= header_tail.len or header_tail[pos] == ':') break;
+            const is_dummy = header_tail[pos] == '.';
+            if (is_dummy) pos += 1;
+            if (pos >= header_tail.len or !isProofIdentStart(header_tail[pos])) {
+                break;
+            }
+            const start = pos;
+            pos += 1;
+            while (pos < header_tail.len and isProofIdentChar(header_tail[pos])) {
+                pos += 1;
+            }
+            try result.append(allocator, .{
+                .name = header_tail[start..pos],
+                .range = .{
+                    .document = .proof,
+                    .start = base + start,
+                    .end = base + pos,
+                },
+                .is_dummy = is_dummy,
+            });
+        }
+    }
+    return try result.toOwnedSlice(allocator);
+}
+
+fn skipProofDefHeaderSpace(text: []const u8, pos: *usize) void {
+    while (pos.* < text.len) {
+        switch (text[pos.*]) {
+            ' ', '\t', '\r', '\n' => pos.* += 1,
+            else => return,
+        }
+    }
+}
+
+fn isProofIdentStart(ch: u8) bool {
+    return std.ascii.isAlphabetic(ch) or ch == '_';
+}
+
+fn isProofIdentChar(ch: u8) bool {
+    return isProofIdentStart(ch) or std.ascii.isDigit(ch);
 }
 
 fn bindersFromArgs(

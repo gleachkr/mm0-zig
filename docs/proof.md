@@ -31,11 +31,18 @@ The `.mm0` file remains the source of truth for:
 - notation and coercions
 
 The `.auf` file supplies proof bodies for public theorems declared in the
-`.mm0` file.
+`.mm0` file. It can also supply bodies for public MM0 definitions whose
+bodies were omitted from the `.mm0` file.
 
 It may also declare top-level `lemma` blocks. These are proof-only local
 rules. They may be cited by later proof blocks and are emitted as local
 MMB theorems.
+
+Top-level `def` items have two meanings. A headerless item of the form
+`def name = $ body $` fills the next public bodyless MM0 definition with
+the same name. A full-header item of the form
+`def name (args): sort = $ body $` declares a proof-local definition and
+emits it as an MMB `LocalDef` statement.
 
 ## Processing model
 
@@ -46,12 +53,16 @@ This means:
 
 - each public theorem block in the `.auf` stream must match the next
   public theorem declaration in the `.mm0` stream
-- zero or more `lemma` blocks may appear before the next public theorem
-  block
+- when the next MM0 declaration is a bodyless `def`, the next `.auf`
+  item must be a matching headerless public body filler
+- zero or more `lemma` blocks or full-header local `def` items may appear
+  before the next public theorem block or public body filler
 - proof blocks may reference only earlier proof lines in the same block
 - proof blocks may reference only axioms, public theorems, and earlier
   lemmas already declared
 - lemma metadata is available only after that lemma block has been checked
+- local definitions are available only after their `def` item has been
+  processed
 - no forward references are permitted
 
 The frontend therefore streams through the MM0 declarations and proof
@@ -70,9 +81,10 @@ headers, lemma headers, and proof lines.
 Annotation comments begin with `--|`. In `.mm0` files these attach to the
 next MM0 statement. In `.auf` files they may attach to the next `lemma`
 block, giving that proof-local rule the same rule-level metadata as an
-ordinary assertion. Annotation comments before public theorem proof
-blocks are not theorem metadata; put theorem metadata on the theorem's
-`.mm0` declaration instead.
+ordinary assertion. Annotation comments before proof-side `def` items are
+not supported yet and are rejected directly. Annotation comments before
+public theorem proof blocks are not theorem metadata; put theorem
+metadata on the theorem's `.mm0` declaration instead.
 
 Outside math strings, newlines may be mixed with other whitespace inside
 one proof line. A new proof line must still begin on a fresh line with
@@ -87,11 +99,12 @@ underline line, or at a `--` comment before that line.
 
 ## Top-level blocks
 
-An Aufbau script is a sequence of theorem blocks, lemma blocks, blank
-lines, and comments.
+An Aufbau script is a sequence of theorem blocks, lemma blocks, def
+items, blank lines, and comments.
 
 ```text
-aufbau-script ::= (theorem-block | lemma-block | blank | comment)*
+aufbau-script ::= (theorem-block | lemma-block | def-item | blank |
+                   comment)*
 comment ::= '--' (any char except newline)* newline
 annotation-comment ::= '--|' annotation-text newline
 ```
@@ -173,6 +186,92 @@ lemma sb_local (a: wff): $ sb a P <-> a $
 -------------------------------------------
 l1: $ sb a P <-> a $ by sb_P_base
 ```
+
+### Def items
+
+Proof-side `def` items are top-level items. They are not proof lines and
+do not have an underline. There are two forms.
+
+```text
+def-item ::= public-body-filler | local-def
+public-body-filler ::= 'def' identifier '=' math-string newline
+local-def ::= 'def' identifier def-header-tail '=' math-string newline
+def-header-tail ::= binder* ':' sort
+```
+
+#### Public body fillers
+
+A headerless item fills a public MM0 definition whose body was omitted
+from the `.mm0` file:
+
+```mm0
+provable sort wff;
+term top: wff;
+def alias: wff;
+axiom ax_top: $ top $;
+theorem use_alias: $ alias $;
+```
+
+```auf
+def alias = $ top $
+
+use_alias
+---------
+p: $ alias $ by ax_top []
+```
+
+The filler must appear exactly where the bodyless MM0 definition is
+reached by the statement-order stream, and its name must match that MM0
+definition. The body is parsed in the MM0 definition's binder context,
+including named hidden dummy binders. Anonymous hidden binders cannot be
+referenced by name. The filled definition is public: it is emitted as an
+ordinary MMB term definition and is checked against the MM0 declaration.
+
+Only the headerless form is supported for public body fillers. This is
+not accepted yet:
+
+```auf
+def alias: wff = $ top $  -- local def, not a public body filler
+```
+
+#### Local definitions
+
+A full-header item declares a proof-local definition:
+
+```auf
+def local_top: wff = $ top $
+
+use_local
+---------
+p: $ local_top $ by ax_top []
+```
+
+Local definitions are emitted as MMB `LocalDef` statements and appended
+to the MMB term table. That means they consume term IDs, so a local def
+inserted before a later public MM0 term shifts the numeric term IDs of
+that later declaration in the emitted MMB. The compiler and LSP process
+the MM0 and `.auf` streams together so that later declarations see the
+same term IDs that the MMB writer emits.
+
+Local defs may be used by later proof lines, later local lemmas, later
+local defs, later public body fillers, and later MM0 math parsed after
+the local def has entered the stream. They are not available before their
+declaration, and forward references are rejected.
+
+Local defs may use ordinary and hidden dummy binders in their header, for
+example:
+
+```auf
+def choose (.d: obj) (x: obj): obj = $ d $
+```
+
+As with MM0 definitions, the body is checked against the declared result
+sort before the def unify stream is used. A body that leaves hidden dummy
+binders free in the result is rejected.
+
+Proof-side notation declarations are not supported yet. Term metadata on
+proof-side defs, such as `@acui`, is also not supported yet. Put
+notations and term-level annotations on public MM0 declarations for now.
 
 ## Proof lines
 

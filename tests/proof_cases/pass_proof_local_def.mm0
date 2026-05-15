@@ -1,0 +1,4 @@
+provable sort wff;
+term top: wff;
+axiom ax_top: $ top $;
+theorem use_local: $ top $;

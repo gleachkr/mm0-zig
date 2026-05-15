@@ -1525,6 +1525,183 @@ test "local lemma rule resolves in later proof block" {
     try std.testing.expectEqual(decl_start, def.range.start);
 }
 
+test "local proof defs navigate, hover, complete, and outline" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+        \\axiom top_i: $ top $;
+        \\theorem main: $ top $;
+    ;
+    const proof_text =
+        \\def local_top: wff = $ top $
+        \\
+        \\main
+        \\----
+        \\l1: $ local_top $ by top_i []
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const use_offset = std.mem.lastIndexOf(u8, proof_text, "local_top") orelse {
+        return error.MissingLocalDefUse;
+    };
+    const completions = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        use_offset + "local".len,
+        .{},
+    );
+    defer std.testing.allocator.free(completions);
+    const item = completionNamed(completions, "local_top") orelse {
+        return error.MissingLocalDefCompletion;
+    };
+    try std.testing.expectEqual(Index.CompletionKind.def, item.kind);
+
+    const def = snapshot.definitionAt(.proof, use_offset) orelse {
+        return error.MissingLocalDefDefinition;
+    };
+    try std.testing.expectEqualStrings("file:///test.auf", def.uri);
+    const decl_offset = std.mem.indexOf(u8, proof_text, "local_top") orelse {
+        return error.MissingLocalDefDecl;
+    };
+    try std.testing.expectEqual(decl_offset, def.range.start);
+
+    const hover = snapshot.hoverAt(.proof, use_offset) orelse {
+        return error.MissingLocalDefHover;
+    };
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        hover.markdown,
+        1,
+        "Definition `local_top`",
+    ));
+
+    const outline = snapshot.outline(.proof);
+    try std.testing.expectEqual(@as(usize, 2), outline.len);
+    try std.testing.expectEqualStrings("local_top", outline[0].name);
+    try std.testing.expectEqual(Index.DeclarationKind.def, outline[0].kind);
+}
+
+test "completion excludes future local proof defs" {
+    const mm0_text =
+        \\provable sort wff;
+        \\term top: wff;
+    ;
+    const proof_text =
+        \\def earlier: wff = $ loc $
+        \\def local_top: wff = $ top $
+        \\def later: wff = $ loc $
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const early_offset = std.mem.indexOf(u8, proof_text, "loc") orelse {
+        return error.MissingEarlyLocalDefContext;
+    };
+    const early_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        early_offset + "loc".len,
+        .{},
+    );
+    defer std.testing.allocator.free(early_items);
+    try std.testing.expect(completionNamed(early_items, "local_top") == null);
+
+    const late_offset = std.mem.lastIndexOf(u8, proof_text, "loc") orelse {
+        return error.MissingLateLocalDefContext;
+    };
+    const late_items = try snapshot.completionsAt(
+        std.testing.allocator,
+        .proof,
+        late_offset + "loc".len,
+        .{},
+    );
+    defer std.testing.allocator.free(late_items);
+    try std.testing.expect(completionNamed(late_items, "local_top") != null);
+}
+
+test "local proof def binders navigate from bodies" {
+    const mm0_text =
+        \\sort obj;
+    ;
+    const proof_text =
+        \\def choose (.d: obj) (x: obj): obj = $ d $
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const body_offset = std.mem.lastIndexOf(u8, proof_text, "d") orelse {
+        return error.MissingLocalDummyUse;
+    };
+    const def = snapshot.definitionAt(.proof, body_offset) orelse {
+        return error.MissingLocalDummyDefinition;
+    };
+    const dummy_offset = std.mem.indexOf(u8, proof_text, ".d") orelse {
+        return error.MissingLocalDummyDecl;
+    };
+    try std.testing.expectEqual(dummy_offset + 1, def.range.start);
+    try std.testing.expectEqualStrings(
+        "d",
+        snapshot.proof_text.?[def.range.start..def.range.end],
+    );
+}
+
+test "public proof def bodies navigate to mm0 declarations" {
+    const mm0_text =
+        \\sort obj;
+        \\def hold (x: obj): obj;
+    ;
+    const proof_text =
+        \\def hold = $ x $
+    ;
+    var snapshot = try Snapshot.build(std.testing.allocator, .{
+        .mm0_uri = "file:///test.mm0",
+        .mm0_text = mm0_text,
+        .proof_uri = "file:///test.auf",
+        .proof_text = proof_text,
+    });
+    defer snapshot.deinit();
+
+    const name_offset = std.mem.indexOf(u8, proof_text, "hold") orelse {
+        return error.MissingPublicDefBodyName;
+    };
+    const name_def = snapshot.definitionAt(.proof, name_offset) orelse {
+        return error.MissingPublicDefBodyDefinition;
+    };
+    try std.testing.expectEqualStrings("file:///test.mm0", name_def.uri);
+    try std.testing.expectEqualStrings(
+        "hold",
+        snapshot.mm0_text[name_def.range.start..name_def.range.end],
+    );
+
+    const body_offset = std.mem.indexOf(u8, proof_text, "x") orelse {
+        return error.MissingPublicDefBodyBinder;
+    };
+    const binder_def = snapshot.definitionAt(.proof, body_offset) orelse {
+        return error.MissingPublicDefBodyBinderDefinition;
+    };
+    try std.testing.expectEqualStrings("file:///test.mm0", binder_def.uri);
+    try std.testing.expectEqualStrings(
+        "x",
+        snapshot.mm0_text[binder_def.range.start..binder_def.range.end],
+    );
+}
+
 test "hypothesis references hover and jump to owning rule" {
     const mm0_text =
         \\provable sort wff;

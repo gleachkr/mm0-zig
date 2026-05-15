@@ -311,11 +311,15 @@ convenience.
 
 The compiler processes the `.mm0` file and the Aufbau script in
 statement order. It does not build a separate global proof database.
-Instead, it streams through declarations, and when it encounters a
-statement it either records metadata immediately or, for a theorem,
-reads the next proof block and compiles it right away.
+Instead, it streams through declarations and proof-side items together.
+When it encounters a theorem, it reads the next proof block and compiles
+it right away. Before a public theorem or public bodyless def, it drains
+any earlier local proof items from the `.auf` stream.
 
-That statement-order lockstep model is a major simplifying choice.
+That statement-order lockstep model is a major simplifying choice. It is
+also required for proof-side local definitions: local defs append to the
+MMB term table, so later public MM0 declarations must be parsed and
+emitted with term IDs that include those earlier local entries.
 
 `Compiler.check` and `Compiler.compileMmb` both run
 `compiler/pipeline.zig`. One path stops after validation; the other also
@@ -381,11 +385,14 @@ emission records.
 At a high level it does this:
 
 1. parse the next MM0 statement
-2. update the global environment
-3. process metadata annotations attached to that statement
-4. if the statement is a theorem, fetch the next proof block and check it
-5. if emission is enabled, append the corresponding MMB records
-6. reject leftover proof blocks after the MM0 stream finishes
+2. drain proof-side local items that precede the next public anchor
+3. update the global environment
+4. process metadata annotations attached to that statement
+5. if the statement is a bodyless public def, consume its `.auf` body
+   filler and emit a public `.TermDef`
+6. if the statement is a theorem, fetch the next proof block and check it
+7. if emission is enabled, append the corresponding MMB records
+8. reject leftover proof items after the MM0 stream finishes
 
 This file is the best place to start if you want to understand the
 compiler's control flow.
@@ -395,17 +402,29 @@ compiler's control flow.
 `src/frontend/proof_script.zig` parses the textual Aufbau script
 format.
 
-A proof block is either:
+A top-level proof item is one of:
 
-- a theorem block, named to match an MM0 theorem, or
+- a theorem block, named to match an MM0 theorem
 - a local lemma block, which carries a theorem-like header and becomes a
   local MMB theorem during emission
+- a headerless `def name = $ body $` item, which fills a public bodyless
+  MM0 definition of the same name
+- a full-header `def name ... : sort = $ body $` item, which becomes a
+  proof-local MMB `LocalDef`
 
 The proof-script parser also carries leading `--|` annotation comments
-on a block. Public theorem metadata still comes from the `.mm0` theorem
+on an item. Public theorem metadata still comes from the `.mm0` theorem
 declaration, but local lemma annotations are attached to the lemma
 `ProofBlock`. After the pipeline checks and registers the local rule, it
 runs the normal assertion-metadata path for those annotations.
+Proof-side def annotations are intentionally rejected for now; local def
+notation and term metadata are not part of the current format.
+
+Local defs are inserted into the live parser and `GlobalEnv` immediately
+after they are checked. Later `.auf` math and later MM0 declarations can
+therefore resolve them, but earlier items cannot. Bodyless public def
+fillers use the public declaration's binder context and are emitted as
+public term definitions, not `LocalDef` statements.
 
 A proof line contains:
 

@@ -1,0 +1,5 @@
+def alias = $ top $
+
+use_alias
+---------
+p: $ alias $ by ax_top []

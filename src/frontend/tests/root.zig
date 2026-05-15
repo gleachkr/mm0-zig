@@ -4,6 +4,7 @@ const mm0 = @import("mm0");
 const FrontendEnv = mm0.Frontend.Env;
 const FrontendExpr = mm0.Frontend.Expr;
 const Expr = mm0.Expr;
+const MathSpan = mm0.MathSpan;
 const MM0Parser = mm0.MM0Parser;
 const ProofScript = mm0.ProofScript;
 
@@ -514,6 +515,300 @@ test "proof script parser recovery requires underlines on later blocks" {
     var parser = ProofScript.Parser.init(arena.allocator(), src);
     try std.testing.expectError(error.ExpectedIdentifier, parser.nextBlock());
     try std.testing.expect(!parser.recoverToNextBlockBoundary());
+}
+
+test "proof script parser reads headerless def items" {
+    const src =
+        \\def foo = $ x $
+        \\
+        \\main
+        \\----
+        \\l1: $ x $ by keep []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const item = (try parser.nextItem()).?;
+    switch (item) {
+        .def => |def| {
+            try std.testing.expectEqualStrings("foo", def.name);
+            try std.testing.expect(def.header_tail == null);
+            try std.testing.expectEqualStrings(" x ", def.body.text);
+        },
+        else => return error.UnexpectedProofItem,
+    }
+
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expectEqualStrings("main", block.name);
+}
+
+test "proof script parser reads full-header def items" {
+    const src =
+        \\def local_foo (x: obj): obj = $ x $
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const item = (try parser.nextItem()).?;
+    switch (item) {
+        .def => |def| {
+            try std.testing.expectEqualStrings("local_foo", def.name);
+            try std.testing.expectEqualStrings(
+                "(x: obj): obj",
+                def.header_tail.?,
+            );
+            try std.testing.expect(def.header_tail_span != null);
+            try std.testing.expectEqualStrings(" x ", def.body.text);
+        },
+        else => return error.UnexpectedProofItem,
+    }
+    try std.testing.expect((try parser.nextItem()) == null);
+}
+
+test "proof script parser preserves comments and annotations before defs" {
+    const src =
+        \\-- ordinary comment
+        \\--| @local-note
+        \\def local_foo (x: obj): obj = $ x $
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    const item = (try parser.nextItem()).?;
+    switch (item) {
+        .def => |def| {
+            try std.testing.expectEqual(@as(usize, 1), def.annotations.len);
+            try std.testing.expectEqualStrings("@local-note", def.annotations[0]);
+        },
+        else => return error.UnexpectedProofItem,
+    }
+}
+
+test "proof script parser recovers from malformed def items" {
+    const src =
+        \\def bad = not_math
+        \\
+        \\good_block
+        \\----------
+        \\l1: $ top $ by keep []
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = ProofScript.Parser.init(arena.allocator(), src);
+    try std.testing.expectError(error.ExpectedMathString, parser.nextItem());
+    try std.testing.expect(parser.diagnosticSpan() != null);
+    try std.testing.expect(parser.recoverToNextItemBoundary());
+
+    const block = (try parser.nextBlock()).?;
+    try std.testing.expectEqualStrings("good_block", block.name);
+    try std.testing.expectEqual(@as(usize, 1), block.lines.len);
+}
+
+test "mm0 parser preserves hidden dummy names" {
+    const src =
+        \\sort obj;
+        \\def quote (.d ._: obj): obj;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    const stmt = (try parser.next()).?;
+    const term = switch (stmt) {
+        .term => |value| value,
+        else => return error.UnexpectedStatementKind,
+    };
+
+    try std.testing.expectEqual(@as(usize, 2), term.dummy_args.len);
+    try std.testing.expectEqual(@as(usize, 2), term.dummy_names.len);
+    try std.testing.expectEqualStrings("d", term.dummy_names[0].?);
+    try std.testing.expect(term.dummy_names[1] == null);
+}
+
+test "public def body parser sees visible args" {
+    const src =
+        \\sort obj;
+        \\def id (x: obj): obj;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    const stmt = (try parser.next()).?;
+    const term = switch (stmt) {
+        .term => |value| value,
+        else => return error.UnexpectedStatementKind,
+    };
+
+    const body = try parser.parsePublicDefBodyText(
+        term,
+        "x",
+        .{ .start = 0, .end = 1 },
+    );
+    try std.testing.expect(body == term.arg_exprs[0]);
+}
+
+test "public def body parser sees named hidden dummy binders" {
+    const src =
+        \\sort obj;
+        \\def pick (.d: obj): obj;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    const stmt = (try parser.next()).?;
+    const term = switch (stmt) {
+        .term => |value| value,
+        else => return error.UnexpectedStatementKind,
+    };
+
+    const body = try parser.parsePublicDefBodyText(
+        term,
+        "d",
+        .{ .start = 0, .end = 1 },
+    );
+    try std.testing.expect(body == term.dummy_exprs[0]);
+}
+
+test "public def body parser rejects unknown and anonymous binders" {
+    const src =
+        \\sort obj;
+        \\def pick (._: obj): obj;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    const stmt = (try parser.next()).?;
+    const term = switch (stmt) {
+        .term => |value| value,
+        else => return error.UnexpectedStatementKind,
+    };
+
+    try std.testing.expectError(
+        error.UnknownMathToken,
+        parser.parsePublicDefBodyText(
+            term,
+            "_",
+            .{ .start = 0, .end = 1 },
+        ),
+    );
+    try std.testing.expectError(
+        error.UnknownMathToken,
+        parser.parsePublicDefBodyText(
+            term,
+            "missing",
+            .{ .start = 0, .end = 7 },
+        ),
+    );
+}
+
+test "local def parser mutates live term table" {
+    const src =
+        \\sort obj;
+        \\term zero: obj;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+
+    const local = try parser.parseLocalDefText(
+        "id",
+        .{ .start = 10, .end = 12 },
+        "(x: obj): obj",
+        "x",
+        .{ .start = 24, .end = 25 },
+    );
+    try std.testing.expectEqualStrings("id", local.name);
+
+    var vars = std.StringHashMap(*const Expr).init(arena.allocator());
+    const expr = try parser.parseMathText("id zero", &vars);
+    switch (expr.*) {
+        .term => |app| {
+            try std.testing.expectEqual(@as(u32, 1), app.id);
+            try std.testing.expectEqual(@as(usize, 1), app.args.len);
+        },
+        else => return error.UnexpectedExprNode,
+    }
+}
+
+test "local def parser rejects duplicate term names" {
+    const src =
+        \\sort obj;
+        \\term zero: obj;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+
+    const span = MathSpan{ .start = 5, .end = 9 };
+    try std.testing.expectError(
+        error.DuplicateTermName,
+        parser.parseLocalDefText(
+            "zero",
+            span,
+            "(x: obj): obj",
+            "x",
+            null,
+        ),
+    );
+    const diag = parser.diagnosticSpan().?;
+    try std.testing.expectEqual(span.start, diag.start);
+    try std.testing.expectEqual(span.end, diag.end);
+}
+
+test "local def parser maps body diagnostics to proof spans" {
+    const src =
+        \\sort obj;
+        \\term zero: obj;
+    ;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    var parser = MM0Parser.init(src, arena.allocator());
+    _ = (try parser.next()).?;
+    _ = (try parser.next()).?;
+
+    const body_span = MathSpan{ .start = 100, .end = 107 };
+    try std.testing.expectError(
+        error.UnknownMathToken,
+        parser.parseLocalDefText(
+            "bad",
+            .{ .start = 4, .end = 7 },
+            ": obj",
+            "missing",
+            body_span,
+        ),
+    );
+    const diag = parser.diagnosticSpan().?;
+    try std.testing.expectEqual(body_span.start, diag.start);
+    try std.testing.expectEqual(body_span.end, diag.end);
 }
 
 test "theorem context preserves theorem var identity" {

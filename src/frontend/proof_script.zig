@@ -98,6 +98,21 @@ pub const ProofBlock = struct {
     span: Span,
 };
 
+pub const DefItem = struct {
+    name: []const u8,
+    name_span: Span,
+    header_tail: ?[]const u8 = null,
+    header_tail_span: ?Span = null,
+    body: MathString,
+    annotations: []const []const u8 = &.{},
+    span: Span,
+};
+
+pub const TopLevelItem = union(enum) {
+    block: ProofBlock,
+    def: DefItem,
+};
+
 pub const TheoremBlock = ProofBlock;
 
 pub const Parser = struct {
@@ -116,7 +131,7 @@ pub const Parser = struct {
         };
     }
 
-    pub fn nextBlock(self: *Parser) !?ProofBlock {
+    pub fn nextItem(self: *Parser) !?TopLevelItem {
         self.current_block_name = null;
         self.current_block_name_span = null;
         self.last_error_span = null;
@@ -124,18 +139,32 @@ pub const Parser = struct {
         const annotations = try self.skipBlockTriviaAndCaptureAnnotations();
         if (self.pos >= self.src.len) return null;
 
-        const block_start = self.pos;
+        const item_start = self.pos;
         const ident_start = self.pos;
         const ident = try self.parseIdentifier();
-        if (std.mem.eql(u8, ident, "lemma") and self.startsLemmaHeader()) {
-            return try self.parseLemmaBlock(block_start, annotations);
+        if (std.mem.eql(u8, ident, "def") and self.startsDefHeader()) {
+            return .{ .def = try self.parseDefItem(item_start, annotations) };
         }
-        return try self.parseTheoremBlock(
-            block_start,
+        if (std.mem.eql(u8, ident, "lemma") and self.startsLemmaHeader()) {
+            return .{ .block = try self.parseLemmaBlock(
+                item_start,
+                annotations,
+            ) };
+        }
+        return .{ .block = try self.parseTheoremBlock(
+            item_start,
             ident,
             ident_start,
             annotations,
-        );
+        ) };
+    }
+
+    pub fn nextBlock(self: *Parser) !?ProofBlock {
+        const item = (try self.nextItem()) orelse return null;
+        return switch (item) {
+            .block => |block| block,
+            .def => error.ExpectedProofBlock,
+        };
     }
 
     pub fn diagnosticSpan(self: *const Parser) ?Span {
@@ -151,7 +180,7 @@ pub const Parser = struct {
         return self.current_block_name;
     }
 
-    pub fn recoverToNextBlockBoundary(self: *Parser) bool {
+    pub fn recoverToNextItemBoundary(self: *Parser) bool {
         self.current_block_name = null;
         self.current_block_name_span = null;
         if (self.pos < self.src.len) {
@@ -159,7 +188,7 @@ pub const Parser = struct {
         }
         while (self.pos < self.src.len) {
             const line_start = self.pos;
-            if (self.lineLooksLikeBlockHeader(line_start)) {
+            if (self.lineLooksLikeItemHeader(line_start)) {
                 return true;
             }
             self.pos = self.nextLineStart(line_start);
@@ -167,7 +196,17 @@ pub const Parser = struct {
         return false;
     }
 
+    pub fn recoverToNextBlockBoundary(self: *Parser) bool {
+        return self.recoverToNextItemBoundary();
+    }
+
     fn startsLemmaHeader(self: *Parser) bool {
+        var i = self.pos;
+        while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
+        return i < self.src.len and isIdentStart(self.src[i]);
+    }
+
+    fn startsDefHeader(self: *Parser) bool {
         var i = self.pos;
         while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
         return i < self.src.len and isIdentStart(self.src[i]);
@@ -245,6 +284,81 @@ pub const Parser = struct {
                 .end = self.pos,
             },
         };
+    }
+
+    fn parseDefItem(
+        self: *Parser,
+        item_start: usize,
+        annotations: []const []const u8,
+    ) !DefItem {
+        self.skipHorizontalSpace();
+        const name_start = self.pos;
+        const name = try self.parseIdentifier();
+        self.setCurrentBlockContext(name, name_start);
+
+        const header_tail_start = self.pos;
+        try self.skipUntilDefEquals();
+        var header_tail_end = self.pos;
+        while (header_tail_end > header_tail_start and
+            isHorizontalSpace(self.src[header_tail_end - 1]))
+        {
+            header_tail_end -= 1;
+        }
+        const header_tail_raw = self.src[header_tail_start..header_tail_end];
+        const header_tail = std.mem.trimLeft(u8, header_tail_raw, " \t\r");
+        const trimmed_start = header_tail_end - header_tail.len;
+
+        try self.expect('=');
+        const body = try self.parseMathString();
+        try self.expectLineEnd();
+
+        return .{
+            .name = name,
+            .name_span = .{
+                .start = name_start,
+                .end = name_start + name.len,
+            },
+            .header_tail = if (header_tail.len == 0) null else header_tail,
+            .header_tail_span = if (header_tail.len == 0)
+                null
+            else
+                .{ .start = trimmed_start, .end = header_tail_end },
+            .body = body,
+            .annotations = annotations,
+            .span = .{
+                .start = item_start,
+                .end = self.pos,
+            },
+        };
+    }
+
+    fn skipUntilDefEquals(self: *Parser) !void {
+        while (self.pos < self.src.len) {
+            if (self.src[self.pos] == '$') {
+                const math_start = self.pos;
+                self.pos += 1;
+                while (self.pos < self.src.len and self.src[self.pos] != '$') {
+                    self.pos += 1;
+                }
+                if (self.pos >= self.src.len) {
+                    return self.recordErrorAtSpan(
+                        error.UnterminatedMathString,
+                        .{
+                            .start = math_start,
+                            .end = @min(math_start + 1, self.src.len),
+                        },
+                    );
+                }
+                self.pos += 1;
+                continue;
+            }
+            if (self.src[self.pos] == '=') return;
+            if (self.src[self.pos] == '\n') {
+                return self.recordErrorAtPos(error.ExpectedDefEquals);
+            }
+            self.pos += 1;
+        }
+        return self.recordErrorAtPos(error.ExpectedDefEquals);
     }
 
     fn parseProofLines(self: *Parser) ![]const ProofLine {
@@ -790,16 +904,16 @@ pub const Parser = struct {
         return self.src[text_start..text_end];
     }
 
-    fn lineLooksLikeBlockHeader(
+    fn lineLooksLikeItemHeader(
         self: *Parser,
         line_start: usize,
     ) bool {
-        if (!self.lineStartsBlockHeaderLead(line_start)) return false;
+        if (!self.lineStartsItemHeaderLead(line_start)) return false;
         self.pos = line_start;
         return true;
     }
 
-    fn lineStartsBlockHeaderLead(
+    fn lineStartsItemHeaderLead(
         self: *const Parser,
         line_start: usize,
     ) bool {
@@ -817,6 +931,9 @@ pub const Parser = struct {
         i += 1;
         while (i < self.src.len and isIdentChar(self.src[i])) : (i += 1) {}
         const ident = self.src[ident_start..i];
+        if (std.mem.eql(u8, ident, "def")) {
+            return self.lineLooksLikeDefHeader(i);
+        }
         if (std.mem.eql(u8, ident, "lemma")) {
             return self.lineLooksLikeLemmaHeader(i);
         }
@@ -829,6 +946,37 @@ pub const Parser = struct {
         if (!header_ok) return false;
         const next_start = self.nextLineStart(line_start);
         return next_start < self.src.len and self.lineIsUnderline(next_start);
+    }
+
+    fn lineLooksLikeDefHeader(
+        self: *const Parser,
+        after_keyword: usize,
+    ) bool {
+        var i = after_keyword;
+        while (i < self.src.len and isHorizontalSpace(self.src[i])) : (i += 1) {}
+        if (i >= self.src.len or !isIdentStart(self.src[i])) return false;
+        i += 1;
+        while (i < self.src.len and isIdentChar(self.src[i])) : (i += 1) {}
+
+        while (i < self.src.len) {
+            if (self.src[i] == '$') {
+                i += 1;
+                while (i < self.src.len and self.src[i] != '$') : (i += 1) {}
+                if (i >= self.src.len) return false;
+                i += 1;
+                continue;
+            }
+            if (i + 1 < self.src.len and
+                self.src[i] == '-' and
+                self.src[i + 1] == '-')
+            {
+                return false;
+            }
+            if (self.src[i] == '=') return true;
+            if (self.src[i] == '\n') return false;
+            i += 1;
+        }
+        return false;
     }
 
     fn lineLooksLikeLemmaHeader(

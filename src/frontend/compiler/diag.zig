@@ -13,7 +13,13 @@ pub const DiagnosticKind = enum {
     omitted_diagnostics,
     missing_proof_block,
     extra_proof_block,
+    extra_proof_def,
     theorem_name_mismatch,
+    missing_public_def_body,
+    public_def_body_name_mismatch,
+    public_def_body_header,
+    unexpected_proof_def,
+    unsupported_proof_def_annotation,
     duplicate_rule_name,
     parse_assertion,
     parse_binding,
@@ -332,6 +338,19 @@ pub fn missingProofBlockDiagnostic(
     };
 }
 
+pub fn extraProofDefDiagnostic(
+    name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .extra_proof_def,
+        .err = error.ExtraProofItem,
+        .source = .proof,
+        .name = name,
+        .span = span,
+    };
+}
+
 pub fn theoremNameMismatchDiagnostic(
     theorem_name: []const u8,
     block_name: []const u8,
@@ -344,6 +363,73 @@ pub fn theoremNameMismatchDiagnostic(
         .theorem_name = theorem_name,
         .block_name = block_name,
         .expected_name = theorem_name,
+        .span = span,
+    };
+}
+
+pub fn missingPublicDefBodyDiagnostic(
+    name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .missing_public_def_body,
+        .err = error.MissingPublicDefBody,
+        .source = .mm0,
+        .name = name,
+        .span = span,
+    };
+}
+
+pub fn publicDefBodyNameMismatchDiagnostic(
+    expected_name: []const u8,
+    actual_name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .public_def_body_name_mismatch,
+        .err = error.PublicDefBodyNameMismatch,
+        .source = .proof,
+        .name = actual_name,
+        .expected_name = expected_name,
+        .span = span,
+    };
+}
+
+pub fn publicDefBodyHeaderDiagnostic(
+    name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .public_def_body_header,
+        .err = error.PublicDefBodyMustBeHeaderless,
+        .source = .proof,
+        .name = name,
+        .span = span,
+    };
+}
+
+pub fn unexpectedProofDefDiagnostic(
+    name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .unexpected_proof_def,
+        .err = error.UnexpectedProofDefItem,
+        .source = .proof,
+        .name = name,
+        .span = span,
+    };
+}
+
+pub fn unsupportedProofDefAnnotationDiagnostic(
+    name: []const u8,
+    span: Span,
+) Diagnostic {
+    return .{
+        .kind = .unsupported_proof_def_annotation,
+        .err = error.UnsupportedProofDefAnnotation,
+        .source = .proof,
+        .name = name,
         .span = span,
     };
 }
@@ -619,7 +705,13 @@ pub fn diagnosticSummary(diag: Diagnostic) []const u8 {
         .omitted_diagnostics => "additional diagnostics omitted",
         .missing_proof_block => "missing proof block for theorem",
         .extra_proof_block => "extra proof block with no matching theorem",
+        .extra_proof_def => "extra proof-side definition item",
         .theorem_name_mismatch => "proof block name does not match the theorem",
+        .missing_public_def_body => "missing proof-side body for public definition",
+        .public_def_body_name_mismatch => "proof-side definition body targets a different public definition",
+        .public_def_body_header => "public definition body filler must omit the signature",
+        .unexpected_proof_def => "unexpected proof-side definition item",
+        .unsupported_proof_def_annotation => "proof-side definition annotations are not supported yet",
         .duplicate_rule_name => "duplicate rule name",
         .parse_assertion => "could not parse proof line assertion",
         .parse_binding => "could not parse binder assignment",
@@ -765,6 +857,12 @@ fn compilerErrorSummary(err: anyerror) []const u8 {
         error.ExpectedMathString,
         error.ExpectedMathStr,
         => "expected $...$ math string",
+        error.MissingPublicDefBody => "missing proof-side body for public definition",
+        error.PublicDefBodyNameMismatch => "proof-side definition body targets a different public definition",
+        error.PublicDefBodyMustBeHeaderless => "public definition body filler must omit the signature",
+        error.UnexpectedProofDefItem => "unexpected proof-side definition item",
+        error.UnsupportedProofDefAnnotation => "proof-side definition annotations are not supported yet",
+        error.ExtraProofItem => "extra proof item with no matching declaration",
         error.ExpectedKeyword => "expected keyword",
         error.ExpectedString => "expected quoted string",
         error.UnknownTerm => "unknown term",

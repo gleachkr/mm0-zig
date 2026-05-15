@@ -13,9 +13,14 @@ const SortStmt = @import("../../trusted/parse.zig").SortStmt;
 const TermStmt = @import("../../trusted/parse.zig").TermStmt;
 const MM0Parser = @import("../../trusted/parse.zig").MM0Parser;
 const MM0Stmt = @import("../../trusted/parse.zig").MM0Stmt;
-const ProofScriptParser = @import("../proof_script.zig").Parser;
-const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
-const Span = @import("../proof_script.zig").Span;
+const MathSpan = @import("../../trusted/parse.zig").MathSpan;
+const PublicStmtHeader = @import("../../trusted/parse.zig").PublicStmtHeader;
+const ProofScript = @import("../proof_script.zig");
+const ProofScriptParser = ProofScript.Parser;
+const TheoremBlock = ProofScript.TheoremBlock;
+const DefItem = ProofScript.DefItem;
+const TopLevelItem = ProofScript.TopLevelItem;
+const Span = ProofScript.Span;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const BindingValidation = @import("../binding_validation.zig");
 const CompilerEmit = @import("./emit.zig");
@@ -40,12 +45,38 @@ pub const Output = struct {
     statements: std.ArrayListUnmanaged(Statement) = .{},
 };
 
+const ProofItemStream = struct {
+    allocator: std.mem.Allocator,
+    parser: ProofScriptParser,
+    pending: std.ArrayListUnmanaged(TopLevelItem) = .{},
+
+    fn init(allocator: std.mem.Allocator, source: []const u8) ProofItemStream {
+        return .{
+            .allocator = allocator,
+            .parser = ProofScriptParser.init(allocator, source),
+        };
+    }
+
+    fn next(self: *ProofItemStream) !?TopLevelItem {
+        if (self.pending.items.len > 0) {
+            return self.pending.pop().?;
+        }
+        return try self.parser.nextItem();
+    }
+
+    fn putBack(self: *ProofItemStream, item: TopLevelItem) void {
+        self.pending.append(self.allocator, item) catch unreachable;
+    }
+};
+
 fn validateDefinitionBody(
     self: anytype,
     allocator: std.mem.Allocator,
     parser: *const MM0Parser,
     env: *const GlobalEnv,
     term_stmt: TermStmt,
+    diag_source: DiagnosticSource,
+    diag_span: ?Span,
 ) !void {
     if (!term_stmt.is_def) return;
 
@@ -66,7 +97,9 @@ fn validateDefinitionBody(
             .kind = .invalid_definition_body,
             .err = error.SortMismatch,
             .name = term_stmt.name,
-            .span = CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+            .source = diag_source,
+            .span = diag_span orelse
+                CompilerDiag.mathSpanToSpan(term_stmt.name_span),
             .detail = .{ .definition_body = .{
                 .declared_sort_name = term_stmt.ret_sort_name,
                 .actual_sort_name = body_info.sort_name,
@@ -89,7 +122,9 @@ fn validateDefinitionBody(
             .kind = .invalid_definition_body,
             .err = error.DepViolation,
             .name = term_stmt.name,
-            .span = CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+            .source = diag_source,
+            .span = diag_span orelse
+                CompilerDiag.mathSpanToSpan(term_stmt.name_span),
             .detail = .{ .definition_body = .{
                 .declared_sort_name = term_stmt.ret_sort_name,
                 .actual_sort_name = body_info.sort_name,
@@ -139,13 +174,35 @@ pub fn run(
     );
     var views = std.AutoHashMap(u32, ViewDecl).init(allocator);
     var sort_vars = SortVarRegistry.init(allocator);
-    var proof_parser = if (self.proof_source) |proof|
-        ProofScriptParser.init(allocator, proof)
+    var proof_stream = if (self.proof_source) |proof|
+        ProofItemStream.init(allocator, proof)
     else
         null;
     var last_stmt: ?MM0Stmt = null;
 
     while (true) {
+        parser.prepareNextPublicStatement() catch |err| {
+            self.setDiagnostic(CompilerDiag.mm0ParserDiagnostic(
+                &parser,
+                err,
+            ));
+            return err;
+        };
+        try drainAnchoredLocalProofItems(
+            self,
+            allocator,
+            &parser,
+            &env,
+            &registry,
+            &rule_catalog,
+            &fresh_bindings,
+            &freshen_bindings,
+            &views,
+            &sort_vars,
+            &proof_stream,
+            emit,
+        );
+
         const stmt = parser.next() catch |err| {
             self.setDiagnostic(CompilerDiag.mm0ParserDiagnostic(
                 &parser,
@@ -201,13 +258,34 @@ pub fn run(
                 };
             },
             .term => |term_stmt| {
-                const term_stmt_copy = term_stmt;
+                var filled_term_stmt = term_stmt;
+                var filled_body_span: ?Span = null;
+                if (term_stmt.is_def and term_stmt.body == null) {
+                    const filled = try fillPublicDefBody(
+                        self,
+                        allocator,
+                        &parser,
+                        &proof_stream,
+                        term_stmt,
+                    );
+                    filled_term_stmt = filled.stmt;
+                    filled_body_span = filled.body_span;
+                }
+
+                const term_stmt_copy = filled_term_stmt;
+                const term_diag_source: DiagnosticSource = if (filled_body_span != null)
+                    .proof
+                else
+                    .mm0;
+                const term_diag_span = filled_body_span;
                 validateDefinitionBody(
                     self,
                     allocator,
                     &parser,
                     &env,
-                    term_stmt,
+                    filled_term_stmt,
+                    term_diag_source,
+                    term_diag_span,
                 ) catch |err| {
                     return err;
                 };
@@ -215,7 +293,7 @@ pub fn run(
                     const term_record = CompilerEmit.compileTermRecord(
                         allocator,
                         &parser,
-                        term_stmt,
+                        filled_term_stmt,
                     ) catch |err| {
                         CompilerDiag.setIfMissing(
                             self,
@@ -228,11 +306,11 @@ pub fn run(
                         return err;
                     };
                     try out.terms.append(allocator, term_record);
-                    const body = if (term_stmt.is_def)
+                    const body = if (filled_term_stmt.is_def)
                         CompilerEmit.buildDefProofBody(
                             allocator,
                             &parser,
-                            term_stmt,
+                            filled_term_stmt,
                         ) catch |err| {
                             CompilerDiag.setIfMissing(
                                 self,
@@ -251,7 +329,7 @@ pub fn run(
                         .body = body,
                     });
                 }
-                env.addStmt(stmt) catch |err| {
+                env.addStmt(.{ .term = filled_term_stmt }) catch |err| {
                     CompilerDiag.setIfMissing(
                         self,
                         CompilerDiag.mm0StatementDiagnostic(
@@ -262,22 +340,26 @@ pub fn run(
                     );
                     return err;
                 };
-                if (term_stmt.is_def) {
-                    const term_id = env.term_names.get(term_stmt.name) orelse {
+                if (filled_term_stmt.is_def) {
+                    const term_id = env.term_names.get(
+                        filled_term_stmt.name,
+                    ) orelse {
                         return error.UnknownTerm;
                     };
                     try CompilerLints.lintUnusedDefinitionParameters(
                         self,
                         allocator,
                         &env.terms.items[term_id],
-                        CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+                        CompilerDiag.mathSpanToSpan(
+                            filled_term_stmt.name_span,
+                        ),
                         .mm0,
                     );
                 }
                 Metadata.processTermMetadata(
                     &env,
                     &registry,
-                    term_stmt,
+                    filled_term_stmt,
                     parser.last_annotations,
                 ) catch |err| {
                     CompilerDiag.setIfMissing(
@@ -303,7 +385,7 @@ pub fn run(
                     &freshen_bindings,
                     &views,
                     &sort_vars,
-                    &proof_parser,
+                    &proof_stream,
                     assertion,
                     emit,
                 ) catch |err| {
@@ -331,21 +413,409 @@ pub fn run(
         return err;
     };
 
-    if (proof_parser) |*proofs| {
-        const block = proofs.nextBlock() catch |err| {
+    if (proof_stream) |*proofs| {
+        const item = proofs.next() catch |err| {
             self.setDiagnostic(CompilerDiag.proofParserDiagnostic(
-                proofs,
+                &proofs.parser,
                 null,
                 err,
             ));
             return err;
         } orelse return;
-        self.setDiagnostic(CompilerDiag.extraProofBlockDiagnostic(
-            block.name,
-            block.name_span,
-        ));
-        return error.ExtraProofBlock;
+        return setExtraProofItemDiagnostic(self, item);
     }
+}
+
+const FilledPublicDef = struct {
+    stmt: TermStmt,
+    body_span: Span,
+};
+
+fn fillPublicDefBody(
+    self: anytype,
+    _: std.mem.Allocator,
+    parser: *MM0Parser,
+    proof_stream: *?ProofItemStream,
+    term_stmt: TermStmt,
+) !FilledPublicDef {
+    const actual_proofs = if (proof_stream.*) |*proofs|
+        proofs
+    else {
+        self.setDiagnostic(CompilerDiag.missingPublicDefBodyDiagnostic(
+            term_stmt.name,
+            CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+        ));
+        return error.MissingPublicDefBody;
+    };
+
+    const item = actual_proofs.next() catch |err| {
+        self.setDiagnostic(CompilerDiag.proofParserDiagnostic(
+            &actual_proofs.parser,
+            term_stmt.name,
+            err,
+        ));
+        return err;
+    } orelse {
+        self.setDiagnostic(CompilerDiag.missingPublicDefBodyDiagnostic(
+            term_stmt.name,
+            CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+        ));
+        return error.MissingPublicDefBody;
+    };
+
+    switch (item) {
+        .def => |def| {
+            try rejectDefAnnotations(self, def);
+            if (!std.mem.eql(u8, def.name, term_stmt.name)) {
+                self.setDiagnostic(
+                    CompilerDiag.publicDefBodyNameMismatchDiagnostic(
+                        term_stmt.name,
+                        def.name,
+                        def.name_span,
+                    ),
+                );
+                return error.PublicDefBodyNameMismatch;
+            }
+            if (def.header_tail != null) {
+                self.setDiagnostic(
+                    CompilerDiag.publicDefBodyHeaderDiagnostic(
+                        def.name,
+                        def.header_tail_span orelse def.name_span,
+                    ),
+                );
+                return error.PublicDefBodyMustBeHeaderless;
+            }
+            const body_span = proofMathTextSpan(def.body.span);
+            var filled = term_stmt;
+            filled.body = parser.parsePublicDefBodyText(
+                term_stmt,
+                def.body.text,
+                body_span,
+            ) catch |err| {
+                self.setDiagnostic(publicDefBodyParseDiagnostic(
+                    parser,
+                    def,
+                    err,
+                ));
+                return err;
+            };
+            return .{ .stmt = filled, .body_span = def.body.span };
+        },
+        .block => {
+            actual_proofs.putBack(item);
+            self.setDiagnostic(CompilerDiag.missingPublicDefBodyDiagnostic(
+                term_stmt.name,
+                CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+            ));
+            return error.MissingPublicDefBody;
+        },
+    }
+}
+
+fn proofMathTextSpan(span: Span) MathSpan {
+    return .{
+        .start = @min(span.start + 1, span.end),
+        .end = if (span.end > span.start) span.end - 1 else span.end,
+    };
+}
+
+fn publicDefBodyParseDiagnostic(
+    parser: *const MM0Parser,
+    def: DefItem,
+    err: anyerror,
+) Diagnostic {
+    var diag = Diagnostic{
+        .kind = .generic,
+        .err = err,
+        .source = .proof,
+        .name = def.name,
+        .span = CompilerDiag.mathSpanToSpanOpt(parser.diagnosticSpan()) orelse
+            def.body.span,
+    };
+    if (err == error.UnknownMathToken) {
+        if (parser.last_math_error) |math_err| {
+            switch (math_err) {
+                .unknown_token => |token| {
+                    diag.detail = .{ .unknown_math_token = .{
+                        .token = token.text,
+                    } };
+                },
+                else => {},
+            }
+        }
+    }
+    return diag;
+}
+
+fn setExtraProofItemDiagnostic(self: anytype, item: TopLevelItem) anyerror {
+    switch (item) {
+        .block => |block| {
+            self.setDiagnostic(
+                CompilerDiag.extraProofBlockDiagnostic(block.name, block.name_span),
+            );
+            return error.ExtraProofBlock;
+        },
+        .def => |def| {
+            self.setDiagnostic(
+                CompilerDiag.extraProofDefDiagnostic(def.name, def.name_span),
+            );
+            return error.ExtraProofItem;
+        },
+    }
+}
+
+fn drainAnchoredLocalProofItems(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *GlobalEnv,
+    registry: *RewriteRegistry,
+    rule_catalog: *const RuleCatalog.Catalog,
+    fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
+    views: *std.AutoHashMap(u32, ViewDecl),
+    sort_vars: *const SortVarRegistry,
+    proof_stream: *?ProofItemStream,
+    emit: ?*Output,
+) !void {
+    const proofs = if (proof_stream.*) |*actual| actual else return;
+    const header = parser.peekNextPublicStmtHeader() orelse return;
+
+    var locals = std.ArrayListUnmanaged(TopLevelItem){};
+    defer locals.deinit(allocator);
+
+    while (true) {
+        const item = proofs.next() catch |err| {
+            self.setDiagnostic(CompilerDiag.proofParserDiagnostic(
+                &proofs.parser,
+                header.name,
+                err,
+            ));
+            return err;
+        } orelse {
+            putBackItems(proofs, locals.items);
+            return;
+        };
+
+        if (isLocalProofItem(item)) {
+            try locals.append(allocator, item);
+            continue;
+        }
+
+        const matches = locals.items.len > 0 and anchorMatches(header, item);
+        if (!matches) {
+            proofs.putBack(item);
+            putBackItems(proofs, locals.items);
+            return;
+        }
+
+        proofs.putBack(item);
+        for (locals.items) |local| {
+            try processLocalProofItem(
+                self,
+                allocator,
+                parser,
+                env,
+                registry,
+                rule_catalog,
+                fresh_bindings,
+                freshen_bindings,
+                views,
+                sort_vars,
+                local,
+                emit,
+            );
+        }
+        return;
+    }
+}
+
+fn putBackItems(proofs: *ProofItemStream, items: []const TopLevelItem) void {
+    var idx = items.len;
+    while (idx > 0) {
+        idx -= 1;
+        proofs.putBack(items[idx]);
+    }
+}
+
+fn isLocalProofItem(item: TopLevelItem) bool {
+    return switch (item) {
+        .block => |block| block.kind == .lemma,
+        .def => |def| def.header_tail != null,
+    };
+}
+
+fn anchorMatches(header: PublicStmtHeader, item: TopLevelItem) bool {
+    switch (item) {
+        .block => |block| {
+            if (block.kind != .theorem) return false;
+            if (header.kind != .theorem) return false;
+            const name = header.name orelse return false;
+            return std.mem.eql(u8, name, block.name);
+        },
+        .def => |def| {
+            if (def.header_tail != null) return false;
+            if (header.kind != .def) return false;
+            const name = header.name orelse return false;
+            return std.mem.eql(u8, name, def.name);
+        },
+    }
+}
+
+fn processLocalProofItem(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *GlobalEnv,
+    registry: *RewriteRegistry,
+    rule_catalog: *const RuleCatalog.Catalog,
+    fresh_bindings: *std.AutoHashMap(u32, []const FreshDecl),
+    freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
+    views: *std.AutoHashMap(u32, ViewDecl),
+    sort_vars: *const SortVarRegistry,
+    item: TopLevelItem,
+    emit: ?*Output,
+) !void {
+    switch (item) {
+        .block => |block| try processLocalProofBlock(
+            self,
+            allocator,
+            parser,
+            env,
+            registry,
+            rule_catalog,
+            fresh_bindings,
+            freshen_bindings,
+            views,
+            sort_vars,
+            block,
+            emit,
+        ),
+        .def => |def| try processLocalDefItem(
+            self,
+            allocator,
+            parser,
+            env,
+            def,
+            emit,
+        ),
+    }
+}
+
+fn processLocalDefItem(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    parser: *MM0Parser,
+    env: *GlobalEnv,
+    def: DefItem,
+    emit: ?*Output,
+) !void {
+    try rejectDefAnnotations(self, def);
+
+    const header_tail = def.header_tail orelse {
+        self.setDiagnostic(CompilerDiag.unexpectedProofDefDiagnostic(
+            def.name,
+            def.name_span,
+        ));
+        return error.UnexpectedProofDefItem;
+    };
+    const term_stmt = parser.parseLocalDefText(
+        def.name,
+        .{ .start = def.name_span.start, .end = def.name_span.end },
+        header_tail,
+        def.body.text,
+        proofMathTextSpan(def.body.span),
+    ) catch |err| {
+        self.setDiagnostic(localDefParseDiagnostic(parser, def, err));
+        return err;
+    };
+
+    validateDefinitionBody(
+        self,
+        allocator,
+        parser,
+        env,
+        term_stmt,
+        .proof,
+        def.body.span,
+    ) catch |err| return err;
+
+    if (emit) |out| {
+        const term_record = CompilerEmit.compileTermRecord(
+            allocator,
+            parser,
+            term_stmt,
+        ) catch |err| {
+            self.setDiagnostic(localDefParseDiagnostic(parser, def, err));
+            return err;
+        };
+        try out.terms.append(allocator, term_record);
+        const body = CompilerEmit.buildDefProofBody(
+            allocator,
+            parser,
+            term_stmt,
+        ) catch |err| {
+            self.setDiagnostic(localDefParseDiagnostic(parser, def, err));
+            return err;
+        };
+        try out.statements.append(allocator, .{
+            .cmd = .LocalDef,
+            .body = body,
+        });
+    }
+
+    env.addStmt(.{ .term = term_stmt }) catch |err| {
+        self.setDiagnostic(localDefParseDiagnostic(parser, def, err));
+        return err;
+    };
+
+    const term_id = env.term_names.get(term_stmt.name) orelse {
+        return error.UnknownTerm;
+    };
+    try CompilerLints.lintUnusedDefinitionParameters(
+        self,
+        allocator,
+        &env.terms.items[term_id],
+        def.name_span,
+        .proof,
+    );
+}
+
+fn rejectDefAnnotations(self: anytype, def: DefItem) !void {
+    if (def.annotations.len == 0) return;
+    self.setDiagnostic(CompilerDiag.unsupportedProofDefAnnotationDiagnostic(
+        def.name,
+        def.name_span,
+    ));
+    return error.UnsupportedProofDefAnnotation;
+}
+
+fn localDefParseDiagnostic(
+    parser: *const MM0Parser,
+    def: DefItem,
+    err: anyerror,
+) Diagnostic {
+    var diag = Diagnostic{
+        .kind = .generic,
+        .err = err,
+        .source = .proof,
+        .name = def.name,
+        .span = CompilerDiag.mathSpanToSpanOpt(parser.diagnosticSpan()) orelse
+            def.name_span,
+    };
+    if (err == error.UnknownMathToken) {
+        if (parser.last_math_error) |math_err| {
+            switch (math_err) {
+                .unknown_token => |token| {
+                    diag.detail = .{ .unknown_math_token = .{
+                        .token = token.text,
+                    } };
+                },
+                else => {},
+            }
+        }
+    }
+    return diag;
 }
 
 const FreshBindingMap = std.AutoHashMap(u32, []const FreshDecl);
@@ -353,9 +823,11 @@ const FreshenBindingMap = std.AutoHashMap(u32, []const FreshenDecl);
 const ViewMap = std.AutoHashMap(u32, ViewDecl);
 
 const ProofAnalysisState = struct {
+    allocator: std.mem.Allocator,
     invalid_rules: InvalidRuleSet,
+    invalid_terms: InvalidRuleSet,
     parser: ProofScriptParser,
-    pending_block: ?TheoremBlock = null,
+    pending: std.ArrayListUnmanaged(TopLevelItem) = .{},
     exhausted: bool = false,
     stream_aborted: bool = false,
 
@@ -364,9 +836,22 @@ const ProofAnalysisState = struct {
         source: []const u8,
     ) ProofAnalysisState {
         return .{
+            .allocator = allocator,
             .invalid_rules = InvalidRuleSet.init(allocator),
+            .invalid_terms = InvalidRuleSet.init(allocator),
             .parser = ProofScriptParser.init(allocator, source),
         };
+    }
+
+    fn nextItem(self: *ProofAnalysisState) !?TopLevelItem {
+        if (self.pending.items.len > 0) {
+            return self.pending.pop().?;
+        }
+        return try self.parser.nextItem();
+    }
+
+    fn putBack(self: *ProofAnalysisState, item: TopLevelItem) void {
+        self.pending.append(self.allocator, item) catch unreachable;
     }
 };
 
@@ -380,6 +865,7 @@ const AnalysisState = struct {
     views: ViewMap,
     sort_vars: SortVarRegistry,
     invalid_assertions: InvalidRuleSet,
+    invalid_terms: InvalidRuleSet,
     proof: ?ProofAnalysisState = null,
     last_stmt: ?MM0Stmt = null,
 
@@ -400,6 +886,7 @@ const AnalysisState = struct {
             .views = ViewMap.init(allocator),
             .sort_vars = SortVarRegistry.init(allocator),
             .invalid_assertions = InvalidRuleSet.init(allocator),
+            .invalid_terms = InvalidRuleSet.init(allocator),
             .proof = if (with_proof)
                 if (proof_source) |proof|
                     ProofAnalysisState.init(allocator, proof)
@@ -543,6 +1030,19 @@ fn analyzeInternal(
     );
 
     parse_loop: while (true) {
+        state.parser.prepareNextPublicStatement() catch |err| {
+            if (!recoverFromMm0ParseFailure(self, &state.parser, err)) {
+                return;
+            }
+            continue :parse_loop;
+        };
+        if (with_proof) {
+            try analyzeDrainAnchoredLocalProofItems(
+                self,
+                allocator,
+                &state,
+            );
+        }
         const next_stmt = state.parser.next() catch |err| {
             if (!recoverFromMm0ParseFailure(self, &state.parser, err)) {
                 return;
@@ -608,6 +1108,237 @@ fn analyzeInternal(
     }
 }
 
+fn analyzeDrainAnchoredLocalProofItems(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    state: *AnalysisState,
+) !void {
+    const proof = if (state.proof) |*actual| actual else return;
+    const header = state.parser.peekNextPublicStmtHeader() orelse return;
+    if (!analysisProofStreamLooksLocal(proof)) return;
+
+    var locals = std.ArrayListUnmanaged(TopLevelItem){};
+    defer locals.deinit(allocator);
+
+    while (true) {
+        const item = proof.nextItem() catch |err| {
+            self.addPrimaryDiagnostic(CompilerDiag.proofParserDiagnostic(
+                &proof.parser,
+                header.name,
+                err,
+            ));
+            if (!proof.parser.recoverToNextItemBoundary()) {
+                proof.exhausted = true;
+                putBackAnalysisItems(proof, locals.items);
+                return;
+            }
+            continue;
+        } orelse {
+            proof.exhausted = true;
+            putBackAnalysisItems(proof, locals.items);
+            return;
+        };
+
+        if (isLocalProofItem(item)) {
+            try locals.append(allocator, item);
+            continue;
+        }
+
+        const matches = locals.items.len > 0 and anchorMatches(header, item);
+        if (!matches) {
+            proof.putBack(item);
+            putBackAnalysisItems(proof, locals.items);
+            return;
+        }
+
+        proof.putBack(item);
+        for (locals.items) |local| {
+            try analyzeLocalProofItem(self, allocator, state, proof, local);
+        }
+        return;
+    }
+}
+
+fn analysisProofStreamLooksLocal(proof: *const ProofAnalysisState) bool {
+    if (proof.pending.items.len > 0) {
+        return isLocalProofItem(proof.pending.items[proof.pending.items.len - 1]);
+    }
+    return proofNextItemLooksLocal(&proof.parser);
+}
+
+fn proofNextItemLooksLocal(parser: *const ProofScriptParser) bool {
+    const src = parser.src;
+    var pos = parser.pos;
+    while (pos < src.len) {
+        while (pos < src.len and
+            (src[pos] == ' ' or src[pos] == '\t' or src[pos] == '\r' or
+                src[pos] == '\n'))
+        {
+            pos += 1;
+        }
+        if (pos + 1 < src.len and src[pos] == '-' and src[pos + 1] == '-') {
+            while (pos < src.len and src[pos] != '\n') pos += 1;
+            continue;
+        }
+        break;
+    }
+    const word_start = pos;
+    while (pos < src.len and isProofIdentChar(src[pos])) pos += 1;
+    const word = src[word_start..pos];
+    if (std.mem.eql(u8, word, "lemma")) return true;
+    if (!std.mem.eql(u8, word, "def")) return false;
+
+    while (pos < src.len and (src[pos] == ' ' or src[pos] == '\t')) pos += 1;
+    while (pos < src.len and isProofIdentChar(src[pos])) pos += 1;
+    const tail_start = pos;
+    while (pos < src.len and src[pos] != '=' and src[pos] != '\n') pos += 1;
+    if (pos >= src.len or src[pos] != '=') return false;
+    return std.mem.trim(u8, src[tail_start..pos], " \t\r").len != 0;
+}
+
+fn isProofIdentChar(ch: u8) bool {
+    return std.ascii.isAlphanumeric(ch) or ch == '_';
+}
+
+fn putBackAnalysisItems(
+    proof: *ProofAnalysisState,
+    items: []const TopLevelItem,
+) void {
+    var idx = items.len;
+    while (idx > 0) {
+        idx -= 1;
+        proof.putBack(items[idx]);
+    }
+}
+
+fn analyzeLocalProofItem(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    state: *AnalysisState,
+    proof: *ProofAnalysisState,
+    item: TopLevelItem,
+) !void {
+    switch (item) {
+        .block => |block| try analyzeLocalProofBlock(
+            self,
+            allocator,
+            state,
+            proof,
+            block,
+        ),
+        .def => |def| try analyzeLocalDefItem(
+            self,
+            allocator,
+            state,
+            proof,
+            def,
+        ),
+    }
+}
+
+fn analyzeLocalProofBlock(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    state: *AnalysisState,
+    proof: *ProofAnalysisState,
+    block: TheoremBlock,
+) !void {
+    const warnings = WarningSnapshot.capture(self);
+    processLocalProofBlock(
+        self,
+        allocator,
+        &state.parser,
+        &state.env,
+        &state.registry,
+        &state.rule_catalog,
+        &state.fresh_bindings,
+        &state.freshen_bindings,
+        &state.views,
+        &state.sort_vars,
+        block,
+        null,
+    ) catch |err| {
+        warnings.restore(self);
+        recordPrimaryProofFailure(
+            self,
+            &proof.invalid_rules,
+            CompilerDiag.proofBlockDiagnostic(
+                block.name,
+                block.header_span,
+                err,
+            ),
+        );
+        try proof.invalid_rules.put(block.name, {});
+        return;
+    };
+}
+
+fn analyzeLocalDefItem(
+    self: anytype,
+    allocator: std.mem.Allocator,
+    state: *AnalysisState,
+    proof: *ProofAnalysisState,
+    def: DefItem,
+) !void {
+    const warnings = WarningSnapshot.capture(self);
+    const snapshot = try TermRecoverySnapshot.capture(allocator, state);
+    const parser_term_count = state.parser.terms.items.len;
+
+    processLocalDefItem(
+        self,
+        allocator,
+        &state.parser,
+        &state.env,
+        def,
+        null,
+    ) catch |err| {
+        warnings.restore(self);
+        snapshot.restore(state);
+        try discardFailedLocalTerm(
+            &state.env,
+            &state.parser,
+            parser_term_count,
+            def.name,
+        );
+        try proof.invalid_terms.put(def.name, {});
+        recordPrimaryLocalDefFailure(self, def, err);
+        return;
+    };
+}
+
+fn discardFailedLocalTerm(
+    env: *GlobalEnv,
+    parser: *const MM0Parser,
+    parser_term_count: usize,
+    name: []const u8,
+) !void {
+    if (parser.terms.items.len <= parser_term_count) return;
+    while (env.terms.items.len + 1 < parser.terms.items.len) {
+        try env.appendInvalidTerm(name);
+    }
+    if (env.terms.items.len < parser.terms.items.len) {
+        try env.appendInvalidTerm(name);
+    } else {
+        env.invalidateLastTerm(name);
+    }
+}
+
+fn recordPrimaryLocalDefFailure(
+    self: anytype,
+    def: DefItem,
+    err: anyerror,
+) void {
+    const diag = self.last_diagnostic orelse Diagnostic{
+        .kind = .generic,
+        .err = err,
+        .source = .proof,
+        .name = def.name,
+        .span = def.name_span,
+    };
+    self.last_diagnostic = null;
+    self.addPrimaryDiagnostic(diag);
+}
+
 fn analyzeSortStatement(
     self: anytype,
     allocator: std.mem.Allocator,
@@ -647,34 +1378,69 @@ fn analyzeTermStatement(
     warnings: WarningSnapshot,
 ) !void {
     const snapshot = try TermRecoverySnapshot.capture(allocator, state);
+    var actual_stmt = term_stmt;
+    var proof_body_span: ?Span = null;
 
-    switch (validateTermDependencies(&state.env, term_stmt)) {
+    if (term_stmt.is_def and term_stmt.body == null) {
+        const filled = try analyzeFillPublicDefBody(self, state, term_stmt);
+        if (filled == null) {
+            warnings.restore(self);
+            snapshot.restore(state);
+            try snapshot.discardTerm(&state.env, term_stmt.name);
+            try state.invalid_terms.put(term_stmt.name, {});
+            recordPrimaryStatementFailure(self, &state.parser, stmt, error.InvalidTerm);
+            return;
+        }
+        actual_stmt = filled.?.stmt;
+        proof_body_span = filled.?.body_span;
+    }
+
+    switch (validateTermDependencies(&state.env, actual_stmt)) {
         .ok => {},
         .blocked => {
             warnings.restore(self);
             snapshot.restore(state);
-            try state.env.appendInvalidTerm(term_stmt.name);
+            try snapshot.discardTerm(&state.env, actual_stmt.name);
+            try state.invalid_terms.put(actual_stmt.name, {});
             return;
         },
     }
 
-    state.env.addStmt(stmt) catch |err| {
+    validateDefinitionBody(
+        self,
+        allocator,
+        &state.parser,
+        &state.env,
+        actual_stmt,
+        if (proof_body_span != null) .proof else .mm0,
+        proof_body_span,
+    ) catch |err| {
         warnings.restore(self);
         snapshot.restore(state);
-        try snapshot.discardTerm(&state.env, term_stmt.name);
+        try snapshot.discardTerm(&state.env, actual_stmt.name);
+        try state.invalid_terms.put(actual_stmt.name, {});
         recordPrimaryStatementFailure(self, &state.parser, stmt, err);
         return;
     };
 
-    if (term_stmt.is_def) {
-        const term_id = state.env.term_names.get(term_stmt.name) orelse {
+    state.env.addStmt(.{ .term = actual_stmt }) catch |err| {
+        warnings.restore(self);
+        snapshot.restore(state);
+        try snapshot.discardTerm(&state.env, actual_stmt.name);
+        try state.invalid_terms.put(actual_stmt.name, {});
+        recordPrimaryStatementFailure(self, &state.parser, stmt, err);
+        return;
+    };
+
+    if (actual_stmt.is_def) {
+        const term_id = state.env.term_names.get(actual_stmt.name) orelse {
             return error.UnknownTerm;
         };
         try CompilerLints.lintUnusedDefinitionParameters(
             self,
             allocator,
             &state.env.terms.items[term_id],
-            CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+            CompilerDiag.mathSpanToSpan(actual_stmt.name_span),
             .mm0,
         );
     }
@@ -682,14 +1448,104 @@ fn analyzeTermStatement(
     Metadata.processTermMetadata(
         &state.env,
         &state.registry,
-        term_stmt,
+        actual_stmt,
         state.parser.last_annotations,
     ) catch |err| {
         warnings.restore(self);
         snapshot.restore(state);
-        try snapshot.discardTerm(&state.env, term_stmt.name);
+        try snapshot.discardTerm(&state.env, actual_stmt.name);
+        try state.invalid_terms.put(actual_stmt.name, {});
         recordPrimaryStatementFailure(self, &state.parser, stmt, err);
     };
+}
+
+fn analyzeFillPublicDefBody(
+    self: anytype,
+    state: *AnalysisState,
+    term_stmt: TermStmt,
+) !?FilledPublicDef {
+    const proof = if (state.proof) |*actual| actual else {
+        self.setDiagnostic(CompilerDiag.missingPublicDefBodyDiagnostic(
+            term_stmt.name,
+            CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+        ));
+        return null;
+    };
+
+    const item = proof.nextItem() catch |err| {
+        self.setDiagnostic(CompilerDiag.proofParserDiagnostic(
+            &proof.parser,
+            term_stmt.name,
+            err,
+        ));
+        if (!proof.parser.recoverToNextItemBoundary()) {
+            proof.exhausted = true;
+        }
+        return null;
+    } orelse {
+        proof.exhausted = true;
+        self.setDiagnostic(CompilerDiag.missingPublicDefBodyDiagnostic(
+            term_stmt.name,
+            CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+        ));
+        return null;
+    };
+
+    switch (item) {
+        .def => |def| {
+            if (def.annotations.len != 0) {
+                self.setDiagnostic(
+                    CompilerDiag.unsupportedProofDefAnnotationDiagnostic(
+                        def.name,
+                        def.name_span,
+                    ),
+                );
+                return null;
+            }
+            if (!std.mem.eql(u8, def.name, term_stmt.name)) {
+                self.setDiagnostic(
+                    CompilerDiag.publicDefBodyNameMismatchDiagnostic(
+                        term_stmt.name,
+                        def.name,
+                        def.name_span,
+                    ),
+                );
+                return null;
+            }
+            if (def.header_tail != null) {
+                self.setDiagnostic(
+                    CompilerDiag.publicDefBodyHeaderDiagnostic(
+                        def.name,
+                        def.header_tail_span orelse def.name_span,
+                    ),
+                );
+                return null;
+            }
+            const body_span = proofMathTextSpan(def.body.span);
+            var filled = term_stmt;
+            filled.body = state.parser.parsePublicDefBodyText(
+                term_stmt,
+                def.body.text,
+                body_span,
+            ) catch |err| {
+                self.setDiagnostic(publicDefBodyParseDiagnostic(
+                    &state.parser,
+                    def,
+                    err,
+                ));
+                return null;
+            };
+            return .{ .stmt = filled, .body_span = def.body.span };
+        },
+        .block => {
+            proof.putBack(item);
+            self.setDiagnostic(CompilerDiag.missingPublicDefBodyDiagnostic(
+                term_stmt.name,
+                CompilerDiag.mathSpanToSpan(term_stmt.name_span),
+            ));
+            return null;
+        },
+    }
 }
 
 fn analyzeAssertionStatement(
@@ -798,7 +1654,7 @@ fn analyzeAssertionStatement(
         }
     }
 
-    var no_proof_parser: ?ProofScriptParser = null;
+    var no_proof_parser: ?ProofItemStream = null;
     processAssertion(
         self,
         allocator,
@@ -866,7 +1722,7 @@ fn analyzeTheoremProof(
     if (proof.stream_aborted) {
         return null;
     }
-    if (proof.exhausted and proof.pending_block == null) {
+    if (proof.exhausted and proof.pending.items.len == 0) {
         self.addPrimaryDiagnostic(CompilerDiag.missingProofBlockDiagnostic(
             assertion.name,
             theorem_name_span,
@@ -876,7 +1732,7 @@ fn analyzeTheoremProof(
 
     var saw_parse_error = false;
     while (true) {
-        const block = takePendingOrNextProofBlock(proof) catch |err| {
+        const item = proof.nextItem() catch |err| {
             const suppressed = shouldSuppressProofParseFailure(
                 &proof.parser,
                 &proof.invalid_rules,
@@ -891,7 +1747,7 @@ fn analyzeTheoremProof(
                 );
                 saw_parse_error = true;
             }
-            if (!proof.parser.recoverToNextBlockBoundary()) {
+            if (!proof.parser.recoverToNextItemBoundary()) {
                 proof.exhausted = true;
                 if (suppressed) {
                     self.addPrimaryDiagnostic(
@@ -921,94 +1777,109 @@ fn analyzeTheoremProof(
             return null;
         };
 
-        if (block.kind == .lemma) {
-            const warnings = WarningSnapshot.capture(self);
-            processLocalProofBlock(
-                self,
-                allocator,
-                parser,
-                env,
-                registry,
-                rule_catalog,
-                fresh_bindings,
-                freshen_bindings,
-                views,
-                sort_vars,
-                block,
-                null,
-            ) catch |err| {
-                warnings.restore(self);
-                recordPrimaryProofFailure(
-                    self,
-                    &proof.invalid_rules,
-                    CompilerDiag.proofBlockDiagnostic(
-                        block.name,
-                        block.header_span,
-                        err,
-                    ),
-                );
-                try proof.invalid_rules.put(block.name, {});
-                continue;
-            };
-            continue;
-        }
-
-        if (!std.mem.eql(u8, block.name, assertion.name)) {
-            if (proof.invalid_rules.contains(block.name)) {
-                continue;
-            }
-            proof.pending_block = block;
-            if (!saw_parse_error) {
+        switch (item) {
+            .def => |def| {
                 self.addPrimaryDiagnostic(
-                    CompilerDiag.theoremNameMismatchDiagnostic(
-                        assertion.name,
-                        block.name,
-                        block.name_span,
+                    CompilerDiag.unexpectedProofDefDiagnostic(
+                        def.name,
+                        def.name_span,
                     ),
                 );
-            }
-            return null;
+                return null;
+            },
+            .block => |block| {
+                if (block.kind == .lemma) {
+                    const warnings = WarningSnapshot.capture(self);
+                    processLocalProofBlock(
+                        self,
+                        allocator,
+                        parser,
+                        env,
+                        registry,
+                        rule_catalog,
+                        fresh_bindings,
+                        freshen_bindings,
+                        views,
+                        sort_vars,
+                        block,
+                        null,
+                    ) catch |err| {
+                        warnings.restore(self);
+                        recordPrimaryProofFailure(
+                            self,
+                            &proof.invalid_rules,
+                            CompilerDiag.proofBlockDiagnostic(
+                                block.name,
+                                block.header_span,
+                                err,
+                            ),
+                        );
+                        try proof.invalid_rules.put(block.name, {});
+                        continue;
+                    };
+                    continue;
+                }
+
+                if (!std.mem.eql(u8, block.name, assertion.name)) {
+                    if (proof.invalid_rules.contains(block.name)) {
+                        continue;
+                    }
+                    proof.putBack(item);
+                    if (!saw_parse_error) {
+                        self.addPrimaryDiagnostic(
+                            CompilerDiag.theoremNameMismatchDiagnostic(
+                                assertion.name,
+                                block.name,
+                                block.name_span,
+                            ),
+                        );
+                    }
+                    return null;
+                }
+
+                const warnings = WarningSnapshot.capture(self);
+                var theorem = TheoremContext.init(allocator);
+                defer theorem.deinit();
+
+                try theorem.seedAssertion(assertion);
+                const theorem_concl = try theorem.internParsedExpr(
+                    assertion.concl,
+                );
+                _ = Check.checkTheoremBlock(
+                    self,
+                    allocator,
+                    parser,
+                    env,
+                    registry,
+                    rule_catalog,
+                    fresh_bindings,
+                    freshen_bindings,
+                    views,
+                    sort_vars,
+                    assertion,
+                    block,
+                    &theorem,
+                    theorem_concl,
+                ) catch |err| {
+                    warnings.restore(self);
+                    recordPrimaryProofFailure(
+                        self,
+                        &proof.invalid_rules,
+                        CompilerDiag.theoremDiagnostic(
+                            assertion.name,
+                            block.name_span,
+                            .proof,
+                            err,
+                        ),
+                    );
+                    return null;
+                };
+
+                return .{
+                    .warnings = warnings,
+                };
+            },
         }
-
-        const warnings = WarningSnapshot.capture(self);
-        var theorem = TheoremContext.init(allocator);
-        defer theorem.deinit();
-
-        try theorem.seedAssertion(assertion);
-        const theorem_concl = try theorem.internParsedExpr(assertion.concl);
-        _ = Check.checkTheoremBlock(
-            self,
-            allocator,
-            parser,
-            env,
-            registry,
-            rule_catalog,
-            fresh_bindings,
-            freshen_bindings,
-            views,
-            sort_vars,
-            assertion,
-            block,
-            &theorem,
-            theorem_concl,
-        ) catch |err| {
-            warnings.restore(self);
-            recordPrimaryProofFailure(
-                self,
-                &proof.invalid_rules,
-                CompilerDiag.theoremDiagnostic(
-                    assertion.name,
-                    block.name_span,
-                    .proof,
-                    err,
-                ),
-            );
-            return null;
-        };
-
-        return .{
-            .warnings = warnings,
-        };
     }
 }
 
@@ -1016,10 +1887,10 @@ fn analyzeExtraProofBlocks(
     self: anytype,
     proof: *ProofAnalysisState,
 ) !void {
-    if (proof.exhausted and proof.pending_block == null) return;
+    if (proof.exhausted and proof.pending.items.len == 0) return;
 
     while (true) {
-        const block = takePendingOrNextProofBlock(proof) catch |err| {
+        const item = proof.nextItem() catch |err| {
             if (!shouldSuppressProofParseFailure(
                 &proof.parser,
                 &proof.invalid_rules,
@@ -1032,29 +1903,32 @@ fn analyzeExtraProofBlocks(
                     ),
                 );
             }
-            if (!proof.parser.recoverToNextBlockBoundary()) {
+            if (!proof.parser.recoverToNextItemBoundary()) {
                 return;
             }
             continue;
         } orelse return;
-        if (proof.invalid_rules.contains(block.name)) {
-            continue;
+        switch (item) {
+            .block => |block| {
+                if (proof.invalid_rules.contains(block.name)) {
+                    continue;
+                }
+                self.addPrimaryDiagnostic(CompilerDiag.extraProofBlockDiagnostic(
+                    block.name,
+                    block.name_span,
+                ));
+            },
+            .def => |def| {
+                if (proof.invalid_terms.contains(def.name)) {
+                    continue;
+                }
+                self.addPrimaryDiagnostic(CompilerDiag.extraProofDefDiagnostic(
+                    def.name,
+                    def.name_span,
+                ));
+            },
         }
-        self.addPrimaryDiagnostic(CompilerDiag.extraProofBlockDiagnostic(
-            block.name,
-            block.name_span,
-        ));
     }
-}
-
-fn takePendingOrNextProofBlock(
-    proof: *ProofAnalysisState,
-) !?TheoremBlock {
-    if (proof.pending_block) |pending| {
-        proof.pending_block = null;
-        return pending;
-    }
-    return try proof.parser.nextBlock();
 }
 
 fn processAssertion(
@@ -1068,7 +1942,7 @@ fn processAssertion(
     freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
     views: *std.AutoHashMap(u32, ViewDecl),
     sort_vars: *SortVarRegistry,
-    proof_parser: *?ProofScriptParser,
+    proof_parser: *?ProofItemStream,
     assertion: AssertionStmt,
     emit: ?*Output,
 ) !void {
@@ -1296,15 +2170,15 @@ fn nextTheoremBlock(
     freshen_bindings: *std.AutoHashMap(u32, []const FreshenDecl),
     views: *std.AutoHashMap(u32, ViewDecl),
     sort_vars: *const SortVarRegistry,
-    proofs: *ProofScriptParser,
+    proofs: *ProofItemStream,
     theorem_name: []const u8,
     theorem_name_span: Span,
     emit: ?*Output,
 ) !TheoremBlock {
     while (true) {
-        const block = proofs.nextBlock() catch |err| {
+        const item = proofs.next() catch |err| {
             self.setDiagnostic(CompilerDiag.proofParserDiagnostic(
-                proofs,
+                &proofs.parser,
                 theorem_name,
                 err,
             ));
@@ -1316,32 +2190,45 @@ fn nextTheoremBlock(
             ));
             return error.MissingProofBlock;
         };
-        if (block.kind == .lemma) {
-            try processLocalProofBlock(
-                self,
-                allocator,
-                parser,
-                env,
-                registry,
-                rule_catalog,
-                fresh_bindings,
-                freshen_bindings,
-                views,
-                sort_vars,
-                block,
-                emit,
-            );
-            continue;
+        switch (item) {
+            .block => |block| {
+                if (block.kind == .lemma) {
+                    try processLocalProofBlock(
+                        self,
+                        allocator,
+                        parser,
+                        env,
+                        registry,
+                        rule_catalog,
+                        fresh_bindings,
+                        freshen_bindings,
+                        views,
+                        sort_vars,
+                        block,
+                        emit,
+                    );
+                    continue;
+                }
+                if (!std.mem.eql(u8, block.name, theorem_name)) {
+                    self.setDiagnostic(
+                        CompilerDiag.theoremNameMismatchDiagnostic(
+                            theorem_name,
+                            block.name,
+                            block.name_span,
+                        ),
+                    );
+                    return error.TheoremNameMismatch;
+                }
+                return block;
+            },
+            .def => |def| {
+                self.setDiagnostic(CompilerDiag.unexpectedProofDefDiagnostic(
+                    def.name,
+                    def.name_span,
+                ));
+                return error.UnexpectedProofDefItem;
+            },
         }
-        if (!std.mem.eql(u8, block.name, theorem_name)) {
-            self.setDiagnostic(CompilerDiag.theoremNameMismatchDiagnostic(
-                theorem_name,
-                block.name,
-                block.name_span,
-            ));
-            return error.TheoremNameMismatch;
-        }
-        return block;
     }
 }
 
