@@ -324,6 +324,14 @@ pub fn build(b: *std.Build) void {
         b.path("tests/proof_cases/peano.auf"),
         "web-demo/fixtures/peano.auf",
     );
+    const install_euclid_mm0 = b.addInstallFile(
+        b.path("tests/proof_cases/euclid.mm0"),
+        "web-demo/fixtures/euclid.mm0",
+    );
+    const install_euclid_proof = b.addInstallFile(
+        b.path("tests/proof_cases/euclid.auf"),
+        "web-demo/fixtures/euclid.auf",
+    );
     const install_smullyan_mm0 = b.addInstallFile(
         b.path("tests/proof_cases/smullyan.mm0"),
         "web-demo/fixtures/smullyan.mm0",
@@ -390,6 +398,8 @@ pub fn build(b: *std.Build) void {
     web_demo_step.dependOn(&install_martin_lof_proof.step);
     web_demo_step.dependOn(&install_peano_mm0.step);
     web_demo_step.dependOn(&install_peano_proof.step);
+    web_demo_step.dependOn(&install_euclid_mm0.step);
+    web_demo_step.dependOn(&install_euclid_proof.step);
     web_demo_step.dependOn(&install_smullyan_mm0.step);
     web_demo_step.dependOn(&install_smullyan_proof.step);
     web_demo_step.dependOn(&install_zermelo_mm0.step);

@@ -109,6 +109,11 @@ const examples = {
     mm0: "./fixtures/peano.mm0",
     proof: "./fixtures/peano.auf",
   },
+  euclid: {
+    label: "euclid",
+    mm0: "./fixtures/euclid.mm0",
+    proof: "./fixtures/euclid.auf",
+  },
   smullyan: {
     label: "smullyan",
     mm0: "./fixtures/smullyan.mm0",

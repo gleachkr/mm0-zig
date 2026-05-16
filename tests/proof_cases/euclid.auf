@@ -1,0 +1,1265 @@
+lt_congr_eq
+-----------
+l1: $ suc a = suc b $ by suc_congr_eq [#1]
+l2: $ (a < c) ↔ (b < d) $ by le_congr_eq [l1, #2]
+
+le_iff_add
+----------
+l1: $ x + k = y ⊢ x + k = y $ by ax
+l2: $ x + k = y ⊢ ∃ k (x + k = y) $
+  by ex_intro (t := $ k $) [l1]
+l3: $ g ⊢ ∃ k (x + k = y) $
+  by ex_elim (x := $ k $) [#1, l2]
+
+le_from_add
+-----------
+l1: $ g ⊢ x ≤ y $ by ex_intro [#1]
+
+eq_sym_nd
+---------
+-- Given a derivation of  g ⊢ a = b,  produce  g ⊢ b = a.
+l1: $ g ⊢ a = a $ by eq_intro_nd
+-- eq_replace yields  g , g ⊢ b = a,  which ACUI normalises to g ⊢ b = a.
+l2: $ g ⊢ b = a $
+  by eq_replace [#1, l1]
+
+no_suc_eq_self
+--------------
+l1: $ _ ⊢ ¬ suc 0 = 0 $ by peano1
+l2: $ ¬ suc n = n ⊢ ¬ suc n = n $ by ax
+l3: $ suc (suc n) = suc n ⊢ suc (suc n) = suc n $ by ax
+l4: $ _ ⊢ suc (suc n) = suc n → suc n = n $ by peano2
+l5: $ suc (suc n) = suc n ⊢ suc n = n $ by imp_elim [l4, l3]
+l6: $ ¬ suc n = n , suc (suc n) = suc n ⊢ ⊥ $
+  by not_elim [l2, l5]
+l7: $ ¬ suc n = n ⊢ ¬ suc (suc n) = suc n $ by not_intro [l6]
+l8: $ _ ⊢ (¬ suc n = n) → ¬ suc (suc n) = suc n $ by imp_intro [l7]
+l9: $ _ ⊢ ∀ n ((¬ suc n = n) → ¬ suc (suc n) = suc n) $
+  by all_intro [l8]
+l10: $ _ ⊢ ∀ n (¬ suc n = n) $ by peano5 [l1, l9]
+
+no_suc_eq_self_inst
+-------------------
+l1: $ _ ⊢ ∀ n (¬ suc n = n) $ by no_suc_eq_self
+l2: $ _ ⊢ ¬ suc a = a $ by all_elim [l1]
+
+le_antisym_ax
+-------------
+l1: $ g ⊢ ∃ k (a + k = b) $ by le_iff_add [#1]
+l2: $ h ⊢ ∃ m (b + m = a) $ by le_iff_add [#2]
+l3: $ a + k = b ⊢ a + k = b $ by ax
+l4: $ b + m = a ⊢ b + m = a $ by ax
+l5: $ a + k = b ⊢ b = a + k $ by eq_sym_nd [l3]
+l7: $ a + k = b , b + m = a ⊢ (a + k) + m = a $
+  by eq_replace [l5, l4]
+l8: $ _ ⊢ (a + k) + m = a + (k + m) $ by add_assoc_ax
+l9: $ a + k = b , b + m = a ⊢ a + (k + m) = a $
+  by eq_replace [l8, l7]
+l10: $ _ ⊢ a + 0 = a $ by add_0_ax
+l11: $ _ ⊢ a = a + 0 $ by eq_sym_nd [l10]
+l12: $ a + k = b , b + m = a ⊢ a + (k + m) = a + 0 $
+  by eq_replace [l11, l9]
+l13: $ a + k = b , b + m = a ⊢ k + m = 0 $
+  by add_cancel_left_ax [l12]
+l14: $ a + k = b , b + m = a ⊢ k = 0 ∧ m = 0 $
+  by add_eq_zero_ax [l13]
+l15: $ a + k = b , b + m = a ⊢ k = 0 $ by and_elim_l [l14]
+l16: $ a + k = b , b + m = a ⊢ a + 0 = b $
+  by eq_replace [l15, l3]
+l17: $ a + k = b , b + m = a ⊢ a = b $
+  by eq_replace [l10, l16]
+l18: $ a + k = b , h ⊢ a = b $ by ex_elim (x := $ m $) [l2, l17]
+l19: $ g , h ⊢ a = b $ by ex_elim (x := $ k $) [l1, l18]
+
+zero_le_ax
+----------
+l1: $ _ ⊢ 0 + a = a $ by add_zero_left_ax
+l2: $ _ ⊢ 0 ≤ a $ by le_from_add [l1]
+
+le_refl_ax
+----------
+l1: $ _ ⊢ a + 0 = a $ by add_0_ax
+l2: $ _ ⊢ a ≤ a $ by le_from_add [l1]
+
+le_trans_ax
+-----------
+l1: $ g ⊢ ∃ k (x + k = y) $ by le_iff_add [#1]
+l2: $ h ⊢ ∃ m (y + m = z) $ by le_iff_add [#2]
+l3: $ x + k = y ⊢ x + k = y $ by ax
+l4: $ y + m = z ⊢ y + m = z $ by ax
+l5: $ _ ⊢ (x + k) + m = x + (k + m) $ by add_assoc_ax
+l6: $ x + k = y ⊢ y + m = x + (k + m) $
+  by eq_replace [l3, l5]
+l8: $ x + k = y ⊢ x + (k + m) = y + m $ by eq_sym_nd [l6]
+l9: $ x + k = y , y + m = z ⊢ x + (k + m) = z $
+  by eq_replace [l4, l8]
+l10: $ x + k = y , y + m = z ⊢ x ≤ z $ by le_from_add [l9]
+l11: $ x + k = y , h ⊢ x ≤ z $ by ex_elim (x := $ m $) [l2, l10]
+l12: $ g , h ⊢ x ≤ z $ by ex_elim (x := $ k $) [l1, l11]
+
+add_one_eq_suc_ax
+-----------------
+l1: $ g ⊢ a + suc 0 = suc (a + 0) $ by add_suc_ax
+l2: $ g ⊢ a + 0 = a $ by add_0_ax
+l3: $ g ⊢ a + suc 0 = suc a $ by eq_replace [l2, l1]
+
+one_add_eq_suc_ax
+-----------------
+l1: $ _ ⊢ suc 0 + a = a + suc 0 $ by add_comm_ax
+l2: $ _ ⊢ a + suc 0 = suc 0 + a $ by eq_sym_nd [l1]
+l3: $ g ⊢ a + suc 0 = suc a $ by add_one_eq_suc_ax
+l4: $ g ⊢ suc 0 + a = suc a $ by eq_replace [l2, l3]
+
+suc_pos_ax
+----------
+l1: $ g ⊢ suc 0 + n = suc n $ by one_add_eq_suc_ax
+l2: $ g ⊢ suc 0 ≤ suc n $ by le_from_add [l1]
+
+pos_mul_pos_ax
+--------------
+l1: $ g ⊢ ∃ k (suc 0 + k = a) $ by le_iff_add [#1]
+l2: $ h ⊢ ∃ m (suc 0 + m = b) $ by le_iff_add [#2]
+l3: $ suc 0 + k = a ⊢ suc 0 + k = a $ by ax
+l4: $ suc 0 + m = b ⊢ suc 0 + m = b $ by ax
+l5: $ _ ⊢ (suc 0 + k) + a * m = suc 0 + (k + a * m) $
+  by add_assoc_ax
+l6: $ _ ⊢ suc 0 + (k + a * m) = (suc 0 + k) + a * m $
+  by eq_sym_nd [l5]
+l7: $ suc 0 + k = a ⊢ suc 0 + (k + a * m) = a + a * m $
+  by eq_replace [l3, l6]
+l8: $ _ ⊢ suc 0 + m = suc m $ by one_add_eq_suc_ax
+l9: $ suc 0 + m = b ⊢ suc m = b $ by eq_replace [l8, l4]
+l10: $ _ ⊢ a * suc m = a * m + a $ by mul_suc_ax
+l11: $ suc 0 + m = b ⊢ a * b = a * m + a $
+  by eq_replace [l9, l10]
+l12: $ _ ⊢ a * m + a = a + a * m $ by add_comm_ax
+l13: $ suc 0 + m = b ⊢ a * b = a + a * m $
+  by eq_replace [l12, l11]
+l14: $ suc 0 + m = b ⊢ a + a * m = a * b $ by eq_sym_nd [l13]
+l15: $ suc 0 + k = a , suc 0 + m = b ⊢ suc 0 + (k + a * m) = a * b $
+  by eq_replace [l14, l7]
+l16: $ suc 0 + k = a , suc 0 + m = b ⊢ suc 0 ≤ a * b $
+  by le_from_add [l15]
+l17: $ suc 0 + k = a , h ⊢ suc 0 ≤ a * b $
+  by ex_elim (x := $ m $) [l2, l16]
+l18: $ g , h ⊢ suc 0 ≤ a * b $ by ex_elim (x := $ k $) [l1, l17]
+
+le_suc_suc_ax
+-------------
+l1: $ g ⊢ ∃ k (a + k = b) $ by le_iff_add [#1]
+l2: $ a + k = b ⊢ a + k = b $ by ax
+l3: $ _ ⊢ suc a + k = suc (a + k) $ by add_suc_left_ax
+l4: $ a + k = b ⊢ suc a + k = suc b $
+  by eq_replace [l2, l3]
+l5: $ a + k = b ⊢ suc a ≤ suc b $ by le_from_add [l4]
+l6: $ g ⊢ suc a ≤ suc b $ by ex_elim (x := $ k $) [l1, l5]
+
+add_assoc4_ax
+-------------
+l1: $ _ ⊢ ((a + b) + c) + d = (a + b) + (c + d) $
+  by add_assoc_ax
+l2: $ _ ⊢ (a + b) + (c + d) = a + (b + (c + d)) $
+  by add_assoc_ax
+l3: $ g ⊢ ((a + b) + c) + d = ((a + b) + c) + d $
+  by eq_intro_nd
+l4: $ g ⊢ (a + b) + (c + d) = ((a + b) + c) + d $
+  by eq_replace [l1, l3]
+l5: $ g ⊢ ((a + b) + c) + d = (a + b) + (c + d) $
+  by eq_sym_nd [l4]
+l6: $ g ⊢ ((a + b) + c) + d = a + (b + (c + d)) $
+  by eq_replace [l2, l5]
+l7: $ _ ⊢ (b + c) + d = b + (c + d) $ by add_assoc_ax
+l8: $ _ ⊢ b + (c + d) = b + c + d $ by eq_sym_nd [l7]
+l9: $ g ⊢ ((a + b) + c) + d = a + (b + c + d) $
+  by eq_replace [l8, l6]
+
+lt_iff_suc_le
+--------------
+l1: $ g , x < y ⊢ suc x ≤ y $ by ax
+l2: $ g , suc x ≤ y ⊢ x < y $ by ax
+l3: $ g ⊢ (x < y) ↔ (suc x ≤ y) $ by bi_intro [l1, l2]
+
+lt_from_suc_le
+--------------
+l1: $ g ⊢ (x < y) ↔ (suc x ≤ y) $ by lt_iff_suc_le
+l2: $ g ⊢ x < y $ by bi_elim_r [l1, #1]
+
+suc_le_from_lt
+--------------
+l1: $ g ⊢ (x < y) ↔ (suc x ≤ y) $ by lt_iff_suc_le
+l2: $ g ⊢ suc x ≤ y $ by bi_elim_l [l1, #1]
+
+lt_irrefl_ax
+------------
+l1: $ a < a ⊢ a < a $ by ax
+l2: $ a < a ⊢ suc a ≤ a $ by suc_le_from_lt [l1]
+l3: $ _ ⊢ a + suc 0 = suc a $ by add_one_eq_suc_ax
+l4: $ _ ⊢ a ≤ suc a $ by le_from_add [l3]
+l5: $ a < a ⊢ suc a = a $ by le_antisym_ax [l2, l4]
+l6: $ _ ⊢ ¬ suc a = a $ by no_suc_eq_self_inst
+l7: $ a < a ⊢ ⊥ $ by not_elim [l6, l5]
+l8: $ _ ⊢ ¬ a < a $ by not_intro [l7]
+
+lt_trans_ax
+-----------
+l1: $ _ ⊢ suc a ≤ b $ by suc_le_from_lt [#1]
+l2: $ _ ⊢ suc b ≤ c $ by suc_le_from_lt [#2]
+l3: $ _ ⊢ a + suc 0 = suc a $ by add_one_eq_suc_ax
+l4: $ _ ⊢ a ≤ suc a $ by le_from_add [l3]
+l5: $ _ ⊢ a ≤ b $ by le_trans_ax [l4, l1]
+l6: $ _ ⊢ suc a ≤ suc b $ by le_suc_suc_ax [l5]
+l7: $ _ ⊢ suc a ≤ c $ by le_trans_ax [l6, l2]
+l8: $ _ ⊢ a < c $ by lt_from_suc_le [l7]
+
+le_lt_trans_ax
+--------------
+l1: $ _ ⊢ suc b ≤ c $ by suc_le_from_lt [#2]
+l2: $ _ ⊢ suc a ≤ suc b $ by le_suc_suc_ax [#1]
+l3: $ _ ⊢ suc a ≤ c $ by le_trans_ax [l2, l1]
+l4: $ _ ⊢ a < c $ by lt_from_suc_le [l3]
+
+lt_le_trans_ax
+--------------
+l1: $ _ ⊢ suc a ≤ b $ by suc_le_from_lt [#1]
+l2: $ _ ⊢ suc a ≤ c $ by le_trans_ax [l1, #2]
+l3: $ _ ⊢ a < c $ by lt_from_suc_le [l2]
+
+not_lt_zero_ax
+--------------
+l1: $ a < 0 ⊢ a < 0 $ by ax
+l2: $ a < 0 ⊢ suc a ≤ 0 $ by suc_le_from_lt [l1]
+l3: $ a < 0 ⊢ ∃ k (suc a + k = 0) $ by le_iff_add [l2]
+l4: $ suc a + k = 0 ⊢ suc a + k = 0 $ by ax
+l5: $ suc a + k = 0 ⊢ suc a = 0 ∧ k = 0 $
+  by add_eq_zero_ax [l4]
+l6: $ suc a + k = 0 ⊢ suc a = 0 $ by and_elim_l [l5]
+l7: $ _ ⊢ ¬ suc a = 0 $ by peano1
+l8: $ suc a + k = 0 ⊢ ⊥ $ by not_elim [l7, l6]
+l9: $ a < 0 ⊢ ⊥ $ by ex_elim [l3, l8]
+l10: $ _ ⊢ ¬ a < 0 $ by not_intro [l9]
+
+suc_lt_suc_ax
+-------------
+l1: $ _ ⊢ suc a ≤ b $ by suc_le_from_lt [#1]
+l2: $ _ ⊢ suc (suc a) ≤ suc b $ by le_suc_suc_ax [l1]
+l3: $ _ ⊢ suc a < suc b $ by lt_from_suc_le [l2]
+
+lt_implies_le_ax
+----------------
+l1: $ g ⊢ suc x ≤ y $ by suc_le_from_lt [#1]
+l2: $ _ ⊢ x + suc 0 = suc x $ by add_one_eq_suc_ax
+l3: $ _ ⊢ x ≤ suc x $ by le_from_add [l2]
+l4: $ g ⊢ x ≤ y $ by le_trans_ax [l3, l1]
+
+pos_of_one_lt_ax
+----------------
+l1: $ g ⊢ suc (suc 0) ≤ x $ by suc_le_from_lt [#1]
+l2: $ _ ⊢ suc 0 ≤ suc (suc 0) $ by suc_pos_ax
+l3: $ g ⊢ suc 0 ≤ x $ by le_trans_ax [l2, l1]
+l4: $ g ⊢ 0 < x $ by lt_from_suc_le [l3]
+
+lt_suc_self_ax
+--------------
+l1: $ g ⊢ suc a + 0 = suc a $ by add_0_ax
+l2: $ g ⊢ suc a ≤ suc a $ by le_from_add [l1]
+l3: $ g ⊢ a < suc a $ by lt_from_suc_le [l2]
+
+dvd_intro
+---------
+l1: $ g ⊢ a ∣ b $ by ex_intro [#1]
+
+dvd_elim
+--------
+l1: $ g , h ⊢ c $ by ex_elim [#1, #2]
+
+dvd_zero_imp_eq_zero_ax
+-----------------------
+l1: $ x = 0 * k ⊢ x = 0 * k $ by ax
+l2: $ _ ⊢ 0 * k = 0 $ by mul_zero_left_ax
+l3: $ x = 0 * k ⊢ x = 0 $ by eq_replace [l2, l1]
+l4: $ g ⊢ x = 0 $ by dvd_elim [#1, l3]
+
+le_refl
+-------
+-- a ≤ a:  use the additive characterisation with witness 0.
+l1: $ _ ⊢ a + 0 = a $ by add_0_ax
+l2: $ _ ⊢ a ≤ a $ by le_from_add [l1]
+
+le_refl_all
+-----------
+l1: $ _ ⊢ a ≤ a $ by le_refl
+l2: $ _ ⊢ ∀ a (a ≤ a) $ by all_intro [l1]
+
+dvd_refl
+--------
+-- a = a * 1, so a ∣ a.
+l1: $ _ ⊢ a * suc 0 = a $ by mul_one_right_ax
+l2: $ _ ⊢ a = a * suc 0 $ by eq_sym_nd [l1]
+l3: $ _ ⊢ a ∣ a $ by dvd_intro [l2]
+
+zero_le
+-------
+-- 0 ≤ a via the additive characterisation with witness a.
+l1: $ _ ⊢ 0 + a = a $ by add_zero_left_ax
+l2: $ _ ⊢ 0 ≤ a $ by le_from_add [l1]
+
+dvd_zero
+--------
+-- a ∣ 0 with witness 0:  0 = a * 0.
+l1: $ _ ⊢ a * 0 = 0 $ by mul_0_ax
+l2: $ _ ⊢ 0 = a * 0 $ by eq_sym_nd [l1]
+l3: $ _ ⊢ a ∣ 0 $ by dvd_intro [l2]
+
+one_dvd
+-------
+-- 1 ∣ a with witness a:  a = 1 * a.
+l1: $ _ ⊢ suc 0 * a = a $ by mul_one_left_ax
+l2: $ _ ⊢ a = suc 0 * a $ by eq_sym_nd [l1]
+l3: $ _ ⊢ suc 0 ∣ a $ by dvd_intro [l2]
+
+dvd_mul_right
+-------------
+-- From a ∣ b (witness k: b = a*k) deduce a ∣ b*c (witness k*c).
+l1: $ b = a * k ⊢ b = a * k $ by ax
+l2: $ _ ⊢ b * c = b * c $ by eq_intro_nd
+l3: $ b = a * k ⊢ b * c = (a * k) * c $ by eq_replace [l1, l2]
+l4: $ _ ⊢ (a * k) * c = a * (k * c) $ by mul_assoc_ax
+l5: $ b = a * k ⊢ b * c = a * (k * c) $ by eq_replace [l4, l3]
+l6: $ b = a * k ⊢ a ∣ (b * c) $ by dvd_intro [l5]
+l7: $ g ⊢ a ∣ (b * c) $ by dvd_elim [#1, l6]
+
+dvd_add
+-------
+-- From a ∣ b (witness k) and a ∣ c (witness m) deduce a ∣ (b + c)
+-- (witness k + m), via distributivity.
+l1: $ b = a * k ⊢ b = a * k $ by ax
+l2: $ c = a * m ⊢ c = a * m $ by ax
+l3: $ _ ⊢ b + c = b + c $ by eq_intro_nd
+l4: $ b = a * k ⊢ b + c = a * k + c $ by eq_replace [l1, l3]
+l5: $ b = a * k , c = a * m ⊢ b + c = a * k + a * m $
+  by eq_replace [l2, l4]
+l6: $ _ ⊢ a * (k + m) = a * k + a * m $ by mul_distrib_left_ax
+l7: $ _ ⊢ a * k + a * m = a * (k + m) $ by eq_sym_nd [l6]
+l8: $ b = a * k , c = a * m ⊢ b + c = a * (k + m) $
+  by eq_replace [l7, l5]
+l9: $ b = a * k , c = a * m ⊢ a ∣ (b + c) $ by dvd_intro [l8]
+-- Discharge both witnesses.
+l10: $ b = a * k ⊢ a ∣ (b + c) $ by dvd_elim [#2, l9]
+l11: $ _ ⊢ a ∣ (b + c) $ by dvd_elim [#1, l10]
+
+dvd_trans
+---------
+-- From x ∣ y (witness k) and y ∣ z (witness m): z = y*m = (x*k)*m
+-- = x*(k*m), so x ∣ z with witness k*m.
+l1: $ y = x * k ⊢ y = x * k $ by ax
+l2: $ z = y * m ⊢ z = y * m $ by ax
+l3: $ y = x * k , z = y * m ⊢ z = (x * k) * m $ by eq_replace [l1, l2]
+l4: $ _ ⊢ (x * k) * m = x * (k * m) $ by mul_assoc_ax
+l5: $ y = x * k , z = y * m ⊢ z = x * (k * m) $ by eq_replace [l4, l3]
+l6: $ y = x * k , z = y * m ⊢ x ∣ z $ by dvd_intro [l5]
+l7: $ y = x * k , h ⊢ x ∣ z $ by dvd_elim [#2, l6]
+l8: $ g , h ⊢ x ∣ z $ by dvd_elim [#1, l7]
+
+dvd_one_implies
+---------------
+-- a ∣ 1 gives witness k with 1 = a*k.  By mul_eq_one_ax, a = 1.
+l1: $ suc 0 = a * k ⊢ suc 0 = a * k $ by ax
+l2: $ suc 0 = a * k ⊢ a * k = suc 0 $ by eq_sym_nd [l1]
+l3: $ suc 0 = a * k ⊢ a = suc 0 ∧ k = suc 0 $ by mul_eq_one_ax [l2]
+l4: $ suc 0 = a * k ⊢ a = suc 0 $ by and_elim_l [l3]
+l5: $ g ⊢ a = suc 0 $ by dvd_elim [#1, l4]
+
+prime_not_dvd_one
+-----------------
+l1: $ g ⊢ suc 0 < p $ by and_elim_l [#1]
+l2: $ p ∣ suc 0 ⊢ p ∣ suc 0 $ by ax
+l3: $ p ∣ suc 0 ⊢ p = suc 0 $ by dvd_one_implies [l2]
+l4: $ g , p ∣ suc 0 ⊢ suc 0 < suc 0 $ by eq_replace [l3, l1]
+l5: $ _ ⊢ ¬ suc 0 < suc 0 $ by lt_irrefl_ax
+l6: $ g , p ∣ suc 0 ⊢ ⊥ $ by not_elim [l5, l4]
+l7: $ g ⊢ ¬ p ∣ suc 0 $ by not_intro [l6]
+
+fact_pos
+--------
+-- Induction on n in  suc 0 ≤ ! n.
+
+-- Base: ! 0 = suc 0, so we need suc 0 ≤ suc 0.
+l1: $ _ ⊢ ! 0 = suc 0 $ by fact_0_ax
+l2: $ _ ⊢ suc 0 ≤ suc 0 $ by le_refl_ax
+-- Rewrite suc 0 ↦ ! 0 on the right.
+l3: $ _ ⊢ suc 0 = ! 0 $ by eq_sym_nd [l1]
+l4: $ _ ⊢ suc 0 ≤ ! 0 $ by eq_replace [l3, l2]
+
+-- Step: from  suc 0 ≤ ! n,  prove  suc 0 ≤ ! suc n.
+l5: $ suc 0 ≤ ! n ⊢ suc 0 ≤ ! n $ by ax
+-- ! suc n = suc n * ! n.
+l6: $ _ ⊢ ! suc n = suc n * ! n $ by fact_suc_ax
+-- suc 0 ≤ suc n (suc is positive).
+l7: $ _ ⊢ suc 0 ≤ suc n $ by suc_pos_ax
+-- Product of positives:  1 ≤ suc n * ! n.
+l8: $ suc 0 ≤ ! n ⊢ suc 0 ≤ suc n * ! n $ by pos_mul_pos_ax [l7, l5]
+-- Rewrite back to ! suc n.
+l9: $ _ ⊢ suc n * ! n = ! suc n $ by eq_sym_nd [l6]
+l10: $ suc 0 ≤ ! n ⊢ suc 0 ≤ ! suc n $ by eq_replace [l9, l8]
+
+-- Discharge and generalise.
+l11: $ _ ⊢ (suc 0 ≤ ! n) → suc 0 ≤ ! suc n $ by imp_intro [l10]
+l12: $ _ ⊢ ∀ n ((suc 0 ≤ ! n) → suc 0 ≤ ! suc n) $ by all_intro [l11]
+l13: $ _ ⊢ ∀ n (suc 0 ≤ ! n) $ by peano5 [l4, l12]
+
+fact_pos_inst
+-------------
+l1: $ _ ⊢ ∀ n (suc 0 ≤ ! n) $ by fact_pos
+l2: $ _ ⊢ suc 0 ≤ ! m $ by all_elim [l1]
+
+one_lt_fact_succ
+----------------
+-- From  suc 0 ≤ ! m  obtain  suc (suc 0) ≤ suc (! m)  by suc-monotonicity,
+-- then rewrite suc (! m) ↦ ! m + suc 0 and lower ≤ to <.
+l1: $ _ ⊢ suc 0 ≤ ! m $ by fact_pos_inst
+l2: $ _ ⊢ suc (suc 0) ≤ suc (! m) $ by le_suc_suc_ax [l1]
+l3: $ _ ⊢ ! m + suc 0 = suc (! m) $ by add_one_eq_suc_ax
+l4: $ _ ⊢ suc (! m) = ! m + suc 0 $ by eq_sym_nd [l3]
+l5: $ _ ⊢ suc (suc 0) ≤ ! m + suc 0 $ by eq_replace [l4, l2]
+l6: $ _ ⊢ suc 0 < ! m + suc 0 $ by lt_from_suc_le [l5]
+
+nat_cases
+---------
+-- Induction with the unused-IH trick.  The step doesn't need the IH —
+-- suc n = 0 ∨ ∃ k. suc n = suc k holds via the right disjunct with
+-- witness k = n.
+
+-- Base:  0 = 0 ∨ ∃ k. 0 = suc k.   Left disjunct.
+l1: $ _ ⊢ 0 = 0 $ by eq_intro_nd
+l2: $ _ ⊢ 0 = 0 ∨ ∃ k (0 = suc k) $ by or_intro_l [l1]
+
+-- Step body (with the IH available in context):
+--   prove suc n = 0 ∨ ∃ k (suc n = suc k) under hypothesis P(n).
+l3: $ n = 0 ∨ ∃ k (n = suc k) ⊢ n = 0 ∨ ∃ k (n = suc k) $ by ax
+l4: $ _ ⊢ suc n = suc n $ by eq_intro_nd
+l5: $ _ ⊢ ∃ k (suc n = suc k) $ by ex_intro [l4]
+l6: $ _ ⊢ suc n = 0 ∨ ∃ k (suc n = suc k) $ by or_intro_r [l5]
+-- and_intro / and_elim_r trick to pull the IH into the context.
+l7: $ n = 0 ∨ ∃ k (n = suc k) ⊢ (n = 0 ∨ ∃ k (n = suc k)) ∧ (suc n = 0 ∨ ∃ k (suc n = suc k)) $
+  by and_intro [l3, l6]
+l8: $ n = 0 ∨ ∃ k (n = suc k) ⊢ suc n = 0 ∨ ∃ k (suc n = suc k) $
+  by and_elim_r [l7]
+
+l9: $ _ ⊢ (n = 0 ∨ ∃ k (n = suc k)) → (suc n = 0 ∨ ∃ k (suc n = suc k)) $
+  by imp_intro [l8]
+l10: $ _ ⊢ ∀ n ((n = 0 ∨ ∃ k (n = suc k)) → (suc n = 0 ∨ ∃ k (suc n = suc k))) $
+  by all_intro [l9]
+l11: $ _ ⊢ ∀ n (n = 0 ∨ ∃ k (n = suc k)) $ by peano5 [l2, l10]
+
+nat_cases_inst
+--------------
+l1: $ _ ⊢ ∀ n (n = 0 ∨ ∃ k (n = suc k)) $ by nat_cases
+l2: $ _ ⊢ m = 0 ∨ ∃ k (m = suc k) $ by all_elim [l1]
+
+le_total_all
+------------
+l1: $ _ ⊢ 0 ≤ j $ by zero_le_ax
+l2: $ _ ⊢ 0 ≤ j ∨ j ≤ 0 $ by or_intro_l [l1]
+l3: $ _ ⊢ ∀ j (0 ≤ j ∨ j ≤ 0) $ by all_intro [l2]
+
+l4: $ ∀ j (i ≤ j ∨ j ≤ i) ⊢ ∀ j (i ≤ j ∨ j ≤ i) $ by ax
+l5: $ _ ⊢ j = 0 ∨ ∃ k (j = suc k) $ by nat_cases_inst
+
+l6: $ j = 0 ⊢ j = 0 $ by ax
+l7: $ j = 0 ⊢ 0 = j $ by eq_sym_nd [l6]
+l8: $ _ ⊢ 0 ≤ suc i $ by zero_le_ax
+l9: $ j = 0 ⊢ j ≤ suc i $ by eq_replace [l7, l8]
+l10: $ j = 0 ⊢ suc i ≤ j ∨ j ≤ suc i $ by or_intro_r [l9]
+
+l11: $ j = suc k ⊢ j = suc k $ by ax
+l12: $ j = suc k ⊢ suc k = j $ by eq_sym_nd [l11]
+l13: $ ∀ j (i ≤ j ∨ j ≤ i) ⊢ i ≤ k ∨ k ≤ i $ by all_elim [l4]
+
+l14: $ i ≤ k ⊢ i ≤ k $ by ax
+l15: $ i ≤ k ⊢ suc i ≤ suc k $ by le_suc_suc_ax [l14]
+l16: $ j = suc k , i ≤ k ⊢ suc i ≤ j $ by eq_replace [l12, l15]
+l17: $ j = suc k , i ≤ k ⊢ suc i ≤ j ∨ j ≤ suc i $
+  by or_intro_l [l16]
+
+l18: $ k ≤ i ⊢ k ≤ i $ by ax
+l19: $ k ≤ i ⊢ suc k ≤ suc i $ by le_suc_suc_ax [l18]
+l20: $ j = suc k , k ≤ i ⊢ j ≤ suc i $ by eq_replace [l12, l19]
+l21: $ j = suc k , k ≤ i ⊢ suc i ≤ j ∨ j ≤ suc i $
+  by or_intro_r [l20]
+l22: $ ∀ j (i ≤ j ∨ j ≤ i) , j = suc k ⊢ suc i ≤ j ∨ j ≤ suc i $
+  by or_elim [l13, l17, l21]
+
+l23: $ ∃ k (j = suc k) ⊢ ∃ k (j = suc k) $ by ax
+l24: $ ∀ j (i ≤ j ∨ j ≤ i) , ∃ k (j = suc k) ⊢ suc i ≤ j ∨ j ≤ suc i $
+  by ex_elim (x := $ k $) [l23, l22]
+l25: $ ∀ j (i ≤ j ∨ j ≤ i) ⊢ suc i ≤ j ∨ j ≤ suc i $
+  by or_elim [l5, l10, l24]
+l26: $ ∀ j (i ≤ j ∨ j ≤ i) ⊢ ∀ j (suc i ≤ j ∨ j ≤ suc i) $
+  by all_intro [l25]
+l27: $ _ ⊢ (∀ j (i ≤ j ∨ j ≤ i)) → ∀ j (suc i ≤ j ∨ j ≤ suc i) $
+  by imp_intro [l26]
+l28: $ _ ⊢ ∀ i ((∀ j (i ≤ j ∨ j ≤ i)) → ∀ j (suc i ≤ j ∨ j ≤ suc i)) $
+  by all_intro [l27]
+l29: $ _ ⊢ ∀ i (∀ j (i ≤ j ∨ j ≤ i)) $ by peano5 [l3, l28]
+
+le_total_ax
+-----------
+l1: $ _ ⊢ ∀ i (∀ j (i ≤ j ∨ j ≤ i)) $ by le_total_all
+l2: $ _ ⊢ ∀ j (a ≤ j ∨ j ≤ a) $ by all_elim [l1]
+l3: $ _ ⊢ a ≤ b ∨ b ≤ a $ by all_elim [l2]
+
+ne_zero_of_pos_ax
+-----------------
+l1: $ x = 0 ⊢ x = 0 $ by ax
+l2: $ g , x = 0 ⊢ 0 < 0 $ by eq_replace [l1, #1]
+l3: $ _ ⊢ ¬ 0 < 0 $ by lt_irrefl_ax
+l4: $ g , x = 0 ⊢ ⊥ $ by not_elim [l3, l2]
+l5: $ g ⊢ ¬ x = 0 $ by not_intro [l4]
+
+one_lt_of_ne_zero_ne_one_ax
+---------------------------
+l1: $ _ ⊢ x = 0 ∨ ∃ k (x = suc k) $ by nat_cases_inst
+
+l2: $ x = 0 ⊢ x = 0 $ by ax
+l3: $ g , x = 0 ⊢ ⊥ $ by not_elim [#1, l2]
+l4: $ g , x = 0 ⊢ suc 0 < x $ by bot_elim [l3]
+
+l5: $ x = suc k ⊢ x = suc k $ by ax
+l6: $ _ ⊢ k = 0 ∨ ∃ j (k = suc j) $ by nat_cases_inst
+
+l7: $ k = 0 ⊢ k = 0 $ by ax
+l8: $ x = suc k , k = 0 ⊢ x = suc 0 $ by eq_replace [l7, l5]
+l9: $ h , x = suc k , k = 0 ⊢ ⊥ $ by not_elim [#2, l8]
+l10: $ h , x = suc k , k = 0 ⊢ suc 0 < x $ by bot_elim [l9]
+
+l11: $ k = suc j ⊢ k = suc j $ by ax
+l12: $ x = suc k , k = suc j ⊢ x = suc (suc j) $
+  by eq_replace [l11, l5]
+l13: $ _ ⊢ suc 0 ≤ suc j $ by suc_pos_ax
+l14: $ _ ⊢ suc (suc 0) ≤ suc (suc j) $ by le_suc_suc_ax [l13]
+l15: $ x = suc k , k = suc j ⊢ suc (suc j) = x $ by eq_sym_nd [l12]
+l16: $ x = suc k , k = suc j ⊢ suc (suc 0) ≤ x $
+  by eq_replace [l15, l14]
+l17: $ x = suc k , k = suc j ⊢ suc 0 < x $ by lt_from_suc_le [l16]
+l18: $ ∃ j (k = suc j) ⊢ ∃ j (k = suc j) $ by ax
+l19: $ x = suc k , ∃ j (k = suc j) ⊢ suc 0 < x $
+  by ex_elim (x := $ j $) [l18, l17]
+
+l20: $ h , x = suc k ⊢ suc 0 < x $ by or_elim [l6, l10, l19]
+l21: $ ∃ k (x = suc k) ⊢ ∃ k (x = suc k) $ by ax
+l22: $ h , ∃ k (x = suc k) ⊢ suc 0 < x $
+  by ex_elim (x := $ k $) [l21, l20]
+l23: $ g , h ⊢ suc 0 < x $ by or_elim [l1, l4, l22]
+
+lt_of_le_ne_ax
+--------------
+l1: $ g ⊢ ∃ k (x + k = y) $ by le_iff_add [#1]
+l2: $ x + k = y ⊢ x + k = y $ by ax
+l3: $ _ ⊢ k = 0 ∨ ∃ j (k = suc j) $ by nat_cases_inst
+
+l4: $ k = 0 ⊢ k = 0 $ by ax
+l5: $ x + k = y , k = 0 ⊢ x + 0 = y $ by eq_replace [l4, l2]
+l6: $ _ ⊢ x + 0 = x $ by add_0_ax
+l7: $ x + k = y , k = 0 ⊢ x = y $ by eq_replace [l6, l5]
+l8: $ h , x + k = y , k = 0 ⊢ ⊥ $ by not_elim [#2, l7]
+l9: $ h , x + k = y , k = 0 ⊢ x < y $ by bot_elim [l8]
+
+l10: $ k = suc j ⊢ k = suc j $ by ax
+l11: $ x + k = y , k = suc j ⊢ x + suc j = y $
+  by eq_replace [l10, l2]
+l12: $ _ ⊢ x + suc j = suc (x + j) $ by add_suc_ax
+l13: $ _ ⊢ suc x + j = suc (x + j) $ by add_suc_left_ax
+l14: $ _ ⊢ suc (x + j) = x + suc j $ by eq_sym_nd [l12]
+l15: $ _ ⊢ suc x + j = x + suc j $ by eq_replace [l14, l13]
+l15a: $ _ ⊢ x + suc j = suc x + j $ by eq_sym_nd [l15]
+l16a: $ x + suc j = y ⊢ x + suc j = y $ by ax
+l16b: $ x + suc j = y ⊢ suc x + j = y $ by eq_replace [l15a, l16a]
+l16c: $ _ ⊢ (x + suc j = y) → suc x + j = y $ by imp_intro [l16b]
+l16: $ x + k = y , k = suc j ⊢ suc x + j = y $
+  by imp_elim [l16c, l11]
+l17: $ x + k = y , k = suc j ⊢ suc x ≤ y $ by le_from_add [l16]
+l18: $ x + k = y , k = suc j ⊢ x < y $ by lt_from_suc_le [l17]
+l19: $ ∃ j (k = suc j) ⊢ ∃ j (k = suc j) $ by ax
+l20: $ x + k = y , ∃ j (k = suc j) ⊢ x < y $
+  by ex_elim [l19, l18]
+
+l21: $ h , x + k = y ⊢ x < y $ by or_elim [l3, l9, l20]
+l22: $ g , h ⊢ x < y $ by ex_elim [l1, l21]
+
+dvd_pos_imp_le_ax
+-----------------
+l1: $ y = x * k ⊢ y = x * k $ by ax
+l2: $ _ ⊢ k = 0 ∨ ∃ j (k = suc j) $ by nat_cases_inst
+
+l3: $ k = 0 ⊢ k = 0 $ by ax
+l4: $ y = x * k , k = 0 ⊢ y = x * 0 $ by eq_replace [l3, l1]
+l5: $ _ ⊢ x * 0 = 0 $ by mul_0_ax
+l6: $ y = x * k , k = 0 ⊢ y = 0 $ by eq_replace [l5, l4]
+l7: $ h ⊢ ¬ y = 0 $ by ne_zero_of_pos_ax [#2]
+l8: $ h , y = x * k , k = 0 ⊢ ⊥ $ by not_elim [l7, l6]
+l9: $ h , y = x * k , k = 0 ⊢ x ≤ y $ by bot_elim [l8]
+
+l10: $ k = suc j ⊢ k = suc j $ by ax
+l11: $ y = x * k , k = suc j ⊢ y = x * suc j $
+  by eq_replace [l10, l1]
+l12: $ _ ⊢ x * suc j = x * j + x $ by mul_suc_ax
+l13: $ y = x * k , k = suc j ⊢ y = x * j + x $
+  by eq_replace [l12, l11]
+l14: $ _ ⊢ x * j + x = x + x * j $ by add_comm_ax
+l15: $ y = x * k , k = suc j ⊢ y = x + x * j $
+  by eq_replace [l14, l13]
+l16: $ y = x * k , k = suc j ⊢ x + x * j = y $ by eq_sym_nd [l15]
+l17: $ y = x * k , k = suc j ⊢ x ≤ y $ by le_from_add [l16]
+l18: $ ∃ j (k = suc j) ⊢ ∃ j (k = suc j) $ by ax
+l19: $ y = x * k , ∃ j (k = suc j) ⊢ x ≤ y $
+  by ex_elim [l18, l17]
+
+l20: $ h , y = x * k ⊢ x ≤ y $ by or_elim [l2, l9, l19]
+l21: $ g , h ⊢ x ≤ y $ by dvd_elim [#1, l20]
+
+nat_compare
+-----------
+-- le_total splits  a ≤ b ∨ b ≤ a.  In the right case, open the
+-- additive witness  b + k = a  and case-split on k (= 0 or = suc j).
+-- k = 0 gives  b = a  hence  a ≤ b (left of goal);  k = suc j gives
+-- suc b + j = a  hence  b < a (right of goal).
+
+l1: $ _ ⊢ a ≤ b ∨ b ≤ a $ by le_total_ax
+
+-- Branch 1:   a ≤ b.   Done by or_intro_l directly.
+l2: $ a ≤ b ⊢ a ≤ b $ by ax
+l3: $ a ≤ b ⊢ a ≤ b ∨ b < a $ by or_intro_l [l2]
+
+-- Branch 2:   b ≤ a.   Open the additive witness.
+l4: $ b ≤ a ⊢ b ≤ a $ by ax
+l5: $ b ≤ a ⊢ ∃ k (b + k = a) $ by le_iff_add [l4]
+
+-- Inside the existential, case-split on k = 0 ∨ ∃ j. k = suc j.
+l6: $ b + k = a ⊢ b + k = a $ by ax
+l7: $ _ ⊢ k = 0 ∨ ∃ j (k = suc j) $ by nat_cases_inst
+
+-- Sub-branch 2a:  k = 0.   Then b = a, so a ≤ b.
+l8: $ k = 0 ⊢ k = 0 $ by ax
+-- Rewrite k ↦ 0 in (b + k = a):  b + 0 = a.
+l9: $ b + k = a , k = 0 ⊢ b + 0 = a $ by eq_replace [l8, l6]
+-- b + 0 = b  (add_0_ax).
+l10: $ _ ⊢ b + 0 = b $ by add_0_ax
+l11: $ _ ⊢ b = b + 0 $ by eq_sym_nd [l10]
+-- Chain  b = b + 0 = a  ⇒  b = a.
+l12: $ b + k = a , k = 0 ⊢ b = a $ by eq_replace [l9, l11]
+-- a ≤ a, then rewrite a ↦ b on the left to get a ≤ b... no, we want a ≤ b
+-- given b = a.  Use le_refl_ax for b ≤ b, then rewrite first b to a:  a ≤ b.
+l13: $ _ ⊢ b ≤ b $ by le_refl_ax
+l14: $ b + k = a , k = 0 ⊢ a ≤ b $ by eq_replace [l12, l13]
+l15: $ b + k = a , k = 0 ⊢ a ≤ b ∨ b < a $ by or_intro_l [l14]
+
+-- Sub-branch 2b:  ∃ j. k = suc j.   Open it.
+l16: $ k = suc j ⊢ k = suc j $ by ax
+-- Rewrite k ↦ suc j in (b + k = a):  b + suc j = a.
+l17: $ b + k = a , k = suc j ⊢ b + suc j = a $ by eq_replace [l16, l6]
+-- b + suc j = suc (b + j)  (add_suc_ax).
+l18: $ _ ⊢ b + suc j = suc (b + j) $ by add_suc_ax
+l19: $ _ ⊢ suc (b + j) = b + suc j $ by eq_sym_nd [l18]
+-- suc b + j = suc (b + j)  (add_suc_left_ax).
+l20: $ _ ⊢ suc b + j = suc (b + j) $ by add_suc_left_ax
+-- Chain to  suc b + j = b + suc j,  then flip to  b + suc j = suc b + j.
+l21: $ _ ⊢ suc b + j = b + suc j $ by eq_replace [l19, l20]
+l22: $ _ ⊢ b + suc j = suc b + j $ by eq_sym_nd [l21]
+-- Combine with l17 to get  suc b + j = a.
+l23: $ b + suc j = a ⊢ b + suc j = a $ by ax
+l24: $ b + suc j = a ⊢ suc b + j = a $ by eq_replace [l22, l23]
+-- That gives suc b ≤ a, hence b < a.
+l25: $ b + suc j = a ⊢ suc b ≤ a $ by le_from_add [l24]
+l26: $ b + suc j = a ⊢ b < a $ by lt_from_suc_le [l25]
+l27: $ b + suc j = a ⊢ a ≤ b ∨ b < a $ by or_intro_r [l26]
+-- Chain l17 (which produces b + suc j = a from the outer context) into l27.
+l27a: $ _ ⊢ (b + suc j = a) → (a ≤ b ∨ b < a) $ by imp_intro [l27]
+l28: $ b + k = a , k = suc j ⊢ a ≤ b ∨ b < a $ by imp_elim [l27a, l17]
+-- Close out the inner ∃ j (k = suc j) before the outer or_elim.
+l28a: $ ∃ j (k = suc j) ⊢ ∃ j (k = suc j) $ by ax
+l28b: $ b + k = a , ∃ j (k = suc j) ⊢ a ≤ b ∨ b < a $ by ex_elim [l28a, l28]
+
+-- Combine sub-branches via or_elim on l7.
+l29: $ b + k = a ⊢ a ≤ b ∨ b < a $ by or_elim [l7, l15, l28b]
+
+-- Discharge the outer existential (over k).
+l30: $ b ≤ a ⊢ a ≤ b ∨ b < a $ by ex_elim [l5, l29]
+
+-- Combine the two top-level branches via or_elim on l1.
+l31: $ _ ⊢ a ≤ b ∨ b < a $ by or_elim [l1, l3, l30]
+
+dvd_add_cancel
+--------------
+-- Open the two divisibility witnesses:
+--   #1 (a ∣ b)          gives  k  with  b = a * k.
+--   #2 (a ∣ (b + c))    gives  m  with  b + c = a * m.
+
+-- Substitute b ↦ a * k inside the second equation.
+l1: $ b = a * k ⊢ b = a * k $ by ax
+l2: $ b + c = a * m ⊢ b + c = a * m $ by ax
+l3: $ b = a * k , b + c = a * m ⊢ a * k + c = a * m $ by eq_replace [l1, l2]
+
+-- Case-split on  k ≤ m  vs  m < k.
+l4: $ _ ⊢ k ≤ m ∨ m < k $ by nat_compare
+
+-- ----------------------------------------------------------------
+-- Branch A:   k ≤ m.   Extract j with k + j = m, then conclude
+-- c = a * j by add cancellation, giving the witness for a ∣ c.
+-- ----------------------------------------------------------------
+
+l5: $ k ≤ m ⊢ k ≤ m $ by ax
+l6: $ k ≤ m ⊢ ∃ j (k + j = m) $ by le_iff_add [l5]
+
+l7: $ k + j = m ⊢ k + j = m $ by ax
+l8: $ k + j = m ⊢ m = k + j $ by eq_sym_nd [l7]
+
+-- a * m = a * (k + j)  by rewriting m ↦ k + j.
+l9: $ _ ⊢ a * m = a * m $ by eq_intro_nd
+l10: $ k + j = m ⊢ a * m = a * (k + j) $ by eq_replace [l8, l9]
+
+-- a * (k + j) = a * k + a * j  by distributivity.
+l11: $ _ ⊢ a * (k + j) = a * k + a * j $ by mul_distrib_left_ax
+
+-- Chain to:   a * m = a * k + a * j.
+l12: $ k + j = m ⊢ a * m = a * k + a * j $ by eq_replace [l11, l10]
+
+-- From l3 (a*k + c = a*m) substitute the RHS to get  a*k + c = a*k + a*j.
+l13: $ b = a * k , b + c = a * m , k + j = m ⊢ a * k + c = a * k + a * j $
+  by eq_replace [l12, l3]
+
+-- Cancel a*k on the left to get  c = a * j.
+l14: $ b = a * k , b + c = a * m , k + j = m ⊢ c = a * j $
+  by add_cancel_left_ax [l13]
+
+-- That gives  a ∣ c  with witness j.
+l15: $ b = a * k , b + c = a * m , k + j = m ⊢ a ∣ c $ by dvd_intro [l14]
+
+-- Close out the inner existential over j.
+l16: $ b = a * k , b + c = a * m , k ≤ m ⊢ a ∣ c $ by ex_elim [l6, l15]
+
+-- ----------------------------------------------------------------
+-- Branch B:   m < k.   From  suc m ≤ k  extract j with  suc m + j = k,
+-- so a * k = a * (suc m + j) = a * suc m + a * j = (a * m + a) + a * j.
+-- Substituting into  a * k + c = a * m  and applying add_cancel_left
+-- yields  a + a * j + c = 0,  whence c = 0 by add_eq_zero.  Then
+-- a ∣ c via the witness 0:  c = 0 = a * 0.
+-- ----------------------------------------------------------------
+
+l17: $ m < k ⊢ m < k $ by ax
+l18: $ m < k ⊢ suc m ≤ k $ by suc_le_from_lt [l17]
+l19: $ m < k ⊢ ∃ j (suc m + j = k) $ by le_iff_add [l18]
+
+l20: $ suc m + j = k ⊢ suc m + j = k $ by ax
+l21: $ suc m + j = k ⊢ k = suc m + j $ by eq_sym_nd [l20]
+
+-- a * k = a * (suc m + j)  by rewriting k ↦ suc m + j.
+l22: $ _ ⊢ a * k = a * k $ by eq_intro_nd
+l23: $ suc m + j = k ⊢ a * k = a * (suc m + j) $ by eq_replace [l21, l22]
+
+-- a * (suc m + j) = a * suc m + a * j  by distributivity.
+l24: $ _ ⊢ a * (suc m + j) = a * suc m + a * j $ by mul_distrib_left_ax
+l25: $ suc m + j = k ⊢ a * k = a * suc m + a * j $ by eq_replace [l24, l23]
+
+-- a * suc m = a * m + a  by mul_suc_ax.
+l26: $ _ ⊢ a * suc m = a * m + a $ by mul_suc_ax
+-- Lift through (· + a*j):  a * suc m + a * j = (a * m + a) + a * j.
+l27: $ _ ⊢ a * suc m + a * j = a * suc m + a * j $ by eq_intro_nd
+l28: $ _ ⊢ a * suc m + a * j = (a * m + a) + a * j $ by eq_replace [l26, l27]
+-- Chain into l25.
+l29: $ suc m + j = k ⊢ a * k = (a * m + a) + a * j $ by eq_replace [l28, l25]
+
+-- Now substitute into l3 (a*k + c = a*m) to get
+--   ((a*m + a) + a*j) + c = a * m.
+l30b: $ _ ⊢ a * k + c = a * k + c $ by eq_intro_nd
+l31b: $ suc m + j = k ⊢ a * k + c = ((a * m + a) + a * j) + c $
+  by eq_replace [l29, l30b]
+l32: $ b = a * k , b + c = a * m , suc m + j = k
+      ⊢ ((a * m + a) + a * j) + c = a * m $
+  by eq_replace [l31b, l3]
+
+-- Re-associate the LHS to  a*m + ((a + a*j) + c).
+l33: $ _ ⊢ ((a * m + a) + a * j) + c = a * m + (a + a * j + c) $
+  by add_assoc4_ax
+l34: $ b = a * k , b + c = a * m , suc m + j = k
+      ⊢ a * m + (a + a * j + c) = a * m $
+  by eq_replace [l33, l32]
+
+-- Rewrite a*m on the RHS as a*m + 0 so add_cancel_left_ax can fire.
+l34a: $ _ ⊢ a * m + 0 = a * m $ by add_0_ax
+l34b: $ _ ⊢ a * m = a * m + 0 $ by eq_sym_nd [l34a]
+l34c: $ b = a * k , b + c = a * m , suc m + j = k
+       ⊢ a * m + (a + a * j + c) = a * m + 0 $
+  by eq_replace [l34b, l34]
+
+-- Cancel a*m on the left:  (a + a*j) + c = 0.
+l35: $ b = a * k , b + c = a * m , suc m + j = k
+      ⊢ a + a * j + c = 0 $
+  by add_cancel_left_ax [l34c]
+
+-- Apply add_eq_zero to  (a + a*j) + c = 0:   c = 0 (right conjunct).
+l36: $ b = a * k , b + c = a * m , suc m + j = k
+      ⊢ (a + a * j) = 0 ∧ c = 0 $
+  by add_eq_zero_ax [l35]
+l37: $ b = a * k , b + c = a * m , suc m + j = k ⊢ c = 0 $
+  by and_elim_r [l36]
+
+-- a ∣ 0,  rewritten c ↦ 0,  is a ∣ c.
+l38: $ _ ⊢ a ∣ 0 $ by dvd_zero
+l39: $ b = a * k , b + c = a * m , suc m + j = k ⊢ 0 = c $
+  by eq_sym_nd [l37]
+l40: $ b = a * k , b + c = a * m , suc m + j = k ⊢ a ∣ c $
+  by eq_replace [l39, l38]
+
+-- Close inner ∃ j.
+l41: $ b = a * k , b + c = a * m , m < k ⊢ a ∣ c $
+  by ex_elim [l19, l40]
+
+-- ----------------------------------------------------------------
+-- Combine the two branches.
+-- ----------------------------------------------------------------
+
+l42: $ b = a * k , b + c = a * m ⊢ a ∣ c $ by or_elim [l4, l16, l41]
+
+-- Close the two outer divisibility witnesses.
+l43: $ h , b = a * k ⊢ a ∣ c $ by dvd_elim [#2, l42]
+l44: $ g , h ⊢ a ∣ c $ by dvd_elim [#1, l43]
+
+le_suc_cases
+------------
+-- From  a ≤ suc b  extract k with  a + k = suc b,  then case-split on k.
+
+l1: $ g ⊢ ∃ k (a + k = suc b) $ by le_iff_add [#1]
+l2: $ a + k = suc b ⊢ a + k = suc b $ by ax
+l3: $ _ ⊢ k = 0 ∨ ∃ j (k = suc j) $ by nat_cases_inst
+
+-- Branch k = 0:  a + 0 = suc b  ⇒  a = suc b.
+l4: $ k = 0 ⊢ k = 0 $ by ax
+l5: $ a + k = suc b , k = 0 ⊢ a + 0 = suc b $ by eq_replace [l4, l2]
+l6: $ _ ⊢ a + 0 = a $ by add_0_ax
+l8: $ a + k = suc b , k = 0 ⊢ a = suc b $ by eq_replace [l6, l5]
+l9: $ a + k = suc b , k = 0 ⊢ a ≤ b ∨ a = suc b $ by or_intro_r [l8]
+
+-- Branch k = suc j:  a + suc j = suc b  ⇒  suc (a + j) = suc b
+--                  ⇒  a + j = b   (peano2)  ⇒  a ≤ b.
+l10: $ k = suc j ⊢ k = suc j $ by ax
+l11: $ a + k = suc b , k = suc j ⊢ a + suc j = suc b $
+  by eq_replace [l10, l2]
+l12: $ _ ⊢ a + suc j = suc (a + j) $ by add_suc_ax
+l14: $ a + k = suc b , k = suc j ⊢ suc (a + j) = suc b $
+  by eq_replace [l12, l11]
+l15: $ _ ⊢ suc (a + j) = suc b → a + j = b $ by peano2
+l16: $ a + k = suc b , k = suc j ⊢ a + j = b $ by imp_elim [l15, l14]
+l17: $ a + k = suc b , k = suc j ⊢ a ≤ b $ by le_from_add [l16]
+l18: $ a + k = suc b , k = suc j ⊢ a ≤ b ∨ a = suc b $
+  by or_intro_l [l17]
+
+-- Close the inner ∃ j.
+l19: $ ∃ j (k = suc j) ⊢ ∃ j (k = suc j) $ by ax
+l20: $ a + k = suc b , ∃ j (k = suc j) ⊢ a ≤ b ∨ a = suc b $
+  by ex_elim [l19, l18]
+
+-- Combine the two k-branches.
+l21: $ a + k = suc b ⊢ a ≤ b ∨ a = suc b $
+  by or_elim [l3, l9, l20]
+
+-- Close the outer ∃ k.
+l22: $ g ⊢ a ≤ b ∨ a = suc b $ by ex_elim [l1, l21]
+
+dvd_mul_left
+------------
+-- From a ∣ b  derive  a ∣ (c * b)  via dvd_mul_right + mul_comm.
+l1: $ g ⊢ a ∣ (b * c) $ by dvd_mul_right [#1]
+l2: $ _ ⊢ b * c = c * b $ by mul_comm_ax
+l3: $ g ⊢ a ∣ (c * b) $ by eq_replace [l2, l1]
+
+dvd_fact
+--------
+-- Induction on n in  ∀ d. (1 < d ∧ d ≤ n) → d ∣ ! n.
+
+-- ---------- Base case (n = 0) ----------
+-- 1 < d ∧ d ≤ 0  is contradictory:  d ≤ 0 forces d = 0, but 1 < d
+-- forces d ≠ 0.  We never reach the conclusion; bot_elim covers it.
+l1: $ suc 0 < d ∧ d ≤ 0 ⊢ suc 0 < d ∧ d ≤ 0 $ by ax
+l2: $ suc 0 < d ∧ d ≤ 0 ⊢ suc 0 < d $ by and_elim_l [l1]
+l3: $ suc 0 < d ∧ d ≤ 0 ⊢ d ≤ 0 $ by and_elim_r [l1]
+
+-- d ≤ 0  ⇒  ∃ k. d + k = 0  ⇒  d = 0.
+l4: $ suc 0 < d ∧ d ≤ 0 ⊢ ∃ k (d + k = 0) $ by le_iff_add [l3]
+l5: $ d + k = 0 ⊢ d + k = 0 $ by ax
+l6: $ d + k = 0 ⊢ d = 0 ∧ k = 0 $ by add_eq_zero_ax [l5]
+l7: $ d + k = 0 ⊢ d = 0 $ by and_elim_l [l6]
+l8: $ suc 0 < d ∧ d ≤ 0 ⊢ d = 0 $ by ex_elim [l4, l7]
+
+-- 1 < d  ⇒  1 ≤ d  ⇒  ∃ k. 1 + k = d.
+l9: $ suc 0 < d ∧ d ≤ 0 ⊢ suc 0 ≤ d $ by lt_implies_le_ax [l2]
+l10: $ suc 0 < d ∧ d ≤ 0 ⊢ ∃ k (suc 0 + k = d) $ by le_iff_add [l9]
+
+-- Rewrite d ↦ 0 in (suc 0 + k = d) to get  suc 0 + k = 0.  Then
+-- add_eq_zero gives suc 0 = 0, contradicting peano1.
+l11: $ suc 0 + k = d ⊢ suc 0 + k = d $ by ax
+l13: $ suc 0 + k = 0 ⊢ suc 0 + k = 0 $ by ax
+l14: $ suc 0 + k = 0 ⊢ suc 0 = 0 ∧ k = 0 $ by add_eq_zero_ax [l13]
+l15: $ suc 0 + k = 0 ⊢ suc 0 = 0 $ by and_elim_l [l14]
+l16: $ _ ⊢ ¬ suc 0 = 0 $ by peano1
+l17: $ suc 0 + k = 0 ⊢ ⊥ $ by not_elim [l16, l15]
+l17a: $ _ ⊢ (suc 0 + k = 0) → ⊥ $ by imp_intro [l17]
+
+-- Plug into the actual contexts:  suc 0 < d ∧ d ≤ 0  gives  d = 0
+-- (via l8),  and there's a witness k of suc 0 + k = d.  Rewrite
+-- d ↦ 0,  derive ⊥,  close the existential.
+l20: $ suc 0 < d ∧ d ≤ 0 , suc 0 + k = d ⊢ suc 0 + k = 0 $
+  by eq_replace [l8, l11]
+l21: $ suc 0 < d ∧ d ≤ 0 , suc 0 + k = d ⊢ ⊥ $ by imp_elim [l17a, l20]
+l22: $ suc 0 < d ∧ d ≤ 0 ⊢ ⊥ $ by ex_elim [l10, l21]
+
+-- ⊥ implies anything; in particular  d ∣ ! 0.
+l23: $ suc 0 < d ∧ d ≤ 0 ⊢ d ∣ ! 0 $ by bot_elim [l22]
+l24: $ _ ⊢ (suc 0 < d ∧ d ≤ 0) → d ∣ ! 0 $ by imp_intro [l23]
+
+-- ---------- Inductive step ----------
+-- Assume (1 < d ∧ d ≤ n) → d ∣ ! n.   Show (1 < d ∧ d ≤ suc n) → d ∣ ! suc n.
+
+-- Hypotheses available in the step body.
+l25: $ suc 0 < d ∧ d ≤ suc n ⊢ suc 0 < d ∧ d ≤ suc n $ by ax
+l26: $ suc 0 < d ∧ d ≤ suc n ⊢ suc 0 < d $ by and_elim_l [l25]
+l27: $ suc 0 < d ∧ d ≤ suc n ⊢ d ≤ suc n $ by and_elim_r [l25]
+
+-- Split d ≤ suc n  into  d ≤ n  ∨  d = suc n.
+l28: $ suc 0 < d ∧ d ≤ suc n ⊢ d ≤ n ∨ d = suc n $ by le_suc_cases [l27]
+
+-- Sub-branch d ≤ n:  use the inductive hypothesis.
+l29: $ d ≤ n ⊢ d ≤ n $ by ax
+l30: $ suc 0 < d ∧ d ≤ suc n , d ≤ n ⊢ suc 0 < d ∧ d ≤ n $
+  by and_intro [l26, l29]
+-- The induction hypothesis  (1 < d ∧ d ≤ n) → d ∣ ! n  is the
+-- antecedent of peano5's step; we expose it via ax on its sequent form.
+l31: $ (suc 0 < d ∧ d ≤ n) → d ∣ ! n
+       ⊢ (suc 0 < d ∧ d ≤ n) → d ∣ ! n $ by ax
+l32: $ (suc 0 < d ∧ d ≤ n) → d ∣ ! n , suc 0 < d ∧ d ≤ suc n , d ≤ n
+       ⊢ d ∣ ! n $ by imp_elim [l31, l30]
+-- d ∣ (suc n * ! n)  via dvd_mul_left.
+l33: $ (suc 0 < d ∧ d ≤ n) → d ∣ ! n , suc 0 < d ∧ d ≤ suc n , d ≤ n
+       ⊢ d ∣ (suc n * ! n) $ by dvd_mul_left [l32]
+-- Rewrite suc n * ! n ↦ ! suc n via fact_suc_ax.
+l34: $ _ ⊢ ! suc n = suc n * ! n $ by fact_suc_ax
+l35: $ _ ⊢ suc n * ! n = ! suc n $ by eq_sym_nd [l34]
+l36: $ (suc 0 < d ∧ d ≤ n) → d ∣ ! n , suc 0 < d ∧ d ≤ suc n , d ≤ n
+       ⊢ d ∣ ! suc n $ by eq_replace [l35, l33]
+
+-- Sub-branch d = suc n:  ! suc n = suc n * ! n = d * ! n,  so d ∣ ! suc n.
+l37: $ d = suc n ⊢ d = suc n $ by ax
+l38: $ d = suc n ⊢ suc n = d $ by eq_sym_nd [l37]
+-- suc n * ! n = d * ! n  (rewrite suc n ↦ d).
+l39: $ _ ⊢ suc n * ! n = suc n * ! n $ by eq_intro_nd
+l40: $ d = suc n ⊢ suc n * ! n = d * ! n $ by eq_replace [l38, l39]
+-- Chain with ! suc n = suc n * ! n  to get  ! suc n = d * ! n.
+l41: $ d = suc n ⊢ ! suc n = d * ! n $ by eq_replace [l40, l34]
+-- That gives d ∣ ! suc n with witness ! n.
+l42: $ d = suc n ⊢ d ∣ ! suc n $ by dvd_intro [l41]
+
+-- Combine the two sub-branches.
+l43: $ suc 0 < d ∧ d ≤ suc n ,
+       (suc 0 < d ∧ d ≤ n) → d ∣ ! n
+       ⊢ d ∣ ! suc n $ by or_elim [l28, l36, l42]
+
+-- Discharge the two hypotheses in the right order so the IH ends up
+-- as the outer antecedent (matching peano5's step shape).
+l44: $ (suc 0 < d ∧ d ≤ n) → d ∣ ! n
+       ⊢ (suc 0 < d ∧ d ≤ suc n) → d ∣ ! suc n $
+  by imp_intro [l43]
+l45: $ _ ⊢ ((suc 0 < d ∧ d ≤ n) → d ∣ ! n)
+           → ((suc 0 < d ∧ d ≤ suc n) → d ∣ ! suc n) $
+  by imp_intro [l44]
+
+-- Generalise and close the induction.
+l46: $ _ ⊢ ∀ n (((suc 0 < d ∧ d ≤ n) → d ∣ ! n)
+             → ((suc 0 < d ∧ d ≤ suc n) → d ∣ ! suc n)) $
+  by all_intro [l45]
+l47: $ _ ⊢ ∀ n ((suc 0 < d ∧ d ≤ n) → d ∣ ! n) $
+  by peano5 [l24, l46]
+
+not_and_imp_or_not
+------------------
+-- Case-split on a via LEM:  a ∨ ¬ a.
+l1: $ _ ⊢ a ∨ ¬ a $ by lem
+
+-- Branch  a:   need ¬ b.   Assume b for contradiction.
+l2: $ a ⊢ a $ by ax
+l3: $ b ⊢ b $ by ax
+l4: $ a , b ⊢ a ∧ b $ by and_intro [l2, l3]
+l5: $ g , a , b ⊢ ⊥ $ by not_elim [#1, l4]
+l6: $ g , a ⊢ ¬ b $ by not_intro [l5]
+l7: $ g , a ⊢ ¬ a ∨ ¬ b $ by or_intro_r [l6]
+
+-- Branch ¬ a:  trivially ¬a ∨ ¬b.
+l8: $ ¬ a ⊢ ¬ a $ by ax
+l9: $ ¬ a ⊢ ¬ a ∨ ¬ b $ by or_intro_l [l8]
+
+-- Combine.
+l10: $ g ⊢ ¬ a ∨ ¬ b $ by or_elim [l1, l7, l9]
+
+dne
+---
+-- Case-split on a via LEM.
+l1: $ _ ⊢ a ∨ ¬ a $ by lem
+
+-- Branch a:  done.
+l2: $ a ⊢ a $ by ax
+
+-- Branch ¬ a:  combine with ¬ ¬ a (= #1) for ⊥, then bot_elim to a.
+l3: $ ¬ a ⊢ ¬ a $ by ax
+l4: $ g , ¬ a ⊢ ⊥ $ by not_elim [#1, l3]
+l5: $ g , ¬ a ⊢ a $ by bot_elim [l4]
+
+-- Combine.
+l6: $ g ⊢ a $ by or_elim [l1, l2, l5]
+
+not_or_imp_and_not
+------------------
+-- ¬ a:   assume a, then a ∨ b by or_intro_l, contradicting #1.
+l1: $ a ⊢ a $ by ax
+l2: $ a ⊢ a ∨ b $ by or_intro_l [l1]
+l3: $ g , a ⊢ ⊥ $ by not_elim [#1, l2]
+l4: $ g ⊢ ¬ a $ by not_intro [l3]
+
+-- ¬ b:  symmetric.
+l5: $ b ⊢ b $ by ax
+l6: $ b ⊢ a ∨ b $ by or_intro_r [l5]
+l7: $ g , b ⊢ ⊥ $ by not_elim [#1, l6]
+l8: $ g ⊢ ¬ b $ by not_intro [l7]
+
+l9: $ g ⊢ ¬ a ∧ ¬ b $ by and_intro [l4, l8]
+
+not_imp_imp_and_not
+-------------------
+-- Need to produce  a ∧ ¬ b  from  ¬ (a → b).
+
+-- ¬ b:  assume b.  Then a → b by  imp_intro  applied to (a ⊢ b)
+-- (which uses ax + ACUI weakening via and_intro/and_elim_r trick).
+l1: $ a ⊢ a $ by ax
+l2: $ b ⊢ b $ by ax
+l3: $ a , b ⊢ a ∧ b $ by and_intro [l1, l2]
+l4: $ a , b ⊢ b $ by and_elim_r [l3]
+l5: $ b ⊢ a → b $ by imp_intro [l4]
+l6: $ g , b ⊢ ⊥ $ by not_elim [#1, l5]
+l7: $ g ⊢ ¬ b $ by not_intro [l6]
+
+-- a:  by LEM on a.
+l8: $ _ ⊢ a ∨ ¬ a $ by lem
+l9: $ a ⊢ a $ by ax
+-- ¬ a branch:  from ¬ a we get  a → b  (vacuously),  contradicting #1.
+l10: $ ¬ a ⊢ ¬ a $ by ax
+l11: $ ¬ a , a ⊢ ⊥ $ by not_elim [l10, l9]
+l12: $ ¬ a , a ⊢ b $ by bot_elim [l11]
+l13: $ ¬ a ⊢ a → b $ by imp_intro [l12]
+l14: $ g , ¬ a ⊢ ⊥ $ by not_elim [#1, l13]
+l15: $ g , ¬ a ⊢ a $ by bot_elim [l14]
+-- Combine the LEM branches.
+l16: $ g ⊢ a $ by or_elim [l8, l9, l15]
+
+l17: $ g ⊢ a ∧ ¬ b $ by and_intro [l16, l7]
+
+not_forall_imp_exists_not
+-------------------------
+-- LEM on  ∃ x (¬ P).  In the negative branch reconstruct ∀ x P
+-- and contradict #1.  The inner proof works on  [x/y] P  (with y
+-- a fresh nat from @vars) so the final all_intro_sub can re-bind.
+
+l1: $ _ ⊢ (∃ x (¬ P)) ∨ ¬ (∃ x (¬ P)) $ by lem
+
+-- Positive branch:  done.
+l2: $ ∃ x (¬ P) ⊢ ∃ x (¬ P) $ by ax
+
+-- Negative branch:  show ∀ x P for the contradiction.   Work with
+-- [x/y] P  rather than  P  itself.
+l3: $ _ ⊢ [x/y] P ∨ ¬ [x/y] P $ by lem
+l4: $ [x/y] P ⊢ [x/y] P $ by ax
+l5: $ ¬ [x/y] P ⊢ ¬ [x/y] P $ by ax
+-- ex_intro recovers the witness as y.
+l6: $ ¬ [x/y] P ⊢ ∃ x (¬ P) $ by ex_intro [l5]
+l6a: $ ¬ (∃ x (¬ P)) ⊢ ¬ (∃ x (¬ P)) $ by ax
+l7: $ ¬ (∃ x (¬ P)) , ¬ [x/y] P ⊢ ⊥ $ by not_elim [l6a, l6]
+l8: $ ¬ (∃ x (¬ P)) , ¬ [x/y] P ⊢ [x/y] P $ by bot_elim [l7]
+l9: $ ¬ (∃ x (¬ P)) ⊢ [x/y] P $ by or_elim [l3, l4, l8]
+-- Substitution-form ∀-introduction recovers u = y.
+l10: $ ¬ (∃ x (¬ P)) ⊢ ∀ x P $ by all_intro [l9]
+l11: $ g , ¬ (∃ x (¬ P)) ⊢ ⊥ $ by not_elim [#1, l10]
+l12: $ g , ¬ (∃ x (¬ P)) ⊢ ∃ x (¬ P) $ by bot_elim [l11]
+
+l13: $ g ⊢ ∃ x (¬ P) $ by or_elim [l1, l2, l12]
+
+exists_prime_factor
+-------------------
+-- Strong induction on m.  The induction hypothesis says every smaller
+-- y > 1 has a prime divisor.
+l1: $ _ ⊢ prime m ∨ ¬ prime m $ by lem
+
+-- If m is prime, m itself is the required prime divisor.
+l2: $ prime m ⊢ prime m $ by ax
+l3: $ _ ⊢ m ∣ m $ by dvd_refl
+l4: $ prime m ⊢ prime m ∧ m ∣ m $ by and_intro [l2, l3]
+l5: $ prime m ⊢ ∃ p (prime p ∧ p ∣ m) $ by ex_intro [l4]
+
+-- If m is not prime, decompose the failed defining conjunction.
+l6: $ ¬ prime m
+      ⊢ ¬ (suc 0 < m ∧ ∀ d (d ∣ m → (d = suc 0 ∨ d = m))) $ by ax
+l7: $ ¬ prime m ⊢ ¬ suc 0 < m ∨ ¬ (∀ d (d ∣ m → (d = suc 0 ∨ d = m))) $
+  by not_and_imp_or_not [l6]
+
+-- The ¬(1 < m) subcase contradicts the branch assumption 1 < m.
+l8: $ ¬ suc 0 < m ⊢ ¬ suc 0 < m $ by ax
+l9: $ suc 0 < m ⊢ suc 0 < m $ by ax
+l10: $ suc 0 < m , ¬ suc 0 < m ⊢ ⊥ $ by not_elim [l8, l9]
+l11: $ suc 0 < m , ¬ suc 0 < m ⊢ ∃ p (prime p ∧ p ∣ m) $
+  by bot_elim [l10]
+
+-- Otherwise, extract a divisor d of m which is neither 1 nor m.
+l12: $ ¬ (∀ d (d ∣ m → (d = suc 0 ∨ d = m)))
+       ⊢ ¬ (∀ d (d ∣ m → (d = suc 0 ∨ d = m))) $ by ax
+l13: $ ¬ (∀ d (d ∣ m → (d = suc 0 ∨ d = m)))
+       ⊢ ∃ d (¬ (d ∣ m → (d = suc 0 ∨ d = m))) $
+  by not_forall_imp_exists_not [l12]
+l14: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m))
+       ⊢ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) $ by ax
+l15: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m))
+       ⊢ d ∣ m ∧ ¬ (d = suc 0 ∨ d = m) $
+  by not_imp_imp_and_not [l14]
+l16: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) ⊢ d ∣ m $
+  by and_elim_l [l15]
+l17: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m))
+       ⊢ ¬ (d = suc 0 ∨ d = m) $ by and_elim_r [l15]
+l18: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) ⊢ ¬ d = suc 0 ∧ ¬ d = m $
+  by not_or_imp_and_not [l17]
+l19: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) ⊢ ¬ d = suc 0 $
+  by and_elim_l [l18]
+l20: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) ⊢ ¬ d = m $
+  by and_elim_r [l18]
+
+-- Since m > 1, m is positive and nonzero.
+l21: $ suc 0 < m ⊢ 0 < m $ by pos_of_one_lt_ax [l9]
+l22: $ suc 0 < m ⊢ ¬ m = 0 $ by ne_zero_of_pos_ax [l21]
+
+-- d is nonzero: if d = 0, then 0 ∣ m, hence m = 0.
+l23: $ d = 0 ⊢ d = 0 $ by ax
+l24: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , d = 0 ⊢ 0 ∣ m $
+  by eq_replace [l23, l16]
+l25: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , d = 0 ⊢ m = 0 $
+  by dvd_zero_imp_eq_zero_ax [l24]
+l26: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , suc 0 < m , d = 0 ⊢ ⊥ $
+  by not_elim [l22, l25]
+l27: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , suc 0 < m ⊢ ¬ d = 0 $
+  by not_intro [l26]
+
+-- Thus 1 < d, and since d ∣ m with m positive, d ≤ m.  Together with
+-- d ≠ m this gives d < m.
+l28: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , suc 0 < m ⊢ suc 0 < d $
+  by one_lt_of_ne_zero_ne_one_ax [l27, l19]
+l29: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , suc 0 < m ⊢ d ≤ m $
+  by dvd_pos_imp_le_ax [l16, l21]
+l30: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , suc 0 < m ⊢ d < m $
+  by lt_of_le_ne_ax [l29, l20]
+
+-- Apply the strong induction hypothesis to d.
+l31: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y)))
+       ⊢ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))) $ by ax
+l32: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y)))
+       ⊢ d < m → (suc 0 < d → ∃ p (prime p ∧ p ∣ d)) $
+  by all_elim [l31]
+l33: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))) ,
+       ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , suc 0 < m
+       ⊢ suc 0 < d → ∃ p (prime p ∧ p ∣ d) $ by imp_elim [l32, l30]
+l34: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))) ,
+       ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , suc 0 < m
+       ⊢ ∃ p (prime p ∧ p ∣ d) $ by imp_elim [l33, l28]
+
+-- A prime divisor q of d is also a prime divisor of m.
+l35: $ prime q ∧ q ∣ d ⊢ prime q ∧ q ∣ d $ by ax
+l36: $ prime q ∧ q ∣ d ⊢ prime q $ by and_elim_l [l35]
+l37: $ prime q ∧ q ∣ d ⊢ q ∣ d $ by and_elim_r [l35]
+l38: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , prime q ∧ q ∣ d ⊢ q ∣ m $
+  by dvd_trans [l37, l16]
+l39: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , prime q ∧ q ∣ d
+       ⊢ prime q ∧ q ∣ m $ by and_intro [l36, l38]
+l40: $ ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , prime q ∧ q ∣ d
+       ⊢ ∃ p (prime p ∧ p ∣ m) $ by ex_intro [l39]
+l41: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))) ,
+       ¬ (d ∣ m → (d = suc 0 ∨ d = m)) , suc 0 < m
+       ⊢ ∃ p (prime p ∧ p ∣ m) $ by ex_elim [l34, l40]
+l42: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))) ,
+       suc 0 < m , ¬ (∀ d (d ∣ m → (d = suc 0 ∨ d = m)))
+       ⊢ ∃ p (prime p ∧ p ∣ m) $ by ex_elim [l13, l41]
+
+-- Close the non-prime branch, then the prime/non-prime split.
+l43: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))) ,
+       suc 0 < m , ¬ prime m ⊢ ∃ p (prime p ∧ p ∣ m) $
+  by or_elim [l7, l11, l42]
+l44: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))) ,
+       suc 0 < m ⊢ ∃ p (prime p ∧ p ∣ m) $ by or_elim [l1, l5, l43]
+
+-- Discharge the assumptions and invoke strong induction.
+l45: $ ∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y)))
+       ⊢ suc 0 < m → ∃ p (prime p ∧ p ∣ m) $ by imp_intro [l44]
+l46: $ _ ⊢ (∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))))
+           → (suc 0 < m → ∃ p (prime p ∧ p ∣ m)) $ by imp_intro [l45]
+l47: $ _ ⊢ ∀ m ((∀ y (y < m → (suc 0 < y → ∃ p (prime p ∧ p ∣ y))))
+           → (suc 0 < m → ∃ p (prime p ∧ p ∣ m))) $ by all_intro [l46]
+l48: $ _ ⊢ ∀ m (suc 0 < m → ∃ p (prime p ∧ p ∣ m)) $
+  by peano5_strong [l47]
+
+exists_prime_factor_inst
+------------------------
+l1: $ _ ⊢ ∀ m (suc 0 < m → ∃ p (prime p ∧ p ∣ m)) $ by exists_prime_factor
+l2: $ _ ⊢ suc 0 < z → ∃ p (prime p ∧ p ∣ z) $ by all_elim [l1]
+
+
+euclid
+------
+-- Let M = !y + 1.  It is greater than 1, so it has a prime divisor.
+l1: $ _ ⊢ suc 0 < ! y + suc 0 $ by one_lt_fact_succ
+l2: $ _ ⊢ suc 0 < ! y + suc 0 → ∃ p (prime p ∧ p ∣ (! y + suc 0)) $
+  by exists_prime_factor_inst
+l3: $ _ ⊢ ∃ p (prime p ∧ p ∣ (! y + suc 0)) $ by imp_elim [l2, l1]
+
+-- Work under a fixed prime divisor r of M.
+l4: $ prime r ∧ r ∣ (! y + suc 0) ⊢ prime r ∧ r ∣ (! y + suc 0) $
+  by ax
+l5: $ prime r ∧ r ∣ (! y + suc 0) ⊢ prime r $ by and_elim_l [l4]
+l6: $ prime r ∧ r ∣ (! y + suc 0) ⊢ r ∣ (! y + suc 0) $
+  by and_elim_r [l4]
+
+-- Compare r with y.  The good branch immediately gives the witness.
+l7: $ _ ⊢ r ≤ y ∨ y < r $ by nat_compare
+l8: $ y < r ⊢ y < r $ by ax
+l9: $ prime r ∧ r ∣ (! y + suc 0) , y < r ⊢ prime r ∧ y < r $
+  by and_intro [l5, l8]
+l10: $ prime r ∧ r ∣ (! y + suc 0) , y < r
+       ⊢ ∃ q (prime q ∧ y < q) $ by ex_intro [l9]
+
+-- In the bad branch, r ≤ y implies r divides y!, hence r divides 1.
+l11: $ r ≤ y ⊢ r ≤ y $ by ax
+l12: $ prime r ∧ r ∣ (! y + suc 0) ⊢ suc 0 < r $
+  by and_elim_l [l5]
+l13: $ prime r ∧ r ∣ (! y + suc 0) , r ≤ y ⊢ suc 0 < r ∧ r ≤ y $
+  by and_intro [l12, l11]
+l14: $ _ ⊢ ∀ y ((suc 0 < r ∧ r ≤ y) → r ∣ ! y) $ by dvd_fact
+l15: $ _ ⊢ (suc 0 < r ∧ r ≤ y) → r ∣ ! y $ by all_elim [l14]
+l16: $ prime r ∧ r ∣ (! y + suc 0) , r ≤ y ⊢ r ∣ ! y $
+  by imp_elim [l15, l13]
+l17: $ prime r ∧ r ∣ (! y + suc 0) , r ≤ y ⊢ r ∣ suc 0 $
+  by dvd_add_cancel [l16, l6]
+
+-- But no prime divides 1.
+l18: $ prime r ∧ r ∣ (! y + suc 0) ⊢ ¬ r ∣ suc 0 $
+  by prime_not_dvd_one [l5]
+l19: $ prime r ∧ r ∣ (! y + suc 0) , r ≤ y ⊢ ⊥ $
+  by not_elim [l18, l17]
+l20: $ prime r ∧ r ∣ (! y + suc 0) , r ≤ y
+       ⊢ ∃ q (prime q ∧ y < q) $ by bot_elim [l19]
+
+-- Close the comparison and the prime-factor existential.
+l21: $ prime r ∧ r ∣ (! y + suc 0) ⊢ ∃ q (prime q ∧ y < q) $
+  by or_elim [l7, l20, l10]
+l22: $ _ ⊢ ∃ q (prime q ∧ y < q) $ by ex_elim [l3, l21]
+
+-- Generalise y back to the theorem's bound variable n.
+l23: $ _ ⊢ ∀ n (∃ q (prime q ∧ n < q)) $ by all_intro [l22]
