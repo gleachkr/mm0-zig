@@ -6,6 +6,7 @@ const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const Span = @import("../proof_script.zig").Span;
 const DiagnosticDetail = @import("./diag.zig").DiagnosticDetail;
 const DiagnosticSource = @import("./diag.zig").DiagnosticSource;
+const CompilerContext = @import("./context.zig").CompilerContext;
 
 const UseState = struct {
     used_args: []bool,
@@ -13,7 +14,7 @@ const UseState = struct {
 };
 
 pub fn lintUnusedTheoremParameters(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     rule: *const RuleDecl,
     span: ?Span,
@@ -59,7 +60,7 @@ pub fn lintUnusedTheoremParameters(
 }
 
 pub fn lintUnusedDefinitionParameters(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     term: *const TermDecl,
     span: ?Span,

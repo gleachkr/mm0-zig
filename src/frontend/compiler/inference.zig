@@ -20,6 +20,7 @@ const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const CompilerViews = @import("./views.zig");
 const ViewDecl = CompilerViews.ViewDecl;
 const CompilerDiag = @import("./diag.zig");
+const CompilerContext = @import("./context.zig").CompilerContext;
 const CompilerFresh = @import("./fresh.zig");
 const CompilerVars = @import("./vars.zig");
 const ViewTrace = @import("../view_trace.zig");
@@ -750,7 +751,7 @@ fn bindingSeedsForViewReuse(
 }
 
 fn buildViewSeedSetup(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     registry: *RewriteRegistry,
@@ -1360,7 +1361,7 @@ fn matchRulePartSurface(
 }
 
 fn finishHoleyRuleMatchSession(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleInferenceContext,
     line: anytype,
     session: *DefOps.RuleMatchSession,
@@ -1422,8 +1423,7 @@ fn finishHoleyRuleMatchSession(
             defer allocator.free(snapshot);
             for (snapshot, 0..) |binding, idx| {
                 if (binding != null) continue;
-                CompilerDiag.setProof(
-                    self,
+                self.setProof(
                     try buildMissingBinderDiagnostic(
                         allocator,
                         env,
@@ -1440,8 +1440,7 @@ fn finishHoleyRuleMatchSession(
                 break;
             }
         } else if (err == error.UnresolvedDummyWitness) {
-            CompilerDiag.setProof(
-                self,
+            self.setProof(
                 try buildInferenceFailureDiagnostic(
                     allocator,
                     env,
@@ -1461,7 +1460,7 @@ fn finishHoleyRuleMatchSession(
 }
 
 pub fn inferBindingsFromHoleyAdvanced(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
@@ -1486,7 +1485,7 @@ pub fn inferBindingsFromHoleyAdvanced(
         holey_concl,
         maybe_view,
     )) |bindings| {
-        self.last_diagnostic = null;
+        self.restoreDiagnostic(null);
         return bindings;
     }
 
@@ -1541,8 +1540,7 @@ pub fn inferBindingsFromHoleyAdvanced(
     return switch (result) {
         .concrete => |bindings| bindings,
         .no_match => {
-            CompilerDiag.setProof(
-                self,
+            self.setProof(
                 try buildInferenceFailureDiagnostic(
                     allocator,
                     env,
@@ -1559,8 +1557,7 @@ pub fn inferBindingsFromHoleyAdvanced(
             return error.UnifyMismatch;
         },
         .unresolved_dummy_witness => {
-            CompilerDiag.setProof(
-                self,
+            self.setProof(
                 try buildInferenceFailureDiagnostic(
                     allocator,
                     env,
@@ -1583,7 +1580,7 @@ pub fn inferBindingsFromHoleyAdvanced(
 // hole is not itself a structural sort. A whole-line `_wff` can hide an `nd`
 // conclusion whose context binder is recoverable only from ACUI hypotheses.
 fn tryInferHoleyStructuralSolver(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
@@ -1668,7 +1665,7 @@ fn tryInferHoleyStructuralSolver(
 }
 
 fn maybeAddStructuralAmbiguityWarning(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     assertion: AssertionStmt,
     line: anytype,
@@ -1702,7 +1699,7 @@ fn maybeAddStructuralAmbiguityWarning(
 }
 
 fn tryConcreteStructuralSolver(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
@@ -1746,8 +1743,7 @@ fn tryConcreteStructuralSolver(
             partial_bindings,
             partial_bindings,
         );
-        CompilerDiag.setProof(
-            self,
+        self.setProof(
             try buildInferenceFailureDiagnostic(
                 allocator,
                 env,
@@ -1774,7 +1770,7 @@ fn tryConcreteStructuralSolver(
 }
 
 fn tryConcreteRuleMatchSessionFallback(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleInferenceContext,
     line: anytype,
     seeds: []const DefOps.BindingSeed,
@@ -1827,8 +1823,7 @@ fn tryConcreteRuleMatchSessionFallback(
         .concrete => |bindings| bindings,
         .no_match => null,
         .unresolved_dummy_witness => blk: {
-            CompilerDiag.setProof(
-                self,
+            self.setProof(
                 try buildInferenceFailureDiagnostic(
                     allocator,
                     env,
@@ -1848,7 +1843,7 @@ fn tryConcreteRuleMatchSessionFallback(
 }
 
 fn inferBindingsNoView(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
@@ -1899,7 +1894,7 @@ fn inferBindingsNoView(
         .complete => |bindings| return bindings,
         .failed => |failure| {
             defer allocator.free(failure.partial_bindings);
-            self.last_diagnostic = null;
+            self.restoreDiagnostic(null);
             try traceInferenceFailure(
                 self.debug,
                 allocator,
@@ -1946,7 +1941,7 @@ fn inferBindingsNoView(
                         partial_bindings,
                         failure.partial_bindings,
                     );
-                    self.last_diagnostic = null;
+                    self.restoreDiagnostic(null);
                 }
 
                 const seeds = try DefOps.BindingSeed.fromOptionalBindings(
@@ -1965,7 +1960,7 @@ fn inferBindingsNoView(
                     partial_bindings,
                     failure.partial_bindings,
                 )) |bindings| {
-                    self.last_diagnostic = null;
+                    self.restoreDiagnostic(null);
                     return bindings;
                 }
             }
@@ -1994,8 +1989,7 @@ fn inferBindingsNoView(
             if (failure.err == error.MissingBinderAssignment) {
                 for (failure.partial_bindings, 0..) |binding, idx| {
                     if (binding != null) continue;
-                    CompilerDiag.setProof(
-                        self,
+                    self.setProof(
                         try buildMissingBinderDiagnostic(
                             allocator,
                             env,
@@ -2012,8 +2006,7 @@ fn inferBindingsNoView(
                     return failure.err;
                 }
             }
-            CompilerDiag.setProof(
-                self,
+            self.setProof(
                 try buildInferenceFailureDiagnostic(
                     allocator,
                     env,
@@ -2033,7 +2026,7 @@ fn inferBindingsNoView(
 }
 
 pub fn inferBindings(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleInferenceContext,
     line: anytype,
     partial_bindings: []const ?ExprId,
@@ -2156,8 +2149,7 @@ pub fn inferBindings(
                 else
                     partial_bindings,
             );
-            if (CompilerDiag.setProofScratchDiagnosticIfPresent(
-                self,
+            if (self.setProofScratchDiagnosticIfPresent(
                 scratch,
                 match_mark,
                 env,
@@ -2194,8 +2186,7 @@ pub fn inferBindings(
                     partial_bindings,
                     solver_bindings,
                 );
-                CompilerDiag.setProof(
-                    self,
+                self.setProof(
                     try buildInferenceFailureDiagnostic(
                         allocator,
                         env,
@@ -2245,8 +2236,7 @@ pub fn inferBindings(
                 partial_bindings,
                 solver_bindings,
             );
-            CompilerDiag.setProof(
-                self,
+            self.setProof(
                 try buildInferenceFailureDiagnostic(
                     allocator,
                     env,
@@ -2302,9 +2292,8 @@ pub fn inferBindings(
         .complete => |bindings| return bindings,
         .failed => |strict_failure| {
             defer allocator.free(strict_failure.partial_bindings);
-            if (self.last_diagnostic != null) return strict_failure.err;
-            CompilerDiag.setProof(
-                self,
+            if (self.getDiagnostic() != null) return strict_failure.err;
+            self.setProof(
                 try buildInferenceFailureDiagnostic(
                     allocator,
                     env,
@@ -2324,7 +2313,7 @@ pub fn inferBindings(
 }
 
 fn strictInferBindingsDetailed(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
@@ -2388,8 +2377,7 @@ fn strictInferBindingsDetailed(
 
     for (0..rule.args.len) |idx| {
         const binding = snapshot[idx] orelse {
-            CompilerDiag.maybeSetProof(
-                self,
+            self.maybeSetProof(
                 try buildMissingBinderDiagnostic(
                     allocator,
                     env,
@@ -2444,7 +2432,7 @@ fn strictInferBindingsDetailed(
                 partial_bindings,
                 snapshot,
             );
-            CompilerDiag.maybeSetProof(self, diag);
+            self.maybeSetProof(diag);
             return .{ .failed = .{
                 .err = err,
                 .partial_bindings = snapshot,
@@ -2461,7 +2449,7 @@ fn strictInferBindingsDetailed(
 }
 
 pub fn strictInferBindings(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
@@ -2495,7 +2483,7 @@ pub fn strictInferBindings(
 }
 
 pub fn validateResolvedBindingsWithDebug(
-    self: anytype,
+    self: *CompilerContext,
     debug: DebugConfig,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
@@ -2512,7 +2500,7 @@ pub fn validateResolvedBindingsWithDebug(
             rule.args[idx],
             binding,
         ) catch |err| {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            self.setProof(CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = err,
                 .theorem_name = assertion.name,
@@ -2552,7 +2540,7 @@ pub fn validateResolvedBindingsWithDebug(
             "  deps: first=0x{x} second=0x{x}",
             .{ detail.first_deps, detail.second_deps },
         );
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        self.setProof(CompilerDiag.withPhase(.{
             .kind = .generic,
             .err = error.DepViolation,
             .theorem_name = assertion.name,
@@ -2566,7 +2554,7 @@ pub fn validateResolvedBindingsWithDebug(
 }
 
 pub fn validateResolvedBindings(
-    self: anytype,
+    self: *CompilerContext,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
     assertion: AssertionStmt,

@@ -29,6 +29,7 @@ const Check = @import("./check.zig");
 const RuleCatalog = @import("./rule_catalog.zig");
 const CompilerVars = @import("./vars.zig");
 const CompilerDiag = @import("./diag.zig");
+const CompilerContext = @import("./context.zig").CompilerContext;
 const CompilerLints = @import("./lints.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
 const DiagnosticSource = CompilerDiag.DiagnosticSource;
@@ -71,7 +72,7 @@ const ProofItemStream = struct {
 };
 
 fn validateDefinitionBody(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *const MM0Parser,
     env: *const GlobalEnv,
@@ -158,7 +159,7 @@ const DependencyStatus = enum {
 const InvalidRuleSet = std.StringHashMap(void);
 
 pub fn run(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     emit: ?*Output,
 ) !void {
@@ -213,8 +214,7 @@ pub fn run(
         } orelse break;
         last_stmt = stmt;
         CompilerVars.validateSortVarCollisions(&parser, &sort_vars) catch |err| {
-            CompilerDiag.setIfMissing(
-                self,
+            self.setIfMissing(
                 CompilerDiag.mm0StatementDiagnostic(&parser, stmt, err),
             );
             return err;
@@ -231,8 +231,7 @@ pub fn run(
                     });
                 }
                 env.addStmt(stmt) catch |err| {
-                    CompilerDiag.setIfMissing(
-                        self,
+                    self.setIfMissing(
                         CompilerDiag.mm0StatementDiagnostic(
                             &parser,
                             MM0Stmt{ .sort = sort_stmt_copy },
@@ -247,8 +246,7 @@ pub fn run(
                     parser.last_annotations,
                     &sort_vars,
                 ) catch |err| {
-                    CompilerDiag.setIfMissing(
-                        self,
+                    self.setIfMissing(
                         CompilerDiag.mm0StatementDiagnostic(
                             &parser,
                             MM0Stmt{ .sort = sort_stmt_copy },
@@ -296,8 +294,7 @@ pub fn run(
                         &parser,
                         filled_term_stmt,
                     ) catch |err| {
-                        CompilerDiag.setIfMissing(
-                            self,
+                        self.setIfMissing(
                             CompilerDiag.mm0StatementDiagnostic(
                                 &parser,
                                 MM0Stmt{ .term = term_stmt_copy },
@@ -313,8 +310,7 @@ pub fn run(
                             &parser,
                             filled_term_stmt,
                         ) catch |err| {
-                            CompilerDiag.setIfMissing(
-                                self,
+                            self.setIfMissing(
                                 CompilerDiag.mm0StatementDiagnostic(
                                     &parser,
                                     MM0Stmt{ .term = term_stmt_copy },
@@ -331,8 +327,7 @@ pub fn run(
                     });
                 }
                 env.addStmt(.{ .term = filled_term_stmt }) catch |err| {
-                    CompilerDiag.setIfMissing(
-                        self,
+                    self.setIfMissing(
                         CompilerDiag.mm0StatementDiagnostic(
                             &parser,
                             MM0Stmt{ .term = term_stmt_copy },
@@ -363,8 +358,7 @@ pub fn run(
                     filled_term_stmt,
                     parser.last_annotations,
                 ) catch |err| {
-                    CompilerDiag.setIfMissing(
-                        self,
+                    self.setIfMissing(
                         CompilerDiag.mm0StatementDiagnostic(
                             &parser,
                             MM0Stmt{ .term = term_stmt_copy },
@@ -390,8 +384,7 @@ pub fn run(
                     assertion,
                     emit,
                 ) catch |err| {
-                    CompilerDiag.setIfMissing(
-                        self,
+                    self.setIfMissing(
                         CompilerDiag.mm0StatementDiagnostic(
                             &parser,
                             MM0Stmt{ .assertion = assertion },
@@ -406,8 +399,7 @@ pub fn run(
 
     CompilerVars.validateSortVarCollisions(&parser, &sort_vars) catch |err| {
         if (last_stmt) |stmt| {
-            CompilerDiag.setIfMissing(
-                self,
+            self.setIfMissing(
                 CompilerDiag.mm0StatementDiagnostic(&parser, stmt, err),
             );
         }
@@ -433,7 +425,7 @@ const FilledPublicDef = struct {
 };
 
 fn fillPublicDefBody(
-    self: anytype,
+    self: *CompilerContext,
     _: std.mem.Allocator,
     parser: *MM0Parser,
     proof_stream: *?ProofItemStream,
@@ -548,7 +540,7 @@ fn publicDefBodyParseDiagnostic(
     return diag;
 }
 
-fn setExtraProofItemDiagnostic(self: anytype, item: TopLevelItem) anyerror {
+fn setExtraProofItemDiagnostic(self: *CompilerContext, item: TopLevelItem) anyerror {
     switch (item) {
         .block => |block| {
             self.setDiagnostic(
@@ -566,7 +558,7 @@ fn setExtraProofItemDiagnostic(self: anytype, item: TopLevelItem) anyerror {
 }
 
 fn drainAnchoredLocalProofItems(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *GlobalEnv,
@@ -664,7 +656,7 @@ fn anchorMatches(header: PublicStmtHeader, item: TopLevelItem) bool {
 }
 
 fn processLocalProofItem(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *GlobalEnv,
@@ -704,7 +696,7 @@ fn processLocalProofItem(
 }
 
 fn processLocalDefItem(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *GlobalEnv,
@@ -782,7 +774,7 @@ fn processLocalDefItem(
     );
 }
 
-fn rejectDefAnnotations(self: anytype, def: DefItem) !void {
+fn rejectDefAnnotations(self: *CompilerContext, def: DefItem) !void {
     if (def.annotations.len == 0) return;
     self.setDiagnostic(CompilerDiag.unsupportedProofDefAnnotationDiagnostic(
         def.name,
@@ -903,19 +895,20 @@ const WarningSnapshot = struct {
     warning_count: usize,
     dropped_warning_count: usize,
 
-    fn capture(self: anytype) WarningSnapshot {
+    fn capture(self: *CompilerContext) WarningSnapshot {
         return .{
-            .warning_count = self.warning_count,
-            .dropped_warning_count = self.dropped_warning_count,
+            .warning_count = self.diagnostics.warning_count,
+            .dropped_warning_count = self.diagnostics.dropped_warning_count,
         };
     }
 
     fn restore(
         self: WarningSnapshot,
-        sink: anytype,
+        context: *CompilerContext,
     ) void {
-        sink.warning_count = self.warning_count;
-        sink.dropped_warning_count = self.dropped_warning_count;
+        context.diagnostics.warning_count = self.warning_count;
+        context.diagnostics.dropped_warning_count =
+            self.dropped_warning_count;
     }
 };
 
@@ -1005,21 +998,21 @@ const AssertionRecoverySnapshot = struct {
 };
 
 pub fn analyze(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
 ) !void {
     try analyzeInternal(self, allocator, true);
 }
 
 pub fn analyzeMm0(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
 ) !void {
     try analyzeInternal(self, allocator, false);
 }
 
 fn analyzeInternal(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     comptime with_proof: bool,
 ) !void {
@@ -1110,7 +1103,7 @@ fn analyzeInternal(
 }
 
 fn analyzeDrainAnchoredLocalProofItems(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     state: *AnalysisState,
 ) !void {
@@ -1213,7 +1206,7 @@ fn putBackAnalysisItems(
 }
 
 fn analyzeLocalProofItem(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     state: *AnalysisState,
     proof: *ProofAnalysisState,
@@ -1238,7 +1231,7 @@ fn analyzeLocalProofItem(
 }
 
 fn analyzeLocalProofBlock(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     state: *AnalysisState,
     proof: *ProofAnalysisState,
@@ -1275,7 +1268,7 @@ fn analyzeLocalProofBlock(
 }
 
 fn analyzeLocalDefItem(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     state: *AnalysisState,
     proof: *ProofAnalysisState,
@@ -1325,23 +1318,23 @@ fn discardFailedLocalTerm(
 }
 
 fn recordPrimaryLocalDefFailure(
-    self: anytype,
+    self: *CompilerContext,
     def: DefItem,
     err: anyerror,
 ) void {
-    const diag = self.last_diagnostic orelse Diagnostic{
+    const diag = self.getDiagnostic() orelse Diagnostic{
         .kind = .generic,
         .err = err,
         .source = .proof,
         .name = def.name,
         .span = def.name_span,
     };
-    self.last_diagnostic = null;
+    self.restoreDiagnostic(null);
     self.addPrimaryDiagnostic(diag);
 }
 
 fn analyzeSortStatement(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     state: *AnalysisState,
     stmt: MM0Stmt,
@@ -1371,7 +1364,7 @@ fn analyzeSortStatement(
 }
 
 fn analyzeTermStatement(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     state: *AnalysisState,
     stmt: MM0Stmt,
@@ -1461,7 +1454,7 @@ fn analyzeTermStatement(
 }
 
 fn analyzeFillPublicDefBody(
-    self: anytype,
+    self: *CompilerContext,
     state: *AnalysisState,
     term_stmt: TermStmt,
 ) !?FilledPublicDef {
@@ -1550,7 +1543,7 @@ fn analyzeFillPublicDefBody(
 }
 
 fn analyzeAssertionStatement(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     state: *AnalysisState,
     stmt: MM0Stmt,
@@ -1706,7 +1699,7 @@ const TheoremProofResult = struct {
 };
 
 fn analyzeTheoremProof(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *GlobalEnv,
@@ -1885,7 +1878,7 @@ fn analyzeTheoremProof(
 }
 
 fn analyzeExtraProofBlocks(
-    self: anytype,
+    self: *CompilerContext,
     proof: *ProofAnalysisState,
 ) !void {
     if (proof.exhausted and proof.pending.items.len == 0) return;
@@ -1933,7 +1926,7 @@ fn analyzeExtraProofBlocks(
 }
 
 fn processAssertion(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *GlobalEnv,
@@ -2001,8 +1994,7 @@ fn processAssertion(
             &theorem,
             theorem_concl,
         ) catch |err| {
-            CompilerDiag.setIfMissing(
-                self,
+            self.setIfMissing(
                 CompilerDiag.theoremDiagnostic(
                     assertion.name,
                     block.name_span,
@@ -2029,8 +2021,7 @@ fn processAssertion(
                 env,
                 checked,
             ) catch |err| {
-                CompilerDiag.setIfMissing(
-                    self,
+                self.setIfMissing(
                     CompilerDiag.theoremDiagnostic(
                         assertion.name,
                         block.name_span,
@@ -2090,7 +2081,7 @@ fn processAssertion(
 }
 
 fn processNonTheoremAssertion(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *GlobalEnv,
@@ -2161,7 +2152,7 @@ fn processNonTheoremAssertion(
 }
 
 fn nextTheoremBlock(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *GlobalEnv,
@@ -2234,7 +2225,7 @@ fn nextTheoremBlock(
 }
 
 fn parseLemmaAssertion(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *const MM0Parser,
     block: TheoremBlock,
@@ -2255,7 +2246,7 @@ fn parseLemmaAssertion(
 }
 
 fn processLocalProofBlock(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *GlobalEnv,
@@ -2291,8 +2282,7 @@ fn processLocalProofBlock(
         &theorem,
         theorem_concl,
     ) catch |err| {
-        CompilerDiag.setIfMissing(
-            self,
+        self.setIfMissing(
             CompilerDiag.theoremDiagnostic(
                 assertion.name,
                 block.header_span,
@@ -2320,8 +2310,7 @@ fn processLocalProofBlock(
             env,
             checked,
         ) catch |err| {
-            CompilerDiag.setIfMissing(
-                self,
+            self.setIfMissing(
                 CompilerDiag.theoremDiagnostic(
                     assertion.name,
                     block.header_span,
@@ -2378,8 +2367,7 @@ fn processLocalProofBlock(
         block.annotations,
     ) catch |err| {
         env.removeLastRule(assertion.name);
-        CompilerDiag.setIfMissing(
-            self,
+        self.setIfMissing(
             CompilerDiag.proofBlockDiagnostic(
                 block.name,
                 block.header_span,
@@ -2391,7 +2379,7 @@ fn processLocalProofBlock(
 }
 
 fn addAssertionToEnv(
-    self: anytype,
+    self: *CompilerContext,
     env: *GlobalEnv,
     assertion: AssertionStmt,
     diag_name: []const u8,
@@ -2411,7 +2399,7 @@ fn addAssertionToEnv(
 }
 
 fn recoverFromMm0ParseFailure(
-    self: anytype,
+    self: *CompilerContext,
     parser: *MM0Parser,
     err: anyerror,
 ) bool {
@@ -2424,24 +2412,24 @@ fn recoverFromMm0ParseFailure(
 }
 
 fn recordPrimaryStatementFailure(
-    self: anytype,
+    self: *CompilerContext,
     parser: *MM0Parser,
     stmt: MM0Stmt,
     err: anyerror,
 ) void {
-    const diag = self.last_diagnostic orelse
+    const diag = self.getDiagnostic() orelse
         CompilerDiag.mm0StatementDiagnostic(parser, stmt, err);
-    self.last_diagnostic = null;
+    self.restoreDiagnostic(null);
     self.addPrimaryDiagnostic(diag);
 }
 
 fn recordPrimaryProofFailure(
-    self: anytype,
+    self: *CompilerContext,
     invalid_rules: *const InvalidRuleSet,
     fallback: CompilerDiag.Diagnostic,
 ) void {
-    const diag = self.last_diagnostic orelse fallback;
-    self.last_diagnostic = null;
+    const diag = self.getDiagnostic() orelse fallback;
+    self.restoreDiagnostic(null);
     if (shouldSuppressProofFailure(diag, invalid_rules)) return;
     self.addPrimaryDiagnostic(diag);
 }

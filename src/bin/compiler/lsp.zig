@@ -635,7 +635,7 @@ pub const Handler = struct {
 
         var compiler = mm0.Compiler.init(arena, text);
         compiler.analyzeMm0() catch |err| {
-            if (compiler.last_diagnostic != null or
+            if (compiler.diagnostics.last_diagnostic != null or
                 compiler.primaryDiagnostics().len != 0 or
                 compiler.warningDiagnostics().len != 0)
             {
@@ -644,7 +644,7 @@ pub const Handler = struct {
                     diag_context,
                     compiler.primaryDiagnostics(),
                     compiler.warningDiagnostics(),
-                    compiler.last_diagnostic,
+                    compiler.diagnostics.last_diagnostic,
                     compiler.omittedPrimaryDiagnostic(.mm0),
                     .mm0,
                 );
@@ -728,7 +728,7 @@ pub const Handler = struct {
             proof_text,
         );
         compiler.analyze() catch |err| {
-            if (compiler.last_diagnostic != null or
+            if (compiler.diagnostics.last_diagnostic != null or
                 compiler.primaryDiagnostics().len != 0 or
                 compiler.warningDiagnostics().len != 0)
             {
@@ -737,7 +737,7 @@ pub const Handler = struct {
                     diag_context,
                     compiler.primaryDiagnostics(),
                     compiler.warningDiagnostics(),
-                    compiler.last_diagnostic,
+                    compiler.diagnostics.last_diagnostic,
                     compiler.omittedPrimaryDiagnostic(.proof),
                     .proof,
                 );
@@ -746,7 +746,7 @@ pub const Handler = struct {
                     diag_context,
                     compiler.primaryDiagnostics(),
                     compiler.warningDiagnostics(),
-                    compiler.last_diagnostic,
+                    compiler.diagnostics.last_diagnostic,
                     compiler.omittedPrimaryDiagnostic(.mm0),
                     .mm0,
                 );
@@ -772,7 +772,7 @@ pub const Handler = struct {
             diag_context,
             compiler.primaryDiagnostics(),
             compiler.warningDiagnostics(),
-            compiler.last_diagnostic,
+            compiler.diagnostics.last_diagnostic,
             compiler.omittedPrimaryDiagnostic(.proof),
             .proof,
         );
@@ -781,7 +781,7 @@ pub const Handler = struct {
             diag_context,
             compiler.primaryDiagnostics(),
             compiler.warningDiagnostics(),
-            compiler.last_diagnostic,
+            compiler.diagnostics.last_diagnostic,
             compiler.omittedPrimaryDiagnostic(.mm0),
             .mm0,
         );

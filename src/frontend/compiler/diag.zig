@@ -170,34 +170,6 @@ pub const Diagnostic = struct {
     }
 };
 
-pub fn setIfMissing(self: anytype, diag: Diagnostic) void {
-    if (self.last_diagnostic != null) return;
-    self.setDiagnostic(diag);
-}
-
-pub fn setProof(self: anytype, diag: Diagnostic) void {
-    var proof_diag = diag;
-    proof_diag.source = .proof;
-    self.setDiagnostic(proof_diag);
-}
-
-pub fn maybeSetProof(self: anytype, diag: Diagnostic) void {
-    const T = @TypeOf(self);
-    switch (@typeInfo(T)) {
-        .pointer => |ptr| {
-            if (@hasDecl(ptr.child, "setDiagnostic")) {
-                setProof(self, diag);
-            }
-        },
-        .@"struct" => {
-            if (@hasDecl(T, "setDiagnostic")) {
-                setProof(self, diag);
-            }
-        },
-        else => {},
-    }
-}
-
 pub fn setPhase(diag: *Diagnostic, phase: DiagnosticPhase) void {
     diag.phase = phase;
 }
@@ -517,41 +489,6 @@ pub fn proofBindingDiagnosticSpan(
 ) Span {
     return line.application.bindingSpan(binder_name) orelse
         line.application.ruleApplicationSpan();
-}
-
-pub fn setProofScratchDiagnosticIfPresent(
-    self: anytype,
-    scratch: *Scratch,
-    mark: Scratch.Mark,
-    env: *const GlobalEnv,
-    phase: ?DiagnosticPhase,
-    kind: DiagnosticKind,
-    err: anyerror,
-    theorem_name: []const u8,
-    line_label: ?[]const u8,
-    rule_name: ?[]const u8,
-    span: ?Span,
-) bool {
-    const detail = takeScratchDetail(
-        scratch,
-        mark,
-        env,
-        err,
-    ) orelse {
-        return false;
-    };
-    var diag: Diagnostic = .{
-        .kind = kind,
-        .err = err,
-        .theorem_name = theorem_name,
-        .line_label = line_label,
-        .rule_name = rule_name,
-        .span = span,
-        .detail = detail,
-    };
-    if (phase) |actual_phase| setPhase(&diag, actual_phase);
-    maybeSetProof(self, diag);
-    return true;
 }
 
 fn proofMathErrorDiagnostic(

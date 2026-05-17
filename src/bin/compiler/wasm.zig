@@ -46,7 +46,6 @@ pub export fn compile_sources(
     return 1;
 }
 
-
 pub export fn result_json_ptr() u32 {
     return slicePtr(result_json);
 }
@@ -62,7 +61,6 @@ pub export fn result_mmb_ptr() u32 {
 pub export fn result_mmb_len() u32 {
     return @intCast(result_mmb.len);
 }
-
 
 fn clearState() void {
     if (result_json.len != 0) allocator.free(result_json);
@@ -84,7 +82,6 @@ fn slicePtr(bytes: []const u8) u32 {
     if (bytes.len == 0) return 0;
     return @intCast(@intFromPtr(bytes.ptr));
 }
-
 
 fn writeCompileSuccess(mmb_len: usize) !void {
     var out: std.io.Writer.Allocating = .init(allocator);
@@ -118,7 +115,7 @@ fn writeCompileFailure(
     try writeJsonStringField(&out.writer, "error", @errorName(err));
     try out.writer.writeByte(',');
 
-    if (compiler.last_diagnostic) |diag| {
+    if (compiler.diagnostics.last_diagnostic) |diag| {
         try writeJsonStringField(
             &out.writer,
             "message",

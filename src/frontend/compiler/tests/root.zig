@@ -230,7 +230,7 @@ test "compiler rejects unknown term annotations" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.UnknownTermAnnotation, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownTermAnnotation, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("zero", diag.name.?);
@@ -249,7 +249,7 @@ test "compiler pinpoints invalid fallback annotations" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.InvalidFallbackAnnotation, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.InvalidFallbackAnnotation, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("top_i", diag.name.?);
@@ -271,7 +271,7 @@ test "compiler pinpoints duplicate fallback annotations" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.DuplicateFallbackAnnotation, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DuplicateFallbackAnnotation, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("top_i", diag.name.?);
@@ -290,7 +290,7 @@ test "compiler pinpoints unknown fallback rules" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.UnknownFallbackRule, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownFallbackRule, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("top_i", diag.name.?);
@@ -307,7 +307,7 @@ test "compiler pinpoints unknown terms in notation statements" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.UnknownTerm, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownTerm, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("succ", diag.name.?);
@@ -334,7 +334,7 @@ test "compiler rejects anonymous notation binders" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.AnonymousNotationBinder, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("sb_f", diag.name.?);
@@ -361,7 +361,7 @@ test "compiler rejects dummy notation binders" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DummyNotationBinder, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("sb_f", diag.name.?);
@@ -388,7 +388,7 @@ test "compiler rejects notation declarations that omit arguments" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.InvalidNotationVariables, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("sb_f", diag.name.?);
@@ -406,7 +406,7 @@ test "compiler rejects unexpected top-level mm0 keywords" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.UnexpectedKeyword, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnexpectedKeyword, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings(
@@ -437,7 +437,7 @@ test "compiler pinpoints unknown sorts in mm0 declarations" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.UnknownSort, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownSort, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("zero", diag.name.?);
@@ -458,7 +458,7 @@ test "compiler pinpoints unknown math tokens in mm0 declarations" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.UnknownMathToken, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownMathToken, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("bad", diag.name.?);
@@ -486,7 +486,7 @@ test "compiler pinpoints trailing math tokens in mm0 declarations" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.TrailingMathTokens, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.TrailingMathTokens, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("bad", diag.name.?);
@@ -508,7 +508,7 @@ test "compiler pinpoints mismatched closing parens in mm0 math" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.ExpectedCloseParen, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.ExpectedCloseParen, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("bad", diag.name.?);
@@ -532,7 +532,7 @@ test "compiler pinpoints notation mismatches in mm0 math" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.NotationMismatch, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.NotationMismatch, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("bad", diag.name.?);
@@ -555,7 +555,7 @@ test "compiler pinpoints missing math tokens in mm0 math" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.ExpectedMathToken, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.ExpectedMathToken, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("bad", diag.name.?);
@@ -776,7 +776,7 @@ test "compiler rejects lemma names that collide with earlier rules" {
         proof_src,
     );
     try std.testing.expectError(error.DuplicateRuleName, compiler.check());
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DuplicateRuleName, diag.err);
     try std.testing.expectEqualStrings("first", diag.name.?);
     try std.testing.expect(diag.span != null);
@@ -805,7 +805,7 @@ test "compiler rejects theorem names that collide with earlier lemmas" {
         proof_src,
     );
     try std.testing.expectError(error.DuplicateRuleName, compiler.check());
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DuplicateRuleName, diag.err);
     try std.testing.expectEqualStrings("helper", diag.name.?);
 }
@@ -838,7 +838,7 @@ test "compiler preserves local lemma diagnostics after check returns" {
     const churn = try churn_arena.allocator().alloc(u8, 4096);
     @memset(churn, 0xaa);
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownRule, diag.err);
     try std.testing.expectEqualStrings("helper", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -893,7 +893,7 @@ test "compiler records proof diagnostics for failing proof lines" {
     try std.testing.expectError(error.UnknownLabel, compiler.compileMmb(
         std.testing.allocator,
     ));
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownLabel, diag.err);
     try std.testing.expectEqualStrings("keep_label", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -924,7 +924,7 @@ test "compiler pinpoints wrong reference count at the ref list" {
         std.testing.allocator,
     ));
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.RefCountMismatch, diag.err);
     try std.testing.expectEqualStrings("bad_refs", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -1279,7 +1279,7 @@ test "compiler cannot reference hidden applications by rule name" {
         std.testing.allocator,
     ));
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownLabel, diag.err);
     try std.testing.expectEqualStrings("target", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l2", diag.line_label.?);
@@ -1308,7 +1308,7 @@ test "compiler pinpoints unknown nested rule applications" {
         std.testing.allocator,
     ));
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownRule, diag.err);
     try std.testing.expectEqualStrings("target", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -1342,7 +1342,7 @@ test "compiler pinpoints nested application ref-count mismatches" {
         std.testing.allocator,
     ));
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.RefCountMismatch, diag.err);
     try std.testing.expectEqualStrings("target", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -1374,7 +1374,7 @@ test "compiler pinpoints missing nested application bindings" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.MissingBinderAssignment, diag.err);
     try std.testing.expectEqual(.missing_binder_assignment, diag.kind);
     try std.testing.expectEqualStrings("target", diag.theorem_name.?);
@@ -1412,7 +1412,7 @@ test "compiler reports child applications rejected by parent hypotheses" {
         std.testing.allocator,
     ));
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.HypothesisMismatch, diag.err);
     try std.testing.expectEqualStrings("target", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -1447,7 +1447,7 @@ test "compiler pinpoints nested binding validation failures" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.SortMismatch, diag.err);
     try std.testing.expectEqual(.parse_binding, diag.kind);
     try std.testing.expectEqual(
@@ -1494,7 +1494,7 @@ test "compiler preserves nested fallback first failure diagnostics" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.HypothesisMismatch, diag.err);
     try std.testing.expectEqual(.hypothesis_mismatch, diag.kind);
     try std.testing.expectEqual(
@@ -1535,7 +1535,7 @@ test "compiler pinpoints nested fallback cycles" {
         std.testing.allocator,
     ));
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.FallbackCycle, diag.err);
     try std.testing.expectEqual(.generic, diag.kind);
     try std.testing.expectEqual(
@@ -1578,7 +1578,7 @@ test "compiler pinpoints later nested rules" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.RuleNotYetAvailable, diag.err);
     try std.testing.expectEqual(.rule_not_yet_available, diag.kind);
     try std.testing.expectEqualStrings("first", diag.theorem_name.?);
@@ -1611,7 +1611,7 @@ test "compiler pinpoints duplicate proof labels" {
         std.testing.allocator,
     ));
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DuplicateLabel, diag.err);
     try std.testing.expectEqualStrings("dup_label", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -1640,7 +1640,7 @@ test "compiler pinpoints unknown proof rules" {
     );
     try std.testing.expectError(error.UnknownRule, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownRule, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
     try std.testing.expectEqualStrings("bad_rule", diag.theorem_name.?);
@@ -1681,7 +1681,7 @@ test "compiler distinguishes rules declared later in mm0 order" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.RuleNotYetAvailable, diag.err);
     try std.testing.expectEqual(.rule_not_yet_available, diag.kind);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
@@ -1771,7 +1771,7 @@ test "final mismatch reports reconciliation attempts" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.FinalLineMismatch, diag.err);
     try std.testing.expectEqual(.final_line_mismatch, diag.kind);
     try std.testing.expectEqual(
@@ -1813,7 +1813,7 @@ test "compiler reports fallback cycles when every candidate fails" {
         std.testing.allocator,
     ));
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.FallbackCycle, diag.err);
     try std.testing.expectEqualStrings("bad_cycle", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -1847,7 +1847,7 @@ test "compiler preserves the first fallback failure diagnostic" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.ConclusionMismatch, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
     try std.testing.expectEqualStrings("bad_fallback", diag.theorem_name.?);
@@ -1893,7 +1893,7 @@ test "compiler notes exhausted fallback chains for holey assertions" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.HoleConclusionMismatch, diag.err);
     try std.testing.expectEqual(@as(usize, 2), diag.noteSlice().len);
     try std.testing.expectEqualStrings(
@@ -1933,7 +1933,7 @@ test "compiler pinpoints proof parser identifier errors" {
     );
     try std.testing.expectError(error.ExpectedIdentifier, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.ExpectedIdentifier, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
     try std.testing.expectEqualStrings("bad_parse", diag.theorem_name.?);
@@ -1967,7 +1967,7 @@ test "compiler pinpoints missing proof block underlines" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.ExpectedBlockUnderline, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
     try std.testing.expectEqualStrings("bad_parse", diag.theorem_name.?);
@@ -1994,7 +1994,7 @@ test "compiler check diagnostics are marked as mm0 source" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.DuplicateRuleName, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DuplicateRuleName, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("dup", diag.name.?);
@@ -2011,7 +2011,7 @@ test "compiler pinpoints mm0 parser identifier errors" {
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
     try std.testing.expectError(error.ExpectedIdent, compiler.check());
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.ExpectedIdent, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings(
@@ -2044,7 +2044,7 @@ test "compiler records inference diagnostics for omitted arguments" {
     try std.testing.expectError(error.UnifyMismatch, compiler.compileMmb(
         std.testing.allocator,
     ));
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnifyMismatch, diag.err);
     try std.testing.expectEqualStrings(
         "could not infer omitted rule arguments from the line and refs",
@@ -2095,7 +2095,7 @@ test "compiler pinpoints unknown math tokens in proof assertions" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.UnknownMathToken, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
     try std.testing.expectEqualStrings("bad_token", diag.theorem_name.?);
@@ -2137,7 +2137,7 @@ test "compiler explains proof hole sort mismatches" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.HoleConclusionMismatch, diag.err);
     try std.testing.expectEqual(.conclusion_mismatch, diag.kind);
     try std.testing.expectEqualStrings(
@@ -2185,7 +2185,7 @@ test "compiler explains proof hole visible structure mismatches" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.HoleConclusionMismatch, diag.err);
     try std.testing.expectEqual(.conclusion_mismatch, diag.kind);
     try std.testing.expectEqualStrings(
@@ -2230,7 +2230,7 @@ test "compiler explains proof holes that leave binders unsolved" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.MissingBinderAssignment, diag.err);
     try std.testing.expectEqual(.missing_binder_assignment, diag.kind);
     try std.testing.expectEqualStrings("b", diag.name.?);
@@ -2283,7 +2283,7 @@ test "compiler reports which binder assignment is missing" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.MissingBinderAssignment, diag.err);
     try std.testing.expectEqual(.missing_binder_assignment, diag.kind);
     try std.testing.expectEqual(mm0.CompilerDiagnosticPhase.inference, diag.phase.?);
@@ -2346,7 +2346,7 @@ test "compiler reports conflicting dependency binders by name" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DepViolation, diag.err);
     try std.testing.expectEqual(.generic, diag.kind);
     try std.testing.expectEqual(
@@ -2396,7 +2396,7 @@ test "compiler reports checked-ir dep violations before emission" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DepViolation, diag.err);
     try std.testing.expectEqual(.generic, diag.kind);
     try std.testing.expectEqual(
@@ -2440,7 +2440,7 @@ test "compiler rejects def bodies that leave hidden binders free" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DepViolation, diag.err);
     try std.testing.expectEqual(.invalid_definition_body, diag.kind);
     try std.testing.expectEqualStrings(
@@ -2655,7 +2655,7 @@ test "compiler reports freshen attempt notes on failure" {
         compiler.compileMmb(allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.AlphaRewriteSearchFailed, diag.err);
     try std.testing.expectEqual(
         mm0.CompilerDiagnosticPhase.theorem_application,
@@ -2704,7 +2704,7 @@ test "compiler pinpoints invalid @freshen binder kinds" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(
         error.FreshenTargetMustBeRegularBinder,
         diag.err,
@@ -2739,7 +2739,7 @@ test "compiler pinpoints invalid @alpha binder kinds" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.AlphaRequiresBoundBinders, diag.err);
     const span = diag.span orelse return error.ExpectedDiagnosticSpan;
     try std.testing.expectEqualStrings(
@@ -2948,7 +2948,7 @@ test "multi-remainder ambiguity survives to final bindings" {
         @as(usize, 1),
         compiler.warningDiagnostics().len,
     );
-    try std.testing.expect(compiler.last_diagnostic == null);
+    try std.testing.expect(compiler.diagnostics.last_diagnostic == null);
 }
 
 test "compiler reports structural ambiguity without ACUI-only wording" {
@@ -3028,7 +3028,7 @@ test "-Werror upgrades ambiguity warnings into errors" {
     defer allocator.free(proof_src);
 
     var compiler = Compiler.initWithProof(allocator, mm0_src, proof_src);
-    compiler.warnings_as_errors = true;
+    compiler.diagnostics.warnings_as_errors = true;
     try std.testing.expectError(
         error.AmbiguousAcuiMatch,
         compiler.compileMmb(allocator),
@@ -3041,7 +3041,7 @@ test "-Werror upgrades ambiguity warnings into errors" {
         warnings[0].severity,
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(
         mm0.CompilerDiagnosticSeverity.@"error",
         diag.severity,
@@ -3078,7 +3078,7 @@ test "holey ACUI conclusion can still report ambiguity" {
         mm0_src,
         proof_src,
     );
-    werror_compiler.warnings_as_errors = true;
+    werror_compiler.diagnostics.warnings_as_errors = true;
     try std.testing.expectError(
         error.AmbiguousAcuiMatch,
         werror_compiler.compileMmb(allocator),
@@ -3271,7 +3271,7 @@ test "-Werror upgrades unused theorem parameter warnings into errors" {
     ;
 
     var compiler = Compiler.init(std.testing.allocator, mm0_src);
-    compiler.warnings_as_errors = true;
+    compiler.diagnostics.warnings_as_errors = true;
     try std.testing.expectError(
         error.UnusedTheoremParameter,
         compiler.check(),
@@ -3284,7 +3284,7 @@ test "-Werror upgrades unused theorem parameter warnings into errors" {
         warnings[0].severity,
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(
         mm0.CompilerDiagnosticSeverity.@"error",
         diag.severity,
@@ -3467,10 +3467,16 @@ test "compiler points binding validation errors at explicit assignments" {
         mm0_src,
         proof_src,
     );
+    var compiler_context = mm0.CompilerContext.init(
+        mm0_src,
+        proof_src,
+        compiler.debug,
+        &compiler.diagnostics,
+    );
     try std.testing.expectError(
         error.SortMismatch,
         CompilerInference.validateResolvedBindings(
-            &compiler,
+            &compiler_context,
             &env,
             &theorem,
             assertion,
@@ -3480,7 +3486,7 @@ test "compiler points binding validation errors at explicit assignments" {
         ),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.SortMismatch, diag.err);
     const span = diag.span orelse return error.ExpectedDiagnosticSpan;
     try std.testing.expectEqualStrings(
@@ -3513,7 +3519,7 @@ test "compiler rejects @congr binders declared old-old-new-new" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.CongruenceBinderOrderMismatch, diag.err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.mm0, diag.source);
     try std.testing.expectEqualStrings("pair_congr", diag.name.?);
@@ -3547,7 +3553,7 @@ test "compiler rejects @congr regular args reused on both sides" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.CongruenceBinderOrderMismatch, diag.err);
     try std.testing.expectEqualStrings("box_congr", diag.name.?);
     const span = diag.span orelse return error.ExpectedDiagnosticSpan;
@@ -3578,7 +3584,7 @@ test "compiler rejects @congr with wrong outer relation" {
         compiler.check(),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.InvalidCongruenceAnnotation, diag.err);
     try std.testing.expectEqualStrings("box_congr", diag.name.?);
     const span = diag.span orelse return error.ExpectedDiagnosticSpan;
@@ -3668,7 +3674,7 @@ test "compiler reports normalized comparison snapshots on mismatch" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.ConclusionMismatch, diag.err);
     try std.testing.expectEqual(.conclusion_mismatch, diag.kind);
     try std.testing.expectEqual(
@@ -3737,7 +3743,7 @@ test "compiler reports missing congruence rules for normalization" {
         compiler.compileMmb(std.testing.allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.MissingCongruenceRule, diag.err);
     try std.testing.expectEqual(.generic, diag.kind);
     try std.testing.expectEqualStrings(
@@ -4085,7 +4091,7 @@ test "compiler reports dependency slot exhaustion clearly" {
         compiler.compileMmb(allocator),
     );
 
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(error.DependencySlotExhausted, diag.err);
     try std.testing.expectEqualStrings("overflow", diag.theorem_name.?);
     try std.testing.expectEqualStrings("l1", diag.line_label.?);
@@ -4184,10 +4190,16 @@ test "strict replay does not open defs during omitted inference" {
         .span = .{ .start = 0, .end = 0 },
     };
 
+    var compiler_context = mm0.CompilerContext.init(
+        mm0_src,
+        proof_src,
+        compiler.debug,
+        &compiler.diagnostics,
+    );
     try std.testing.expectError(
         error.TermMismatch,
         CompilerInference.strictInferBindings(
-            {},
+            &compiler_context,
             arena.allocator(),
             &env,
             &theorem,
@@ -4244,7 +4256,7 @@ test "compiler analyze mm0 collects multiple statement diagnostics" {
 
     const diags = compiler.primaryDiagnostics();
     try std.testing.expectEqual(@as(usize, 2), diags.len);
-    try std.testing.expect(compiler.last_diagnostic == null);
+    try std.testing.expect(compiler.diagnostics.last_diagnostic == null);
 
     try std.testing.expectEqual(error.UnknownFallbackRule, diags[0].err);
     try std.testing.expectEqualStrings("bad", diags[0].name.?);
@@ -4358,7 +4370,7 @@ test "compiler analyze with proof collects multiple block diagnostics" {
 
     const diags = compiler.primaryDiagnostics();
     try std.testing.expectEqual(@as(usize, 2), diags.len);
-    try std.testing.expect(compiler.last_diagnostic == null);
+    try std.testing.expect(compiler.diagnostics.last_diagnostic == null);
 
     try std.testing.expectEqual(error.UnknownRule, diags[0].err);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diags[0].source);

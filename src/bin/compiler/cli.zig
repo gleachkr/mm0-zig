@@ -125,7 +125,7 @@ fn runCompile(
         proof,
     );
     compiler.debug = cmd.debug;
-    compiler.warnings_as_errors = cmd.warnings_as_errors;
+    compiler.diagnostics.warnings_as_errors = cmd.warnings_as_errors;
     const mmb = compiler.compileMmb(allocator) catch |err| {
         std.debug.print("Failed to compile {s}\n", .{cmd.paths.input});
         compiler.reportError(err);

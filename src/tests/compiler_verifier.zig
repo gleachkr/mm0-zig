@@ -472,7 +472,7 @@ test "compiler rejects missing public body filler" {
         error.MissingPublicDefBody,
         compiler.compileMmb(std.testing.allocator),
     );
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(.missing_public_def_body, diag.kind);
 }
 
@@ -495,7 +495,7 @@ test "compiler rejects mismatched public body filler name" {
         error.PublicDefBodyNameMismatch,
         compiler.compileMmb(std.testing.allocator),
     );
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(.public_def_body_name_mismatch, diag.kind);
     try std.testing.expectEqualStrings("alias", diag.expected_name.?);
 }
@@ -518,7 +518,7 @@ test "compiler rejects public body fillers that leak hidden dummies" {
         error.DepViolation,
         compiler.compileMmb(std.testing.allocator),
     );
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(.invalid_definition_body, diag.kind);
 }
 
@@ -648,7 +648,7 @@ test "compiler rejects local def sort mismatches" {
         error.SortMismatch,
         compiler.compileMmb(std.testing.allocator),
     );
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(.generic, diag.kind);
     try std.testing.expectEqual(mm0.CompilerDiagnosticSource.proof, diag.source);
 }
@@ -678,7 +678,7 @@ test "compiler rejects local defs that leak hidden dummies" {
         error.DepViolation,
         compiler.compileMmb(std.testing.allocator),
     );
-    const diag = compiler.last_diagnostic orelse return error.ExpectedDiagnostic;
+    const diag = compiler.diagnostics.last_diagnostic orelse return error.ExpectedDiagnostic;
     try std.testing.expectEqual(.invalid_definition_body, diag.kind);
 }
 

@@ -23,6 +23,8 @@ const ViewDecl = CompilerViews.ViewDecl;
 const FreshDecl = CompilerFresh.FreshDecl;
 const FreshenDecl = CompilerFresh.FreshenDecl;
 const CompilerDiag = @import("./diag.zig");
+const CompilerContext = @import("./context.zig").CompilerContext;
+const DiagnosticSink = @import("./diagnostic_sink.zig").DiagnosticSink;
 const Normalize = @import("./normalize.zig");
 const ViewTrace = @import("../view_trace.zig");
 const Diagnostic = CompilerDiag.Diagnostic;
@@ -130,7 +132,7 @@ const RuleApplyContext = struct {
 };
 
 pub fn checkTheoremBlock(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *const GlobalEnv,
@@ -163,7 +165,7 @@ pub fn checkTheoremBlock(
 
     for (block.lines) |line| {
         if (labels.contains(line.label)) {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            self.setProof(CompilerDiag.withPhase(.{
                 .kind = .duplicate_label,
                 .err = error.DuplicateLabel,
                 .theorem_name = assertion.name,
@@ -221,7 +223,7 @@ pub fn checkTheoremBlock(
     }
 
     const final_line = last_line orelse {
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        self.setProof(CompilerDiag.withPhase(.{
             .kind = .empty_proof_block,
             .err = error.EmptyProofBlock,
             .theorem_name = assertion.name,
@@ -263,7 +265,7 @@ pub fn checkTheoremBlock(
                         .detail = detail,
                     }, .final_reconciliation);
                     addBoundaryAttemptNotes(&diag, final_report);
-                    CompilerDiag.setProof(self, diag);
+                    self.setProof(diag);
                     return err;
                 }
                 diag_scratch.discard(final_mark);
@@ -291,10 +293,10 @@ pub fn checkTheoremBlock(
                 .span = last_span,
             }, .final_reconciliation);
             addBoundaryAttemptNotes(&diag, final_report);
-            CompilerDiag.setProof(self, diag);
+            self.setProof(diag);
             return error.FinalLineMismatch;
         }
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        self.setProof(CompilerDiag.withPhase(.{
             .kind = .final_line_mismatch,
             .err = error.FinalLineMismatch,
             .theorem_name = assertion.name,
@@ -307,7 +309,7 @@ pub fn checkTheoremBlock(
 }
 
 fn parseProofLineAssertion(
-    self: anytype,
+    self: *CompilerContext,
     parser: *MM0Parser,
     theorem: *TheoremContext,
     theorem_vars: *NameExprMap,
@@ -322,7 +324,7 @@ fn parseProofLineAssertion(
         sort_vars,
         line.assertion.text,
     ) catch |err| {
-        CompilerDiag.setProof(self, CompilerDiag.proofMathParseDiagnostic(
+        self.setProof(CompilerDiag.proofMathParseDiagnostic(
             parser,
             .parse_assertion,
             err,
@@ -337,7 +339,7 @@ fn parseProofLineAssertion(
 }
 
 fn applyRuleApplication(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleApplyContext,
     application: RuleApplication,
     line_assertion: LineAssertion,
@@ -366,7 +368,7 @@ fn applyRuleApplication(
     while (true) {
         const seen = try seen_candidates.getOrPut(candidate_rule_id);
         if (seen.found_existing) {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            self.setProof(CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = error.FallbackCycle,
                 .theorem_name = diag_context.theorem_name,
@@ -487,7 +489,7 @@ fn applyRuleApplication(
 }
 
 fn tryApplyRuleApplicationWithCandidate(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleApplyContext,
     application: RuleApplication,
     line_assertion: LineAssertion,
@@ -507,7 +509,7 @@ fn tryApplyRuleApplicationWithCandidate(
     const rule = &env.rules.items[rule_id];
     const diag_line = line;
     if (application.refs.len != rule.hyps.len) {
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        self.setProof(CompilerDiag.withPhase(.{
             .kind = .ref_count_mismatch,
             .err = error.RefCountMismatch,
             .theorem_name = assertion.name,
@@ -637,7 +639,7 @@ fn tryApplyRuleApplicationWithCandidate(
                         null,
                         self.debug.views,
                     ) catch |err| {
-                        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+                        self.setProof(CompilerDiag.withPhase(.{
                             .kind = .generic,
                             .err = err,
                             .theorem_name = assertion.name,
@@ -752,7 +754,7 @@ fn tryApplyRuleApplicationWithCandidate(
                 .detail = .{ .dep_violation = dep_detail },
             }, .theorem_application);
             try addFreshenAttemptNotes(allocator, &diag, rule, freshen_report);
-            CompilerDiag.setProof(self, diag);
+            self.setProof(diag);
             return fresh_err;
         } orelse return err;
         resolved_bindings = freshened_bindings.?.bindings;
@@ -774,7 +776,7 @@ fn tryApplyRuleApplicationWithCandidate(
                 .detail = .{ .dep_violation = remaining_dep_detail },
             }, .theorem_application);
             try addFreshenAttemptNotes(allocator, &diag, rule, freshen_report);
-            CompilerDiag.setProof(self, diag);
+            self.setProof(diag);
             return error.AlphaRewriteSearchFailed;
         }
         restoreDiagnostic(self, null);
@@ -849,7 +851,7 @@ fn tryApplyRuleApplicationWithCandidate(
             refs,
             ref_exprs,
         ) catch |err| {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            self.setProof(CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = err,
                 .theorem_name = assertion.name,
@@ -887,8 +889,7 @@ fn tryApplyRuleApplicationWithCandidate(
             actual,
             expected,
         ) catch |err| {
-            if (CompilerDiag.setProofScratchDiagnosticIfPresent(
-                self,
+            if (self.setProofScratchDiagnosticIfPresent(
                 diag_scratch,
                 match_mark,
                 env,
@@ -959,7 +960,7 @@ fn tryApplyRuleApplicationWithCandidate(
             actual,
             true,
         );
-        CompilerDiag.setProof(self, diag);
+        self.setProof(diag);
         return error.HypothesisMismatch;
     }
 
@@ -1014,8 +1015,7 @@ fn tryApplyRuleApplicationWithCandidate(
         if (checkedRangeOwnsRefs(checked.items[concl_checked_mark..], refs)) {
             refs_owned = false;
         }
-        if (CompilerDiag.setProofScratchDiagnosticIfPresent(
-            self,
+        if (self.setProofScratchDiagnosticIfPresent(
             diag_scratch,
             concl_mark,
             env,
@@ -1052,7 +1052,7 @@ fn tryApplyRuleApplicationWithCandidate(
             candidate.displayed_conclusion,
             true,
         );
-        CompilerDiag.setProof(self, diag);
+        self.setProof(diag);
         return error.ConclusionMismatch;
     };
     refs_owned = false;
@@ -1085,7 +1085,7 @@ fn checkedRangeOwnsRefs(
 }
 
 fn resolveLineAssertionForBindings(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     theorem: *TheoremContext,
@@ -1127,7 +1127,7 @@ fn resolveLineAssertionForBindings(
 }
 
 fn requireConcreteBindingsWithDiagnostic(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
@@ -1138,8 +1138,7 @@ fn requireConcreteBindingsWithDiagnostic(
 ) ![]const ExprId {
     for (partial_bindings, 0..) |binding, idx| {
         if (binding != null) continue;
-        CompilerDiag.setProof(
-            self,
+        self.setProof(
             try Inference.buildMissingBinderDiagnostic(
                 allocator,
                 env,
@@ -1159,7 +1158,7 @@ fn requireConcreteBindingsWithDiagnostic(
 }
 
 fn inferCandidateBindings(
-    self: anytype,
+    self: *CompilerContext,
     context: *const Inference.RuleInferenceContext,
     line: ApplicationLine,
     line_assertion: LineAssertion,
@@ -1442,7 +1441,7 @@ fn templateSort(
 }
 
 fn elaborateCandidateLine(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     theorem: *TheoremContext,
@@ -1484,7 +1483,7 @@ fn elaborateCandidateLine(
 }
 
 fn validateHoleyAssertionAgainstCandidate(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     theorem: *TheoremContext,
@@ -1570,7 +1569,7 @@ fn validateHoleyAssertionAgainstCandidate(
             line.assertion_span,
     }, .theorem_application);
     try addHoleConcreteMatchNotes(allocator, &diag, line, hole_report);
-    CompilerDiag.setProof(self, diag);
+    self.setProof(diag);
     return error.HoleConclusionMismatch;
 }
 
@@ -1756,7 +1755,7 @@ fn applyFreshenedRuleLine(
 }
 
 fn ensureConcreteCheckedIrRange(
-    self: anytype,
+    self: *CompilerContext,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
     theorem_name: []const u8,
@@ -1768,7 +1767,7 @@ fn ensureConcreteCheckedIrRange(
     if (lines.len == 0) return;
 
     CheckedIr.validateLines(theorem, lines) catch |err| {
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        self.setProof(CompilerDiag.withPhase(.{
             .kind = .generic,
             .err = err,
             .theorem_name = theorem_name,
@@ -1778,7 +1777,7 @@ fn ensureConcreteCheckedIrRange(
         return err;
     };
     if (try CheckedIr.firstDepViolation(env, theorem, lines)) |failure| {
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        self.setProof(CompilerDiag.withPhase(.{
             .kind = .generic,
             .err = error.DepViolation,
             .theorem_name = theorem_name,
@@ -1798,7 +1797,7 @@ fn ensureConcreteCheckedIrRange(
 // the caller's saved diagnostic on success so speculative attempts remain
 // diagnostically transparent.
 fn validateAttemptCheckedIrRange(
-    self: anytype,
+    self: *CompilerContext,
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
     theorem_name: []const u8,
@@ -1822,14 +1821,6 @@ fn validateAttemptCheckedIrRange(
 }
 
 test "checked ir leak diagnostics replace saved diagnostics" {
-    const Sink = struct {
-        last_diagnostic: ?Diagnostic = null,
-
-        pub fn setDiagnostic(self: *@This(), diag: Diagnostic) void {
-            self.last_diagnostic = diag;
-        }
-    };
-
     var theorem = TheoremContext.init(std.testing.allocator);
     defer theorem.deinit();
     try theorem.seedBinderCount(1);
@@ -1844,14 +1835,15 @@ test "checked ir leak diagnostics replace saved diagnostics" {
         } },
     }};
 
-    var sink = Sink{};
-    sink.last_diagnostic = CompilerDiag.withPhase(.{
+    var sink = DiagnosticSink.init("", null);
+    var context = CompilerContext.init("", null, .none, &sink);
+    context.setDiagnostic(CompilerDiag.withPhase(.{
         .kind = .generic,
         .err = error.UnknownRule,
         .theorem_name = "stale",
         .line_label = "old",
-    }, .theorem_application);
-    const saved_diag = getDiagnostic(&sink);
+    }, .theorem_application));
+    const saved_diag = getDiagnostic(&context);
     const span: Span = .{ .start = 3, .end = 11 };
     var env = GlobalEnv.init(std.testing.allocator);
     defer {
@@ -1865,7 +1857,7 @@ test "checked ir leak diagnostics replace saved diagnostics" {
     try std.testing.expectError(
         error.PlaceholderLeakage,
         validateAttemptCheckedIrRange(
-            &sink,
+            &context,
             &env,
             &theorem,
             "demo",
@@ -1891,7 +1883,7 @@ test "checked ir leak diagnostics replace saved diagnostics" {
 }
 
 fn lookupRuleApplicationId(
-    self: anytype,
+    self: *CompilerContext,
     env: *const GlobalEnv,
     rule_catalog: *const RuleCatalog.Catalog,
     diag_context: ApplicationDiagnosticContext,
@@ -1922,12 +1914,12 @@ fn lookupRuleApplicationId(
                 .mm0,
                 entry.name_span,
             );
-            CompilerDiag.setProof(self, diag);
+            self.setProof(diag);
             return error.RuleNotYetAvailable;
         }
     }
 
-    CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+    self.setProof(CompilerDiag.withPhase(.{
         .kind = .unknown_rule,
         .err = error.UnknownRule,
         .theorem_name = diag_context.theorem_name,
@@ -1999,7 +1991,7 @@ fn instantiateTemplatePartial(
 }
 
 fn elaborateRefs(
-    self: anytype,
+    self: *CompilerContext,
     context: *const RuleApplyContext,
     line: ApplicationLine,
     theorem: *TheoremContext,
@@ -2016,7 +2008,7 @@ fn elaborateRefs(
                 if (hyp.index == 0 or
                     hyp.index > theorem.theorem_hyps.items.len)
                 {
-                    CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+                    self.setProof(CompilerDiag.withPhase(.{
                         .kind = .unknown_hypothesis_ref,
                         .err = error.UnknownHypothesisRef,
                         .theorem_name = assertion.name,
@@ -2035,7 +2027,7 @@ fn elaborateRefs(
             },
             .line => |label| blk: {
                 const line_idx = context.labels.get(label.label) orelse {
-                    CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+                    self.setProof(CompilerDiag.withPhase(.{
                         .kind = .unknown_label,
                         .err = error.UnknownLabel,
                         .theorem_name = assertion.name,
@@ -2099,43 +2091,16 @@ fn cloneNameExprMap(
     return dst;
 }
 
-fn getDiagnostic(self: anytype) ?Diagnostic {
-    const T = @TypeOf(self);
-    switch (@typeInfo(T)) {
-        .pointer => |ptr| {
-            if (@hasField(ptr.child, "last_diagnostic")) {
-                return self.last_diagnostic;
-            }
-        },
-        .@"struct" => {
-            if (@hasField(T, "last_diagnostic")) {
-                return self.last_diagnostic;
-            }
-        },
-        else => {},
-    }
-    return null;
+fn getDiagnostic(self: *CompilerContext) ?Diagnostic {
+    return self.getDiagnostic();
 }
 
-fn restoreDiagnostic(self: anytype, diag: ?Diagnostic) void {
-    const T = @TypeOf(self);
-    switch (@typeInfo(T)) {
-        .pointer => |ptr| {
-            if (@hasField(ptr.child, "last_diagnostic")) {
-                self.last_diagnostic = diag;
-            }
-        },
-        .@"struct" => {
-            if (@hasField(T, "last_diagnostic")) {
-                self.last_diagnostic = diag;
-            }
-        },
-        else => {},
-    }
+fn restoreDiagnostic(self: *CompilerContext, diag: ?Diagnostic) void {
+    self.restoreDiagnostic(diag);
 }
 
 fn parseBindings(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     theorem: *TheoremContext,
@@ -2148,7 +2113,7 @@ fn parseBindings(
 ) ![]?ExprId {
     for (rule.arg_names) |arg_name| {
         if (arg_name == null) {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            self.setProof(CompilerDiag.withPhase(.{
                 .kind = .generic,
                 .err = error.UnnamedRuleBinder,
                 .theorem_name = theorem_name,
@@ -2165,7 +2130,7 @@ fn parseBindings(
 
     for (application.arg_bindings) |binding| {
         const arg_index = findRuleArgIndex(rule, binding.name) orelse {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            self.setProof(CompilerDiag.withPhase(.{
                 .kind = .unknown_binder_name,
                 .err = error.UnknownBinderName,
                 .theorem_name = theorem_name,
@@ -2177,7 +2142,7 @@ fn parseBindings(
             return error.UnknownBinderName;
         };
         if (bindings[arg_index] != null) {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            self.setProof(CompilerDiag.withPhase(.{
                 .kind = .duplicate_binder_assignment,
                 .err = error.DuplicateBinderAssignment,
                 .theorem_name = theorem_name,
@@ -2203,7 +2168,7 @@ fn parseBindings(
                 rule.args[arg_index],
             );
         } catch |err| {
-            CompilerDiag.setProof(self, CompilerDiag.proofMathParseDiagnostic(
+            self.setProof(CompilerDiag.proofMathParseDiagnostic(
                 parser,
                 .parse_binding,
                 err,
@@ -2277,7 +2242,7 @@ fn templateKnownDeps(
 }
 
 fn validateFreshBindingsAgainstLine(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     env: *const GlobalEnv,
     theorem: *TheoremContext,
@@ -2314,7 +2279,7 @@ fn validateFreshBindingsAgainstLine(
             selected,
         )).deps;
         if ((used_deps & selected_deps) == 0) continue;
-        CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+        self.setProof(CompilerDiag.withPhase(.{
             .kind = .parse_fresh,
             .err = error.FreshNoAvailableVar,
             .theorem_name = theorem_name,
@@ -2328,7 +2293,7 @@ fn validateFreshBindingsAgainstLine(
 }
 
 fn applyFreshBindings(
-    self: anytype,
+    self: *CompilerContext,
     parser: *MM0Parser,
     env: *const GlobalEnv,
     theorem: *TheoremContext,
@@ -2364,7 +2329,7 @@ fn applyFreshBindings(
             used_deps,
             reserved_deps,
         ) catch |err| {
-            CompilerDiag.setProof(self, CompilerDiag.withPhase(.{
+            self.setProof(CompilerDiag.withPhase(.{
                 .kind = .parse_fresh,
                 .err = err,
                 .theorem_name = theorem_name,
@@ -2429,7 +2394,7 @@ fn proofSpanForSourceSpan(
 }
 
 fn setHoleyInferenceDiagnostic(
-    self: anytype,
+    self: *CompilerContext,
     allocator: std.mem.Allocator,
     assertion: AssertionStmt,
     line: ApplicationLine,
@@ -2476,7 +2441,7 @@ fn setHoleyInferenceDiagnostic(
         } },
     }, .inference);
     try addHoleyInferenceNotes(allocator, &diag, rule, line, holey, report);
-    CompilerDiag.setProof(self, diag);
+    self.setProof(diag);
 }
 
 fn addHoleyInferenceNotes(

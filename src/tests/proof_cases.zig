@@ -710,7 +710,7 @@ test "compiler proof cases from files" {
             .pass => {
                 const mmb = compiler.compileMmb(allocator) catch |err| {
                     std.debug.print("FAIL (compile) case={s} err={}\n", .{ case.stem, err });
-                    if (compiler.last_diagnostic) |diag| {
+                    if (compiler.diagnostics.last_diagnostic) |diag| {
                         std.debug.print(
                             "  diag: kind={} theorem={s} line={s} rule={s}\n",
                             .{

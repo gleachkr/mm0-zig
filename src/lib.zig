@@ -2,6 +2,8 @@ const std = @import("std");
 
 pub const Arg = @import("./trusted/args.zig").Arg;
 pub const Compiler = @import("./frontend/compiler.zig").Compiler;
+pub const CompilerContext = @import("./frontend/compiler.zig").CompilerContext;
+pub const DiagnosticSink = @import("./frontend/compiler.zig").DiagnosticSink;
 pub const CheckedLine = @import("./frontend/compiler.zig").CheckedLine;
 pub const DebugConfig = @import("./frontend/debug.zig").DebugConfig;
 pub const advertised_channel_list =
