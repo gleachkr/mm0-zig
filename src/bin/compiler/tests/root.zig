@@ -1,3 +1,3 @@
 comptime {
-    _ = @import("../lsp.zig");
+    _ = @import("./lsp_tests.zig");
 }

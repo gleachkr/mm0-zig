@@ -13,6 +13,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const lsp_diagnostics_module = b.createModule(.{
+        .root_source_file = b.path("src/frontend/lsp/diagnostics.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lsp_diagnostics_module.addImport("mm0", mm0_lib);
+    lsp_diagnostics_module.addImport("lsp", lsp_module);
+
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
@@ -36,6 +44,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const lsp_diagnostics_wasm_module = b.createModule(.{
+        .root_source_file = b.path("src/frontend/lsp/diagnostics.zig"),
+        .target = wasm_target,
+        .optimize = optimize,
+    });
+    lsp_diagnostics_wasm_module.addImport("mm0", mm0_wasm_lib);
+    lsp_diagnostics_wasm_module.addImport("lsp", lsp_wasm_module);
+
     const verifier_module = b.createModule(.{
         .root_source_file = b.path("src/bin/verifier/main.zig"),
         .target = target,
@@ -56,6 +72,7 @@ pub fn build(b: *std.Build) void {
     });
     compiler_module.addImport("mm0", mm0_lib);
     compiler_module.addImport("lsp", lsp_module);
+    compiler_module.addImport("lsp_diagnostics", lsp_diagnostics_module);
 
     const compiler_exe = b.addExecutable(.{
         .name = "abc",
@@ -100,6 +117,10 @@ pub fn build(b: *std.Build) void {
     });
     lsp_server_wasm_module.addImport("mm0", mm0_wasm_lib);
     lsp_server_wasm_module.addImport("lsp", lsp_wasm_module);
+    lsp_server_wasm_module.addImport(
+        "lsp_diagnostics",
+        lsp_diagnostics_wasm_module,
+    );
 
     const lsp_server_wasm = b.addExecutable(.{
         .name = "abc-lsp-web",
@@ -489,6 +510,10 @@ pub fn build(b: *std.Build) void {
     });
     compiler_bin_test_module.addImport("mm0", mm0_lib);
     compiler_bin_test_module.addImport("lsp", lsp_module);
+    compiler_bin_test_module.addImport(
+        "lsp_diagnostics",
+        lsp_diagnostics_module,
+    );
 
     const compiler_bin_tests = b.addTest(.{
         .root_module = compiler_bin_test_module,
