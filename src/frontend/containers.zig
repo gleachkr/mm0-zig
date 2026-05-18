@@ -13,3 +13,17 @@ pub fn cloneMap(
     }
     return clone;
 }
+
+pub fn cloneManagedMap(
+    allocator: std.mem.Allocator,
+    src: anytype,
+) !@TypeOf(src.*) {
+    var clone = @TypeOf(src.*).init(allocator);
+    errdefer clone.deinit();
+
+    var it = src.iterator();
+    while (it.next()) |entry| {
+        try clone.put(entry.key_ptr.*, entry.value_ptr.*);
+    }
+    return clone;
+}

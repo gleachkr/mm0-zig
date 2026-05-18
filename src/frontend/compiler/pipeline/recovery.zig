@@ -5,6 +5,9 @@ const RewriteRegistry = RewriteModule.RewriteRegistry;
 const Metadata = @import("../metadata.zig");
 const CompilerContext = @import("../context.zig").CompilerContext;
 const CompilerVars = @import("../vars.zig");
+const Containers = @import("../../containers.zig");
+
+const cloneManagedMap = Containers.cloneManagedMap;
 
 const FreshDecl = Metadata.FreshDecl;
 const FreshenDecl = Metadata.FreshenDecl;
@@ -82,18 +85,15 @@ pub const AssertionRecoverySnapshot = struct {
     ) !AssertionRecoverySnapshot {
         return .{
             .registry = try cloneRewriteRegistry(allocator, &state.registry),
-            .fresh_bindings = try cloneAutoHashMap(
-                []const FreshDecl,
+            .fresh_bindings = try cloneManagedMap(
                 allocator,
                 &state.fresh_bindings,
             ),
-            .freshen_bindings = try cloneAutoHashMap(
-                []const FreshenDecl,
+            .freshen_bindings = try cloneManagedMap(
                 allocator,
                 &state.freshen_bindings,
             ),
-            .views = try cloneAutoHashMap(
-                ViewDecl,
+            .views = try cloneManagedMap(
                 allocator,
                 &state.views,
             ),
@@ -120,62 +120,14 @@ pub const AssertionRecoverySnapshot = struct {
     }
 };
 
-fn cloneStringHashMap(
-    comptime V: type,
-    allocator: std.mem.Allocator,
-    src: *const std.StringHashMap(V),
-) !std.StringHashMap(V) {
-    var dst = std.StringHashMap(V).init(allocator);
-    var it = src.iterator();
-    while (it.next()) |entry| {
-        try dst.put(entry.key_ptr.*, entry.value_ptr.*);
-    }
-    return dst;
-}
-
-fn cloneAutoHashMap(
-    comptime V: type,
-    allocator: std.mem.Allocator,
-    src: *const std.AutoHashMap(u32, V),
-) !std.AutoHashMap(u32, V) {
-    var dst = std.AutoHashMap(u32, V).init(allocator);
-    var it = src.iterator();
-    while (it.next()) |entry| {
-        try dst.put(entry.key_ptr.*, entry.value_ptr.*);
-    }
-    return dst;
-}
-
-fn cloneAutoHashMapKV(
-    comptime K: type,
-    comptime V: type,
-    allocator: std.mem.Allocator,
-    src: *const std.AutoHashMap(K, V),
-) !std.AutoHashMap(K, V) {
-    var dst = std.AutoHashMap(K, V).init(allocator);
-    var it = src.iterator();
-    while (it.next()) |entry| {
-        try dst.put(entry.key_ptr.*, entry.value_ptr.*);
-    }
-    return dst;
-}
-
 pub fn cloneSortVarRegistry(
     allocator: std.mem.Allocator,
     src: *const SortVarRegistry,
 ) !SortVarRegistry {
     return .{
         .allocator = allocator,
-        .tokens = try cloneStringHashMap(
-            CompilerVars.SortVarDecl,
-            allocator,
-            &src.tokens,
-        ),
-        .pools = try cloneStringHashMap(
-            CompilerVars.SortVarPool,
-            allocator,
-            &src.pools,
-        ),
+        .tokens = try cloneManagedMap(allocator, &src.tokens),
+        .pools = try cloneManagedMap(allocator, &src.pools),
     };
 }
 
@@ -185,44 +137,20 @@ fn cloneRewriteRegistry(
 ) !RewriteRegistry {
     return .{
         .allocator = allocator,
-        .relations = try cloneStringHashMap(
-            RewriteModule.RelationBundle,
-            allocator,
-            &src.relations,
-        ),
-        .rewrites_by_head = try cloneAutoHashMapKV(
-            u32,
-            std.ArrayListUnmanaged(
-                RewriteModule.RewriteRule,
-            ),
+        .relations = try cloneManagedMap(allocator, &src.relations),
+        .rewrites_by_head = try cloneManagedMap(
             allocator,
             &src.rewrites_by_head,
         ),
-        .alpha_by_head = try cloneAutoHashMapKV(
-            u32,
-            std.ArrayListUnmanaged(
-                RewriteModule.AlphaRule,
-            ),
+        .alpha_by_head = try cloneManagedMap(
             allocator,
             &src.alpha_by_head,
         ),
-        .congr_by_head = try cloneAutoHashMapKV(
-            u32,
-            RewriteModule.CongruenceRule,
+        .congr_by_head = try cloneManagedMap(
             allocator,
             &src.congr_by_head,
         ),
-        .fallbacks = try cloneAutoHashMapKV(
-            u32,
-            u32,
-            allocator,
-            &src.fallbacks,
-        ),
-        .acui_by_head = try cloneAutoHashMapKV(
-            u32,
-            RewriteModule.StructuralCombiner,
-            allocator,
-            &src.acui_by_head,
-        ),
+        .fallbacks = try cloneManagedMap(allocator, &src.fallbacks),
+        .acui_by_head = try cloneManagedMap(allocator, &src.acui_by_head),
     };
 }

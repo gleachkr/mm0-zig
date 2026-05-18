@@ -37,6 +37,12 @@ const StatementRef = union(enum) {
     theorem: usize,
 };
 
+const StatementKind = enum {
+    sort,
+    term,
+    theorem,
+};
+
 pub const Verifier = struct {
     // Per-theorem working state - reset between theorems
     stack: Stack,
@@ -298,14 +304,13 @@ pub const Verifier = struct {
             switch (@as(StmtCmd, @enumFromInt(cmd.op))) {
                 .End => break,
                 .Sort => {
-                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
-                    if (sort_count >= self.sort_table.len) {
-                        return error.SortCountMismatch;
-                    }
-                    self.current_statement = .{ .sort = sort_count };
-                    if (self.index) |index| {
-                        try index.validateSortProof(sort_count, stmt_start);
-                    }
+                    const stmt_end = try self.beginStatement(
+                        .sort,
+                        stmt_start,
+                        pos,
+                        cmd.data,
+                        sort_count,
+                    );
                     try checker.checkSort(
                         @intCast(sort_count),
                         self.sort_table[sort_count],
@@ -315,14 +320,13 @@ pub const Verifier = struct {
                     pos = stmt_end;
                 },
                 .TermDef => {
-                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
-                    if (term_count >= self.term_table.len) {
-                        return error.TermCountMismatch;
-                    }
-                    self.current_statement = .{ .term = term_count };
-                    if (self.index) |index| {
-                        try index.validateTermProof(term_count, stmt_start);
-                    }
+                    const stmt_end = try self.beginStatement(
+                        .term,
+                        stmt_start,
+                        pos,
+                        cmd.data,
+                        term_count,
+                    );
                     const term = self.term_table[term_count];
                     if (self.sort_table[term.ret_sort.sort].pure)
                         return error.PureSort;
@@ -347,14 +351,13 @@ pub const Verifier = struct {
                     pos = stmt_end;
                 },
                 .Axiom => {
-                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
-                    if (thm_count >= self.thm_table.len) {
-                        return error.TheoremCountMismatch;
-                    }
-                    self.current_statement = .{ .theorem = thm_count };
-                    if (self.index) |index| {
-                        try index.validateTheoremProof(thm_count, stmt_start);
-                    }
+                    const stmt_end = try self.beginStatement(
+                        .theorem,
+                        stmt_start,
+                        pos,
+                        cmd.data,
+                        thm_count,
+                    );
                     const theorem = self.thm_table[thm_count];
                     try checker.checkAssertion(theorem, self.file_bytes);
                     try self.verifyAxiom(
@@ -369,14 +372,13 @@ pub const Verifier = struct {
                     pos = stmt_end;
                 },
                 .Thm => {
-                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
-                    if (thm_count >= self.thm_table.len) {
-                        return error.TheoremCountMismatch;
-                    }
-                    self.current_statement = .{ .theorem = thm_count };
-                    if (self.index) |index| {
-                        try index.validateTheoremProof(thm_count, stmt_start);
-                    }
+                    const stmt_end = try self.beginStatement(
+                        .theorem,
+                        stmt_start,
+                        pos,
+                        cmd.data,
+                        thm_count,
+                    );
                     const theorem = self.thm_table[thm_count];
                     try checker.checkAssertion(theorem, self.file_bytes);
                     try self.verifyThm(
@@ -391,14 +393,13 @@ pub const Verifier = struct {
                     pos = stmt_end;
                 },
                 .LocalDef => {
-                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
-                    if (term_count >= self.term_table.len) {
-                        return error.TermCountMismatch;
-                    }
-                    self.current_statement = .{ .term = term_count };
-                    if (self.index) |index| {
-                        try index.validateTermProof(term_count, stmt_start);
-                    }
+                    const stmt_end = try self.beginStatement(
+                        .term,
+                        stmt_start,
+                        pos,
+                        cmd.data,
+                        term_count,
+                    );
                     if (self.sort_table[self.term_table[term_count].ret_sort.sort].pure)
                         return error.PureSort;
                     try self.verifyDef(
@@ -413,14 +414,13 @@ pub const Verifier = struct {
                     pos = stmt_end;
                 },
                 .LocalThm => {
-                    const stmt_end = try self.statementEnd(stmt_start, pos, cmd.data);
-                    if (thm_count >= self.thm_table.len) {
-                        return error.TheoremCountMismatch;
-                    }
-                    self.current_statement = .{ .theorem = thm_count };
-                    if (self.index) |index| {
-                        try index.validateTheoremProof(thm_count, stmt_start);
-                    }
+                    const stmt_end = try self.beginStatement(
+                        .theorem,
+                        stmt_start,
+                        pos,
+                        cmd.data,
+                        thm_count,
+                    );
                     try self.verifyThm(
                         self.thm_table[thm_count],
                         @intCast(pos),
@@ -483,6 +483,53 @@ pub const Verifier = struct {
             }
         }
         return std.fmt.bufPrint(buf, "T{}", .{id}) catch "<theorem>";
+    }
+
+    fn beginStatement(
+        self: *Verifier,
+        kind: StatementKind,
+        stmt_start: usize,
+        body_start: usize,
+        encoded_len: u32,
+        statement_idx: usize,
+    ) !usize {
+        const stmt_end = try self.statementEnd(
+            stmt_start,
+            body_start,
+            encoded_len,
+        );
+
+        switch (kind) {
+            .sort => {
+                if (statement_idx >= self.sort_table.len) {
+                    return error.SortCountMismatch;
+                }
+                self.current_statement = .{ .sort = statement_idx };
+                if (self.index) |index| {
+                    try index.validateSortProof(statement_idx, stmt_start);
+                }
+            },
+            .term => {
+                if (statement_idx >= self.term_table.len) {
+                    return error.TermCountMismatch;
+                }
+                self.current_statement = .{ .term = statement_idx };
+                if (self.index) |index| {
+                    try index.validateTermProof(statement_idx, stmt_start);
+                }
+            },
+            .theorem => {
+                if (statement_idx >= self.thm_table.len) {
+                    return error.TheoremCountMismatch;
+                }
+                self.current_statement = .{ .theorem = statement_idx };
+                if (self.index) |index| {
+                    try index.validateTheoremProof(statement_idx, stmt_start);
+                }
+            },
+        }
+
+        return stmt_end;
     }
 
     fn statementEnd(
