@@ -4,10 +4,10 @@ const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const BranchStateOps = @import("./branch_state.zig");
 const SemanticCompare = @import("./semantic_compare.zig");
 const StructuralFragmentMatcher =
-    @import("./structural_fragment_matcher.zig");
-const StructuralIntervals = @import("./structural_intervals.zig");
+    @import("./fragment_matcher.zig");
+const StructuralIntervals = @import("./intervals.zig");
 const StructuralTransparentMatcher =
-    @import("./structural_transparent_matcher.zig");
+    @import("./transparent_matcher.zig");
 const types = @import("./types.zig");
 const BinderSpace = types.BinderSpace;
 const BranchState = types.BranchState;

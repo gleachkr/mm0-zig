@@ -24,7 +24,7 @@ pub fn rebuildBoundValue(
     mode: BindingMode,
 ) anyerror!BoundValue {
     if (try resymbolizeBinding(self, expr_id, state, witness_slots)) |symbolic| {
-        return makeSymbolicBoundValue(self, symbolic, mode);
+        return makeSymbolicBoundValue(symbolic, mode);
     }
     return try makeConcreteBoundValue(self, expr_id, state, mode);
 }
@@ -82,11 +82,9 @@ pub fn makeConcreteBoundValue(
 }
 
 pub fn makeSymbolicBoundValue(
-    self: anytype,
     symbolic: *const SymbolicExpr,
     mode: BindingMode,
 ) BoundValue {
-    _ = self;
     return .{ .symbolic = .{
         .expr = symbolic,
         .mode = mode,
@@ -156,7 +154,7 @@ pub fn assignBinderFromSymbolic(
             state,
         );
     }
-    state.bindings[idx] = makeSymbolicBoundValue(self, symbolic, mode);
+    state.bindings[idx] = makeSymbolicBoundValue(symbolic, mode);
     invalidateRepresentativeCaches(state);
     return true;
 }

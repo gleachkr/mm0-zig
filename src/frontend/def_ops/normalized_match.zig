@@ -243,9 +243,8 @@ const NormalizedView = struct {
         }
         if (self.symbolic_slot_values[slot]) |existing| return existing;
 
-        var symbolic_engine = session.engine();
-        if (symbolic_engine.currentWitnessExpr(slot, &session.state)) |witness| {
-            if (!symbolic_engine.isProvisionalWitnessExpr(
+        if (SymbolicEngine.currentWitnessExpr(slot, &session.state)) |witness| {
+            if (!SymbolicEngine.isProvisionalWitnessExpr(
                 witness,
                 &session.state,
             )) {
@@ -678,13 +677,12 @@ pub const RuleMatchSession = struct {
     /// dummy slot in this session. This lets callers inspect live hidden
     /// binder assignments without depending on the mutable match session.
     pub fn materializeDummyWitnesses(self: *RuleMatchSession) ![]?ExprId {
-        var symbolic_engine = self.engine();
         const witnesses = try self.shared.allocator.alloc(
             ?ExprId,
             self.state.symbolic_dummy_infos.items.len,
         );
         for (witnesses, 0..) |*witness, slot| {
-            witness.* = symbolic_engine.currentWitnessExpr(slot, &self.state);
+            witness.* = SymbolicEngine.currentWitnessExpr(slot, &self.state);
         }
         return witnesses;
     }
@@ -717,9 +715,8 @@ pub const RuleMatchSession = struct {
         self: *RuleMatchSession,
         assignments: []const MaterializedDummyAssignment,
     ) !void {
-        var symbolic_engine = self.engine();
         for (assignments) |assignment| {
-            const root = try symbolic_engine.resolveDummySlot(
+            const root = try SymbolicEngine.resolveDummySlot(
                 assignment.root_slot,
                 &self.state,
             );
@@ -731,7 +728,7 @@ pub const RuleMatchSession = struct {
                 if (existing != assignment.expr_id) return error.UnifyMismatch;
             }
             if (self.state.materialized_witness_slots.get(assignment.expr_id)) |slot| {
-                const slot_root = try symbolic_engine.resolveDummySlot(
+                const slot_root = try SymbolicEngine.resolveDummySlot(
                     slot,
                     &self.state,
                 );
@@ -807,7 +804,7 @@ pub const RuleMatchSession = struct {
             },
             .fixed => symbolic,
             .dummy => |slot| blk: {
-                if (symbolic_engine.currentWitnessExpr(
+                if (SymbolicEngine.currentWitnessExpr(
                     slot,
                     &self.state,
                 ) == hole_expr) {
@@ -1147,7 +1144,7 @@ pub const RuleMatchSession = struct {
                 .normalized,
             );
         }
-        return symbolic_engine.makeSymbolicBoundValue(
+        return SymbolicEngine.makeSymbolicBoundValue(
             try self.mirrorExprToSymbolic(expr_id, view),
             .normalized,
         );

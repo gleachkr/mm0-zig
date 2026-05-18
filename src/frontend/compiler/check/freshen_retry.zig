@@ -5,7 +5,7 @@ const GlobalEnv = @import("../../env.zig").GlobalEnv;
 const RuleDecl = @import("../../env.zig").RuleDecl;
 const RewriteRegistry = @import("../../rewrite_registry.zig").RewriteRegistry;
 const CompilerDiag = @import("../diag.zig");
-const CompilerFreshen = @import("../freshen.zig");
+const AlphaRewrite = @import("../alpha_rewrite.zig");
 const CheckedIr = @import("../checked_ir.zig");
 const CheckedLine = CheckedIr.CheckedLine;
 const CheckedRef = CheckedIr.CheckedRef;
@@ -22,7 +22,7 @@ pub fn applyFreshenedRuleLine(
     rule: *const RuleDecl,
     rule_id: u32,
     original_bindings: []const ExprId,
-    freshened: CompilerFreshen.FreshenResult,
+    freshened: AlphaRewrite.FreshenResult,
     refs: []const CheckedRef,
     base_ref_exprs: []const ExprId,
 ) !usize {
@@ -57,7 +57,7 @@ pub fn applyFreshenedRuleLine(
             continue;
         }
 
-        const conv_idx = (try CompilerFreshen.buildRelationProofFromTargetChange(
+        const conv_idx = (try AlphaRewrite.buildRelationProofFromTargetChange(
             allocator,
             theorem,
             registry,
@@ -70,7 +70,7 @@ pub fn applyFreshenedRuleLine(
             freshened.new_target_expr,
             freshened.target_conv_line_idx,
         )) orelse return error.FreshenTransportFailed;
-        fresh_refs[idx] = try CompilerFreshen.transportRefAlongProof(
+        fresh_refs[idx] = try AlphaRewrite.transportRefAlongProof(
             allocator,
             theorem,
             registry,
@@ -104,7 +104,7 @@ pub fn applyFreshenedRuleLine(
         original_bindings,
     );
     if (expected_old_line != expected_new_line) {
-        const conv_idx = (try CompilerFreshen.buildRelationProofFromTargetChange(
+        const conv_idx = (try AlphaRewrite.buildRelationProofFromTargetChange(
             allocator,
             theorem,
             registry,
@@ -117,7 +117,7 @@ pub fn applyFreshenedRuleLine(
             freshened.new_target_expr,
             freshened.target_conv_line_idx,
         )) orelse return error.FreshenTransportFailed;
-        result_ref = try CompilerFreshen.transportRefBackwardAlongProof(
+        result_ref = try AlphaRewrite.transportRefBackwardAlongProof(
             allocator,
             theorem,
             registry,

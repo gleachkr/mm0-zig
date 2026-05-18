@@ -44,11 +44,9 @@ pub fn chooseRepresentative(
 }
 
 pub fn representativeCacheForMode(
-    self: anytype,
     state: *MatchSession,
     mode: BindingMode,
 ) *RepresentativeCache {
-    _ = self;
     return switch (mode) {
         .exact => unreachable,
         .transparent => &state.transparent_representatives,
@@ -66,7 +64,7 @@ pub fn chooseRepresentativeSymbolic(
         return try self.allocSymbolic(.{ .fixed = expr_id });
     }
 
-    const cache = representativeCacheForMode(self, state, mode);
+    const cache = representativeCacheForMode(state, mode);
     if (cache.get(expr_id)) |cached| return cached;
 
     var current = try rebuildExprRepresentativeSymbolic(

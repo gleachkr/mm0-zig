@@ -16,7 +16,7 @@ const CompilerViews = @import("../views.zig");
 const ViewDecl = CompilerViews.ViewDecl;
 const CompilerDiag = @import("../diag.zig");
 const CompilerContext = @import("../context.zig").CompilerContext;
-const CompilerFresh = @import("../fresh.zig");
+const FreshSelect = @import("../fresh_select.zig");
 const DebugTrace = @import("../../debug.zig");
 const NormalizedCompare = @import("../normalized_compare.zig");
 const InferenceContextModule = @import("context.zig");
@@ -550,7 +550,7 @@ fn tryFinalizeRuleMatchSession(
 
     const extra_used_deps =
         try session.collectConcreteDepsForPendingFinalization();
-    const needs = try allocator.alloc(CompilerFresh.HiddenRootNeed, roots.len);
+    const needs = try allocator.alloc(FreshSelect.HiddenRootNeed, roots.len);
     defer allocator.free(needs);
     for (roots, 0..) |root, idx| {
         needs[idx] = .{
@@ -559,7 +559,7 @@ fn tryFinalizeRuleMatchSession(
         };
     }
 
-    const hidden_assignments = CompilerFresh.assignHiddenRootsFromVarsPoolWithLineDeps(
+    const hidden_assignments = FreshSelect.assignHiddenRootsFromVarsPoolWithLineDeps(
         allocator,
         fresh.parser,
         env,

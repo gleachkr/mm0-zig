@@ -16,12 +16,12 @@ const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
 const CompilerViews = @import("./views.zig");
-const CompilerFresh = @import("./fresh.zig");
-const CompilerFreshen = @import("./freshen.zig");
+const FreshSelect = @import("./fresh_select.zig");
+const AlphaRewrite = @import("./alpha_rewrite.zig");
 const RuleCatalog = @import("./rule_catalog.zig");
 const ViewDecl = CompilerViews.ViewDecl;
-const FreshDecl = CompilerFresh.FreshDecl;
-const FreshenDecl = CompilerFresh.FreshenDecl;
+const FreshDecl = FreshSelect.FreshDecl;
+const FreshenDecl = FreshSelect.FreshenDecl;
 const CompilerDiag = @import("./diag.zig");
 const CompilerContext = @import("./context.zig").CompilerContext;
 const DiagnosticSink = @import("./diagnostic_sink.zig").DiagnosticSink;
@@ -703,7 +703,7 @@ fn tryApplyRuleApplicationWithCandidate(
     );
 
     var resolved_bindings = bindings;
-    var freshened_bindings: ?CompilerFreshen.FreshenResult = null;
+    var freshened_bindings: ?AlphaRewrite.FreshenResult = null;
     Inference.validateResolvedBindingsWithDebug(
         self,
         self.debug,
@@ -724,8 +724,8 @@ fn tryApplyRuleApplicationWithCandidate(
             rule.arg_names,
             resolved_bindings,
         )) orelse return err;
-        var freshen_report: CompilerFreshen.FreshenAttemptReport = .{};
-        freshened_bindings = CompilerFreshen.tryFreshenBindings(
+        var freshen_report: AlphaRewrite.FreshenAttemptReport = .{};
+        freshened_bindings = AlphaRewrite.tryFreshenBindings(
             allocator,
             parser,
             env,
@@ -2131,7 +2131,7 @@ fn validateFreshBindingsAgainstLine(
         optional_bindings[fresh.target_arg_idx] = null;
     }
 
-    const used_deps = try CompilerFresh.collectUsedDeps(
+    const used_deps = try FreshSelect.collectUsedDeps(
         env,
         theorem,
         line_expr,
@@ -2177,7 +2177,7 @@ fn applyFreshBindings(
     bindings: []?ExprId,
     fresh_list: []const FreshDecl,
 ) !void {
-    const used_deps = try CompilerFresh.collectUsedDepsFromLineDeps(
+    const used_deps = try FreshSelect.collectUsedDepsFromLineDeps(
         env,
         theorem,
         line_deps,
@@ -2190,7 +2190,7 @@ fn applyFreshBindings(
     for (fresh_list) |fresh| {
         if (bindings[fresh.target_arg_idx] != null) continue;
 
-        const selection = CompilerFresh.chooseFreshBinding(
+        const selection = FreshSelect.chooseFreshBinding(
             parser,
             theorem,
             theorem_vars,

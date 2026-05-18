@@ -1,10 +1,10 @@
 const std = @import("std");
 const ExprId = @import("../expr.zig").ExprId;
 const BranchStateOps = @import("./branch_state.zig");
-const StructuralIntervals = @import("./structural_intervals.zig");
-const StructuralItems = @import("./structural_items.zig");
+const StructuralIntervals = @import("./intervals.zig");
+const StructuralItems = @import("./items.zig");
 const StructuralStateUpdates =
-    @import("./structural_state_updates.zig");
+    @import("./state_updates.zig");
 const types = @import("./types.zig");
 const BinderSpace = types.BinderSpace;
 const BranchState = types.BranchState;

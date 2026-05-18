@@ -235,7 +235,7 @@ pub fn matchSymbolicDummyState(
     actual: ExprId,
     state: *MatchSession,
 ) anyerror!bool {
-    const root = try resolveDummySlot(self, slot, state);
+    const root = try resolveDummySlot(slot, state);
     const root_info = state.symbolic_dummy_infos.items[root];
 
     // Matching a symbolic dummy against a non-variable is a plain mismatch,
@@ -248,9 +248,9 @@ pub fn matchSymbolicDummyState(
     }
     _ = info;
 
-    if (currentWitnessExpr(self, root, state)) |existing| {
+    if (currentWitnessExpr(root, state)) |existing| {
         if (existing == actual) return true;
-        if (isProvisionalWitnessExpr(self, existing, state)) {
+        if (isProvisionalWitnessExpr(existing, state)) {
             try putWitnessForDummySlot(self, root, actual, state);
             return true;
         }

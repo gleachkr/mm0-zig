@@ -12,8 +12,8 @@ const ProofEmit = @import("../normalizer/proof_emit.zig");
 const RewriteProof = @import("../normalizer/proof_emit.zig");
 const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const Expr = @import("../../trusted/expressions.zig").Expr;
-const CompilerFresh = @import("./fresh.zig");
-const FreshenDecl = CompilerFresh.FreshenDecl;
+const FreshSelect = @import("./fresh_select.zig");
+const FreshenDecl = FreshSelect.FreshenDecl;
 const SortVarRegistry = @import("./vars.zig").SortVarRegistry;
 const Inference = @import("./inference.zig");
 const DepViolationDetail = Inference.DepViolationDetail;
@@ -92,7 +92,7 @@ pub fn tryFreshenBindings(
     for (bindings, 0..) |binding, idx| {
         optional_bindings[idx] = binding;
     }
-    const used_deps = try CompilerFresh.collectUsedDeps(
+    const used_deps = try FreshSelect.collectUsedDeps(
         env,
         theorem,
         line_expr,
@@ -100,7 +100,7 @@ pub fn tryFreshenBindings(
         optional_bindings,
         0,
     );
-    const selection = try CompilerFresh.chooseFreshBinding(
+    const selection = try FreshSelect.chooseFreshBinding(
         parser,
         theorem,
         theorem_vars,

@@ -293,7 +293,6 @@ fn rewriteBoundValueFromSymbolic(
             .transparent,
         ),
         else => WitnessState.makeSymbolicBoundValue(
-            self,
             symbolic,
             .transparent,
         ),

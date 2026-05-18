@@ -11,7 +11,7 @@ const Span = @import("../../proof_script.zig").Span;
 const RewriteRegistry = @import("../../rewrite_registry.zig").RewriteRegistry;
 const CompilerDiag = @import("../diag.zig");
 const CompilerContext = @import("../context.zig").CompilerContext;
-const CompilerFreshen = @import("../freshen.zig");
+const AlphaRewrite = @import("../alpha_rewrite.zig");
 const Normalize = @import("../normalize.zig");
 const Holes = @import("../holes.zig");
 const TheoremBoundary = @import("../theorem_boundary.zig");
@@ -294,7 +294,7 @@ pub fn addFreshenAttemptNotes(
     allocator: std.mem.Allocator,
     diag: *Diagnostic,
     rule: *const RuleDecl,
-    report: CompilerFreshen.FreshenAttemptReport,
+    report: AlphaRewrite.FreshenAttemptReport,
 ) !void {
     if (!report.attempted) return;
 

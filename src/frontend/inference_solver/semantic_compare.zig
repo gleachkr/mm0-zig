@@ -1,4 +1,4 @@
-const StructuralCongruence = @import("./structural_congruence.zig");
+const StructuralCongruence = @import("./congruence.zig");
 const ExprId = @import("../expr.zig").ExprId;
 const types = @import("./types.zig");
 const StructuralProfile = types.StructuralProfile;

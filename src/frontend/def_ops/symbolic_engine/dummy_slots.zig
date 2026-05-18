@@ -37,7 +37,6 @@ pub fn slotForWitness(
 }
 
 pub fn resolveDummySlot(
-    self: anytype,
     slot: usize,
     state: *const MatchSession,
 ) anyerror!usize {
@@ -56,7 +55,6 @@ pub fn resolveDummySlot(
             return error.CyclicSymbolicDummyAlias;
         }
     }
-    _ = self;
     return current;
 }
 
@@ -66,7 +64,7 @@ pub fn putWitnessForDummySlot(
     actual: ExprId,
     state: *MatchSession,
 ) anyerror!void {
-    const root = try resolveDummySlot(self, slot, state);
+    const root = try resolveDummySlot(slot, state);
     try state.witnesses.put(self.shared.allocator, root, actual);
     invalidateRepresentativeCaches(state);
 }
@@ -77,8 +75,8 @@ pub fn alignDummySlots(
     rhs_slot: usize,
     state: *MatchSession,
 ) anyerror!bool {
-    const lhs_root = try resolveDummySlot(self, lhs_slot, state);
-    const rhs_root = try resolveDummySlot(self, rhs_slot, state);
+    const lhs_root = try resolveDummySlot(lhs_slot, state);
+    const rhs_root = try resolveDummySlot(rhs_slot, state);
     if (lhs_root == rhs_root) return true;
 
     const lhs_info = state.symbolic_dummy_infos.items[lhs_root];
@@ -90,8 +88,8 @@ pub fn alignDummySlots(
         return false;
     }
 
-    const lhs_witness = currentWitnessExpr(self, lhs_root, state);
-    const rhs_witness = currentWitnessExpr(self, rhs_root, state);
+    const lhs_witness = currentWitnessExpr(lhs_root, state);
+    const rhs_witness = currentWitnessExpr(rhs_root, state);
     if (lhs_witness != null and rhs_witness != null and
         lhs_witness.? != rhs_witness.?)
     {

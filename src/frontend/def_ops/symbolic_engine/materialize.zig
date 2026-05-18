@@ -86,7 +86,7 @@ fn collectUnresolvedRootsInSymbolic(
         },
         .fixed => {},
         .dummy => |slot| {
-            const root = try resolveDummySlot(self, slot, state);
+            const root = try resolveDummySlot(slot, state);
             if (state.witnesses.get(root) != null or
                 state.materialized_witnesses.get(root) != null) return;
             const seen = try seen_roots.getOrPut(
@@ -171,7 +171,7 @@ fn collectConcreteDepsInSymbolic(
         },
         .fixed => |expr_id| deps.* |= try exprDeps(self, expr_id),
         .dummy => |slot| {
-            const root = try resolveDummySlot(self, slot, state);
+            const root = try resolveDummySlot(slot, state);
             if (state.witnesses.get(root)) |expr_id| {
                 deps.* |= try exprDeps(self, expr_id);
             }
@@ -313,7 +313,7 @@ pub fn materializeRepresentativeSymbolic(
             break :blk try materializeAssignedBoundValue(self, bound, state);
         },
         .fixed => |expr| expr,
-        .dummy => |slot| currentWitnessExpr(self, slot, state),
+        .dummy => |slot| currentWitnessExpr(slot, state),
         .app => |app| blk: {
             const args = try self.shared.allocator.alloc(ExprId, app.args.len);
             errdefer self.shared.allocator.free(args);
@@ -364,7 +364,7 @@ pub fn materializeResolvedSymbolic(
             );
         },
         .fixed => |expr_id| expr_id,
-        .dummy => |slot| currentWitnessExpr(self, slot, state),
+        .dummy => |slot| currentWitnessExpr(slot, state),
         .app => |app| blk: {
             const args = try self.shared.allocator.alloc(ExprId, app.args.len);
             errdefer self.shared.allocator.free(args);
@@ -401,7 +401,7 @@ pub fn materializeFinalSymbolic(
             break :blk try finalizeBoundValue(self, bound, state);
         },
         .fixed => |expr_id| expr_id,
-        .dummy => |slot| try resolveWitnessForDummySlot(self, slot, state),
+        .dummy => |slot| try resolveWitnessForDummySlot(slot, state),
         .app => |app| blk: {
             const args = try self.shared.allocator.alloc(ExprId, app.args.len);
             errdefer self.shared.allocator.free(args);
@@ -421,21 +421,18 @@ pub fn materializeFinalSymbolic(
 }
 
 pub fn currentWitnessExpr(
-    self: anytype,
     slot: usize,
     state: *const MatchSession,
 ) ?ExprId {
-    const root = resolveDummySlot(self, slot, state) catch return null;
+    const root = resolveDummySlot(slot, state) catch return null;
     return state.witnesses.get(root) orelse
         state.materialized_witnesses.get(root);
 }
 
 pub fn isProvisionalWitnessExpr(
-    self: anytype,
     expr_id: ExprId,
     state: *const MatchSession,
 ) bool {
-    _ = self;
     return state.provisional_witness_infos.contains(expr_id) or
         state.materialized_witness_infos.contains(expr_id);
 }
@@ -446,11 +443,10 @@ pub fn isProvisionalWitnessExpr(
 /// the user must provide explicit bindings that cover the hidden
 /// def structure.
 pub fn resolveWitnessForDummySlot(
-    self: anytype,
     slot: usize,
     state: *MatchSession,
 ) anyerror!ExprId {
-    const root = try resolveDummySlot(self, slot, state);
+    const root = try resolveDummySlot(slot, state);
     if (state.witnesses.get(root)) |existing| return existing;
     if (state.materialized_witnesses.get(root)) |existing| return existing;
     return error.UnresolvedDummyWitness;

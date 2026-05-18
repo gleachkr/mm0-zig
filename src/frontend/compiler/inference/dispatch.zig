@@ -11,7 +11,7 @@ const CompilerViews = @import("../views.zig");
 const ViewDecl = CompilerViews.ViewDecl;
 const CompilerDiag = @import("../diag.zig");
 const CompilerContext = @import("../context.zig").CompilerContext;
-const CompilerFresh = @import("../fresh.zig");
+const FreshSelect = @import("../fresh_select.zig");
 const Emit = @import("../emit.zig");
 const Context = @import("context.zig");
 const Diagnostics = @import("diagnostics.zig");
@@ -284,7 +284,7 @@ pub fn inferBindings(
 
         if (fresh_context) |fresh| {
             view_seed_overrides =
-                try CompilerFresh.seedRecoverHolesFromVarsPool(
+                try FreshSelect.seedRecoverHolesFromVarsPool(
                     allocator,
                     fresh.parser,
                     env,

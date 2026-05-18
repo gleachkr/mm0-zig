@@ -1,7 +1,7 @@
 const std = @import("std");
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
-const CompilerFresh = @import("./fresh.zig");
+const FreshSelect = @import("./fresh_select.zig");
 const CompilerHoles = @import("./holes.zig");
 const CompilerViews = @import("./views.zig");
 const CompilerVars = @import("./vars.zig");
@@ -11,8 +11,8 @@ const SortStmt = @import("../parse_recovery.zig").SortStmt;
 const TermStmt = @import("../parse_recovery.zig").TermStmt;
 
 pub const ViewDecl = CompilerViews.ViewDecl;
-pub const FreshDecl = CompilerFresh.FreshDecl;
-pub const FreshenDecl = CompilerFresh.FreshenDecl;
+pub const FreshDecl = FreshSelect.FreshDecl;
+pub const FreshenDecl = FreshSelect.FreshenDecl;
 pub const SortVarDecl = CompilerVars.SortVarDecl;
 pub const SortVarRegistry = CompilerVars.SortVarRegistry;
 
@@ -74,7 +74,7 @@ pub fn processAssertionMetadata(
     annotations: []const []const u8,
 ) !void {
     try registry.processAnnotations(env, assertion.name, annotations);
-    try CompilerFresh.processFreshAnnotations(
+    try FreshSelect.processFreshAnnotations(
         allocator,
         parser,
         env,

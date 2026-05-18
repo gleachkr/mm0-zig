@@ -364,24 +364,6 @@ pub const Context = struct {
         return try symbolic_engine.concreteBindingMatchExpr(concrete, state);
     }
 
-    fn currentWitnessExpr(
-        self: *Context,
-        slot: usize,
-        state: *const MatchSession,
-    ) ?ExprId {
-        var symbolic_engine = self.symbolicEngine();
-        return symbolic_engine.currentWitnessExpr(slot, state);
-    }
-
-    fn isProvisionalWitnessExpr(
-        self: *Context,
-        expr_id: ExprId,
-        state: *const MatchSession,
-    ) bool {
-        var symbolic_engine = self.symbolicEngine();
-        return symbolic_engine.isProvisionalWitnessExpr(expr_id, state);
-    }
-
     fn makeConcreteBoundValue(
         self: *Context,
         expr_id: ExprId,
@@ -390,15 +372,6 @@ pub const Context = struct {
     ) anyerror!BoundValue {
         var symbolic_engine = self.symbolicEngine();
         return try symbolic_engine.makeConcreteBoundValue(expr_id, state, mode);
-    }
-
-    fn makeSymbolicBoundValue(
-        self: *Context,
-        symbolic: *const SymbolicExpr,
-        mode: BindingMode,
-    ) BoundValue {
-        var symbolic_engine = self.symbolicEngine();
-        return symbolic_engine.makeSymbolicBoundValue(symbolic, mode);
     }
 
     fn allocSymbolic(

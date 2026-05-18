@@ -1,4 +1,3 @@
-const builtin = @import("builtin");
 const std = @import("std");
 const GlobalEnv = @import("./env.zig").GlobalEnv;
 const RuleDecl = @import("./env.zig").RuleDecl;
@@ -14,35 +13,29 @@ const DerivedBinding = @import("./compiler/views.zig").DerivedBinding;
 const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
 const AcuiSupport = @import("./acui_support.zig");
 const DerivedBindings = @import("./derived_bindings.zig");
-const ViewTrace = @import("./view_trace.zig");
 const DebugConfig = @import("./debug.zig").DebugConfig;
-const DebugTrace = @import("./debug.zig");
 const BranchStateOps = @import("./inference_solver/branch_state.zig");
 const SemanticCompare = @import("./inference_solver/semantic_compare.zig");
 const StructuralIntervals =
-    @import("./inference_solver/structural_intervals.zig");
-const StructuralItems = @import("./inference_solver/structural_items.zig");
-const StructuralSearch = @import("./inference_solver/structural_search.zig");
+    @import("./inference_solver/intervals.zig");
+const StructuralMatcher = @import("./inference_solver/matcher.zig");
+const StructuralObligationSolver =
+    @import("./inference_solver/obligation_solver.zig");
+const StructuralStateUpdates =
+    @import("./inference_solver/state_updates.zig");
+const Ambiguity = @import("./inference_solver/ambiguity_report.zig");
 const types = @import("./inference_solver/types.zig");
 const BinderSpace = types.BinderSpace;
 const MatchConstraint = types.MatchConstraint;
 const StructuralJointObligation = types.StructuralJointObligation;
 const BranchState = types.BranchState;
 
-const SolutionPreference = enum {
-    first,
-    minimal_structural,
-};
+const SolutionPreference = Ambiguity.SolutionPreference;
+pub const AmbiguityReport = Ambiguity.AmbiguityReport;
 
 const ConclusionConstraint = union(enum) {
     concrete: ExprId,
     surface: *const Expr,
-};
-
-pub const AmbiguityReport = struct {
-    distinct_solution_count: usize = 0,
-    chosen_bindings: ?[]const u8 = null,
-    alternative_bindings: ?[]const u8 = null,
 };
 
 pub const Solver = struct {
@@ -195,7 +188,8 @@ pub const Solver = struct {
             states = try self.finalizeStructuralStates(states.items, .rule);
         }
 
-        return try self.pickUniqueSolution(
+        return try Ambiguity.pickUniqueSolution(
+            self,
             states.items,
             .minimal_structural,
         );
@@ -284,7 +278,7 @@ pub const Solver = struct {
         for (constraints) |constraint| {
             var next = std.ArrayListUnmanaged(BranchState){};
             for (current.items) |state| {
-                const matches = try StructuralSearch.matchExpr(
+                const matches = try StructuralMatcher.matchExpr(
                     self,
                     constraint.template,
                     constraint.actual,
@@ -335,7 +329,7 @@ pub const Solver = struct {
 
         if (!SurfaceExpr.containsHole(actual)) {
             const actual_id = try self.theorem.internParsedExpr(actual);
-            return try StructuralSearch.matchExpr(
+            return try StructuralMatcher.matchExpr(
                 self,
                 template,
                 actual_id,
@@ -461,7 +455,7 @@ pub const Solver = struct {
 
         if (nextUnresolvedStructuralObligation(&current, space)) |idx| {
             const obligations = BranchStateOps.getStructuralObligations(&current, space);
-            const branches = try StructuralSearch.solveStructuralObligation(
+            const branches = try StructuralObligationSolver.solveStructuralObligation(
                 self,
                 current,
                 space,
@@ -477,7 +471,7 @@ pub const Solver = struct {
         if (!try self.allStructuralObligationsSatisfied(&current, space)) {
             return;
         }
-        try StructuralSearch.appendUniqueStateForSpace(
+        try StructuralStateUpdates.appendUniqueStateForSpace(
             self,
             out,
             current,
@@ -608,266 +602,4 @@ pub const Solver = struct {
             }
         }
     }
-
-    fn pickUniqueSolution(
-        self: *Solver,
-        states: []const BranchState,
-        preference: SolutionPreference,
-    ) anyerror![]const ExprId {
-        if (states.len == 0) return error.UnifyMismatch;
-
-        var distinct_idxs = std.ArrayListUnmanaged(usize){};
-        defer distinct_idxs.deinit(self.allocator);
-
-        for (states, 0..) |state, idx| {
-            for (state.rule_bindings) |binding| {
-                if (binding == null) return error.MissingBinderAssignment;
-            }
-
-            var already_seen = false;
-            for (distinct_idxs.items) |seen_idx| {
-                if (try SemanticCompare.sameRuleBindingsCompatible(
-                    self,
-                    states[seen_idx].rule_bindings,
-                    state.rule_bindings,
-                )) {
-                    already_seen = true;
-                    break;
-                }
-            }
-            if (!already_seen) {
-                try distinct_idxs.append(self.allocator, idx);
-            }
-        }
-
-        const chosen_distinct_idx = try self.chooseDistinctSolution(
-            states,
-            distinct_idxs.items,
-            preference,
-        );
-        if (distinct_idxs.items.len > 1) {
-            self.ambiguity_warning = true;
-            try self.captureAmbiguityReport(
-                states,
-                distinct_idxs.items,
-                chosen_distinct_idx,
-            );
-            if (self.debug.inference) {
-                try self.debugPrintAmbiguousSolutions(
-                    states,
-                    distinct_idxs.items,
-                    chosen_distinct_idx,
-                    preference,
-                );
-            }
-        }
-
-        const chosen = states[distinct_idxs.items[chosen_distinct_idx]]
-            .rule_bindings;
-        const result = try self.allocator.alloc(ExprId, chosen.len);
-        for (chosen, 0..) |binding, idx| {
-            result[idx] = binding.?;
-        }
-        return result;
-    }
-
-    fn chooseDistinctSolution(
-        self: *Solver,
-        states: []const BranchState,
-        distinct_idxs: []const usize,
-        preference: SolutionPreference,
-    ) !usize {
-        if (distinct_idxs.len == 0) return error.UnifyMismatch;
-        switch (preference) {
-            .first => return 0,
-            .minimal_structural => {},
-        }
-
-        var best: usize = 0;
-        var best_rank = try self.structuralBindingRank(
-            states[distinct_idxs[0]].rule_bindings,
-        );
-        for (distinct_idxs[1..], 1..) |state_idx, distinct_idx| {
-            const rank = try self.structuralBindingRank(
-                states[state_idx].rule_bindings,
-            );
-            if (rank < best_rank) {
-                best = distinct_idx;
-                best_rank = rank;
-            }
-        }
-        return best;
-    }
-
-    fn structuralBindingRank(
-        self: *Solver,
-        bindings: []const ?ExprId,
-    ) !usize {
-        var rank: usize = 0;
-        for (bindings, 0..) |maybe_binding, idx| {
-            const binding = maybe_binding orelse continue;
-            const sort_name = StructuralItems.getBinderSort(
-                self,
-                .rule,
-                idx,
-            ) orelse continue;
-            const combiner = try self.registry.resolveStructuralCombinerForSort(
-                self.env,
-                sort_name,
-            ) orelse continue;
-            const profile = types.StructuralProfile.init(combiner);
-            var items = std.ArrayListUnmanaged(ExprId){};
-            defer items.deinit(self.allocator);
-            try StructuralItems.collectCanonicalStructuralItems(
-                self,
-                binding,
-                profile,
-                &items,
-            );
-            rank += items.items.len;
-        }
-        return rank;
-    }
-
-    fn captureAmbiguityReport(
-        self: *Solver,
-        states: []const BranchState,
-        distinct_idxs: []const usize,
-        chosen_distinct_idx: usize,
-    ) !void {
-        self.ambiguity_report.distinct_solution_count = distinct_idxs.len;
-        if (distinct_idxs.len == 0) return;
-
-        self.ambiguity_report.chosen_bindings = try self.formatBindingSummary(
-            states[distinct_idxs[chosen_distinct_idx]].rule_bindings,
-        );
-        if (distinct_idxs.len > 1) {
-            const alt_idx: usize = if (chosen_distinct_idx == 0) 1 else 0;
-            self.ambiguity_report.alternative_bindings = try self.formatBindingSummary(
-                states[distinct_idxs[alt_idx]].rule_bindings,
-            );
-        }
-    }
-
-    fn formatBindingSummary(
-        self: *Solver,
-        bindings: []const ?ExprId,
-    ) ![]const u8 {
-        var out = std.ArrayListUnmanaged(u8){};
-        errdefer out.deinit(self.allocator);
-
-        var emitted: usize = 0;
-        for (bindings, 0..) |binding, idx| {
-            if (emitted == 3) break;
-            if (emitted != 0) {
-                try out.appendSlice(self.allocator, "; ");
-            }
-
-            const name = self.rule.arg_names[idx] orelse "_";
-            try out.writer(self.allocator).print("{s} = ", .{name});
-            if (binding) |expr_id| {
-                const text = try ViewTrace.formatExpr(
-                    self.allocator,
-                    self.theorem,
-                    self.env,
-                    expr_id,
-                );
-                defer self.allocator.free(text);
-                try appendTruncatedText(&out, self.allocator, text, 48);
-            } else {
-                try out.appendSlice(self.allocator, "<unsolved>");
-            }
-            emitted += 1;
-        }
-
-        if (bindings.len > emitted) {
-            try out.writer(self.allocator).print(
-                "; +{d} more",
-                .{bindings.len - emitted},
-            );
-        }
-        return try out.toOwnedSlice(self.allocator);
-    }
-
-    fn debugPrintAmbiguousSolutions(
-        self: *Solver,
-        states: []const BranchState,
-        distinct_idxs: []const usize,
-        chosen_distinct_idx: usize,
-        preference: SolutionPreference,
-    ) !void {
-        if (comptime builtin.target.os.tag == .freestanding) return;
-
-        DebugTrace.traceInference(
-            self.debug,
-            "omitted binders left {d} distinct final solutions; " ++
-                "choosing by {s}",
-            .{ distinct_idxs.len, solutionPreferenceName(preference) },
-        );
-        for (distinct_idxs, 0..) |state_idx, choice_idx| {
-            DebugTrace.traceInference(
-                self.debug,
-                "  solution {d}{s}",
-                .{
-                    choice_idx + 1,
-                    if (choice_idx == chosen_distinct_idx) " (chosen)" else "",
-                },
-            );
-            try self.debugPrintRuleBindings(states[state_idx].rule_bindings);
-        }
-    }
-
-    fn debugPrintRuleBindings(
-        self: *Solver,
-        bindings: []const ?ExprId,
-    ) !void {
-        for (bindings, 0..) |binding, idx| {
-            const name = self.rule.arg_names[idx] orelse "_";
-            if (binding) |expr_id| {
-                const text = try ViewTrace.formatExpr(
-                    self.allocator,
-                    self.theorem,
-                    self.env,
-                    expr_id,
-                );
-                defer self.allocator.free(text);
-                DebugTrace.traceInference(
-                    self.debug,
-                    "    {s}#{d} = {s}",
-                    .{ name, idx, text },
-                );
-            } else {
-                DebugTrace.traceInference(
-                    self.debug,
-                    "    {s}#{d} = <null>",
-                    .{ name, idx },
-                );
-            }
-        }
-    }
 };
-
-fn solutionPreferenceName(preference: SolutionPreference) []const u8 {
-    return switch (preference) {
-        .first => "first solution",
-        .minimal_structural => "minimal structural residual",
-    };
-}
-
-fn appendTruncatedText(
-    out: *std.ArrayListUnmanaged(u8),
-    allocator: std.mem.Allocator,
-    text: []const u8,
-    limit: usize,
-) !void {
-    if (text.len <= limit) {
-        try out.appendSlice(allocator, text);
-        return;
-    }
-    if (limit <= 1) {
-        try out.appendSlice(allocator, text[0..limit]);
-        return;
-    }
-    try out.appendSlice(allocator, text[0 .. limit - 1]);
-    try out.appendSlice(allocator, "...");
-}

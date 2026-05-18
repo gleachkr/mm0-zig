@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const CompilerFresh = @import("../frontend/compiler/fresh.zig");
+const FreshSelect = @import("../frontend/compiler/fresh_select.zig");
 const CompilerVars = @import("../frontend/compiler/vars.zig");
 const FrontendEnv = @import("../frontend/env.zig");
 const FrontendExpr = @import("../frontend/expr.zig");
@@ -157,7 +157,7 @@ test "fresh helper reuses existing theorem-local vars" {
 
     try fixture.ensureDummyToken("x");
     const line_expr = try fixture.internFormula(" top ");
-    const assignments = try CompilerFresh.assignHiddenRootsFromVarsPool(
+    const assignments = try FreshSelect.assignHiddenRootsFromVarsPool(
         std.testing.allocator,
         &fixture.parser,
         &fixture.env,
@@ -168,7 +168,7 @@ test "fresh helper reuses existing theorem-local vars" {
         &[_]FrontendExpr.ExprId{},
         &[_]?FrontendExpr.ExprId{},
         0,
-        &[_]CompilerFresh.HiddenRootNeed{
+        &[_]FreshSelect.HiddenRootNeed{
             .{ .root_slot = 7, .sort_name = "wff" },
         },
     );
@@ -199,7 +199,7 @@ test "fresh helper lazily allocates from the vars pool" {
     defer fixture.deinit();
 
     const line_expr = try fixture.internFormula(" top ");
-    const assignments = try CompilerFresh.assignHiddenRootsFromVarsPool(
+    const assignments = try FreshSelect.assignHiddenRootsFromVarsPool(
         std.testing.allocator,
         &fixture.parser,
         &fixture.env,
@@ -210,7 +210,7 @@ test "fresh helper lazily allocates from the vars pool" {
         &[_]FrontendExpr.ExprId{},
         &[_]?FrontendExpr.ExprId{},
         0,
-        &[_]CompilerFresh.HiddenRootNeed{
+        &[_]FreshSelect.HiddenRootNeed{
             .{ .root_slot = 3, .sort_name = "wff" },
         },
     );
@@ -237,7 +237,7 @@ test "fresh helper gives distinct vars to distinct hidden roots" {
     defer fixture.deinit();
 
     const line_expr = try fixture.internFormula(" top ");
-    const assignments = try CompilerFresh.assignHiddenRootsFromVarsPool(
+    const assignments = try FreshSelect.assignHiddenRootsFromVarsPool(
         std.testing.allocator,
         &fixture.parser,
         &fixture.env,
@@ -248,7 +248,7 @@ test "fresh helper gives distinct vars to distinct hidden roots" {
         &[_]FrontendExpr.ExprId{},
         &[_]?FrontendExpr.ExprId{},
         0,
-        &[_]CompilerFresh.HiddenRootNeed{
+        &[_]FreshSelect.HiddenRootNeed{
             .{ .root_slot = 1, .sort_name = "wff" },
             .{ .root_slot = 2, .sort_name = "wff" },
         },
@@ -281,7 +281,7 @@ test "fresh helper respects deps already visible on the line" {
 
     try fixture.ensureDummyToken("x");
     const line_expr = try fixture.internFormula(" x ");
-    const assignments = try CompilerFresh.assignHiddenRootsFromVarsPool(
+    const assignments = try FreshSelect.assignHiddenRootsFromVarsPool(
         std.testing.allocator,
         &fixture.parser,
         &fixture.env,
@@ -292,7 +292,7 @@ test "fresh helper respects deps already visible on the line" {
         &[_]FrontendExpr.ExprId{},
         &[_]?FrontendExpr.ExprId{},
         0,
-        &[_]CompilerFresh.HiddenRootNeed{
+        &[_]FreshSelect.HiddenRootNeed{
             .{ .root_slot = 9, .sort_name = "wff" },
         },
     );
@@ -323,7 +323,7 @@ test "recover-hole seeding allocates distinct vars per omitted hole" {
     defer fixture.deinit();
 
     const line_expr = try fixture.internFormula(" pair a b ");
-    const seeds = try CompilerFresh.seedRecoverHolesFromVarsPool(
+    const seeds = try FreshSelect.seedRecoverHolesFromVarsPool(
         std.testing.allocator,
         &fixture.parser,
         &fixture.env,
@@ -378,7 +378,7 @@ test "recover-hole seeding skips non-bound holes" {
     defer fixture.deinit();
 
     const line_expr = try fixture.internFormula(" hold a ");
-    const seeds = try CompilerFresh.seedRecoverHolesFromVarsPool(
+    const seeds = try FreshSelect.seedRecoverHolesFromVarsPool(
         std.testing.allocator,
         &fixture.parser,
         &fixture.env,
