@@ -1,30 +1,14 @@
 const std = @import("std");
-const MmbWriter = @import("./mmb_writer.zig");
+const MmbWriter = @import("./compiler/mmb_writer.zig");
 const CompilerDiag = @import("./compiler/diag.zig");
-const Metadata = @import("./compiler/metadata.zig");
-const CompilerVars = @import("./compiler/vars.zig");
-const CheckedIr = @import("./compiler/checked_ir.zig");
 const Pipeline = @import("./compiler/pipeline.zig");
-const DiagnosticSinkModule = @import("./compiler/diagnostic_sink.zig");
-const CompilerContextModule = @import("./compiler/context.zig");
-pub const DebugConfig = @import("./debug.zig").DebugConfig;
+const DiagnosticSink = @import("./compiler/diagnostic_sink.zig")
+    .DiagnosticSink;
+const CompilerContext = @import("./compiler/context.zig").CompilerContext;
+const DebugConfig = @import("./debug.zig").DebugConfig;
 
-pub const ViewDecl = Metadata.ViewDecl;
-pub const FreshDecl = Metadata.FreshDecl;
-pub const SortVarDecl = CompilerVars.SortVarDecl;
-pub const SortVarRegistry = CompilerVars.SortVarRegistry;
-pub const Diagnostic = CompilerDiag.Diagnostic;
-pub const DiagnosticSeverity = CompilerDiag.DiagnosticSeverity;
-pub const DiagnosticSource = CompilerDiag.DiagnosticSource;
-pub const DiagnosticPhase = CompilerDiag.DiagnosticPhase;
-pub const DiagnosticNote = CompilerDiag.DiagnosticNote;
-pub const DiagnosticRelated = CompilerDiag.DiagnosticRelated;
-pub const DiagnosticSink = DiagnosticSinkModule.DiagnosticSink;
-pub const CompilerContext = CompilerContextModule.CompilerContext;
-pub const CheckedRef = CheckedIr.CheckedRef;
-pub const CheckedLine = CheckedIr.CheckedLine;
-pub const appendRuleLine = CheckedIr.appendRuleLine;
-pub const appendTransportLine = CheckedIr.appendTransportLine;
+const Diagnostic = CompilerDiag.Diagnostic;
+const DiagnosticSource = CompilerDiag.DiagnosticSource;
 
 pub const Compiler = struct {
     pub const max_warnings = DiagnosticSink.max_warnings;

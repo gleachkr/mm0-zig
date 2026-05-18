@@ -1,16 +1,16 @@
 const std = @import("std");
-const GlobalEnv = @import("./env.zig").GlobalEnv;
-const ExprId = @import("./expr.zig").ExprId;
-const ExprNode = @import("./expr.zig").ExprNode;
-const TheoremContext = @import("./expr.zig").TheoremContext;
-const RewriteRegistry = @import("./rewrite_registry.zig").RewriteRegistry;
-const Canonicalizer = @import("./canonicalizer.zig").Canonicalizer;
-const BindingValidation = @import("./binding_validation.zig");
-const DefOps = @import("./def_ops.zig");
+const GlobalEnv = @import("../env.zig").GlobalEnv;
+const ExprId = @import("../expr.zig").ExprId;
+const ExprNode = @import("../expr.zig").ExprNode;
+const TheoremContext = @import("../expr.zig").TheoremContext;
+const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
+const Canonicalizer = @import("../canonicalizer.zig").Canonicalizer;
+const BindingValidation = @import("../binding_validation.zig");
+const DefOps = @import("../def_ops.zig");
 const BindingSeed = DefOps.BindingSeed;
-const BoundValue = @import("./def_ops/types.zig").BoundValue;
-const SymbolicExpr = @import("./def_ops/types.zig").SymbolicExpr;
-const ViewTrace = @import("./view_trace.zig");
+const BoundValue = @import("../def_ops/types.zig").BoundValue;
+const SymbolicExpr = @import("../def_ops/types.zig").SymbolicExpr;
+const ViewTrace = @import("../view_trace.zig");
 
 pub const RecoverDecl = struct {
     target_view_idx: usize,

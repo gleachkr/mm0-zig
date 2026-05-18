@@ -5,7 +5,7 @@ const CompilerVars = @import("../frontend/compiler/vars.zig");
 const FrontendEnv = @import("../frontend/env.zig");
 const FrontendExpr = @import("../frontend/expr.zig");
 const DerivedBinding =
-    @import("../frontend/derived_bindings.zig").DerivedBinding;
+    @import("../frontend/compiler/derived_bindings.zig").DerivedBinding;
 const DefOps = @import("../frontend/def_ops.zig");
 const Expr = @import("../trusted/expressions.zig").Expr;
 const ArgInfo = @import("../frontend/parse_recovery.zig").ArgInfo;

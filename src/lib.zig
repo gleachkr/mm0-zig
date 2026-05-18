@@ -2,9 +2,6 @@ const std = @import("std");
 
 pub const Arg = @import("./trusted/args.zig").Arg;
 pub const Compiler = @import("./frontend/compiler.zig").Compiler;
-pub const CompilerContext = @import("./frontend/compiler.zig").CompilerContext;
-pub const DiagnosticSink = @import("./frontend/compiler.zig").DiagnosticSink;
-pub const CheckedLine = @import("./frontend/compiler.zig").CheckedLine;
 pub const DebugConfig = @import("./frontend/debug.zig").DebugConfig;
 pub const advertised_channel_list =
     @import("./frontend/debug.zig").advertised_channel_list;
@@ -12,19 +9,14 @@ pub const DefOpsTests = if (@import("builtin").is_test)
     @import("./frontend/def_ops/tests/root.zig")
 else
     struct {};
-pub const CompilerDiagnostic = @import("./frontend/compiler.zig").Diagnostic;
-pub const CompilerDiagnosticSeverity =
-    @import("./frontend/compiler.zig").DiagnosticSeverity;
-pub const CompilerDiagnosticSource =
-    @import("./frontend/compiler.zig").DiagnosticSource;
-pub const CompilerDiagnosticPhase =
-    @import("./frontend/compiler.zig").DiagnosticPhase;
-pub const CompilerDiagnosticNote =
-    @import("./frontend/compiler.zig").DiagnosticNote;
-pub const CompilerDiagnosticRelated =
-    @import("./frontend/compiler.zig").DiagnosticRelated;
-pub const compilerDiagnosticSummary =
-    @import("./frontend/compiler.zig").diagnosticSummary;
+const CompilerDiag = @import("./frontend/compiler/diag.zig");
+pub const CompilerDiagnostic = CompilerDiag.Diagnostic;
+pub const CompilerDiagnosticSeverity = CompilerDiag.DiagnosticSeverity;
+pub const CompilerDiagnosticSource = CompilerDiag.DiagnosticSource;
+pub const CompilerDiagnosticPhase = CompilerDiag.DiagnosticPhase;
+pub const CompilerDiagnosticNote = CompilerDiag.DiagnosticNote;
+pub const CompilerDiagnosticRelated = CompilerDiag.DiagnosticRelated;
+pub const compilerDiagnosticSummary = CompilerDiag.diagnosticSummary;
 pub const writeCompilerMissingCongruenceRuleSummary =
     @import("./frontend/compiler/diag.zig").writeMissingCongruenceRuleSummary;
 pub const writeCompilerDepViolationSummary =
@@ -41,17 +33,22 @@ pub const Frontend = struct {
 };
 
 pub const CompilerSupport = struct {
+    pub const CheckedIr = @import("./frontend/compiler/checked_ir.zig");
+    pub const Context = @import("./frontend/compiler/context.zig");
+    pub const DerivedBindings =
+        @import("./frontend/compiler/derived_bindings.zig");
+    pub const DiagnosticSink =
+        @import("./frontend/compiler/diagnostic_sink.zig");
     pub const Holes = @import("./frontend/compiler/holes.zig");
     pub const Inference = @import("./frontend/compiler/inference.zig");
     pub const Metadata = @import("./frontend/compiler/metadata.zig");
+    pub const Normalize = @import("./frontend/compiler/normalize.zig");
     pub const Vars = @import("./frontend/compiler/vars.zig");
     pub const Views = @import("./frontend/compiler/views.zig");
-    pub const Normalize = @import("./frontend/compiler/normalize.zig");
 };
 pub const DefOps = @import("./frontend/def_ops.zig");
 pub const Normalizer = @import("./frontend/normalizer.zig");
 pub const RewriteRegistry = @import("./frontend/rewrite_registry.zig");
-pub const MmbWriter = @import("./frontend/mmb_writer.zig");
 pub const CrossChecker = @import("./trusted/check.zig").CrossChecker;
 pub const Expr = @import("./trusted/expressions.zig").Expr;
 pub const Header = @import("./trusted/headers.zig").Header;

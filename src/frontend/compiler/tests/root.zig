@@ -3467,7 +3467,7 @@ test "compiler points binding validation errors at explicit assignments" {
         mm0_src,
         proof_src,
     );
-    var compiler_context = mm0.CompilerContext.init(
+    var compiler_context = mm0.CompilerSupport.Context.CompilerContext.init(
         mm0_src,
         proof_src,
         compiler.debug,
@@ -4190,7 +4190,7 @@ test "strict replay does not open defs during omitted inference" {
         .span = .{ .start = 0, .end = 0 },
     };
 
-    var compiler_context = mm0.CompilerContext.init(
+    var compiler_context = mm0.CompilerSupport.Context.CompilerContext.init(
         mm0_src,
         proof_src,
         compiler.debug,
