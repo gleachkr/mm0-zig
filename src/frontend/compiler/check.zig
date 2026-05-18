@@ -39,6 +39,7 @@ const TheoremBoundary = @import("./theorem_boundary.zig");
 const CompilerVars = @import("./vars.zig");
 const SortVarRegistry = CompilerVars.SortVarRegistry;
 const Holes = @import("./holes.zig");
+const Idents = @import("./idents.zig");
 
 const NameExprMap = std.StringHashMap(*const Expr);
 const LabelIndexMap = std.StringHashMap(usize);
@@ -51,6 +52,7 @@ const addComparisonSnapshotNotes = DiagNotes.addComparisonSnapshotNotes;
 const addFreshenAttemptNotes = DiagNotes.addFreshenAttemptNotes;
 const addBoundaryAttemptNotes = DiagNotes.addBoundaryAttemptNotes;
 const applyFreshenedRuleLine = FreshenRetry.applyFreshenedRuleLine;
+const findRuleArgIndex = Idents.findRuleArgIndex;
 
 const SuccessfulLineAttempt = struct {
     line_idx: usize,
@@ -2219,13 +2221,4 @@ fn refSpan(ref: Ref) Span {
         .line => |line| line.span,
         .application => |application| application.span,
     };
-}
-
-fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
-    for (rule.arg_names, 0..) |arg_name, idx| {
-        if (arg_name) |actual_name| {
-            if (std.mem.eql(u8, actual_name, name)) return idx;
-        }
-    }
-    return null;
 }

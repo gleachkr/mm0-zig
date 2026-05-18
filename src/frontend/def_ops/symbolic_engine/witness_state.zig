@@ -41,14 +41,6 @@ pub const alignDummySlots = DummySlots.alignDummySlots;
 pub const saveMatchSnapshot = MatchSnapshot.saveMatchSnapshot;
 pub const restoreMatchSnapshot = MatchSnapshot.restoreMatchSnapshot;
 pub const deinitMatchSnapshot = MatchSnapshot.deinitMatchSnapshot;
-pub const cloneWitnessMap = MatchSnapshot.cloneWitnessMap;
-pub const cloneWitnessSlotMap = MatchSnapshot.cloneWitnessSlotMap;
-pub const cloneDummyAliasMap = MatchSnapshot.cloneDummyAliasMap;
-pub const cloneProvisionalWitnessInfoMap =
-    MatchSnapshot.cloneProvisionalWitnessInfoMap;
-pub const cloneMaterializedWitnessInfoMap =
-    MatchSnapshot.cloneMaterializedWitnessInfoMap;
-pub const cloneRepresentativeCache = MatchSnapshot.cloneRepresentativeCache;
 pub const cloneRepresentativeState = MatchSnapshot.cloneRepresentativeState;
 pub const boundValueMatchesExpr = BoundValueMatch.boundValueMatchesExpr;
 pub const concreteExprsMatchMode = BoundValueMatch.concreteExprsMatchMode;

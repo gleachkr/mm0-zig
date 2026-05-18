@@ -3,6 +3,7 @@ const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
 const RuleDecl = @import("../env.zig").RuleDecl;
+const Idents = @import("./idents.zig");
 const Inference = @import("./inference.zig");
 const CompilerVars = @import("./vars.zig");
 const SortVarRegistry = CompilerVars.SortVarRegistry;
@@ -11,6 +12,11 @@ const DerivedBinding = @import("../derived_bindings.zig").DerivedBinding;
 const ArgInfo = @import("../parse_recovery.zig").ArgInfo;
 const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
 const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
+
+const annotationMatchesTag = Idents.annotationMatchesTag;
+const findRuleArgIndex = Idents.findRuleArgIndex;
+const isIdentStart = Idents.isIdentStart;
+const isIdentChar = Idents.isIdentChar;
 
 pub const FreshDecl = struct {
     target_arg_idx: usize,
@@ -410,21 +416,6 @@ fn parseFreshenAnnotation(
     };
 }
 
-fn annotationMatchesTag(ann: []const u8, tag: []const u8) bool {
-    if (!std.mem.startsWith(u8, ann, tag)) return false;
-    if (ann.len == tag.len) return true;
-    return isAsciiWhitespace(ann[tag.len]);
-}
-
-fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
-    for (rule.arg_names, 0..) |arg_name, idx| {
-        if (arg_name) |actual_name| {
-            if (std.mem.eql(u8, actual_name, name)) return idx;
-        }
-    }
-    return null;
-}
-
 fn exprDeps(
     env: *const GlobalEnv,
     theorem: *const TheoremContext,
@@ -436,16 +427,4 @@ fn exprDeps(
         theorem.arg_infos,
         expr_id,
     )).deps;
-}
-
-fn isAsciiWhitespace(ch: u8) bool {
-    return ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r';
-}
-
-fn isIdentStart(ch: u8) bool {
-    return std.ascii.isAlphabetic(ch) or ch == '_';
-}
-
-fn isIdentChar(ch: u8) bool {
-    return std.ascii.isAlphanumeric(ch) or ch == '_';
 }

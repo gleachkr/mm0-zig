@@ -12,6 +12,9 @@ const RuleDecl = @import("../env.zig").RuleDecl;
 const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const DefOps = @import("../def_ops.zig");
 const CompilerVars = @import("./vars.zig");
+const Idents = @import("./idents.zig");
+
+const annotationMatchesTag = Idents.annotationMatchesTag;
 
 pub const NameExprMap = std.StringHashMap(*const Expr);
 pub const SortVarRegistry = CompilerVars.SortVarRegistry;
@@ -54,16 +57,6 @@ pub fn processSortHoleAnnotations(
     if (hole_token) |token| {
         try parser.registerHoleTokenForSort(sort_name, token);
     }
-}
-
-fn annotationMatchesTag(ann: []const u8, tag: []const u8) bool {
-    if (!std.mem.startsWith(u8, ann, tag)) return false;
-    if (ann.len == tag.len) return true;
-    return isAsciiWhitespace(ann[tag.len]);
-}
-
-fn isAsciiWhitespace(ch: u8) bool {
-    return ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r';
 }
 
 pub const ParsedAssertion = union(enum) {

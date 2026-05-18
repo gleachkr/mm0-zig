@@ -1,6 +1,5 @@
 const std = @import("std");
 const GlobalEnv = @import("../env.zig").GlobalEnv;
-const RuleDecl = @import("../env.zig").RuleDecl;
 const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const TemplateExpr = @import("../rules.zig").TemplateExpr;
@@ -14,6 +13,9 @@ const ArgInfo = @import("../parse_recovery.zig").ArgInfo;
 const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
 const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const ViewTrace = @import("../view_trace.zig");
+const Idents = @import("./idents.zig");
+
+const findRuleArgIndex = Idents.findRuleArgIndex;
 
 const recover_guidance_match_budget: usize = 8;
 
@@ -1243,15 +1245,6 @@ fn parseAbstractAnnotation(
         .left_plug_view_idx = left_plug_view_idx,
         .right_plug_view_idx = right_plug_view_idx,
     };
-}
-
-fn findRuleArgIndex(rule: *const RuleDecl, name: []const u8) ?usize {
-    for (rule.arg_names, 0..) |arg_name, idx| {
-        if (arg_name) |actual_name| {
-            if (std.mem.eql(u8, actual_name, name)) return idx;
-        }
-    }
-    return null;
 }
 
 fn findViewBinderIndex(sig: ViewSignature, name: []const u8) ?usize {

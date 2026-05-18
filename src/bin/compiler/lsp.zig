@@ -33,7 +33,6 @@ const LoadedText = struct {
     mtime: ?i128,
 };
 
-
 const NavigationDocumentState = struct {
     uri: []const u8,
     version: ?i32,
@@ -723,23 +722,14 @@ pub const Handler = struct {
                 compiler.primaryDiagnostics().len != 0 or
                 compiler.warningDiagnostics().len != 0)
             {
-                try self.publishCompilerSourceDiagnostics(
+                try self.publishProofAndMm0Diagnostics(
                     arena,
                     diag_context,
                     compiler.primaryDiagnostics(),
                     compiler.warningDiagnostics(),
                     compiler.diagnostics.last_diagnostic,
                     compiler.omittedPrimaryDiagnostic(.proof),
-                    .proof,
-                );
-                try self.publishCompilerSourceDiagnostics(
-                    arena,
-                    diag_context,
-                    compiler.primaryDiagnostics(),
-                    compiler.warningDiagnostics(),
-                    compiler.diagnostics.last_diagnostic,
                     compiler.omittedPrimaryDiagnostic(.mm0),
-                    .mm0,
                 );
             } else {
                 try self.publishMessageDiagnostic(
@@ -758,23 +748,14 @@ pub const Handler = struct {
             return;
         };
 
-        try self.publishCompilerSourceDiagnostics(
+        try self.publishProofAndMm0Diagnostics(
             arena,
             diag_context,
             compiler.primaryDiagnostics(),
             compiler.warningDiagnostics(),
             compiler.diagnostics.last_diagnostic,
             compiler.omittedPrimaryDiagnostic(.proof),
-            .proof,
-        );
-        try self.publishCompilerSourceDiagnostics(
-            arena,
-            diag_context,
-            compiler.primaryDiagnostics(),
-            compiler.warningDiagnostics(),
-            compiler.diagnostics.last_diagnostic,
             compiler.omittedPrimaryDiagnostic(.mm0),
-            .mm0,
         );
     }
 
@@ -999,6 +980,36 @@ pub const Handler = struct {
             const key = found orelse break;
             self.removeNavigationCacheByMm0Uri(key);
         }
+    }
+
+    fn publishProofAndMm0Diagnostics(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        diag_context: DiagnosticContext,
+        primary: []const mm0.CompilerDiagnostic,
+        warnings: []const mm0.CompilerDiagnostic,
+        extra: ?mm0.CompilerDiagnostic,
+        proof_omitted: ?mm0.CompilerDiagnostic,
+        mm0_omitted: ?mm0.CompilerDiagnostic,
+    ) !void {
+        try self.publishCompilerSourceDiagnostics(
+            arena,
+            diag_context,
+            primary,
+            warnings,
+            extra,
+            proof_omitted,
+            .proof,
+        );
+        try self.publishCompilerSourceDiagnostics(
+            arena,
+            diag_context,
+            primary,
+            warnings,
+            extra,
+            mm0_omitted,
+            .mm0,
+        );
     }
 
     fn publishCompilerDiagnostic(
@@ -1271,5 +1282,3 @@ fn clientSupportsHierarchicalDocumentSymbols(
     const document_symbol = text_document.documentSymbol orelse return false;
     return document_symbol.hierarchicalDocumentSymbolSupport orelse false;
 }
-
-

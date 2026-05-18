@@ -1,13 +1,10 @@
 const Types = @import("../types.zig");
 const MatchState = @import("../match_state.zig");
+const Containers = @import("../../containers.zig");
+
+const cloneMap = Containers.cloneMap;
 
 const BoundValue = Types.BoundValue;
-const WitnessMap = Types.WitnessMap;
-const WitnessSlotMap = Types.WitnessSlotMap;
-const DummyAliasMap = Types.DummyAliasMap;
-const ProvisionalWitnessInfoMap = Types.ProvisionalWitnessInfoMap;
-const MaterializedWitnessInfoMap = Types.MaterializedWitnessInfoMap;
-const RepresentativeCache = Types.RepresentativeCache;
 const MatchSession = MatchState.MatchSession;
 const MatchSnapshot = MatchState.MatchSnapshot;
 
@@ -17,24 +14,24 @@ pub fn saveMatchSnapshot(
 ) anyerror!MatchSnapshot {
     return .{
         .bindings = try self.shared.allocator.dupe(?BoundValue, state.bindings),
-        .witnesses = try cloneWitnessMap(self, state.witnesses),
-        .materialized_witnesses = try cloneWitnessMap(self, state.materialized_witnesses),
-        .materialized_witness_slots = try cloneWitnessSlotMap(self, state.materialized_witness_slots),
-        .dummy_aliases = try cloneDummyAliasMap(self, state.dummy_aliases),
-        .provisional_witness_infos = try cloneProvisionalWitnessInfoMap(
-            self,
+        .witnesses = try cloneMap(self.shared.allocator, state.witnesses),
+        .materialized_witnesses = try cloneMap(self.shared.allocator, state.materialized_witnesses),
+        .materialized_witness_slots = try cloneMap(self.shared.allocator, state.materialized_witness_slots),
+        .dummy_aliases = try cloneMap(self.shared.allocator, state.dummy_aliases),
+        .provisional_witness_infos = try cloneMap(
+            self.shared.allocator,
             state.provisional_witness_infos,
         ),
-        .materialized_witness_infos = try cloneMaterializedWitnessInfoMap(
-            self,
+        .materialized_witness_infos = try cloneMap(
+            self.shared.allocator,
             state.materialized_witness_infos,
         ),
-        .transparent_representatives = try cloneRepresentativeCache(
-            self,
+        .transparent_representatives = try cloneMap(
+            self.shared.allocator,
             state.transparent_representatives,
         ),
-        .normalized_representatives = try cloneRepresentativeCache(
-            self,
+        .normalized_representatives = try cloneMap(
+            self.shared.allocator,
             state.normalized_representatives,
         ),
         .dummy_info_len = state.symbolic_dummy_infos.items.len,
@@ -48,42 +45,42 @@ pub fn restoreMatchSnapshot(
 ) anyerror!void {
     @memcpy(state.bindings, snapshot.bindings);
     state.witnesses.deinit(self.shared.allocator);
-    state.witnesses = try cloneWitnessMap(self, snapshot.witnesses);
+    state.witnesses = try cloneMap(self.shared.allocator, snapshot.witnesses);
     state.materialized_witnesses.deinit(self.shared.allocator);
     state.materialized_witnesses =
-        try cloneWitnessMap(self, snapshot.materialized_witnesses);
+        try cloneMap(self.shared.allocator, snapshot.materialized_witnesses);
     state.materialized_witness_slots.deinit(self.shared.allocator);
-    state.materialized_witness_slots = try cloneWitnessSlotMap(
-        self,
+    state.materialized_witness_slots = try cloneMap(
+        self.shared.allocator,
         snapshot.materialized_witness_slots,
     );
     state.dummy_aliases.deinit(self.shared.allocator);
-    state.dummy_aliases = try cloneDummyAliasMap(
-        self,
+    state.dummy_aliases = try cloneMap(
+        self.shared.allocator,
         snapshot.dummy_aliases,
     );
     state.provisional_witness_infos.deinit(self.shared.allocator);
     state.provisional_witness_infos =
-        try cloneProvisionalWitnessInfoMap(
-            self,
+        try cloneMap(
+            self.shared.allocator,
             snapshot.provisional_witness_infos,
         );
     state.materialized_witness_infos.deinit(self.shared.allocator);
     state.materialized_witness_infos =
-        try cloneMaterializedWitnessInfoMap(
-            self,
+        try cloneMap(
+            self.shared.allocator,
             snapshot.materialized_witness_infos,
         );
     state.transparent_representatives.deinit(self.shared.allocator);
     state.transparent_representatives =
-        try cloneRepresentativeCache(
-            self,
+        try cloneMap(
+            self.shared.allocator,
             snapshot.transparent_representatives,
         );
     state.normalized_representatives.deinit(self.shared.allocator);
     state.normalized_representatives =
-        try cloneRepresentativeCache(
-            self,
+        try cloneMap(
+            self.shared.allocator,
             snapshot.normalized_representatives,
         );
     state.symbolic_dummy_infos.shrinkRetainingCapacity(
@@ -106,99 +103,6 @@ pub fn deinitMatchSnapshot(
     snapshot.normalized_representatives.deinit(self.shared.allocator);
 }
 
-pub fn cloneWitnessMap(self: anytype, map: WitnessMap) anyerror!WitnessMap {
-    var clone: WitnessMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            self.shared.allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-pub fn cloneWitnessSlotMap(
-    self: anytype,
-    map: WitnessSlotMap,
-) anyerror!WitnessSlotMap {
-    var clone: WitnessSlotMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            self.shared.allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-pub fn cloneDummyAliasMap(
-    self: anytype,
-    map: DummyAliasMap,
-) anyerror!DummyAliasMap {
-    var clone: DummyAliasMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            self.shared.allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-pub fn cloneProvisionalWitnessInfoMap(
-    self: anytype,
-    map: ProvisionalWitnessInfoMap,
-) anyerror!ProvisionalWitnessInfoMap {
-    var clone: ProvisionalWitnessInfoMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            self.shared.allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-pub fn cloneMaterializedWitnessInfoMap(
-    self: anytype,
-    map: MaterializedWitnessInfoMap,
-) anyerror!MaterializedWitnessInfoMap {
-    var clone: MaterializedWitnessInfoMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            self.shared.allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-pub fn cloneRepresentativeCache(
-    self: anytype,
-    map: RepresentativeCache,
-) anyerror!RepresentativeCache {
-    var clone: RepresentativeCache = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            self.shared.allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
 pub fn cloneRepresentativeState(
     self: anytype,
     source: *const MatchSession,
@@ -207,20 +111,20 @@ pub fn cloneRepresentativeState(
     var clone = try MatchSession.init(self.shared.allocator, binding_len);
     errdefer clone.deinit(self.shared.allocator);
 
-    clone.witnesses = try cloneWitnessMap(self, source.witnesses);
+    clone.witnesses = try cloneMap(self.shared.allocator, source.witnesses);
     clone.materialized_witnesses =
-        try cloneWitnessMap(self, source.materialized_witnesses);
+        try cloneMap(self.shared.allocator, source.materialized_witnesses);
     clone.materialized_witness_slots =
-        try cloneWitnessSlotMap(self, source.materialized_witness_slots);
-    clone.dummy_aliases = try cloneDummyAliasMap(self, source.dummy_aliases);
+        try cloneMap(self.shared.allocator, source.materialized_witness_slots);
+    clone.dummy_aliases = try cloneMap(self.shared.allocator, source.dummy_aliases);
     clone.provisional_witness_infos =
-        try cloneProvisionalWitnessInfoMap(
-            self,
+        try cloneMap(
+            self.shared.allocator,
             source.provisional_witness_infos,
         );
     clone.materialized_witness_infos =
-        try cloneMaterializedWitnessInfoMap(
-            self,
+        try cloneMap(
+            self.shared.allocator,
             source.materialized_witness_infos,
         );
     try clone.symbolic_dummy_infos.appendSlice(

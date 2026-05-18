@@ -3,6 +3,10 @@ const TheoremContext = @import("../expr.zig").TheoremContext;
 const Expr = @import("../../trusted/expressions.zig").Expr;
 const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const Sort = @import("../../trusted/sorts.zig").Sort;
+const Idents = @import("./idents.zig");
+
+const annotationMatchesTag = Idents.annotationMatchesTag;
+const isAsciiWhitespace = Idents.isAsciiWhitespace;
 
 const NameExprMap = std.StringHashMap(*const Expr);
 
@@ -165,12 +169,6 @@ pub fn ensureMathTextVars(
     }
 }
 
-fn annotationMatchesTag(ann: []const u8, tag: []const u8) bool {
-    if (!std.mem.startsWith(u8, ann, tag)) return false;
-    if (ann.len == tag.len) return true;
-    return isAsciiWhitespace(ann[tag.len]);
-}
-
 fn validateTokenHasNoSyntaxCollision(
     parser: *const MM0Parser,
     token: []const u8,
@@ -186,10 +184,6 @@ fn hasSyntaxCollision(parser: *const MM0Parser, token: []const u8) bool {
         parser.core.formula_markers.contains(token) or
         parser.core.prefix_notations.contains(token) or
         parser.core.infix_notations.contains(token);
-}
-
-fn isAsciiWhitespace(ch: u8) bool {
-    return ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r';
 }
 
 fn nextMathToken(

@@ -11,6 +11,9 @@ const Types = @import("./types.zig");
 const MatchState = @import("./match_state.zig");
 const SharedContext = @import("./shared_context.zig").SharedContext;
 const SymbolicEngine = @import("./symbolic_engine.zig").SymbolicEngine;
+const Containers = @import("../containers.zig");
+
+const cloneMap = Containers.cloneMap;
 
 const MirroredTheoremContext = MirrorSupport.MirroredTheoremContext;
 const copyExprBetweenTheorems = MirrorSupport.copyExprBetweenTheorems;
@@ -22,11 +25,6 @@ const MatchSeedState = Types.MatchSeedState;
 const UnresolvedDummyRoot = Types.UnresolvedDummyRoot;
 const MaterializedDummyAssignment =
     Types.MaterializedDummyAssignment;
-const WitnessMap = Types.WitnessMap;
-const WitnessSlotMap = Types.WitnessSlotMap;
-const DummyAliasMap = Types.DummyAliasMap;
-const ProvisionalWitnessInfoMap = Types.ProvisionalWitnessInfoMap;
-const MaterializedWitnessInfoMap = Types.MaterializedWitnessInfoMap;
 const MatchSession = MatchState.MatchSession;
 const default_semantic_match_budget: usize = 8;
 
@@ -278,86 +276,6 @@ const NormalizedView = struct {
     }
 };
 
-fn cloneWitnessMap(
-    allocator: std.mem.Allocator,
-    map: WitnessMap,
-) !WitnessMap {
-    var clone: WitnessMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-fn cloneWitnessSlotMap(
-    allocator: std.mem.Allocator,
-    map: WitnessSlotMap,
-) !WitnessSlotMap {
-    var clone: WitnessSlotMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-fn cloneDummyAliasMap(
-    allocator: std.mem.Allocator,
-    map: DummyAliasMap,
-) !DummyAliasMap {
-    var clone: DummyAliasMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-fn cloneProvisionalWitnessInfoMap(
-    allocator: std.mem.Allocator,
-    map: ProvisionalWitnessInfoMap,
-) !ProvisionalWitnessInfoMap {
-    var clone: ProvisionalWitnessInfoMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
-fn cloneMaterializedWitnessInfoMap(
-    allocator: std.mem.Allocator,
-    map: MaterializedWitnessInfoMap,
-) !MaterializedWitnessInfoMap {
-    var clone: MaterializedWitnessInfoMap = .{};
-    var it = map.iterator();
-    while (it.next()) |entry| {
-        try clone.put(
-            allocator,
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        );
-    }
-    return clone;
-}
-
 pub const RuleMatchSession = struct {
     shared: *SharedContext,
     rule_args: []const ArgInfo,
@@ -402,29 +320,29 @@ pub const RuleMatchSession = struct {
                 shared.allocator,
                 saved.symbolic_dummy_infos,
             );
-            state.witnesses = try cloneWitnessMap(
+            state.witnesses = try cloneMap(
                 shared.allocator,
                 saved.witnesses,
             );
-            state.materialized_witnesses = try cloneWitnessMap(
+            state.materialized_witnesses = try cloneMap(
                 shared.allocator,
                 saved.materialized_witnesses,
             );
-            state.materialized_witness_slots = try cloneWitnessSlotMap(
+            state.materialized_witness_slots = try cloneMap(
                 shared.allocator,
                 saved.materialized_witness_slots,
             );
-            state.dummy_aliases = try cloneDummyAliasMap(
+            state.dummy_aliases = try cloneMap(
                 shared.allocator,
                 saved.dummy_aliases,
             );
             state.provisional_witness_infos =
-                try cloneProvisionalWitnessInfoMap(
+                try cloneMap(
                     shared.allocator,
                     saved.provisional_witness_infos,
                 );
             state.materialized_witness_infos =
-                try cloneMaterializedWitnessInfoMap(
+                try cloneMap(
                     shared.allocator,
                     saved.materialized_witness_infos,
                 );
@@ -729,27 +647,27 @@ pub const RuleMatchSession = struct {
                 SymbolicDummyInfo,
                 self.state.symbolic_dummy_infos.items,
             ),
-            .witnesses = try cloneWitnessMap(
+            .witnesses = try cloneMap(
                 self.shared.allocator,
                 self.state.witnesses,
             ),
-            .materialized_witnesses = try cloneWitnessMap(
+            .materialized_witnesses = try cloneMap(
                 self.shared.allocator,
                 self.state.materialized_witnesses,
             ),
-            .materialized_witness_slots = try cloneWitnessSlotMap(
+            .materialized_witness_slots = try cloneMap(
                 self.shared.allocator,
                 self.state.materialized_witness_slots,
             ),
-            .dummy_aliases = try cloneDummyAliasMap(
+            .dummy_aliases = try cloneMap(
                 self.shared.allocator,
                 self.state.dummy_aliases,
             ),
-            .provisional_witness_infos = try cloneProvisionalWitnessInfoMap(
+            .provisional_witness_infos = try cloneMap(
                 self.shared.allocator,
                 self.state.provisional_witness_infos,
             ),
-            .materialized_witness_infos = try cloneMaterializedWitnessInfoMap(
+            .materialized_witness_infos = try cloneMap(
                 self.shared.allocator,
                 self.state.materialized_witness_infos,
             ),
