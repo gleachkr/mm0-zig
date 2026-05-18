@@ -408,9 +408,8 @@ fn collectAcuiBinderBounds(
     lower_out: *std.ArrayListUnmanaged(ExprId),
     upper_out: *std.ArrayListUnmanaged(ExprId),
 ) anyerror!void {
-    const bindings = BranchStateOps.getBindings(self, @constCast(state), space);
+    const bindings = BranchStateOps.getBindings(@constCast(state), space);
     const intervals = BranchStateOps.getStructuralIntervals(
-        self,
         @constCast(state),
         space,
     );

@@ -49,7 +49,6 @@ pub const CompilerSupport = struct {
     pub const Normalize = @import("./frontend/compiler/normalize.zig");
 };
 pub const DefOps = @import("./frontend/def_ops.zig");
-pub const TermAnnotations = @import("./frontend/term_annotations.zig");
 pub const Normalizer = @import("./frontend/normalizer.zig");
 pub const RewriteRegistry = @import("./frontend/rewrite_registry.zig");
 pub const MmbWriter = @import("./frontend/mmb_writer.zig");

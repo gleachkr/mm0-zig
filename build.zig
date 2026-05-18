@@ -1,5 +1,126 @@
 const std = @import("std");
 
+const WebPackageInstall = struct {
+    source_dir: []const u8,
+    package_name: []const u8,
+};
+
+const WEB_PACKAGE_INSTALLS = [_]WebPackageInstall{
+    .{ .source_dir = "web/packages/compiler", .package_name = "compiler" },
+    .{ .source_dir = "web/packages/verifier", .package_name = "verifier" },
+    .{ .source_dir = "web/packages/lsp", .package_name = "lsp" },
+};
+
+const WebWasmInstall = struct {
+    artifact: *std.Build.Step.Compile,
+    package_name: []const u8,
+    file_name: []const u8,
+};
+
+const WEB_DEMO_FIXTURES = [_][]const u8{
+    "hilbert",
+    "russell",
+    "tseitin",
+    "robinson",
+    "aristotle",
+    "peirce",
+    "gentzen",
+    "prawitz",
+    "barcan",
+    "prior",
+    "pnueli",
+    "barwise",
+    "loeb",
+    "church",
+    "leibniz",
+    "mac_lane",
+    "martin_lof",
+    "peano",
+    "euclid",
+    "smullyan",
+    "zermelo",
+};
+
+fn installWebPackageSet(
+    b: *std.Build,
+    step: *std.Build.Step,
+    install_root: []const u8,
+    compiler_wasm: *std.Build.Step.Compile,
+    verifier_wasm: *std.Build.Step.Compile,
+    lsp_server_wasm: *std.Build.Step.Compile,
+) void {
+    for (WEB_PACKAGE_INSTALLS) |pkg| {
+        const install_pkg = b.addInstallDirectory(.{
+            .source_dir = b.path(pkg.source_dir),
+            .install_dir = .prefix,
+            .install_subdir = b.fmt(
+                "{s}/@aufbau/{s}",
+                .{ install_root, pkg.package_name },
+            ),
+        });
+        step.dependOn(&install_pkg.step);
+    }
+
+    const wasm_installs = [_]WebWasmInstall{
+        .{
+            .artifact = compiler_wasm,
+            .package_name = "compiler",
+            .file_name = "compiler.wasm",
+        },
+        .{
+            .artifact = verifier_wasm,
+            .package_name = "verifier",
+            .file_name = "verifier.wasm",
+        },
+        .{
+            .artifact = lsp_server_wasm,
+            .package_name = "lsp",
+            .file_name = "lsp.wasm",
+        },
+    };
+
+    for (wasm_installs) |wasm| {
+        const install_wasm = b.addInstallArtifact(wasm.artifact, .{
+            .dest_dir = .{ .override = .prefix },
+            .dest_sub_path = b.fmt(
+                "{s}/@aufbau/{s}/{s}",
+                .{ install_root, wasm.package_name, wasm.file_name },
+            ),
+        });
+        step.dependOn(&install_wasm.step);
+    }
+}
+
+fn installWebDemoFixtures(b: *std.Build, step: *std.Build.Step) void {
+    const install_web_assets = b.addInstallDirectory(.{
+        .source_dir = b.path("web"),
+        .install_dir = .prefix,
+        .install_subdir = "web-demo",
+    });
+    step.dependOn(&install_web_assets.step);
+
+    const install_web_fonts = b.addInstallDirectory(.{
+        .source_dir = b.path("web/fonts"),
+        .install_dir = .prefix,
+        .install_subdir = "web-demo/fonts",
+    });
+    step.dependOn(&install_web_fonts.step);
+
+    for (WEB_DEMO_FIXTURES) |fixture| {
+        const install_mm0 = b.addInstallFile(
+            b.path(b.fmt("tests/proof_cases/{s}.mm0", .{fixture})),
+            b.fmt("web-demo/fixtures/{s}.mm0", .{fixture}),
+        );
+        step.dependOn(&install_mm0.step);
+
+        const install_proof = b.addInstallFile(
+            b.path(b.fmt("tests/proof_cases/{s}.auf", .{fixture})),
+            b.fmt("web-demo/fixtures/{s}.auf", .{fixture}),
+        );
+        step.dependOn(&install_proof.step);
+    }
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -136,295 +257,23 @@ pub fn build(b: *std.Build) void {
         "Build the redistributable JS/wasm packages",
     );
 
-    const install_demo_compiler_pkg = b.addInstallDirectory(.{
-        .source_dir = b.path("web/packages/compiler"),
-        .install_dir = .prefix,
-        .install_subdir = "web-demo/@aufbau/compiler",
-    });
-    const install_demo_verifier_pkg = b.addInstallDirectory(.{
-        .source_dir = b.path("web/packages/verifier"),
-        .install_dir = .prefix,
-        .install_subdir = "web-demo/@aufbau/verifier",
-    });
-    const install_demo_lsp_pkg = b.addInstallDirectory(.{
-        .source_dir = b.path("web/packages/lsp"),
-        .install_dir = .prefix,
-        .install_subdir = "web-demo/@aufbau/lsp",
-    });
-    const install_demo_compiler_wasm = b.addInstallArtifact(compiler_wasm, .{
-        .dest_dir = .{ .override = .prefix },
-        .dest_sub_path = "web-demo/@aufbau/compiler/compiler.wasm",
-    });
-    const install_demo_verifier_wasm = b.addInstallArtifact(verifier_wasm, .{
-        .dest_dir = .{ .override = .prefix },
-        .dest_sub_path = "web-demo/@aufbau/verifier/verifier.wasm",
-    });
-    const install_demo_lsp_wasm = b.addInstallArtifact(lsp_server_wasm, .{
-        .dest_dir = .{ .override = .prefix },
-        .dest_sub_path = "web-demo/@aufbau/lsp/lsp.wasm",
-    });
-
-    const install_npm_compiler_pkg = b.addInstallDirectory(.{
-        .source_dir = b.path("web/packages/compiler"),
-        .install_dir = .prefix,
-        .install_subdir = "npm/@aufbau/compiler",
-    });
-    const install_npm_verifier_pkg = b.addInstallDirectory(.{
-        .source_dir = b.path("web/packages/verifier"),
-        .install_dir = .prefix,
-        .install_subdir = "npm/@aufbau/verifier",
-    });
-    const install_npm_lsp_pkg = b.addInstallDirectory(.{
-        .source_dir = b.path("web/packages/lsp"),
-        .install_dir = .prefix,
-        .install_subdir = "npm/@aufbau/lsp",
-    });
-    const install_npm_compiler_wasm = b.addInstallArtifact(compiler_wasm, .{
-        .dest_dir = .{ .override = .prefix },
-        .dest_sub_path = "npm/@aufbau/compiler/compiler.wasm",
-    });
-    const install_npm_verifier_wasm = b.addInstallArtifact(verifier_wasm, .{
-        .dest_dir = .{ .override = .prefix },
-        .dest_sub_path = "npm/@aufbau/verifier/verifier.wasm",
-    });
-    const install_npm_lsp_wasm = b.addInstallArtifact(lsp_server_wasm, .{
-        .dest_dir = .{ .override = .prefix },
-        .dest_sub_path = "npm/@aufbau/lsp/lsp.wasm",
-    });
-    const install_web_assets = b.addInstallDirectory(.{
-        .source_dir = b.path("web"),
-        .install_dir = .prefix,
-        .install_subdir = "web-demo",
-    });
-    const install_web_fonts = b.addInstallDirectory(.{
-        .source_dir = b.path("web/fonts"),
-        .install_dir = .prefix,
-        .install_subdir = "web-demo/fonts",
-    });
-    const install_hilbert_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/hilbert.mm0"),
-        "web-demo/fixtures/hilbert.mm0",
+    installWebPackageSet(
+        b,
+        web_demo_step,
+        "web-demo",
+        compiler_wasm,
+        verifier_wasm,
+        lsp_server_wasm,
     );
-    const install_hilbert_proof = b.addInstallFile(
-        b.path("tests/proof_cases/hilbert.auf"),
-        "web-demo/fixtures/hilbert.auf",
+    installWebPackageSet(
+        b,
+        web_packages_step,
+        "npm",
+        compiler_wasm,
+        verifier_wasm,
+        lsp_server_wasm,
     );
-    const install_russell_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/russell.mm0"),
-        "web-demo/fixtures/russell.mm0",
-    );
-    const install_russell_proof = b.addInstallFile(
-        b.path("tests/proof_cases/russell.auf"),
-        "web-demo/fixtures/russell.auf",
-    );
-    const install_prop_cnf_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/tseitin.mm0"),
-        "web-demo/fixtures/tseitin.mm0",
-    );
-    const install_prop_cnf_proof = b.addInstallFile(
-        b.path("tests/proof_cases/tseitin.auf"),
-        "web-demo/fixtures/tseitin.auf",
-    );
-    const install_robinson_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/robinson.mm0"),
-        "web-demo/fixtures/robinson.mm0",
-    );
-    const install_robinson_proof = b.addInstallFile(
-        b.path("tests/proof_cases/robinson.auf"),
-        "web-demo/fixtures/robinson.auf",
-    );
-    const install_nd_em_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/aristotle.mm0"),
-        "web-demo/fixtures/aristotle.mm0",
-    );
-    const install_nd_em_proof = b.addInstallFile(
-        b.path("tests/proof_cases/aristotle.auf"),
-        "web-demo/fixtures/aristotle.auf",
-    );
-    const install_seq_peirce_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/peirce.mm0"),
-        "web-demo/fixtures/peirce.mm0",
-    );
-    const install_seq_peirce_proof = b.addInstallFile(
-        b.path("tests/proof_cases/peirce.auf"),
-        "web-demo/fixtures/peirce.auf",
-    );
-    const install_lk_exists_mono_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/gentzen.mm0"),
-        "web-demo/fixtures/gentzen.mm0",
-    );
-    const install_lk_exists_mono_proof = b.addInstallFile(
-        b.path("tests/proof_cases/gentzen.auf"),
-        "web-demo/fixtures/gentzen.auf",
-    );
-    const install_prawitz_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/prawitz.mm0"),
-        "web-demo/fixtures/prawitz.mm0",
-    );
-    const install_prawitz_proof = b.addInstallFile(
-        b.path("tests/proof_cases/prawitz.auf"),
-        "web-demo/fixtures/prawitz.auf",
-    );
-    const install_barcan_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/barcan.mm0"),
-        "web-demo/fixtures/barcan.mm0",
-    );
-    const install_barcan_proof = b.addInstallFile(
-        b.path("tests/proof_cases/barcan.auf"),
-        "web-demo/fixtures/barcan.auf",
-    );
-    const install_prior_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/prior.mm0"),
-        "web-demo/fixtures/prior.mm0",
-    );
-    const install_prior_proof = b.addInstallFile(
-        b.path("tests/proof_cases/prior.auf"),
-        "web-demo/fixtures/prior.auf",
-    );
-    const install_pnueli_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/pnueli.mm0"),
-        "web-demo/fixtures/pnueli.mm0",
-    );
-    const install_pnueli_proof = b.addInstallFile(
-        b.path("tests/proof_cases/pnueli.auf"),
-        "web-demo/fixtures/pnueli.auf",
-    );
-    const install_barwise_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/barwise.mm0"),
-        "web-demo/fixtures/barwise.mm0",
-    );
-    const install_barwise_proof = b.addInstallFile(
-        b.path("tests/proof_cases/barwise.auf"),
-        "web-demo/fixtures/barwise.auf",
-    );
-    const install_loeb_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/loeb.mm0"),
-        "web-demo/fixtures/loeb.mm0",
-    );
-    const install_loeb_proof = b.addInstallFile(
-        b.path("tests/proof_cases/loeb.auf"),
-        "web-demo/fixtures/loeb.auf",
-    );
-    const install_hol_beta_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/church.mm0"),
-        "web-demo/fixtures/church.mm0",
-    );
-    const install_hol_beta_proof = b.addInstallFile(
-        b.path("tests/proof_cases/church.auf"),
-        "web-demo/fixtures/church.auf",
-    );
-    const install_calculus_product_rule_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/leibniz.mm0"),
-        "web-demo/fixtures/leibniz.mm0",
-    );
-    const install_calculus_product_rule_proof = b.addInstallFile(
-        b.path("tests/proof_cases/leibniz.auf"),
-        "web-demo/fixtures/leibniz.auf",
-    );
-    const install_category_pullback_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/mac_lane.mm0"),
-        "web-demo/fixtures/mac_lane.mm0",
-    );
-    const install_category_pullback_proof = b.addInstallFile(
-        b.path("tests/proof_cases/mac_lane.auf"),
-        "web-demo/fixtures/mac_lane.auf",
-    );
-    const install_martin_lof_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/martin_lof.mm0"),
-        "web-demo/fixtures/martin_lof.mm0",
-    );
-    const install_martin_lof_proof = b.addInstallFile(
-        b.path("tests/proof_cases/martin_lof.auf"),
-        "web-demo/fixtures/martin_lof.auf",
-    );
-    const install_peano_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/peano.mm0"),
-        "web-demo/fixtures/peano.mm0",
-    );
-    const install_peano_proof = b.addInstallFile(
-        b.path("tests/proof_cases/peano.auf"),
-        "web-demo/fixtures/peano.auf",
-    );
-    const install_euclid_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/euclid.mm0"),
-        "web-demo/fixtures/euclid.mm0",
-    );
-    const install_euclid_proof = b.addInstallFile(
-        b.path("tests/proof_cases/euclid.auf"),
-        "web-demo/fixtures/euclid.auf",
-    );
-    const install_smullyan_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/smullyan.mm0"),
-        "web-demo/fixtures/smullyan.mm0",
-    );
-    const install_smullyan_proof = b.addInstallFile(
-        b.path("tests/proof_cases/smullyan.auf"),
-        "web-demo/fixtures/smullyan.auf",
-    );
-    const install_zermelo_mm0 = b.addInstallFile(
-        b.path("tests/proof_cases/zermelo.mm0"),
-        "web-demo/fixtures/zermelo.mm0",
-    );
-    const install_zermelo_proof = b.addInstallFile(
-        b.path("tests/proof_cases/zermelo.auf"),
-        "web-demo/fixtures/zermelo.auf",
-    );
-    web_demo_step.dependOn(&install_demo_compiler_pkg.step);
-    web_demo_step.dependOn(&install_demo_verifier_pkg.step);
-    web_demo_step.dependOn(&install_demo_lsp_pkg.step);
-    web_demo_step.dependOn(&install_demo_compiler_wasm.step);
-    web_demo_step.dependOn(&install_demo_verifier_wasm.step);
-    web_demo_step.dependOn(&install_demo_lsp_wasm.step);
-    web_demo_step.dependOn(&install_web_assets.step);
-    web_packages_step.dependOn(&install_npm_compiler_pkg.step);
-    web_packages_step.dependOn(&install_npm_verifier_pkg.step);
-    web_packages_step.dependOn(&install_npm_lsp_pkg.step);
-    web_packages_step.dependOn(&install_npm_compiler_wasm.step);
-    web_packages_step.dependOn(&install_npm_verifier_wasm.step);
-    web_packages_step.dependOn(&install_npm_lsp_wasm.step);
-    web_demo_step.dependOn(&install_web_fonts.step);
-    web_demo_step.dependOn(&install_hilbert_mm0.step);
-    web_demo_step.dependOn(&install_hilbert_proof.step);
-    web_demo_step.dependOn(&install_russell_mm0.step);
-    web_demo_step.dependOn(&install_russell_proof.step);
-    web_demo_step.dependOn(&install_prop_cnf_mm0.step);
-    web_demo_step.dependOn(&install_prop_cnf_proof.step);
-    web_demo_step.dependOn(&install_robinson_mm0.step);
-    web_demo_step.dependOn(&install_robinson_proof.step);
-    web_demo_step.dependOn(&install_nd_em_mm0.step);
-    web_demo_step.dependOn(&install_nd_em_proof.step);
-    web_demo_step.dependOn(&install_seq_peirce_mm0.step);
-    web_demo_step.dependOn(&install_seq_peirce_proof.step);
-    web_demo_step.dependOn(&install_lk_exists_mono_mm0.step);
-    web_demo_step.dependOn(&install_lk_exists_mono_proof.step);
-    web_demo_step.dependOn(&install_prawitz_mm0.step);
-    web_demo_step.dependOn(&install_prawitz_proof.step);
-    web_demo_step.dependOn(&install_barcan_mm0.step);
-    web_demo_step.dependOn(&install_barcan_proof.step);
-    web_demo_step.dependOn(&install_prior_mm0.step);
-    web_demo_step.dependOn(&install_prior_proof.step);
-    web_demo_step.dependOn(&install_pnueli_mm0.step);
-    web_demo_step.dependOn(&install_pnueli_proof.step);
-    web_demo_step.dependOn(&install_barwise_mm0.step);
-    web_demo_step.dependOn(&install_barwise_proof.step);
-    web_demo_step.dependOn(&install_loeb_mm0.step);
-    web_demo_step.dependOn(&install_loeb_proof.step);
-    web_demo_step.dependOn(&install_hol_beta_mm0.step);
-    web_demo_step.dependOn(&install_hol_beta_proof.step);
-    web_demo_step.dependOn(&install_calculus_product_rule_mm0.step);
-    web_demo_step.dependOn(&install_calculus_product_rule_proof.step);
-    web_demo_step.dependOn(&install_category_pullback_mm0.step);
-    web_demo_step.dependOn(&install_category_pullback_proof.step);
-    web_demo_step.dependOn(&install_martin_lof_mm0.step);
-    web_demo_step.dependOn(&install_martin_lof_proof.step);
-    web_demo_step.dependOn(&install_peano_mm0.step);
-    web_demo_step.dependOn(&install_peano_proof.step);
-    web_demo_step.dependOn(&install_euclid_mm0.step);
-    web_demo_step.dependOn(&install_euclid_proof.step);
-    web_demo_step.dependOn(&install_smullyan_mm0.step);
-    web_demo_step.dependOn(&install_smullyan_proof.step);
-    web_demo_step.dependOn(&install_zermelo_mm0.step);
-    web_demo_step.dependOn(&install_zermelo_proof.step);
+    installWebDemoFixtures(b, web_demo_step);
 
     const run_step = b.step("run", "Run the mm0-zig verifier");
     const run_cmd = b.addRunArtifact(verifier_exe);
@@ -547,10 +396,6 @@ pub fn build(b: *std.Build) void {
     integration_step.dependOn(&run_integration_tests.step);
 
     const test_step = b.step("test", "Run all tests");
-    test_step.dependOn(&run_trusted_tests.step);
-    test_step.dependOn(&run_root_tests.step);
-    test_step.dependOn(&run_frontend_tests.step);
-    test_step.dependOn(&run_compiler_tests.step);
-    test_step.dependOn(&run_compiler_bin_tests.step);
-    test_step.dependOn(&run_integration_tests.step);
+    test_step.dependOn(unit_step);
+    test_step.dependOn(integration_step);
 }

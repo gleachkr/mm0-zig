@@ -7,6 +7,7 @@ const types = lsp.types;
 const LspIndex = mm0.Frontend.LspIndex;
 const lsp_diagnostics = @import("lsp_diagnostics");
 const DiagnosticContext = lsp_diagnostics.DiagnosticContext;
+const LSP_SERVER_NAME = lsp_diagnostics.SERVER_NAME;
 const compilerDiagnosticsToLsp = lsp_diagnostics.compilerDiagnosticsToLsp;
 const compilerSourceDiagnosticsToLsp =
     lsp_diagnostics.compilerSourceDiagnosticsToLsp;
@@ -223,7 +224,7 @@ pub const Handler = struct {
 
         return .{
             .serverInfo = .{
-                .name = "abc",
+                .name = LSP_SERVER_NAME,
                 .version = "0.1.0",
             },
             .capabilities = capabilities,
@@ -1106,7 +1107,7 @@ pub const Handler = struct {
         diagnostics[0] = .{
             .range = zeroRange(text, self.offset_encoding),
             .severity = .Error,
-            .source = "abc",
+            .source = LSP_SERVER_NAME,
             .message = message,
         };
         try self.publishDiagnostics(arena, uri, version, diagnostics);

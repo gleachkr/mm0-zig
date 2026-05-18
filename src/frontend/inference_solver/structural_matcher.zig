@@ -33,7 +33,7 @@ pub fn matchExpr(
     return switch (template) {
         .binder => |idx| blk: {
             var new_state = try BranchStateOps.cloneState(self, state);
-            const bindings = BranchStateOps.getBindings(self, &new_state, space);
+            const bindings = BranchStateOps.getBindings(&new_state, space);
             if (idx >= bindings.len) break :blk &.{};
             if (bindings[idx]) |existing| {
                 if (!try SemanticCompare.bindingCompatible(

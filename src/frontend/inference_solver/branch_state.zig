@@ -49,7 +49,6 @@ pub fn initState(
 }
 
 pub fn getBindings(
-    _: anytype,
     state: *BranchState,
     space: BinderSpace,
 ) []?ExprId {
@@ -60,7 +59,6 @@ pub fn getBindings(
 }
 
 pub fn getStructuralIntervals(
-    _: anytype,
     state: *BranchState,
     space: BinderSpace,
 ) []?StructuralInterval {
@@ -71,7 +69,6 @@ pub fn getStructuralIntervals(
 }
 
 pub fn getStructuralObligations(
-    _: anytype,
     state: *BranchState,
     space: BinderSpace,
 ) []StructuralJointObligation {
@@ -82,7 +79,6 @@ pub fn getStructuralObligations(
 }
 
 pub fn setStructuralObligations(
-    _: anytype,
     state: *BranchState,
     space: BinderSpace,
     obligations: []StructuralJointObligation,

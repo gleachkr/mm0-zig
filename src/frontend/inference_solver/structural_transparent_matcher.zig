@@ -45,7 +45,7 @@ fn matchTransparentOnly(
     state: BranchState,
 ) anyerror![]BranchState {
     var new_state = try BranchStateOps.cloneState(self, state);
-    const bindings = BranchStateOps.getBindings(self, &new_state, space);
+    const bindings = BranchStateOps.getBindings(&new_state, space);
     const old_bindings = switch (space) {
         .rule => state.rule_bindings,
         .view => state.view_bindings.?,
@@ -165,7 +165,7 @@ fn copySessionBindingsToBranch(
     state: BranchState,
 ) anyerror![]BranchState {
     var new_state = try BranchStateOps.cloneState(self, state);
-    const bindings = BranchStateOps.getBindings(self, &new_state, space);
+    const bindings = BranchStateOps.getBindings(&new_state, space);
 
     for (session_bindings, old_bindings, 0..) |
         maybe_expr,

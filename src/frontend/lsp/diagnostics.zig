@@ -2,6 +2,8 @@ const std = @import("std");
 const lsp = @import("lsp");
 const mm0 = @import("mm0");
 
+pub const SERVER_NAME = "Aufbau";
+
 const LspIndex = mm0.Frontend.LspIndex;
 const types = lsp.types;
 
@@ -135,7 +137,7 @@ pub fn compilerDiagnosticToLsp(
     return .{
         .range = rangeForDiagnostic(doc.text, diag, encoding),
         .severity = diagnosticSeverityToLsp(diag.severity),
-        .source = "abc",
+        .source = SERVER_NAME,
         .message = try compilerDiagnosticMessage(arena, diag),
         .relatedInformation = try compilerDiagnosticRelatedInformation(
             arena,

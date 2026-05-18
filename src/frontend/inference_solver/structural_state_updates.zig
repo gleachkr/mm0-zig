@@ -111,7 +111,6 @@ pub fn appendCombinedStructuralObligationState(
     }
 
     var obligations = BranchStateOps.getStructuralObligations(
-        self,
         &final_state,
         space,
     );
@@ -149,7 +148,6 @@ pub fn appendCombinedStructuralObligationState(
 
     obligations = try self.allocator.realloc(obligations, obligations.len + 1);
     BranchStateOps.setStructuralObligations(
-        self,
         &final_state,
         space,
         obligations,
@@ -168,11 +166,10 @@ pub fn appendCombinedStructuralIntervalState(
 ) anyerror!void {
     var final_state = try BranchStateOps.cloneState(self, state);
     const intervals = BranchStateOps.getStructuralIntervals(
-        self,
         &final_state,
         space,
     );
-    const bindings = BranchStateOps.getBindings(self, &final_state, space);
+    const bindings = BranchStateOps.getBindings(&final_state, space);
     const combined = if (intervals[binder_idx]) |existing|
         (try combineStructuralIntervals(self, existing, interval)) orelse return
     else
@@ -299,7 +296,7 @@ fn bindingCandidateCompatibleImpl(
     binder_idx: usize,
     expr_id: ExprId,
 ) anyerror!bool {
-    const bindings = BranchStateOps.getBindings(self, state, space);
+    const bindings = BranchStateOps.getBindings(state, space);
     if (binder_idx >= bindings.len) return false;
     if (bindings[binder_idx]) |existing| {
         return try SemanticCompare.bindingCompatible(self, existing, expr_id);
@@ -444,7 +441,7 @@ fn applyStructuralBindingCandidate(
     binder_idx: usize,
     expr_id: ExprId,
 ) anyerror!bool {
-    const bindings = BranchStateOps.getBindings(self, state, space);
+    const bindings = BranchStateOps.getBindings(state, space);
     if (!try bindingCandidateCompatibleImpl(
         self,
         state,

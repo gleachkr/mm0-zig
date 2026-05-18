@@ -459,8 +459,8 @@ pub const Solver = struct {
             return;
         }
 
-        if (self.nextUnresolvedStructuralObligation(&current, space)) |idx| {
-            const obligations = BranchStateOps.getStructuralObligations(self, &current, space);
+        if (nextUnresolvedStructuralObligation(&current, space)) |idx| {
+            const obligations = BranchStateOps.getStructuralObligations(&current, space);
             const branches = try StructuralSearch.solveStructuralObligation(
                 self,
                 current,
@@ -490,8 +490,8 @@ pub const Solver = struct {
         state: *BranchState,
         space: BinderSpace,
     ) anyerror!bool {
-        const bindings = BranchStateOps.getBindings(self, state, space);
-        const intervals = BranchStateOps.getStructuralIntervals(self, state, space);
+        const bindings = BranchStateOps.getBindings(state, space);
+        const intervals = BranchStateOps.getStructuralIntervals(state, space);
         for (intervals, 0..) |maybe_interval, idx| {
             const interval = maybe_interval orelse continue;
             const binding = bindings[idx] orelse continue;
@@ -499,7 +499,7 @@ pub const Solver = struct {
                 return false;
             }
         }
-        const obligations = BranchStateOps.getStructuralObligations(self, state, space);
+        const obligations = BranchStateOps.getStructuralObligations(state, space);
         for (obligations) |obligation| {
             if (!try StructuralIntervals.obligationCompatibleWithState(
                 self,
@@ -514,12 +514,11 @@ pub const Solver = struct {
     }
 
     fn nextUnresolvedStructuralObligation(
-        self: *Solver,
         state: *BranchState,
         space: BinderSpace,
     ) ?usize {
-        const bindings = BranchStateOps.getBindings(self, state, space);
-        const obligations = BranchStateOps.getStructuralObligations(self, state, space);
+        const bindings = BranchStateOps.getBindings(state, space);
+        const obligations = BranchStateOps.getStructuralObligations(state, space);
         var best_idx: ?usize = null;
         var best_unbound: usize = std.math.maxInt(usize);
         for (obligations, 0..) |obligation, idx| {
@@ -544,8 +543,8 @@ pub const Solver = struct {
         state: *BranchState,
         space: BinderSpace,
     ) anyerror!void {
-        const bindings = BranchStateOps.getBindings(self, state, space);
-        const intervals = BranchStateOps.getStructuralIntervals(self, state, space);
+        const bindings = BranchStateOps.getBindings(state, space);
+        const intervals = BranchStateOps.getStructuralIntervals(state, space);
         for (intervals, 0..) |maybe_interval, idx| {
             const interval = maybe_interval orelse continue;
             if (bindings[idx]) |existing| {
@@ -563,8 +562,8 @@ pub const Solver = struct {
         state: *BranchState,
         space: BinderSpace,
     ) anyerror!bool {
-        const bindings = BranchStateOps.getBindings(self, state, space);
-        const obligations = BranchStateOps.getStructuralObligations(self, state, space);
+        const bindings = BranchStateOps.getBindings(state, space);
+        const obligations = BranchStateOps.getStructuralObligations(state, space);
         for (obligations) |obligation| {
             for (obligation.binder_idxs) |binder_idx| {
                 if (binder_idx >= bindings.len or

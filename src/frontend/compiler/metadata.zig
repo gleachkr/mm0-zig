@@ -5,7 +5,6 @@ const CompilerFresh = @import("./fresh.zig");
 const CompilerHoles = @import("./holes.zig");
 const CompilerViews = @import("./views.zig");
 const CompilerVars = @import("./vars.zig");
-const TermAnnotations = @import("../term_annotations.zig");
 const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
 const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const SortStmt = @import("../parse_recovery.zig").SortStmt;
@@ -44,12 +43,23 @@ pub fn processTermMetadata(
     term_stmt: TermStmt,
     annotations: []const []const u8,
 ) !void {
-    try TermAnnotations.processTermAnnotations(
-        env,
-        term_stmt,
-        annotations,
-    );
+    try processTermAnnotations(annotations);
     try registry.processAnnotations(env, term_stmt.name, annotations);
+}
+
+fn processTermAnnotations(annotations: []const []const u8) !void {
+    for (annotations) |ann| {
+        const directive = annotationDirective(ann) orelse continue;
+        if (std.mem.eql(u8, directive, "@acui")) continue;
+        return error.UnknownTermAnnotation;
+    }
+}
+
+fn annotationDirective(ann: []const u8) ?[]const u8 {
+    if (ann.len == 0 or ann[0] != '@') return null;
+
+    var iter = std.mem.tokenizeAny(u8, ann, " \t\r\n");
+    return iter.next();
 }
 
 pub fn processAssertionMetadata(

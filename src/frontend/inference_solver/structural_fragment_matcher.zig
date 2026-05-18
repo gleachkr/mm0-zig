@@ -29,7 +29,7 @@ pub fn matchStructural(
         try StructuralItems.resolveStructuralProfile(self, app.term_id) orelse
         return null;
 
-    const bindings = BranchStateOps.getBindings(self, @constCast(&state), space);
+    const bindings = BranchStateOps.getBindings(@constCast(&state), space);
 
     var template_items = std.ArrayListUnmanaged(StructuralTemplateItem){};
     defer template_items.deinit(self.allocator);

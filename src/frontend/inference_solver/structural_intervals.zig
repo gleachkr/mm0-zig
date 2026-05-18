@@ -17,7 +17,7 @@ pub fn bindingSatisfiesStructural(
     idx: usize,
     expr_id: ExprId,
 ) anyerror!bool {
-    const intervals = BranchStateOps.getStructuralIntervals(self, state, space);
+    const intervals = BranchStateOps.getStructuralIntervals(state, space);
     if (idx >= intervals.len) return true;
     const interval = intervals[idx] orelse return true;
     return try exprWithinInterval(self, expr_id, interval);
@@ -330,8 +330,8 @@ pub fn obligationCompatibleWithState(
         obligation.unit_term_id,
     );
 
-    const bindings = BranchStateOps.getBindings(self, state, space);
-    const intervals = BranchStateOps.getStructuralIntervals(self, state, space);
+    const bindings = BranchStateOps.getBindings(state, space);
+    const intervals = BranchStateOps.getStructuralIntervals(state, space);
     var lower_parts = std.ArrayListUnmanaged(ExprId){};
     defer lower_parts.deinit(self.allocator);
     var upper_parts = std.ArrayListUnmanaged(ExprId){};
