@@ -10,6 +10,7 @@ const DocumentId = Types.DocumentId;
 const SourceRange = Types.SourceRange;
 const DeclarationKind = Types.DeclarationKind;
 const BinderDecl = Types.BinderDecl;
+const HypothesisDecl = Types.HypothesisDecl;
 const Declaration = Types.Declaration;
 
 const StatementIterator = source.StatementIterator;
@@ -116,6 +117,93 @@ pub fn findBinder(decl: Declaration, name: []const u8) ?BinderDecl {
         if (std.mem.eql(u8, binder.name, name)) return binder;
     }
     return null;
+}
+
+pub fn hypothesesFromMm0Assertion(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    assertion: parse.AssertionStmt,
+) ![]const HypothesisDecl {
+    const math_strings = try source.mathStringsBeforeByteInContainingStatement(
+        allocator,
+        text,
+        assertion.name_span.start,
+        assertion.name_span.end,
+        '=',
+    );
+    defer allocator.free(math_strings);
+    return hypothesesFromMathStrings(
+        allocator,
+        .mm0,
+        math_strings,
+        0,
+        assertion.hyps.len,
+    );
+}
+
+pub fn hypothesesFromLemma(
+    allocator: std.mem.Allocator,
+    block: proof_script.ProofBlock,
+    hyp_count: usize,
+) ![]const HypothesisDecl {
+    if (block.header_tail.len == 0 or hyp_count == 0) return &.{};
+    return collectHypotheses(
+        allocator,
+        .proof,
+        block.header_tail,
+        0,
+        block.header_tail.len,
+        block.header_tail_span.start,
+        hyp_count,
+    );
+}
+
+fn collectHypotheses(
+    allocator: std.mem.Allocator,
+    document: DocumentId,
+    text: []const u8,
+    start: usize,
+    end: usize,
+    offset_base: usize,
+    hyp_count: usize,
+) ![]const HypothesisDecl {
+    var pos = start;
+    var math_strings = std.ArrayListUnmanaged(source.MathStringSpan){};
+    defer math_strings.deinit(allocator);
+    while (math_strings.items.len < hyp_count) {
+        const math = source.nextMathStringIn(text, end, &pos) orelse break;
+        try math_strings.append(allocator, math);
+    }
+    return hypothesesFromMathStrings(
+        allocator,
+        document,
+        math_strings.items,
+        offset_base,
+        hyp_count,
+    );
+}
+
+fn hypothesesFromMathStrings(
+    allocator: std.mem.Allocator,
+    document: DocumentId,
+    math_strings: []const source.MathStringSpan,
+    offset_base: usize,
+    hyp_count: usize,
+) ![]const HypothesisDecl {
+    var result = std.ArrayListUnmanaged(HypothesisDecl){};
+    const count = @min(hyp_count, math_strings.len);
+    for (math_strings[0..count]) |math| {
+        const range: SourceRange = .{
+            .document = document,
+            .start = offset_base + math.inner_start,
+            .end = offset_base + math.inner_end,
+        };
+        try result.append(allocator, .{
+            .text = math.text,
+            .range = range,
+        });
+    }
+    return try result.toOwnedSlice(allocator);
 }
 
 pub fn bindersFromTerm(

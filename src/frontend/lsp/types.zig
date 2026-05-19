@@ -100,6 +100,11 @@ pub const BinderDecl = struct {
     sort_text: []const u8 = "",
 };
 
+pub const HypothesisDecl = struct {
+    text: []const u8,
+    range: SourceRange,
+};
+
 pub const Declaration = struct {
     name: []const u8,
     kind: DeclarationKind,
@@ -109,4 +114,5 @@ pub const Declaration = struct {
     completion_args: []const BinderDecl = &.{},
     sort_text: []const u8 = "",
     hyp_count: usize = 0,
+    hypotheses: []const HypothesisDecl = &.{},
 };

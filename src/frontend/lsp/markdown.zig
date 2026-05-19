@@ -7,8 +7,6 @@ const Types = @import("types.zig");
 const BinderDecl = Types.BinderDecl;
 const Declaration = Types.Declaration;
 const DeclarationKind = Types.DeclarationKind;
-const SourceSpan = source.SourceSpan;
-const StatementIterator = source.StatementIterator;
 const findStatementByte = source.findStatementByte;
 const nextMathStringIn = source.nextMathStringIn;
 const trimMathWhitespace = source.trimMathWhitespace;
@@ -92,18 +90,25 @@ pub fn assertionMarkdown(
     try writeCompactArgList(&writer, assertion.arg_names, assertion.args);
     try writer.writeAll(":\n");
 
-    const math_strings = try assertionMathSources(
+    const math_strings = try source.mathStringsBeforeByteInContainingStatement(
         allocator,
         text,
-        assertion.name_span,
+        assertion.name_span.start,
+        assertion.name_span.end,
+        '=',
     );
+    defer allocator.free(math_strings);
     const expected = assertion.hyps.len + 1;
     if (math_strings.len >= expected) {
         for (math_strings[0..assertion.hyps.len]) |hyp| {
-            try writeMathLine(&writer, "  ", hyp);
+            try writeMathLine(&writer, "  ", hyp.text);
             try writer.writeAll(" >\n");
         }
-        try writeMathLine(&writer, "  ", math_strings[assertion.hyps.len]);
+        try writeMathLine(
+            &writer,
+            "  ",
+            math_strings[assertion.hyps.len].text,
+        );
         try writer.writeAll(";\n```");
     } else {
         try writer.writeAll("  …;\n```");
@@ -159,9 +164,15 @@ pub fn hypRefMarkdown(
     hyp_index: usize,
     hyp_count: usize,
     hyp_count_known: bool,
+    hyp_text: ?[]const u8,
 ) ![]const u8 {
     var buf = std.ArrayListUnmanaged(u8){};
     var writer = buf.writer(allocator);
+    if (hyp_text) |text| {
+        try writer.writeAll("```mm0\n$");
+        try writer.writeAll(text);
+        try writer.writeAll("$\n```\n\n");
+    }
     try writer.print("hypothesis #{d} of `{s}`.", .{ hyp_index, block_name });
     if (hyp_count_known) {
         try writer.print("\n\n{d} of {d} hypotheses.", .{
@@ -332,39 +343,15 @@ fn definitionBodySource(
     text: []const u8,
     name_span: parse.MathSpan,
 ) ?[]const u8 {
-    const stmt = statementSpanForName(text, name_span) orelse return null;
+    const stmt = source.statementContainingSpan(
+        text,
+        name_span.start,
+        name_span.end,
+    ) orelse return null;
     const eq = findStatementByte(text, stmt, '=') orelse return null;
     var pos = eq + 1;
     const math = nextMathStringIn(text, stmt.end, &pos) orelse return null;
     return math.text;
-}
-
-fn assertionMathSources(
-    allocator: std.mem.Allocator,
-    text: []const u8,
-    name_span: parse.MathSpan,
-) ![]const []const u8 {
-    const stmt = statementSpanForName(text, name_span) orelse return &.{};
-    const end = findStatementByte(text, stmt, '=') orelse stmt.end;
-    var pos = stmt.start;
-    var result = std.ArrayListUnmanaged([]const u8){};
-    while (nextMathStringIn(text, end, &pos)) |math| {
-        try result.append(allocator, math.text);
-    }
-    return try result.toOwnedSlice(allocator);
-}
-
-fn statementSpanForName(
-    text: []const u8,
-    name_span: parse.MathSpan,
-) ?SourceSpan {
-    var iter = StatementIterator.init(text);
-    while (iter.next()) |stmt| {
-        if (name_span.start >= stmt.start and name_span.end <= stmt.end) {
-            return stmt;
-        }
-    }
-    return null;
 }
 
 fn writeMathLine(

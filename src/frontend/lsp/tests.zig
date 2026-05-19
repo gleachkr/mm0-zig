@@ -1702,17 +1702,19 @@ test "public proof def bodies navigate to mm0 declarations" {
     );
 }
 
-test "hypothesis references hover and jump to owning rule" {
+test "hypothesis refs hover and jump to exact theorem hypothesis" {
     const mm0_text =
         \\provable sort wff;
+        \\term first: wff;
+        \\term second: wff;
         \\term top: wff;
-        \\axiom keep: $ top $ > $ top $;
-        \\theorem main: $ top $ > $ top $;
+        \\axiom keep: $ second $ > $ top $;
+        \\theorem main: $ first $ > $ second $ > $ top $;
     ;
     const proof_text =
         \\main
         \\----
-        \\l1: $ top $ by keep [#1]
+        \\l1: $ top $ by keep [#2]
     ;
     var snapshot = try Snapshot.build(std.testing.allocator, .{
         .mm0_uri = "file:///test.mm0",
@@ -1723,7 +1725,7 @@ test "hypothesis references hover and jump to owning rule" {
     defer snapshot.deinit();
 
     const offset =
-        (std.mem.indexOf(u8, proof_text, "#1") orelse unreachable) + 1;
+        (std.mem.indexOf(u8, proof_text, "#2") orelse unreachable) + 1;
     const hover = snapshot.hoverAt(.proof, offset) orelse {
         return error.MissingHover;
     };
@@ -1731,14 +1733,24 @@ test "hypothesis references hover and jump to owning rule" {
         u8,
         hover.markdown,
         1,
-        "hypothesis #1",
+        "$ second $",
+    ));
+    try std.testing.expect(std.mem.containsAtLeast(
+        u8,
+        hover.markdown,
+        1,
+        "hypothesis #2",
     ));
     const def = snapshot.definitionAt(.proof, offset) orelse {
         return error.MissingDefinition;
     };
+    const second_hyp = std.mem.lastIndexOf(u8, mm0_text, "$ second $") orelse {
+        return error.MissingSecondHypothesis;
+    };
     try std.testing.expectEqualStrings("file:///test.mm0", def.uri);
+    try std.testing.expectEqual(second_hyp + 1, def.range.start);
     try std.testing.expectEqualStrings(
-        "main",
+        " second ",
         snapshot.mm0_text[def.range.start..def.range.end],
     );
 }

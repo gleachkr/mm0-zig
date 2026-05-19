@@ -253,6 +253,48 @@ pub fn findStatementByte(
     return null;
 }
 
+pub fn statementContainingSpan(
+    text: []const u8,
+    span_start: usize,
+    span_end: usize,
+) ?SourceSpan {
+    var iter = StatementIterator.init(text);
+    while (iter.next()) |stmt| {
+        if (span_start >= stmt.start and span_end <= stmt.end) return stmt;
+    }
+    return null;
+}
+
+pub fn mathStringsBeforeByteInContainingStatement(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    span_start: usize,
+    span_end: usize,
+    stop_byte: u8,
+) ![]const MathStringSpan {
+    const stmt = statementContainingSpan(
+        text,
+        span_start,
+        span_end,
+    ) orelse return try allocator.alloc(MathStringSpan, 0);
+    return mathStringsBeforeByte(allocator, text, stmt, stop_byte);
+}
+
+pub fn mathStringsBeforeByte(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    stmt: SourceSpan,
+    stop_byte: u8,
+) ![]const MathStringSpan {
+    const end = findStatementByte(text, stmt, stop_byte) orelse stmt.end;
+    var pos = stmt.start;
+    var result = std.ArrayListUnmanaged(MathStringSpan){};
+    while (nextMathStringIn(text, end, &pos)) |math| {
+        try result.append(allocator, math);
+    }
+    return try result.toOwnedSlice(allocator);
+}
+
 pub fn trimMathWhitespace(text: []const u8) []const u8 {
     return std.mem.trim(u8, text, " \n\t\r");
 }

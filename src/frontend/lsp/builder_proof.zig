@@ -30,6 +30,7 @@ const unresolvedBindingMarkdown = markdown.unresolvedBindingMarkdown;
 
 const bindersFromLemma = support.bindersFromLemma;
 const findBinder = support.findBinder;
+const hypothesesFromLemma = support.hypothesesFromLemma;
 const isFatalIndexError = support.isFatalIndexError;
 const proofBlockDeclarationKind = support.proofBlockDeclarationKind;
 const proofSpanRange = support.proofSpanRange;
@@ -129,6 +130,11 @@ pub fn addLemmaBlockHeader(
         ),
         .binders = binders,
         .hyp_count = hyp_count,
+        .hypotheses = try hypothesesFromLemma(
+            self.allocator,
+            block,
+            hyp_count,
+        ),
     };
     const decl_index = try self.addDeclaration(decl);
     self.proof_blocks.items[block_index].decl_index = decl_index;
@@ -328,15 +334,20 @@ pub fn addHypRef(
         return;
     };
     const decl = self.declarations.items[decl_index];
+    const hyp_decl = if (hyp.index <= decl.hypotheses.len)
+        decl.hypotheses[hyp.index - 1]
+    else
+        null;
     try self.addSymbol(.{
         .source_range = proofSpanRange(hyp.span),
-        .target_range = decl.name_range,
+        .target_range = if (hyp_decl) |item| item.range else decl.name_range,
         .markdown = try hypRefMarkdown(
             self.allocator,
             block.name,
             hyp.index,
             block.hyp_count,
             block.hyp_count_known,
+            if (hyp_decl) |item| item.text else null,
         ),
     });
 }

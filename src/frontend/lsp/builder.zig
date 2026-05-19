@@ -44,6 +44,7 @@ const proofSpanRange = support.proofSpanRange;
 const proofMathTextSpan = support.proofMathTextSpan;
 const targetRangeIfAvailable = support.targetRangeIfAvailable;
 const isFatalIndexError = support.isFatalIndexError;
+const hypothesesFromMm0Assertion = support.hypothesesFromMm0Assertion;
 const bindersFromTerm = support.bindersFromTerm;
 const bindersFromProofDef = support.bindersFromProofDef;
 const bindersFromArgs = support.bindersFromArgs;
@@ -287,6 +288,11 @@ pub const Builder = struct {
                         assertion.args,
                     ),
                     .hyp_count = assertion.hyps.len,
+                    .hypotheses = try hypothesesFromMm0Assertion(
+                        self.allocator,
+                        text,
+                        assertion,
+                    ),
                 });
                 try self.addMm0Outline(.{
                     .name = assertion.name,
