@@ -16,6 +16,7 @@ pub const validateResolvedBindingsWithDebug =
 pub const validateResolvedBindings = Validation.validateResolvedBindings;
 pub const bindingsRespectRuleDeps = Validation.bindingsRespectRuleDeps;
 pub const firstDepViolation = Validation.firstDepViolation;
+pub const firstPartialDepViolation = Validation.firstPartialDepViolation;
 pub const validateBindingExpr = Validation.validateBindingExpr;
 pub const exprInfo = Validation.exprInfo;
 pub const buildMissingBinderDiagnostic =
@@ -27,6 +28,8 @@ pub const inferBindingsFromRefsOnly = Strategies.inferBindingsFromRefsOnly;
 pub const inferBindingsFromHoleyAdvanced =
     Strategies.inferBindingsFromHoleyAdvanced;
 pub const inferBindings = Dispatch.inferBindings;
+pub const inferOptionalBindingsAllowUnresolved =
+    Dispatch.inferOptionalBindingsAllowUnresolved;
 pub const strictInferBindings = Dispatch.strictInferBindings;
 pub const hasOmittedBindings = Strategies.hasOmittedBindings;
 pub const hasOmittedStructuralBindings =

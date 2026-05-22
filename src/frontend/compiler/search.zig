@@ -63,6 +63,7 @@ pub const Context = struct {
     checked: *std.ArrayListUnmanaged(CheckedLine),
     diag_scratch: *CompilerDiag.Scratch,
     rule_unify_cache: *Inference.RuleUnifyCache,
+    available_rule_count: usize,
 };
 
 pub const AttemptOptions = struct {
@@ -90,6 +91,45 @@ pub const AttemptResult = struct {
         if (self.theorem) |*theorem| theorem.deinit();
         self.* = undefined;
     }
+};
+
+pub const MatchKind = Check.ConclusionMatchKind;
+pub const UnresolvedHypothesis = Check.UnresolvedHypothesis;
+
+pub const ApplyCandidate = struct {
+    allocator: std.mem.Allocator,
+    rule_id: u32,
+    rule_name: []const u8,
+    declaration_order: usize,
+    match_kind: MatchKind,
+    theorem: TheoremContext,
+    bindings: []const ?ExprId,
+    conclusion: ExprId,
+    unresolved_hyps: []const UnresolvedHypothesis,
+
+    pub fn deinit(self: *ApplyCandidate) void {
+        self.allocator.free(self.bindings);
+        self.allocator.free(self.unresolved_hyps);
+        self.theorem.deinit();
+        self.* = undefined;
+    }
+};
+
+pub const ApplyResults = struct {
+    allocator: std.mem.Allocator,
+    candidates: []ApplyCandidate,
+
+    pub fn deinit(self: *ApplyResults) void {
+        for (self.candidates) |*candidate| {
+            candidate.deinit();
+        }
+        self.allocator.free(self.candidates);
+        self.* = undefined;
+    }
+};
+
+pub const ApplyOptions = struct {
+    max_results: ?usize = null,
 };
 
 const Metadata = @import("./metadata.zig");
@@ -213,6 +253,155 @@ pub fn tryCandidate(
     };
 }
 
+pub fn apply(
+    compiler: *CompilerContext,
+    context: *const Context,
+    goal: Goal,
+    theorem: *const TheoremContext,
+    theorem_vars: *const NameExprMap,
+    options: ApplyOptions,
+) !ApplyResults {
+    const allocator = context.allocator;
+    var candidates = std.ArrayListUnmanaged(ApplyCandidate){};
+    errdefer {
+        for (candidates.items) |*candidate| {
+            candidate.deinit();
+        }
+        candidates.deinit(allocator);
+    }
+
+    const rule_limit = @min(
+        context.available_rule_count,
+        context.env.rules.items.len,
+    );
+    const saved_diag = compiler.getDiagnostic();
+    for (context.env.rules.items[0..rule_limit], 0..) |rule, rule_idx| {
+        var attempt_theorem = try theorem.clone();
+        var attempt_theorem_owned = true;
+        errdefer if (attempt_theorem_owned) attempt_theorem.deinit();
+        var attempt_vars = try Check.cloneNameExprMap(
+            allocator,
+            theorem_vars,
+        );
+        var attempt_vars_owned = true;
+        errdefer if (attempt_vars_owned) attempt_vars.deinit();
+        const diag_mark = context.diag_scratch.mark();
+        const application = RuleApplication{
+            .rule_name = rule.name,
+            .rule_span = .{ .start = 0, .end = 0 },
+            .span = .{ .start = 0, .end = 0 },
+        };
+        const line = Check.ApplicationLine{
+            .label = "<search>",
+            .application = application,
+            .assertion_span = .{ .start = 0, .end = 0 },
+        };
+        const diag_context = Check.ApplicationDiagnosticContext{
+            .theorem_name = context.assertion.name,
+            .line_label = "<search>",
+            .span = null,
+        };
+
+        const apply_context = Check.RuleApplyContext{
+            .allocator = allocator,
+            .parser = context.parser,
+            .env = context.env,
+            .registry = context.registry,
+            .rule_catalog = context.rule_catalog,
+            .fresh_bindings = context.fresh_bindings,
+            .freshen_bindings = context.freshen_bindings,
+            .views = context.views,
+            .sort_vars = context.sort_vars,
+            .assertion = context.assertion,
+            .labels = context.labels,
+            .checked = context.checked,
+            .diag_scratch = context.diag_scratch,
+            .rule_unify_cache = context.rule_unify_cache,
+        };
+        var probe = Check.probeRuleConclusion(
+            compiler,
+            &apply_context,
+            application,
+            goal.lineAssertion(),
+            goal.expectedHint(),
+            diag_context,
+            line,
+            @intCast(rule_idx),
+            &attempt_theorem,
+            &attempt_vars,
+        ) catch |err| {
+            if (err == error.OutOfMemory) return err;
+            context.diag_scratch.discard(diag_mark);
+            compiler.restoreDiagnostic(saved_diag);
+            attempt_vars.deinit();
+            attempt_vars_owned = false;
+            attempt_theorem.deinit();
+            attempt_theorem_owned = false;
+            continue;
+        };
+        errdefer probe.deinit();
+        context.diag_scratch.discard(diag_mark);
+        compiler.restoreDiagnostic(saved_diag);
+        attempt_vars.deinit();
+        attempt_vars_owned = false;
+
+        try candidates.append(allocator, .{
+            .allocator = allocator,
+            .rule_id = probe.rule_id,
+            .rule_name = probe.rule_name,
+            .declaration_order = rule_idx,
+            .match_kind = probe.match_kind,
+            .theorem = attempt_theorem,
+            .bindings = probe.bindings,
+            .conclusion = probe.displayed_conclusion,
+            .unresolved_hyps = probe.unresolved_hyps,
+        });
+        attempt_theorem_owned = false;
+        probe.bindings = &.{};
+        probe.unresolved_hyps = &.{};
+        probe.deinit();
+    }
+    compiler.restoreDiagnostic(saved_diag);
+    std.mem.sort(
+        ApplyCandidate,
+        candidates.items,
+        {},
+        applyCandidateLessThan,
+    );
+    if (options.max_results) |max| {
+        if (max < candidates.items.len) {
+            for (candidates.items[max..]) |*candidate| {
+                candidate.deinit();
+            }
+            candidates.shrinkRetainingCapacity(max);
+        }
+    }
+    return .{
+        .allocator = allocator,
+        .candidates = try candidates.toOwnedSlice(allocator),
+    };
+}
+
+fn applyCandidateLessThan(
+    _: void,
+    lhs: ApplyCandidate,
+    rhs: ApplyCandidate,
+) bool {
+    const lhs_rank = matchKindRank(lhs.match_kind);
+    const rhs_rank = matchKindRank(rhs.match_kind);
+    if (lhs_rank != rhs_rank) return lhs_rank < rhs_rank;
+    return lhs.declaration_order < rhs.declaration_order;
+}
+
+fn matchKindRank(kind: MatchKind) u8 {
+    return switch (kind) {
+        .exact => 0,
+        .transparent => 1,
+        .view => 2,
+        .normalized => 3,
+    };
+}
+
 const TestFixture = struct {
     parser: MM0Parser,
     env: GlobalEnv,
@@ -223,12 +412,40 @@ const TestFixture = struct {
     views: std.AutoHashMap(u32, ViewDecl),
     sort_vars: SortVarRegistry,
     assertion: @import("../parse_recovery.zig").AssertionStmt,
+    available_rule_count: usize,
 };
 
 fn fixtureFor(
     allocator: std.mem.Allocator,
     mm0_src: []const u8,
     theorem_name: []const u8,
+) !TestFixture {
+    return fixtureForSearchPoint(
+        allocator,
+        mm0_src,
+        theorem_name,
+        false,
+    );
+}
+
+fn fixtureForFullEnv(
+    allocator: std.mem.Allocator,
+    mm0_src: []const u8,
+    theorem_name: []const u8,
+) !TestFixture {
+    return fixtureForSearchPoint(
+        allocator,
+        mm0_src,
+        theorem_name,
+        true,
+    );
+}
+
+fn fixtureForSearchPoint(
+    allocator: std.mem.Allocator,
+    mm0_src: []const u8,
+    theorem_name: []const u8,
+    include_trailing_rules: bool,
 ) !TestFixture {
     var fixture = TestFixture{
         .parser = MM0Parser.init(mm0_src, allocator),
@@ -246,7 +463,9 @@ fn fixtureFor(
         .views = std.AutoHashMap(u32, ViewDecl).init(allocator),
         .sort_vars = SortVarRegistry.init(allocator),
         .assertion = undefined,
+        .available_rule_count = 0,
     };
+    var found_theorem = false;
 
     while (try fixture.parser.next()) |stmt| {
         switch (stmt) {
@@ -269,9 +488,15 @@ fn fixtureFor(
                 );
             },
             .assertion => |assertion| {
-                if (std.mem.eql(u8, assertion.name, theorem_name)) {
+                if (!found_theorem and
+                    std.mem.eql(u8, assertion.name, theorem_name))
+                {
                     fixture.assertion = assertion;
-                    return fixture;
+                    fixture.available_rule_count =
+                        fixture.env.rules.items.len;
+                    found_theorem = true;
+                    if (!include_trailing_rules) return fixture;
+                    continue;
                 }
                 try fixture.env.addStmt(stmt);
                 try Metadata.processAssertionMetadata(
@@ -288,6 +513,7 @@ fn fixtureFor(
             },
         }
     }
+    if (found_theorem) return fixture;
     return error.MissingTheorem;
 }
 
@@ -356,6 +582,7 @@ fn runSearchLine(
         .checked = checked,
         .diag_scratch = diag_scratch,
         .rule_unify_cache = rule_unify_cache,
+        .available_rule_count = fixture.available_rule_count,
     };
     return tryCandidate(
         compiler,
@@ -449,6 +676,253 @@ fn expectCaseLineSearch(
     try std.testing.expectEqual(line_index, checked.items.len);
 }
 
+fn expectApplyContains(
+    mm0_src: []const u8,
+    theorem_name: []const u8,
+    goal_text: []const u8,
+    rule_name: []const u8,
+    match_kind: ?MatchKind,
+    unresolved_count: ?usize,
+    null_expected_count: ?usize,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fixture = try fixtureFor(allocator, mm0_src, theorem_name);
+    var sink = DiagnosticSink.init(mm0_src, "");
+    var compiler = CompilerContext.init(mm0_src, "", .none, &sink);
+    var theorem = TheoremContext.init(allocator);
+    defer theorem.deinit();
+    try theorem.seedAssertion(fixture.assertion);
+    var theorem_vars = try Check.buildTheoremVarMap(
+        allocator,
+        fixture.assertion,
+    );
+    defer theorem_vars.deinit();
+    var labels = LabelIndexMap.init(allocator);
+    defer labels.deinit();
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer checked.deinit(allocator);
+    var diag_scratch = CompilerDiag.Scratch.init(allocator);
+    defer diag_scratch.deinit();
+    var cache = Inference.RuleUnifyCache.init(allocator);
+    defer cache.deinit();
+    const context = Context{
+        .allocator = allocator,
+        .parser = &fixture.parser,
+        .env = &fixture.env,
+        .registry = &fixture.registry,
+        .rule_catalog = &fixture.rule_catalog,
+        .fresh_bindings = &fixture.fresh_bindings,
+        .freshen_bindings = &fixture.freshen_bindings,
+        .views = &fixture.views,
+        .sort_vars = &fixture.sort_vars,
+        .assertion = fixture.assertion,
+        .labels = &labels,
+        .checked = &checked,
+        .diag_scratch = &diag_scratch,
+        .rule_unify_cache = &cache,
+        .available_rule_count = fixture.available_rule_count,
+    };
+    const goal = try parseGoal(
+        &fixture,
+        &theorem,
+        &theorem_vars,
+        goal_text,
+    );
+    var results = try apply(
+        &compiler,
+        &context,
+        goal,
+        &theorem,
+        &theorem_vars,
+        .{},
+    );
+    defer results.deinit();
+
+    for (results.candidates) |candidate| {
+        if (!std.mem.eql(u8, candidate.rule_name, rule_name)) continue;
+        if (match_kind) |expected_kind| {
+            try std.testing.expectEqual(expected_kind, candidate.match_kind);
+        }
+        if (unresolved_count) |expected_count| {
+            try std.testing.expectEqual(
+                expected_count,
+                candidate.unresolved_hyps.len,
+            );
+        }
+        if (null_expected_count) |expected_count| {
+            var actual_count: usize = 0;
+            for (candidate.unresolved_hyps) |hyp| {
+                if (hyp.expected == null) actual_count += 1;
+            }
+            try std.testing.expectEqual(expected_count, actual_count);
+        }
+        try std.testing.expectEqual(@as(usize, 0), checked.items.len);
+        return;
+    }
+    return error.ExpectedApplyCandidate;
+}
+
+fn expectApplyNotContains(
+    mm0_src: []const u8,
+    theorem_name: []const u8,
+    goal_text: []const u8,
+    rule_name: []const u8,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fixture = try fixtureForFullEnv(allocator, mm0_src, theorem_name);
+    const excluded_rule_id = fixture.env.getRuleId(rule_name) orelse {
+        return error.ExpectedExcludedRuleInEnv;
+    };
+    _ = excluded_rule_id;
+    var sink = DiagnosticSink.init(mm0_src, "");
+    var compiler = CompilerContext.init(mm0_src, "", .none, &sink);
+    var theorem = TheoremContext.init(allocator);
+    defer theorem.deinit();
+    try theorem.seedAssertion(fixture.assertion);
+    var theorem_vars = try Check.buildTheoremVarMap(
+        allocator,
+        fixture.assertion,
+    );
+    defer theorem_vars.deinit();
+    var labels = LabelIndexMap.init(allocator);
+    defer labels.deinit();
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer checked.deinit(allocator);
+    var diag_scratch = CompilerDiag.Scratch.init(allocator);
+    defer diag_scratch.deinit();
+    var cache = Inference.RuleUnifyCache.init(allocator);
+    defer cache.deinit();
+    const context = Context{
+        .allocator = allocator,
+        .parser = &fixture.parser,
+        .env = &fixture.env,
+        .registry = &fixture.registry,
+        .rule_catalog = &fixture.rule_catalog,
+        .fresh_bindings = &fixture.fresh_bindings,
+        .freshen_bindings = &fixture.freshen_bindings,
+        .views = &fixture.views,
+        .sort_vars = &fixture.sort_vars,
+        .assertion = fixture.assertion,
+        .labels = &labels,
+        .checked = &checked,
+        .diag_scratch = &diag_scratch,
+        .rule_unify_cache = &cache,
+        .available_rule_count = fixture.available_rule_count,
+    };
+    const goal = try parseGoal(
+        &fixture,
+        &theorem,
+        &theorem_vars,
+        goal_text,
+    );
+    var results = try apply(
+        &compiler,
+        &context,
+        goal,
+        &theorem,
+        &theorem_vars,
+        .{},
+    );
+    defer results.deinit();
+
+    for (results.candidates) |candidate| {
+        if (std.mem.eql(u8, candidate.rule_name, rule_name)) {
+            return error.UnexpectedApplyCandidate;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), checked.items.len);
+}
+
+fn expectRuleIsUnavailableAtSearchPoint(
+    mm0_src: []const u8,
+    theorem_name: []const u8,
+    rule_name: []const u8,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fixture = try fixtureForFullEnv(allocator, mm0_src, theorem_name);
+    const rule_id = fixture.env.getRuleId(rule_name) orelse {
+        return error.ExpectedExcludedRuleInEnv;
+    };
+    try std.testing.expect(
+        @as(usize, @intCast(rule_id)) >= fixture.available_rule_count,
+    );
+}
+
+fn expectApplyRuleOrder(
+    mm0_src: []const u8,
+    theorem_name: []const u8,
+    goal_text: []const u8,
+    max_results: ?usize,
+    expected_names: []const []const u8,
+) !void {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    var fixture = try fixtureFor(allocator, mm0_src, theorem_name);
+    var sink = DiagnosticSink.init(mm0_src, "");
+    var compiler = CompilerContext.init(mm0_src, "", .none, &sink);
+    var theorem = TheoremContext.init(allocator);
+    defer theorem.deinit();
+    try theorem.seedAssertion(fixture.assertion);
+    var theorem_vars = try Check.buildTheoremVarMap(
+        allocator,
+        fixture.assertion,
+    );
+    defer theorem_vars.deinit();
+    var labels = LabelIndexMap.init(allocator);
+    defer labels.deinit();
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer checked.deinit(allocator);
+    var diag_scratch = CompilerDiag.Scratch.init(allocator);
+    defer diag_scratch.deinit();
+    var cache = Inference.RuleUnifyCache.init(allocator);
+    defer cache.deinit();
+    const context = Context{
+        .allocator = allocator,
+        .parser = &fixture.parser,
+        .env = &fixture.env,
+        .registry = &fixture.registry,
+        .rule_catalog = &fixture.rule_catalog,
+        .fresh_bindings = &fixture.fresh_bindings,
+        .freshen_bindings = &fixture.freshen_bindings,
+        .views = &fixture.views,
+        .sort_vars = &fixture.sort_vars,
+        .assertion = fixture.assertion,
+        .labels = &labels,
+        .checked = &checked,
+        .diag_scratch = &diag_scratch,
+        .rule_unify_cache = &cache,
+        .available_rule_count = fixture.available_rule_count,
+    };
+    const goal = try parseGoal(
+        &fixture,
+        &theorem,
+        &theorem_vars,
+        goal_text,
+    );
+    var results = try apply(
+        &compiler,
+        &context,
+        goal,
+        &theorem,
+        &theorem_vars,
+        .{ .max_results = max_results },
+    );
+    defer results.deinit();
+
+    try std.testing.expectEqual(expected_names.len, results.candidates.len);
+    for (expected_names, results.candidates) |expected, actual| {
+        try std.testing.expectEqualStrings(expected, actual.rule_name);
+    }
+    try std.testing.expectEqual(@as(usize, 0), checked.items.len);
+}
+
 fn expectInlineSearch(
     mm0_src: []const u8,
     proof_src: []const u8,
@@ -515,6 +989,401 @@ test "search candidate matches exactly" {
     try expectInlineSearch(mm0_src, proof_src, "t", 0);
 }
 
+test "apply search finds exact zero-hypothesis candidates" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\term Q: wff;
+        \\axiom p: $ P $;
+        \\axiom q: $ Q $;
+        \\theorem t: $ P $;
+    ;
+    try expectApplyContains(mm0_src, "t", "P", "p", .exact, 0, 0);
+}
+
+test "apply search returns unresolved hypotheses" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\axiom id (p: wff): $ p $ > $ p $;
+        \\theorem t: $ P $;
+    ;
+    try expectApplyContains(mm0_src, "t", "P", "id", .exact, 1, 0);
+}
+
+test "apply search allows hyp-only unresolved binders" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\term Q: wff;
+        \\term imp (p q: wff): wff;
+        \\infixr imp: $->$ prec 25;
+        \\axiom mp (p q: wff): $ p $ > $ p -> q $ > $ q $;
+        \\theorem t: $ Q $;
+    ;
+    try expectApplyContains(mm0_src, "t", "Q", "mp", .exact, 2, 2);
+}
+
+test "apply search matches through transparent defs" {
+    const mm0_src = try readProofCase(
+        std.testing.allocator,
+        "pass_def_transport",
+        "mm0",
+    );
+    defer std.testing.allocator.free(mm0_src);
+    try expectApplyContains(
+        mm0_src,
+        "concl_transport",
+        "id a",
+        "ax_expanded",
+        .transparent,
+        0,
+        0,
+    );
+}
+
+test "apply search matches through normalization" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\sort mor;
+        \\term iff (a b: wff): wff;
+        \\infixr iff: $<->$ prec 20;
+        \\term mor_eq (f g: mor): wff;
+        \\infixl mor_eq: $~$ prec 15;
+        \\term comp (f g: mor): mor;
+        \\infixl comp: $o$ prec 35;
+        \\term F: mor;
+        \\term G: mor;
+        \\term H: mor;
+        \\--| @relation wff iff iff_refl iff_trans iff_sym iff_mp
+        \\axiom iff_refl (a: wff): $ a <-> a $;
+        \\axiom iff_trans (a b c: wff):
+        \\  $ a <-> b $ > $ b <-> c $ > $ a <-> c $;
+        \\axiom iff_sym (a b: wff): $ a <-> b $ > $ b <-> a $;
+        \\axiom iff_mp (a b: wff): $ a <-> b $ > $ a $ > $ b $;
+        \\--| @relation mor mor_eq mor_refl mor_trans mor_sym _
+        \\axiom mor_refl (f: mor): $ f ~ f $;
+        \\axiom mor_trans (f g h: mor):
+        \\  $ f ~ g $ > $ g ~ h $ > $ f ~ h $;
+        \\axiom mor_sym (f g: mor): $ f ~ g $ > $ g ~ f $;
+        \\--| @congr
+        \\axiom mor_eq_congr (f1 f2 g1 g2: mor):
+        \\  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ (f1 ~ g1) <-> (f2 ~ g2) $;
+        \\--| @congr
+        \\axiom comp_congr (f1 f2 g1 g2: mor):
+        \\  $ f1 ~ f2 $ > $ g1 ~ g2 $ > $ f1 o g1 ~ f2 o g2 $;
+        \\--| @rewrite
+        \\axiom comp_assoc (f g h: mor): $ (f o g) o h ~ f o (g o h) $;
+        \\axiom assoc_refl: $ ((F o G) o H) ~ ((F o G) o H) $;
+        \\def assoc_norm: wff = $ F o (G o H) ~ F o (G o H) $;
+        \\theorem normalize_goal: $ assoc_norm $;
+    ;
+    try expectApplyContains(
+        mm0_src,
+        "normalize_goal",
+        "assoc_norm",
+        "assoc_refl",
+        .normalized,
+        0,
+        0,
+    );
+}
+
+test "apply search matches through view and recover" {
+    const mm0_src = try readProofCase(
+        std.testing.allocator,
+        "pass_recover_basic",
+        "mm0",
+    );
+    defer std.testing.allocator.free(mm0_src);
+    try expectApplyContains(
+        mm0_src,
+        "inst_use",
+        "A. x (P x) -> P u",
+        "ax_inst",
+        .view,
+        0,
+        0,
+    );
+}
+
+test "apply search does not return future rules" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\term Q: wff;
+        \\axiom p: $ P $;
+        \\theorem t: $ Q $;
+        \\axiom future_q: $ Q $;
+    ;
+    try expectRuleIsUnavailableAtSearchPoint(mm0_src, "t", "future_q");
+    try expectApplyNotContains(mm0_src, "t", "Q", "future_q");
+}
+
+test "apply search max_results preserves ranked declaration order" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\axiom p1: $ P $;
+        \\axiom p2: $ P $;
+        \\axiom p3: $ P $;
+        \\theorem t: $ P $;
+    ;
+    try expectApplyRuleOrder(
+        mm0_src,
+        "t",
+        "P",
+        2,
+        &[_][]const u8{ "p1", "p2" },
+    );
+}
+
+test "apply search rejects partial dependency violations" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\sort obj;
+        \\provable sort wff;
+        \\term rel {x y: obj}: wff;
+        \\axiom rel_bad {x y: obj} (p: wff): $ p $ > $ rel x y $;
+        \\theorem t {z: obj}: $ rel z z $;
+    ;
+    try expectApplyNotContains(mm0_src, "t", "rel z z", "rel_bad");
+}
+
+test "apply search keeps view candidates with unresolved hypotheses" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\term raw (a: wff): wff;
+        \\def shown (a: wff): wff = $ raw a $;
+        \\--| @view (a b: wff): $ b $ > $ shown a $
+        \\axiom view_use (a b: wff): $ b $ > $ raw a $;
+        \\theorem t: $ shown P $;
+    ;
+    try expectApplyContains(
+        mm0_src,
+        "t",
+        "shown P",
+        "view_use",
+        .transparent,
+        1,
+        1,
+    );
+}
+
+test "apply search rejects freshness-invalid candidates" {
+    const mm0_src =
+        \\--| @vars x
+        \\provable sort wff;
+        \\term top: wff;
+        \\--| @fresh a
+        \\--| @fresh b
+        \\axiom use_fresh_pair {a b: wff}: $ top $;
+        \\theorem t: $ top $;
+    ;
+    try expectApplyNotContains(mm0_src, "t", "top", "use_fresh_pair");
+}
+
+test "apply search does not use checked proof lines as refs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\term Q: wff;
+        \\term imp (p q: wff): wff;
+        \\infixr imp: $->$ prec 25;
+        \\axiom p: $ P $;
+        \\axiom mp (p q: wff): $ p $ > $ p -> q $ > $ q $;
+        \\theorem t: $ Q $;
+    ;
+    const proof_src =
+        \\t
+        \\------
+        \\l1: $ P $ by p
+    ;
+    var fixture = try fixtureFor(allocator, mm0_src, "t");
+    var sink = DiagnosticSink.init(mm0_src, proof_src);
+    var compiler = CompilerContext.init(mm0_src, proof_src, .none, &sink);
+    var proof_parser = ProofParser.init(allocator, proof_src);
+    const block = (try proof_parser.nextBlock()) orelse return error.MissingBlock;
+    var theorem = TheoremContext.init(allocator);
+    defer theorem.deinit();
+    try theorem.seedAssertion(fixture.assertion);
+    var theorem_vars = try Check.buildTheoremVarMap(
+        allocator,
+        fixture.assertion,
+    );
+    defer theorem_vars.deinit();
+    var labels = LabelIndexMap.init(allocator);
+    defer labels.deinit();
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer {
+        CheckedIr.deinitLines(allocator, checked.items);
+        checked.deinit(allocator);
+    }
+    var diag_scratch = CompilerDiag.Scratch.init(allocator);
+    defer diag_scratch.deinit();
+    var cache = Inference.RuleUnifyCache.init(allocator);
+    defer cache.deinit();
+
+    var line_result = try runSearchLine(
+        allocator,
+        &compiler,
+        &fixture,
+        &labels,
+        &checked,
+        &theorem,
+        &theorem_vars,
+        &diag_scratch,
+        &cache,
+        block.lines[0],
+        true,
+    );
+    defer line_result.deinit();
+    try labels.put(block.lines[0].label, line_result.line_idx);
+
+    const context = Context{
+        .allocator = allocator,
+        .parser = &fixture.parser,
+        .env = &fixture.env,
+        .registry = &fixture.registry,
+        .rule_catalog = &fixture.rule_catalog,
+        .fresh_bindings = &fixture.fresh_bindings,
+        .freshen_bindings = &fixture.freshen_bindings,
+        .views = &fixture.views,
+        .sort_vars = &fixture.sort_vars,
+        .assertion = fixture.assertion,
+        .labels = &labels,
+        .checked = &checked,
+        .diag_scratch = &diag_scratch,
+        .rule_unify_cache = &cache,
+        .available_rule_count = fixture.available_rule_count,
+    };
+    const goal = try parseGoal(&fixture, &theorem, &theorem_vars, "Q");
+    var results = try apply(
+        &compiler,
+        &context,
+        goal,
+        &theorem,
+        &theorem_vars,
+        .{},
+    );
+    defer results.deinit();
+
+    for (results.candidates) |candidate| {
+        if (!std.mem.eql(u8, candidate.rule_name, "mp")) continue;
+        var null_count: usize = 0;
+        for (candidate.unresolved_hyps) |hyp| {
+            if (hyp.expected == null) null_count += 1;
+        }
+        try std.testing.expectEqual(@as(usize, 2), null_count);
+        try std.testing.expectEqual(@as(usize, 1), checked.items.len);
+        return;
+    }
+    return error.ExpectedApplyCandidate;
+}
+
+test "apply candidate can compile after user supplies refs" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\provable sort wff;
+        \\term P: wff;
+        \\term Q: wff;
+        \\term imp (p q: wff): wff;
+        \\infixr imp: $->$ prec 25;
+        \\axiom mp (p q: wff): $ p $ > $ p -> q $ > $ q $;
+        \\theorem t: $ P $ > $ P -> Q $ > $ Q $;
+    ;
+    const proof_src =
+        \\t
+        \\------
+        \\l1: $ Q $ by mp [#1, #2]
+    ;
+    var fixture = try fixtureFor(allocator, mm0_src, "t");
+    var sink = DiagnosticSink.init(mm0_src, proof_src);
+    var compiler = CompilerContext.init(mm0_src, proof_src, .none, &sink);
+    var theorem = TheoremContext.init(allocator);
+    defer theorem.deinit();
+    try theorem.seedAssertion(fixture.assertion);
+    var theorem_vars = try Check.buildTheoremVarMap(
+        allocator,
+        fixture.assertion,
+    );
+    defer theorem_vars.deinit();
+    var labels = LabelIndexMap.init(allocator);
+    defer labels.deinit();
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer checked.deinit(allocator);
+    var diag_scratch = CompilerDiag.Scratch.init(allocator);
+    defer diag_scratch.deinit();
+    var cache = Inference.RuleUnifyCache.init(allocator);
+    defer cache.deinit();
+    const context = Context{
+        .allocator = allocator,
+        .parser = &fixture.parser,
+        .env = &fixture.env,
+        .registry = &fixture.registry,
+        .rule_catalog = &fixture.rule_catalog,
+        .fresh_bindings = &fixture.fresh_bindings,
+        .freshen_bindings = &fixture.freshen_bindings,
+        .views = &fixture.views,
+        .sort_vars = &fixture.sort_vars,
+        .assertion = fixture.assertion,
+        .labels = &labels,
+        .checked = &checked,
+        .diag_scratch = &diag_scratch,
+        .rule_unify_cache = &cache,
+        .available_rule_count = fixture.available_rule_count,
+    };
+    const goal = try parseGoal(&fixture, &theorem, &theorem_vars, "Q");
+    var results = try apply(
+        &compiler,
+        &context,
+        goal,
+        &theorem,
+        &theorem_vars,
+        .{},
+    );
+    defer results.deinit();
+    var found_mp = false;
+    for (results.candidates) |candidate| {
+        found_mp = found_mp or std.mem.eql(u8, candidate.rule_name, "mp");
+    }
+    try std.testing.expect(found_mp);
+
+    var proof_parser = ProofParser.init(allocator, proof_src);
+    const block = (try proof_parser.nextBlock()) orelse return error.MissingBlock;
+    var result = try runSearchLine(
+        allocator,
+        &compiler,
+        &fixture,
+        &labels,
+        &checked,
+        &theorem,
+        &theorem_vars,
+        &diag_scratch,
+        &cache,
+        block.lines[0],
+        false,
+    );
+    defer result.deinit();
+    try std.testing.expect(result.checked_lines.len > 0);
+    try CheckedIr.validateLines(&result.theorem.?, result.checked_lines);
+}
+
 test "search candidate failure leaves no checked lines" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -570,6 +1439,7 @@ test "search candidate failure leaves no checked lines" {
         .checked = &checked,
         .diag_scratch = &diag_scratch,
         .rule_unify_cache = &cache,
+        .available_rule_count = fixture.available_rule_count,
     };
     const goal = try parseGoal(
         &fixture,
