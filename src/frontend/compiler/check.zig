@@ -41,8 +41,8 @@ const SortVarRegistry = CompilerVars.SortVarRegistry;
 const Holes = @import("./holes.zig");
 const Idents = @import("./idents.zig");
 
-const NameExprMap = std.StringHashMap(*const Expr);
-const LabelIndexMap = std.StringHashMap(usize);
+pub const NameExprMap = std.StringHashMap(*const Expr);
+pub const LabelIndexMap = std.StringHashMap(usize);
 
 const addFallbackFailureNote = DiagNotes.addFallbackFailureNote;
 const concreteMatchFailureSpan = DiagNotes.concreteMatchFailureSpan;
@@ -54,13 +54,13 @@ const addBoundaryAttemptNotes = DiagNotes.addBoundaryAttemptNotes;
 const applyFreshenedRuleLine = FreshenRetry.applyFreshenedRuleLine;
 const findRuleArgIndex = Idents.findRuleArgIndex;
 
-const SuccessfulLineAttempt = struct {
+pub const SuccessfulLineAttempt = struct {
     line_idx: usize,
     theorem: TheoremContext,
     theorem_vars: NameExprMap,
 };
 
-const LineAssertion = union(enum) {
+pub const LineAssertion = union(enum) {
     concrete: ExprId,
     holey: *const Expr,
     implicit_whole_conclusion,
@@ -79,7 +79,7 @@ const CandidateElaboration = struct {
     displayed_conclusion: ExprId,
 };
 
-const ApplicationDiagnosticContext = struct {
+pub const ApplicationDiagnosticContext = struct {
     theorem_name: []const u8,
     line_label: ?[]const u8,
     span: ?Span,
@@ -93,7 +93,7 @@ const ApplicationDiagnosticContext = struct {
     }
 };
 
-const ApplicationLine = struct {
+pub const ApplicationLine = struct {
     label: []const u8,
     application: RuleApplication,
     assertion_span: Span,
@@ -127,7 +127,7 @@ const ApplicationLine = struct {
     }
 };
 
-const RuleApplyContext = struct {
+pub const RuleApplyContext = struct {
     allocator: std.mem.Allocator,
     parser: *MM0Parser,
     env: *const GlobalEnv,
@@ -351,7 +351,7 @@ fn parseProofLineAssertion(
     };
 }
 
-fn applyRuleApplication(
+pub fn applyRuleApplication(
     self: *CompilerContext,
     context: *const RuleApplyContext,
     application: RuleApplication,
@@ -1933,7 +1933,7 @@ fn elaborateRefs(
     }
 }
 
-fn buildTheoremVarMap(
+pub fn buildTheoremVarMap(
     allocator: std.mem.Allocator,
     assertion: AssertionStmt,
 ) !NameExprMap {
@@ -1946,7 +1946,7 @@ fn buildTheoremVarMap(
     return vars;
 }
 
-fn cloneNameExprMap(
+pub fn cloneNameExprMap(
     allocator: std.mem.Allocator,
     src: *const NameExprMap,
 ) !NameExprMap {

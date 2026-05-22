@@ -352,6 +352,19 @@ pub fn build(b: *std.Build) void {
     });
     const run_compiler_tests = b.addRunArtifact(compiler_tests);
 
+    const compiler_search_test_module = b.createModule(.{
+        .root_source_file = b.path("src/search_tests.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const compiler_search_tests = b.addTest(.{
+        .root_module = compiler_search_test_module,
+    });
+    const run_compiler_search_tests = b.addRunArtifact(
+        compiler_search_tests,
+    );
+
     const compiler_bin_test_module = b.createModule(.{
         .root_source_file = b.path("src/bin/compiler/tests.zig"),
         .target = target,
@@ -387,6 +400,7 @@ pub fn build(b: *std.Build) void {
     unit_step.dependOn(&run_frontend_tests.step);
     unit_step.dependOn(&run_lsp_index_tests.step);
     unit_step.dependOn(&run_compiler_tests.step);
+    unit_step.dependOn(&run_compiler_search_tests.step);
     unit_step.dependOn(&run_compiler_bin_tests.step);
 
     const integration_step = b.step(
