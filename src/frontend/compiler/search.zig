@@ -301,16 +301,6 @@ pub fn exact(
     options: ExactOptions,
 ) !ExactResults {
     const allocator = context.allocator;
-    var apply_results = try apply(
-        compiler,
-        context,
-        goal,
-        theorem,
-        theorem_vars,
-        .{},
-    );
-    defer apply_results.deinit();
-
     const pool = try buildReferencePool(allocator, context, theorem);
     defer allocator.free(pool);
 
@@ -322,9 +312,28 @@ pub fn exact(
         candidates.deinit(allocator);
     }
 
+    const broad_whole_hole = isBroadWholeLineHole(goal);
+    if (broad_whole_hole and pool.len == 0) {
+        return .{
+            .allocator = allocator,
+            .candidates = try candidates.toOwnedSlice(allocator),
+        };
+    }
+
+    var apply_results = try apply(
+        compiler,
+        context,
+        goal,
+        theorem,
+        theorem_vars,
+        .{},
+    );
+    defer apply_results.deinit();
+
     for (apply_results.candidates) |apply_candidate| {
         const hyp_count = apply_candidate.unresolved_hyps.len;
         if (hyp_count > 0 and pool.len == 0) continue;
+        if (broad_whole_hole and hyp_count == 0) continue;
         const indices = try allocator.alloc(usize, hyp_count);
         defer allocator.free(indices);
         @memset(indices, 0);
@@ -847,6 +856,13 @@ fn applyCandidateLessThan(
     const rhs_rank = matchKindRank(rhs.match_kind);
     if (lhs_rank != rhs_rank) return lhs_rank < rhs_rank;
     return lhs.declaration_order < rhs.declaration_order;
+}
+
+fn isBroadWholeLineHole(goal: Goal) bool {
+    return switch (goal) {
+        .holey => |expr| expr.* == .hole,
+        else => false,
+    };
 }
 
 fn matchKindRank(kind: MatchKind) u8 {
@@ -2637,4 +2653,189 @@ test "search candidate rejects boundness failures" {
     try std.testing.expectEqual(@as(usize, 0), checked.items.len);
     try std.testing.expectEqual(@as(usize, 0), diag_scratch.entries.items.len);
     try std.testing.expect(compiler.getDiagnostic() == null);
+}
+
+test "apply search accepts visible holey goals" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @hole _wff
+        \\provable sort wff;
+        \\term imp (a b: wff): wff;
+        \\infixr imp: $->$ prec 25;
+        \\axiom ax_keep (a b: wff): $ a $ > $ a -> b -> a $;
+        \\theorem t (a b: wff): $ a -> b -> a $;
+    ;
+    try expectApplyContains(
+        mm0_src,
+        "t",
+        "a -> _wff -> a",
+        "ax_keep",
+        .exact,
+        1,
+        0,
+    );
+}
+
+test "apply search accepts term-position holes" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @hole _wff
+        \\provable sort wff;
+        \\--| @hole _set
+        \\sort set;
+        \\term P (x: set): wff;
+        \\term u: set;
+        \\axiom pred_any (x: set): $ P x $;
+        \\theorem t: $ P u $;
+    ;
+    try expectApplyContains(
+        mm0_src,
+        "t",
+        "P _set",
+        "pred_any",
+        .exact,
+        0,
+        0,
+    );
+}
+
+test "exact search accepts visible holey goals" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @hole _wff
+        \\provable sort wff;
+        \\term imp (a b: wff): wff;
+        \\infixr imp: $->$ prec 25;
+        \\axiom ax_keep (a b: wff):
+        \\  $ a $ > $ b $ > $ a -> b -> a $;
+        \\theorem t (a b: wff): $ a $ > $ b $ > $ a -> b -> a $;
+    ;
+    try expectFirstExactRefs(
+        mm0_src,
+        "",
+        "t",
+        "a -> _wff -> a",
+        0,
+        "ax_keep",
+        &[_]ProofScript.Ref{
+            .{ .hyp = .{
+                .index = 1,
+                .span = .{ .start = 0, .end = 0 },
+            } },
+            .{ .hyp = .{
+                .index = 1,
+                .span = .{ .start = 0, .end = 0 },
+            } },
+        },
+    );
+}
+
+test "apply search supports ACUI context holes" {
+    const mm0_src = try readProofCase(
+        std.testing.allocator,
+        "pass_hole_acui_min_ctx",
+        "mm0",
+    );
+    defer std.testing.allocator.free(mm0_src);
+    try expectApplyContains(
+        mm0_src,
+        "hole_acui_min_ctx",
+        "nd _ctx (imp p _wff)",
+        "imp_intro",
+        .exact,
+        1,
+        1,
+    );
+}
+
+test "exact search supports ACUI context holes" {
+    const mm0_src = try readProofCase(
+        std.testing.allocator,
+        "pass_hole_acui_min_ctx",
+        "mm0",
+    );
+    defer std.testing.allocator.free(mm0_src);
+    try expectFirstExactRefs(
+        mm0_src,
+        "",
+        "hole_acui_min_ctx",
+        "nd _ctx (imp p _wff)",
+        0,
+        "imp_intro",
+        &[_]ProofScript.Ref{.{ .hyp = .{
+            .index = 1,
+            .span = .{ .start = 0, .end = 0 },
+        } }},
+    );
+}
+
+test "search candidate supports view recover with holey goals" {
+    try expectCaseLineSearch(
+        "pass_hole_view_recover_matrix",
+        "view_recover_visible_formula",
+        0,
+    );
+}
+
+test "apply search may list broad whole-line hole candidates" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @hole _wff
+        \\provable sort wff;
+        \\term P: wff;
+        \\axiom p: $ P $;
+        \\theorem t: $ P $;
+    ;
+    try expectApplyContains(mm0_src, "t", "_wff", "p", .exact, 0, 0);
+}
+
+test "exact search accepts broad whole-line holes with useful refs" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @hole _wff
+        \\provable sort wff;
+        \\term P: wff;
+        \\axiom id (p: wff): $ p $ > $ p $;
+        \\theorem t: $ P $ > $ P $;
+    ;
+    try expectFirstExactRefs(
+        mm0_src,
+        "",
+        "t",
+        "_wff",
+        0,
+        "id",
+        &[_]ProofScript.Ref{.{ .hyp = .{
+            .index = 1,
+            .span = .{ .start = 0, .end = 0 },
+        } }},
+    );
+}
+
+test "exact search suppresses broad whole-line holes without refs" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @hole _wff
+        \\provable sort wff;
+        \\term P: wff;
+        \\axiom p: $ P $;
+        \\theorem t: $ P $;
+    ;
+    try expectExactRuleOrder(mm0_src, "t", "_wff", &[_][]const u8{});
+}
+
+test "hole sort mismatches do not poison later search candidates" {
+    const mm0_src =
+        \\delimiter $ ( ) $;
+        \\--| @hole _wff
+        \\provable sort wff;
+        \\--| @hole _obj
+        \\provable sort obj;
+        \\term W: wff;
+        \\term O: obj;
+        \\axiom bad_wff: $ W $;
+        \\axiom good_obj: $ O $;
+        \\theorem t: $ O $;
+    ;
+    try expectApplyContains(mm0_src, "t", "_obj", "good_obj", .exact, 0, 0);
 }

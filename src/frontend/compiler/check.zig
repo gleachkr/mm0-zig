@@ -1539,7 +1539,18 @@ fn inferCandidateOptionalBindings(
                 );
             }
         },
-        .holey, .implicit_whole_conclusion => {},
+        .holey => |holey| {
+            if (had_omitted) {
+                return try inferHoleyOptionalBindingsForProbe(
+                    context,
+                    partial_bindings,
+                    base_ref_exprs,
+                    maybe_view,
+                    holey,
+                );
+            }
+        },
+        .implicit_whole_conclusion => {},
     }
 
     const concrete = try inferCandidateBindings(
@@ -1560,6 +1571,67 @@ fn inferCandidateOptionalBindings(
     );
     defer allocator.free(concrete);
     return try concreteBindingsToOptional(allocator, concrete);
+}
+
+fn inferHoleyOptionalBindingsForProbe(
+    context: *const Inference.RuleInferenceContext,
+    partial_bindings: []const ?ExprId,
+    base_ref_exprs: []const ExprId,
+    maybe_view: ?ViewDecl,
+    holey: *const Expr,
+) ![]const ?ExprId {
+    const allocator = context.allocator;
+    const theorem = context.theorem;
+    const rule = context.rule;
+    const optional = try allocator.dupe(?ExprId, partial_bindings);
+    errdefer allocator.free(optional);
+
+    for (rule.hyps, base_ref_exprs) |hyp, ref_expr| {
+        if (!theorem.matchTemplate(hyp, ref_expr, optional)) {
+            return error.UnifyMismatch;
+        }
+    }
+
+    if (maybe_view) |view| {
+        CompilerViews.applyViewBindingsSurfaceConclusion(
+            allocator,
+            theorem,
+            context.env,
+            context.registry,
+            &view,
+            holey,
+            base_ref_exprs,
+            optional,
+            null,
+            null,
+            false,
+        ) catch |err| {
+            if (err == error.OutOfMemory) return err;
+            try matchRawTemplateToHoleyConclusion(theorem, rule, optional, holey);
+        };
+    } else {
+        try matchRawTemplateToHoleyConclusion(theorem, rule, optional, holey);
+    }
+
+    return optional;
+}
+
+fn matchRawTemplateToHoleyConclusion(
+    theorem: *TheoremContext,
+    rule: *const RuleDecl,
+    bindings: []?ExprId,
+    holey: *const Expr,
+) !void {
+    var report = Holes.InferenceReport{};
+    if (!try Holes.matchTemplateToSurfaceDetailed(
+        theorem,
+        rule.concl,
+        holey,
+        bindings,
+        &report,
+    )) {
+        return error.HoleyInferenceMismatch;
+    }
 }
 
 fn validateOptionalBindingsForProbe(
