@@ -166,6 +166,30 @@ pub const ExactOptions = struct {
     max_results: ?usize = null,
 };
 
+pub const SourceSuggestion = struct {
+    title: []const u8,
+    replacement: []const u8,
+    replace_span: Span,
+};
+
+pub const SourceSuggestions = struct {
+    allocator: std.mem.Allocator,
+    items: []const SourceSuggestion,
+
+    pub fn deinit(self: *SourceSuggestions) void {
+        for (self.items) |item| {
+            self.allocator.free(item.title);
+            self.allocator.free(item.replacement);
+        }
+        self.allocator.free(self.items);
+        self.* = undefined;
+    }
+};
+
+pub const SourceSuggestionOptions = struct {
+    max_results: usize = 5,
+};
+
 const Metadata = @import("./metadata.zig");
 const Holes = @import("./holes.zig");
 const DiagnosticSink = @import("./diagnostic_sink.zig").DiagnosticSink;
@@ -872,6 +896,265 @@ fn matchKindRank(kind: MatchKind) u8 {
         .view => 2,
         .normalized => 3,
     };
+}
+
+pub fn suggestionsAtSourceOffset(
+    allocator: std.mem.Allocator,
+    mm0_src: []const u8,
+    proof_src: []const u8,
+    offset: usize,
+    options: SourceSuggestionOptions,
+) !SourceSuggestions {
+    const target = try findSearchLine(allocator, proof_src, offset) orelse {
+        return .{ .allocator = allocator, .items = &.{} };
+    };
+    var fixture = try fixtureFor(allocator, mm0_src, target.block.name);
+    var sink = DiagnosticSink.init(mm0_src, proof_src);
+    var compiler = CompilerContext.init(mm0_src, proof_src, .none, &sink);
+
+    var theorem = TheoremContext.init(allocator);
+    defer theorem.deinit();
+    try theorem.seedAssertion(fixture.assertion);
+    var theorem_vars = try Check.buildTheoremVarMap(
+        allocator,
+        fixture.assertion,
+    );
+    defer theorem_vars.deinit();
+
+    var labels = LabelIndexMap.init(allocator);
+    defer labels.deinit();
+    var checked = std.ArrayListUnmanaged(CheckedLine){};
+    defer {
+        CheckedIr.deinitLines(allocator, checked.items);
+        checked.deinit(allocator);
+    }
+    var diag_scratch = CompilerDiag.Scratch.init(allocator);
+    defer diag_scratch.deinit();
+    var cache = Inference.RuleUnifyCache.init(allocator);
+    defer cache.deinit();
+
+    for (target.block.lines[0..target.line_index]) |line| {
+        if (ProofScript.isSearchPlaceholderRuleName(line.application.rule_name)) {
+            break;
+        }
+        var result = runSearchLine(
+            allocator,
+            &compiler,
+            &fixture,
+            &labels,
+            &checked,
+            &theorem,
+            &theorem_vars,
+            &diag_scratch,
+            &cache,
+            line,
+            true,
+        ) catch return .{ .allocator = allocator, .items = &.{} };
+        defer result.deinit();
+        labels.put(line.label, result.line_idx) catch return error.OutOfMemory;
+    }
+
+    const context = Context{
+        .allocator = allocator,
+        .parser = &fixture.parser,
+        .env = &fixture.env,
+        .registry = &fixture.registry,
+        .rule_catalog = &fixture.rule_catalog,
+        .fresh_bindings = &fixture.fresh_bindings,
+        .freshen_bindings = &fixture.freshen_bindings,
+        .views = &fixture.views,
+        .sort_vars = &fixture.sort_vars,
+        .assertion = fixture.assertion,
+        .labels = &labels,
+        .checked = &checked,
+        .diag_scratch = &diag_scratch,
+        .rule_unify_cache = &cache,
+        .available_rule_count = fixture.available_rule_count,
+    };
+    const target_line = target.block.lines[target.line_index];
+    const goal = try parseGoal(
+        &fixture,
+        &theorem,
+        &theorem_vars,
+        target_line.assertion.text,
+    );
+
+    if (std.mem.eql(u8, target_line.application.rule_name, "exact?")) {
+        var results = try exact(
+            &compiler,
+            &context,
+            goal,
+            &theorem,
+            &theorem_vars,
+            .{ .max_results = options.max_results },
+        );
+        defer results.deinit();
+        return try renderExactSourceSuggestions(
+            allocator,
+            results.candidates,
+            target_line.application.span,
+        );
+    }
+
+    var results = try apply(
+        &compiler,
+        &context,
+        goal,
+        &theorem,
+        &theorem_vars,
+        .{ .max_results = options.max_results },
+    );
+    defer results.deinit();
+    return try renderApplySourceSuggestions(
+        allocator,
+        results.candidates,
+        target_line.application.span,
+    );
+}
+
+const SourceTarget = struct {
+    block: ProofScript.ProofBlock,
+    line_index: usize,
+};
+
+fn findSearchLine(
+    allocator: std.mem.Allocator,
+    proof_src: []const u8,
+    offset: usize,
+) !?SourceTarget {
+    var parser = ProofParser.init(allocator, proof_src);
+    while (try parser.nextBlock()) |block| {
+        for (block.lines, 0..) |line, line_index| {
+            if (!ProofScript.isSearchPlaceholderRuleName(
+                line.application.rule_name,
+            )) continue;
+            const span = line.application.ruleApplicationSpan();
+            if (offset >= span.start and offset <= span.end) {
+                return .{ .block = block, .line_index = line_index };
+            }
+            if (offset >= line.span.start and offset <= line.span.end) {
+                return .{ .block = block, .line_index = line_index };
+            }
+        }
+    }
+    return null;
+}
+
+fn renderExactSourceSuggestions(
+    allocator: std.mem.Allocator,
+    candidates: []const ExactCandidate,
+    replace_span: Span,
+) !SourceSuggestions {
+    var items = std.ArrayListUnmanaged(SourceSuggestion){};
+    errdefer deinitSourceSuggestionItems(allocator, items.items);
+    for (candidates) |candidate| {
+        const replacement = try renderApplication(
+            allocator,
+            candidate.rule_name,
+            candidate.refs,
+        );
+        errdefer allocator.free(replacement);
+        const title = try std.fmt.allocPrint(
+            allocator,
+            "Replace exact? with {s}",
+            .{replacement},
+        );
+        errdefer allocator.free(title);
+        try items.append(allocator, .{
+            .title = title,
+            .replacement = replacement,
+            .replace_span = replace_span,
+        });
+    }
+    return .{ .allocator = allocator, .items = try items.toOwnedSlice(allocator) };
+}
+
+fn renderApplySourceSuggestions(
+    allocator: std.mem.Allocator,
+    candidates: []const ApplyCandidate,
+    replace_span: Span,
+) !SourceSuggestions {
+    var items = std.ArrayListUnmanaged(SourceSuggestion){};
+    errdefer deinitSourceSuggestionItems(allocator, items.items);
+    for (candidates) |candidate| {
+        const replacement = try renderApplyApplication(allocator, candidate);
+        errdefer allocator.free(replacement);
+        const title = try std.fmt.allocPrint(
+            allocator,
+            "Replace apply? with {s}",
+            .{replacement},
+        );
+        errdefer allocator.free(title);
+        try items.append(allocator, .{
+            .title = title,
+            .replacement = replacement,
+            .replace_span = replace_span,
+        });
+    }
+    return .{ .allocator = allocator, .items = try items.toOwnedSlice(allocator) };
+}
+
+fn deinitSourceSuggestionItems(
+    allocator: std.mem.Allocator,
+    items: []SourceSuggestion,
+) void {
+    for (items) |item| {
+        allocator.free(item.title);
+        allocator.free(item.replacement);
+    }
+}
+
+fn renderApplyApplication(
+    allocator: std.mem.Allocator,
+    candidate: ApplyCandidate,
+) ![]const u8 {
+    if (candidate.unresolved_hyps.len == 0) {
+        return try allocator.dupe(u8, candidate.rule_name);
+    }
+    var buf = std.ArrayListUnmanaged(u8){};
+    errdefer buf.deinit(allocator);
+    try buf.writer(allocator).print("{s} [", .{candidate.rule_name});
+    for (candidate.unresolved_hyps, 0..) |_, idx| {
+        if (idx != 0) try buf.appendSlice(allocator, ", ");
+        try buf.writer(allocator).print("ref{}", .{idx + 1});
+    }
+    try buf.append(allocator, ']');
+    return try buf.toOwnedSlice(allocator);
+}
+
+fn renderApplication(
+    allocator: std.mem.Allocator,
+    rule_name: []const u8,
+    refs: []const ProofScript.Ref,
+) anyerror![]const u8 {
+    var buf = std.ArrayListUnmanaged(u8){};
+    errdefer buf.deinit(allocator);
+    try buf.appendSlice(allocator, rule_name);
+    if (refs.len != 0) {
+        try buf.appendSlice(allocator, " [");
+        for (refs, 0..) |ref, idx| {
+            if (idx != 0) try buf.appendSlice(allocator, ", ");
+            try renderRef(allocator, &buf, ref);
+        }
+        try buf.append(allocator, ']');
+    }
+    return try buf.toOwnedSlice(allocator);
+}
+
+fn renderRef(
+    allocator: std.mem.Allocator,
+    buf: *std.ArrayListUnmanaged(u8),
+    ref: ProofScript.Ref,
+) anyerror!void {
+    switch (ref) {
+        .hyp => |hyp| try buf.writer(allocator).print("#{}", .{hyp.index}),
+        .line => |line| try buf.appendSlice(allocator, line.label),
+        .application => |app| {
+            const rendered = try renderApplication(allocator, app.rule_name, app.refs);
+            defer allocator.free(rendered);
+            try buf.appendSlice(allocator, rendered);
+        },
+    }
 }
 
 const TestFixture = struct {

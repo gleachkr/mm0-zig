@@ -8,10 +8,11 @@ const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
 const ExprModule = @import("../../trusted/expressions.zig");
 const Expr = ExprModule.Expr;
 const SourceSpan = ExprModule.SourceSpan;
-const ProofLine = @import("../proof_script.zig").ProofLine;
-const Ref = @import("../proof_script.zig").Ref;
-const RuleApplication = @import("../proof_script.zig").RuleApplication;
-const Span = @import("../proof_script.zig").Span;
+const ProofScript = @import("../proof_script.zig");
+const ProofLine = ProofScript.ProofLine;
+const Ref = ProofScript.Ref;
+const RuleApplication = ProofScript.RuleApplication;
+const Span = ProofScript.Span;
 const TemplateExpr = @import("../rules.zig").TemplateExpr;
 const TheoremBlock = @import("../proof_script.zig").TheoremBlock;
 const RewriteRegistry = @import("../rewrite_registry.zig").RewriteRegistry;
@@ -206,6 +207,14 @@ pub fn checkTheoremBlock(
     var last_span: ?Span = null;
 
     for (block.lines) |line| {
+        if (ProofScript.isSearchPlaceholderRuleName(
+            line.application.rule_name,
+        )) {
+            if (self.allow_search_placeholders) {
+                return try checked.toOwnedSlice(allocator);
+            }
+        }
+
         if (labels.contains(line.label)) {
             self.setProof(CompilerDiag.withPhase(.{
                 .kind = .duplicate_label,

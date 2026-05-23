@@ -404,7 +404,11 @@ pub const Parser = struct {
     fn parseRuleApplication(self: *Parser) anyerror!RuleApplication {
         self.skipProofWhitespace();
         const rule_start = self.pos;
-        const rule_name = try self.parseIdentifier();
+        var rule_name = try self.parseIdentifier();
+        if (isSearchPlaceholderBase(rule_name) and self.peek() == '?') {
+            self.pos += 1;
+            rule_name = self.src[rule_start..self.pos];
+        }
         return try self.parseRuleApplicationAfterName(rule_start, rule_name);
     }
 
@@ -1103,4 +1107,14 @@ fn isIdentStart(ch: u8) bool {
 
 fn isIdentChar(ch: u8) bool {
     return std.ascii.isAlphanumeric(ch) or ch == '_';
+}
+
+fn isSearchPlaceholderBase(name: []const u8) bool {
+    return std.mem.eql(u8, name, "exact") or
+        std.mem.eql(u8, name, "apply");
+}
+
+pub fn isSearchPlaceholderRuleName(name: []const u8) bool {
+    return std.mem.eql(u8, name, "exact?") or
+        std.mem.eql(u8, name, "apply?");
 }

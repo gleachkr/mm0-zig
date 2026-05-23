@@ -5,6 +5,7 @@ const mm0 = @import("mm0");
 
 const types = lsp.types;
 const LspIndex = mm0.Frontend.LspIndex;
+const Search = mm0.CompilerSupport.Search;
 const lsp_diagnostics = @import("lsp_diagnostics");
 const DiagnosticContext = lsp_diagnostics.DiagnosticContext;
 const LSP_SERVER_NAME = lsp_diagnostics.SERVER_NAME;
@@ -17,6 +18,9 @@ const sourceRangeToLsp = lsp_diagnostics.sourceRangeToLsp;
 const sourceRangesToLocations = lsp_diagnostics.sourceRangesToLocations;
 const completionsToLsp = lsp_diagnostics.completionsToLsp;
 const outlineSymbolsToLsp = lsp_diagnostics.outlineSymbolsToLsp;
+const CodeActionResult = lsp.ResultType("textDocument/codeAction");
+const CodeActionItems = @typeInfo(CodeActionResult).optional.child;
+const CodeActionItem = @typeInfo(CodeActionItems).pointer.child;
 
 const UnsupportedUriScheme = error{UnsupportedUriScheme};
 const UnsupportedUriHost = error{UnsupportedUriHost};
@@ -204,6 +208,7 @@ pub const Handler = struct {
             .completionProvider = .{
                 .resolveProvider = false,
             },
+            .codeActionProvider = .{ .bool = true },
             .documentSymbolProvider = if (supports_hierarchical_document_symbols)
                 .{ .bool = true }
             else
@@ -216,6 +221,7 @@ pub const Handler = struct {
             // the client-specific capabilities above.
             var validation_capabilities = capabilities;
             validation_capabilities.documentSymbolProvider = .{ .bool = true };
+            validation_capabilities.codeActionProvider = .{ .bool = true };
             lsp.basic_server.validateServerCapabilities(
                 Handler,
                 validation_capabilities,
@@ -403,6 +409,77 @@ pub const Handler = struct {
             self.offset_encoding,
         );
         return .{ .array_of_CompletionItem = items };
+    }
+
+    pub fn @"textDocument/codeAction"(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        params: types.CodeActionParams,
+    ) !lsp.ResultType("textDocument/codeAction") {
+        const path = uriToPath(arena, params.textDocument.uri) catch return null;
+        if (documentKind(path) != .proof) return null;
+        const proof_loaded = self.loadTextForUriPath(
+            arena,
+            params.textDocument.uri,
+            path,
+        ) catch return null;
+        const mm0_path = siblingPathForProof(arena, path) catch return null;
+        const mm0_loaded = self.loadTextPreferOpenDocument(arena, mm0_path) catch return null;
+        const offset = lsp.offsets.positionToIndex(
+            proof_loaded.text,
+            params.range.start,
+            self.offset_encoding,
+        );
+        const suggestions = Search.suggestionsAtSourceOffset(
+            arena,
+            mm0_loaded.text,
+            proof_loaded.text,
+            offset,
+            .{},
+        ) catch |err| switch (err) {
+            error.OutOfMemory => return err,
+            else => return null,
+        };
+        if (suggestions.items.len == 0) return null;
+
+        const actions = try arena.alloc(CodeActionItem, suggestions.items.len);
+        for (suggestions.items, 0..) |suggestion, idx| {
+            actions[idx] = .{ .CodeAction = try self.searchCodeAction(
+                arena,
+                params.textDocument.uri,
+                proof_loaded.text,
+                suggestion,
+            ) };
+        }
+        return actions;
+    }
+
+    fn searchCodeAction(
+        self: *Handler,
+        arena: std.mem.Allocator,
+        uri: []const u8,
+        text: []const u8,
+        suggestion: Search.SourceSuggestion,
+    ) !types.CodeAction {
+        const edits = try arena.alloc(types.TextEdit, 1);
+        edits[0] = .{
+            .range = lsp.offsets.locToRange(
+                text,
+                .{
+                    .start = suggestion.replace_span.start,
+                    .end = suggestion.replace_span.end,
+                },
+                self.offset_encoding,
+            ),
+            .newText = suggestion.replacement,
+        };
+        var changes: std.json.ArrayHashMap([]const types.TextEdit) = .{};
+        try changes.map.put(arena, uri, edits);
+        return .{
+            .title = suggestion.title,
+            .kind = .quickfix,
+            .edit = .{ .changes = changes },
+        };
     }
 
     pub fn @"textDocument/documentSymbol"(
@@ -718,6 +795,7 @@ pub const Handler = struct {
             mm0_loaded.text,
             proof_text,
         );
+        compiler.allow_search_placeholders = true;
         compiler.analyze() catch |err| {
             if (compiler.diagnostics.last_diagnostic != null or
                 compiler.primaryDiagnostics().len != 0 or

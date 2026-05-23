@@ -356,6 +356,16 @@ fn handleRequest(
             result,
             .{ .emit_null_optional_fields = false },
         );
+    } else if (std.mem.eql(u8, method, "textDocument/codeAction")) {
+        const parsed = try parseParams(types.CodeActionParams, arena, params);
+        const result = try handler.@"textDocument/codeAction"(arena, parsed);
+        try transport.writeResponse(
+            arena,
+            id,
+            ResultType("textDocument/codeAction"),
+            result,
+            .{ .emit_null_optional_fields = false },
+        );
     } else if (std.mem.eql(u8, method, "textDocument/definition")) {
         const parsed = try parseParams(types.DefinitionParams, arena, params);
         const result = try handler.@"textDocument/definition"(arena, parsed);

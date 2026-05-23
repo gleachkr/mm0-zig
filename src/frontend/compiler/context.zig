@@ -11,6 +11,7 @@ pub const CompilerContext = struct {
     proof_source: ?[]const u8,
     debug: DebugConfig,
     diagnostics: *DiagnosticSink,
+    allow_search_placeholders: bool = false,
 
     pub fn init(
         source: []const u8,

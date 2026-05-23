@@ -20,6 +20,7 @@ pub const Compiler = struct {
     proof_source: ?[]const u8,
     diagnostics: DiagnosticSink,
     debug: DebugConfig,
+    allow_search_placeholders: bool,
 
     const PipelineOutput = Pipeline.Output;
 
@@ -49,6 +50,7 @@ pub const Compiler = struct {
             .proof_source = proof_source,
             .diagnostics = DiagnosticSink.init(source, proof_source),
             .debug = DebugConfig.none,
+            .allow_search_placeholders = false,
         };
     }
 
@@ -166,12 +168,14 @@ pub const Compiler = struct {
     }
 
     fn context(self: *Compiler) CompilerContext {
-        return CompilerContext.init(
+        var result = CompilerContext.init(
             self.source,
             self.proof_source,
             self.debug,
             &self.diagnostics,
         );
+        result.allow_search_placeholders = self.allow_search_placeholders;
+        return result;
     }
 };
 
