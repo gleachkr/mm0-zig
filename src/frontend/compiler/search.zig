@@ -2,8 +2,12 @@ const std = @import("std");
 const ExprId = @import("../expr.zig").ExprId;
 const TheoremContext = @import("../expr.zig").TheoremContext;
 const GlobalEnv = @import("../env.zig").GlobalEnv;
-const AssertionStmt = @import("../parse_recovery.zig").AssertionStmt;
-const MM0Parser = @import("../parse_recovery.zig").MM0Parser;
+const ParseRecovery = @import("../parse_recovery.zig");
+const AssertionStmt = ParseRecovery.AssertionStmt;
+const SortStmt = ParseRecovery.SortStmt;
+const TermStmt = ParseRecovery.TermStmt;
+const MM0Parser = ParseRecovery.MM0Parser;
+const MM0Stmt = ParseRecovery.MM0Stmt;
 const Expr = @import("../../trusted/expressions.zig").Expr;
 const ProofScript = @import("../proof_script.zig");
 const RuleApplication = ProofScript.RuleApplication;
@@ -193,6 +197,7 @@ pub const SourceSuggestionOptions = struct {
 const Metadata = @import("./metadata.zig");
 const Holes = @import("./holes.zig");
 const DiagnosticSink = @import("./diagnostic_sink.zig").DiagnosticSink;
+const PipelineCommon = @import("./pipeline/common.zig");
 const ProofParser = ProofScript.Parser;
 
 pub fn tryCandidate(
@@ -908,7 +913,12 @@ pub fn suggestionsAtSourceOffset(
     const target = try findSearchLine(allocator, proof_src, offset) orelse {
         return .{ .allocator = allocator, .items = &.{} };
     };
-    var fixture = try fixtureFor(allocator, mm0_src, target.block.name);
+    var fixture = try fixtureForSourceTarget(
+        allocator,
+        mm0_src,
+        proof_src,
+        target,
+    );
     var sink = DiagnosticSink.init(mm0_src, proof_src);
     var compiler = CompilerContext.init(mm0_src, proof_src, .none, &sink);
 
@@ -1166,7 +1176,7 @@ const TestFixture = struct {
     freshen_bindings: std.AutoHashMap(u32, []const FreshenDecl),
     views: std.AutoHashMap(u32, ViewDecl),
     sort_vars: SortVarRegistry,
-    assertion: @import("../parse_recovery.zig").AssertionStmt,
+    assertion: AssertionStmt,
     available_rule_count: usize,
 };
 
@@ -1196,13 +1206,102 @@ fn fixtureForFullEnv(
     );
 }
 
-fn fixtureForSearchPoint(
+fn fixtureForSourceTarget(
     allocator: std.mem.Allocator,
     mm0_src: []const u8,
-    theorem_name: []const u8,
-    include_trailing_rules: bool,
+    proof_src: []const u8,
+    target: SourceTarget,
 ) !TestFixture {
-    var fixture = TestFixture{
+    const anchor_name = try sourceTargetAnchorName(
+        allocator,
+        proof_src,
+        target.block,
+    ) orelse return error.MissingTheorem;
+    var fixture = try initSearchFixture(allocator, mm0_src);
+    var sink = DiagnosticSink.init(mm0_src, proof_src);
+    var compiler = CompilerContext.init(mm0_src, proof_src, .none, &sink);
+    var proof_stream: ?PipelineCommon.ProofItemStream =
+        PipelineCommon.ProofItemStream.init(allocator, proof_src);
+
+    while (true) {
+        try fixture.parser.prepareNextPublicStatement();
+        const header = fixture.parser.peekNextPublicStmtHeader() orelse {
+            return error.MissingTheorem;
+        };
+        if (target.block.kind == .lemma and
+            publicHeaderNameEql(header, anchor_name))
+        {
+            const block = try drainLocalItemsBeforeSearchTarget(
+                &compiler,
+                allocator,
+                &fixture,
+                &proof_stream,
+                target.block.span,
+            );
+            fixture.assertion = try PipelineCommon.parseLemmaAssertion(
+                &compiler,
+                allocator,
+                &fixture.parser,
+                block,
+            );
+            fixture.available_rule_count = fixture.env.rules.items.len;
+            return fixture;
+        }
+
+        try PipelineCommon.drainAnchoredLocalProofItems(
+            &compiler,
+            allocator,
+            &fixture.parser,
+            &fixture.env,
+            &fixture.registry,
+            &fixture.rule_catalog,
+            &fixture.fresh_bindings,
+            &fixture.freshen_bindings,
+            &fixture.views,
+            &fixture.sort_vars,
+            &proof_stream,
+            null,
+        );
+
+        const stmt = try fixture.parser.next() orelse {
+            return error.MissingTheorem;
+        };
+        switch (stmt) {
+            .sort => |sort_stmt| try processSearchSortStmt(
+                &fixture,
+                stmt,
+                sort_stmt,
+            ),
+            .term => |term_stmt| try processSearchTermStmt(
+                &compiler,
+                allocator,
+                &fixture,
+                &proof_stream,
+                term_stmt,
+            ),
+            .assertion => |assertion| {
+                if (target.block.kind == .theorem and
+                    std.mem.eql(u8, assertion.name, anchor_name))
+                {
+                    fixture.assertion = assertion;
+                    fixture.available_rule_count = fixture.env.rules.items.len;
+                    return fixture;
+                }
+                try processSearchAssertionStmt(
+                    &fixture,
+                    &proof_stream,
+                    assertion,
+                );
+            },
+        }
+    }
+}
+
+fn initSearchFixture(
+    allocator: std.mem.Allocator,
+    mm0_src: []const u8,
+) !TestFixture {
+    return .{
         .parser = MM0Parser.init(mm0_src, allocator),
         .env = GlobalEnv.init(allocator),
         .registry = RewriteRegistry.init(allocator),
@@ -1220,6 +1319,15 @@ fn fixtureForSearchPoint(
         .assertion = undefined,
         .available_rule_count = 0,
     };
+}
+
+fn fixtureForSearchPoint(
+    allocator: std.mem.Allocator,
+    mm0_src: []const u8,
+    theorem_name: []const u8,
+    include_trailing_rules: bool,
+) !TestFixture {
+    var fixture = try initSearchFixture(allocator, mm0_src);
     var found_theorem = false;
 
     while (try fixture.parser.next()) |stmt| {
@@ -1270,6 +1378,218 @@ fn fixtureForSearchPoint(
     }
     if (found_theorem) return fixture;
     return error.MissingTheorem;
+}
+
+fn sourceTargetAnchorName(
+    allocator: std.mem.Allocator,
+    proof_src: []const u8,
+    target_block: ProofScript.ProofBlock,
+) !?[]const u8 {
+    if (target_block.kind == .theorem) return target_block.name;
+
+    var parser = ProofParser.init(allocator, proof_src);
+    var found_target = false;
+    while (try parser.nextItem()) |item| {
+        switch (item) {
+            .block => |block| {
+                if (spanEql(block.span, target_block.span)) {
+                    found_target = true;
+                    continue;
+                }
+                if (!found_target) continue;
+                if (block.kind == .theorem) return block.name;
+            },
+            .def => |def| {
+                if (!found_target) continue;
+                if (def.header_tail == null) return def.name;
+            },
+        }
+    }
+    return null;
+}
+
+fn publicHeaderNameEql(header: anytype, name: []const u8) bool {
+    const header_name = header.name orelse return false;
+    return std.mem.eql(u8, header_name, name);
+}
+
+fn drainLocalItemsBeforeSearchTarget(
+    compiler: *CompilerContext,
+    allocator: std.mem.Allocator,
+    fixture: *TestFixture,
+    proof_stream: *?PipelineCommon.ProofItemStream,
+    target_span: Span,
+) !ProofScript.ProofBlock {
+    const proofs = if (proof_stream.*) |*value| value else {
+        return error.MissingProofBlock;
+    };
+    var locals = std.ArrayListUnmanaged(ProofScript.TopLevelItem){};
+    defer locals.deinit(allocator);
+
+    while (true) {
+        const item = (try proofs.next()) orelse return error.MissingProofBlock;
+        switch (item) {
+            .block => |block| {
+                if (spanEql(block.span, target_span)) {
+                    try processSearchLocalItems(
+                        compiler,
+                        allocator,
+                        fixture,
+                        locals.items,
+                    );
+                    return block;
+                }
+                if (PipelineCommon.isLocalProofItem(item)) {
+                    try locals.append(allocator, item);
+                    continue;
+                }
+                proofs.putBack(item);
+                putBackProofItems(proofs, locals.items);
+                return error.MissingProofBlock;
+            },
+            .def => {
+                if (PipelineCommon.isLocalProofItem(item)) {
+                    try locals.append(allocator, item);
+                    continue;
+                }
+                proofs.putBack(item);
+                putBackProofItems(proofs, locals.items);
+                return error.MissingProofBlock;
+            },
+        }
+    }
+}
+
+fn processSearchLocalItems(
+    compiler: *CompilerContext,
+    allocator: std.mem.Allocator,
+    fixture: *TestFixture,
+    items: []const ProofScript.TopLevelItem,
+) !void {
+    for (items) |item| {
+        try PipelineCommon.processLocalProofItem(
+            compiler,
+            allocator,
+            &fixture.parser,
+            &fixture.env,
+            &fixture.registry,
+            &fixture.rule_catalog,
+            &fixture.fresh_bindings,
+            &fixture.freshen_bindings,
+            &fixture.views,
+            &fixture.sort_vars,
+            item,
+            null,
+        );
+    }
+}
+
+fn putBackProofItems(
+    proofs: *PipelineCommon.ProofItemStream,
+    items: []const ProofScript.TopLevelItem,
+) void {
+    var idx = items.len;
+    while (idx > 0) {
+        idx -= 1;
+        proofs.putBack(items[idx]);
+    }
+}
+
+fn processSearchSortStmt(
+    fixture: *TestFixture,
+    stmt: MM0Stmt,
+    sort_stmt: SortStmt,
+) !void {
+    try fixture.env.addStmt(stmt);
+    try Metadata.processSortMetadata(
+        &fixture.parser,
+        sort_stmt,
+        fixture.parser.last_annotations,
+        &fixture.sort_vars,
+    );
+}
+
+fn processSearchTermStmt(
+    compiler: *CompilerContext,
+    allocator: std.mem.Allocator,
+    fixture: *TestFixture,
+    proof_stream: *?PipelineCommon.ProofItemStream,
+    term_stmt: TermStmt,
+) !void {
+    var filled_term_stmt = term_stmt;
+    var filled_body_span: ?Span = null;
+    if (term_stmt.is_def and term_stmt.body == null) {
+        const filled = try PipelineCommon.fillPublicDefBody(
+            compiler,
+            allocator,
+            &fixture.parser,
+            proof_stream,
+            term_stmt,
+        );
+        filled_term_stmt = filled.stmt;
+        filled_body_span = filled.body_span;
+    }
+
+    try PipelineCommon.validateDefinitionBody(
+        compiler,
+        allocator,
+        &fixture.parser,
+        &fixture.env,
+        filled_term_stmt,
+        if (filled_body_span != null) .proof else .mm0,
+        filled_body_span,
+    );
+    try fixture.env.addStmt(.{ .term = filled_term_stmt });
+    try Metadata.processTermMetadata(
+        &fixture.env,
+        &fixture.registry,
+        filled_term_stmt,
+        fixture.parser.last_annotations,
+    );
+}
+
+fn processSearchAssertionStmt(
+    fixture: *TestFixture,
+    proof_stream: *?PipelineCommon.ProofItemStream,
+    assertion: AssertionStmt,
+) !void {
+    try fixture.env.addStmt(.{ .assertion = assertion });
+    try Metadata.processAssertionMetadata(
+        fixture.env.allocator,
+        &fixture.parser,
+        &fixture.env,
+        &fixture.registry,
+        &fixture.fresh_bindings,
+        &fixture.freshen_bindings,
+        &fixture.views,
+        assertion,
+        fixture.parser.last_annotations,
+    );
+    consumeMatchingPublicProofBlock(proof_stream, assertion) catch {};
+}
+
+fn consumeMatchingPublicProofBlock(
+    proof_stream: *?PipelineCommon.ProofItemStream,
+    assertion: AssertionStmt,
+) !void {
+    if (assertion.kind != .theorem) return;
+    const proofs = if (proof_stream.*) |*value| value else return;
+    const item = (try proofs.next()) orelse return;
+    switch (item) {
+        .block => |block| {
+            if (block.kind == .theorem and
+                std.mem.eql(u8, block.name, assertion.name))
+            {
+                return;
+            }
+            proofs.putBack(item);
+        },
+        .def => proofs.putBack(item),
+    }
+}
+
+fn spanEql(lhs: Span, rhs: Span) bool {
+    return lhs.start == rhs.start and lhs.end == rhs.end;
 }
 
 fn readProofCase(

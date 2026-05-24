@@ -530,6 +530,131 @@ test "LSP code action is absent without sibling mm0" {
     try std.testing.expect(result == null);
 }
 
+test "LSP code action uses prior local lemma in theorem search" {
+    const mm0_uri = "file:///tmp/lsp-code-action-local-theorem.mm0";
+    const proof_uri = "file:///tmp/lsp-code-action-local-theorem.auf";
+    const proof_text =
+        \\lemma local_top: $ top $
+        \\---------
+        \\h1: $ top $ by top_i
+        \\
+        \\main
+        \\----
+        \\l1: $ top $ by exact?
+    ;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try handler.putDocument(mm0_uri, lsp_search_mm0_text, 1);
+    try handler.putDocument(proof_uri, proof_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const actions = try expectCodeActionItems(
+        try handler.@"textDocument/codeAction"(
+            arena_state.allocator(),
+            try codeActionParamsAt(proof_uri, proof_text, "exact?"),
+        ),
+    );
+    const action = codeActionWithReplacement(
+        actions,
+        proof_uri,
+        "local_top",
+    ) orelse return error.MissingLocalLemmaTheoremCodeAction;
+    const edit = codeActionSingleEdit(action, proof_uri) orelse {
+        return error.ExpectedCodeActionEdit;
+    };
+    try expectRangeText(proof_text, edit.range, "exact?");
+}
+
+test "LSP code action works inside local lemma blocks" {
+    const mm0_uri = "file:///tmp/lsp-code-action-local-target.mm0";
+    const proof_uri = "file:///tmp/lsp-code-action-local-target.auf";
+    const proof_text =
+        \\lemma local_top: $ top $
+        \\---------
+        \\h1: $ top $ by top_i
+        \\
+        \\lemma use_local: $ top $
+        \\---------
+        \\u1: $ top $ by exact?
+        \\
+        \\main
+        \\----
+        \\l1: $ top $ by top_i
+    ;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try handler.putDocument(mm0_uri, lsp_search_mm0_text, 1);
+    try handler.putDocument(proof_uri, proof_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const actions = try expectCodeActionItems(
+        try handler.@"textDocument/codeAction"(
+            arena_state.allocator(),
+            try codeActionParamsAt(proof_uri, proof_text, "exact?"),
+        ),
+    );
+    const action = codeActionWithReplacement(
+        actions,
+        proof_uri,
+        "local_top",
+    ) orelse return error.MissingLocalLemmaTargetCodeAction;
+    const edit = codeActionSingleEdit(action, proof_uri) orelse {
+        return error.ExpectedCodeActionEdit;
+    };
+    try expectRangeText(proof_text, edit.range, "exact?");
+}
+
+test "LSP code action excludes future local lemmas" {
+    const mm0_uri = "file:///tmp/lsp-code-action-local-future.mm0";
+    const proof_uri = "file:///tmp/lsp-code-action-local-future.auf";
+    const proof_text =
+        \\lemma use_future: $ top $
+        \\---------
+        \\u1: $ top $ by exact?
+        \\
+        \\lemma future_top: $ top $
+        \\---------
+        \\f1: $ top $ by top_i
+        \\
+        \\main
+        \\----
+        \\l1: $ top $ by top_i
+    ;
+
+    var transport_state: TestTransport = .{};
+    var handler = Handler.init(
+        std.testing.allocator,
+        &transport_state.transport,
+    );
+    defer handler.deinit();
+    try handler.putDocument(mm0_uri, lsp_search_mm0_text, 1);
+    try handler.putDocument(proof_uri, proof_text, 1);
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const actions = try expectCodeActionItems(
+        try handler.@"textDocument/codeAction"(
+            arena_state.allocator(),
+            try codeActionParamsAt(proof_uri, proof_text, "exact?"),
+        ),
+    );
+    try std.testing.expect(
+        codeActionWithReplacement(actions, proof_uri, "future_top") == null,
+    );
+}
+
 test "LSP code action uses open unsaved mm0 and proof documents" {
     const mm0_uri = "file:///tmp/lsp-code-action-unsaved.mm0";
     const proof_uri = "file:///tmp/lsp-code-action-unsaved.auf";
